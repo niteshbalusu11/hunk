@@ -1,0 +1,11 @@
+# Codex project config for this repo.
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+web_search = "live"
+
+[features]
+shell_tool = true
+apply_patch_freeform = true
+
+[sandbox_workspace_write]
+network_access = true

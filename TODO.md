@@ -1,0 +1,12 @@
+# Hunk Diff Viewer TODO
+
+- [x] Pin dependencies and bootstrap project files
+- [x] Implement Git status + per-file diff loading
+- [x] Parse unified diff into render rows
+- [x] Build GPUI app shell with `Root`
+- [x] Build resizable two-pane layout
+- [x] Render file tree from changed files
+- [x] Render diff viewer with per-line styling
+- [x] Add refresh + light/dark mode toggle
+- [x] Run `cargo check` and fix compile/runtime issues
+- [x] Add README with run instructions and scope
