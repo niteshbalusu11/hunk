@@ -1,7 +1,9 @@
 use super::*;
+use gpui_component::button::{Button, ButtonVariants as _};
 
 impl DiffViewer {
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let view = cx.entity();
         let repo_label = self
             .repo_root
             .as_ref()
@@ -61,6 +63,16 @@ impl DiffViewer {
                     )
                     .child(self.render_line_stats("overall", self.overall_line_stats, cx))
                     .child(
+                        Button::new("toggle-diff-fit")
+                            .ghost()
+                            .label(if self.diff_fit_to_width { "Pan" } else { "Fit" })
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.toggle_diff_fit_to_width(cx);
+                                });
+                            }),
+                    )
+                    .child(
                         div()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
@@ -90,6 +102,7 @@ impl DiffViewer {
             .iter()
             .map(|file| (file.path.clone(), file.status))
             .collect::<BTreeMap<_, _>>();
+        let collapsed_by_path = self.collapsed_files.clone();
         let is_dark = cx.theme().mode.is_dark();
 
         v_flex().size_full().overflow_y_scrollbar().child(tree(
@@ -119,7 +132,7 @@ impl DiffViewer {
                             }
 
                             view.update(cx, |this, cx| {
-                                this.select_file(click_path.clone(), Some(FileJumpAnchor::Top), cx);
+                                this.select_file(click_path.clone(), cx);
                             });
                         }
                     })
@@ -136,6 +149,7 @@ impl DiffViewer {
                             .get(item_id.as_str())
                             .copied()
                             .unwrap_or(FileStatus::Unknown);
+                        let is_collapsed = collapsed_by_path.contains(item_id.as_str());
 
                         let (status_label, accent) = match status {
                             FileStatus::Added => ("ADD", cx.theme().success),
@@ -158,6 +172,13 @@ impl DiffViewer {
                             .w_full()
                             .items_center()
                             .gap_2()
+                            .child(
+                                div()
+                                    .w_4()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(if is_collapsed { "▸" } else { "▾" }),
+                            )
                             .child(
                                 div()
                                     .min_w_10()
@@ -200,6 +221,10 @@ impl DiffViewer {
         let diff_scroll_handle = self.diff_scroll_handle.clone();
         let list = uniform_list("diff-rows", self.diff_rows.len(), {
             cx.processor(move |this, visible_range: Range<usize>, _window, cx| {
+                if visible_range.start < visible_range.end {
+                    this.sync_selected_file_from_visible_row(visible_range.start, cx);
+                }
+
                 let mut items = Vec::with_capacity(visible_range.len());
                 for ix in visible_range {
                     let Some(row) = this.diff_rows.get(ix) else {
@@ -222,40 +247,109 @@ impl DiffViewer {
         .track_scroll(diff_scroll_handle.clone())
         .with_sizing_behavior(ListSizingBehavior::Auto);
 
+        if self.diff_fit_to_width {
+            return v_flex()
+                .size_full()
+                .child(self.render_file_status_banner(cx))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_h_0()
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .border_b_1()
+                                .border_color(cx.theme().border)
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .px_2()
+                                        .py_1()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(old_label),
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .px_2()
+                                        .py_1()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(new_label),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_h_0()
+                                .on_scroll_wheel(cx.listener(Self::on_diff_scroll_wheel))
+                                .child(list)
+                                .vertical_scrollbar(&diff_scroll_handle),
+                        ),
+                )
+                .into_any_element();
+        }
+
+        let horizontal_scroll_handle = self.diff_horizontal_scroll_handle.clone();
+
         v_flex()
             .size_full()
             .child(self.render_file_status_banner(cx))
             .child(
-                h_flex()
-                    .w_full()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    .child(
-                        div()
-                            .flex_1()
-                            .px_2()
-                            .py_1()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(old_label),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .px_2()
-                            .py_1()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(new_label),
-                    ),
-            )
-            .child(
                 div()
                     .flex_1()
                     .min_h_0()
-                    .on_scroll_wheel(cx.listener(Self::on_diff_scroll_wheel))
-                    .child(list)
-                    .vertical_scrollbar(&diff_scroll_handle),
+                    .overflow_y_hidden()
+                    .child(
+                        h_flex()
+                            .id("diff-horizontal-scroll-area")
+                            .size_full()
+                            .overflow_x_scroll()
+                            .overflow_y_hidden()
+                            .track_scroll(&horizontal_scroll_handle)
+                            .on_scroll_wheel(cx.listener(Self::on_diff_horizontal_scroll_wheel))
+                            .child(
+                                v_flex()
+                                    .h_full()
+                                    .min_w(px(DIFF_MIN_CONTENT_WIDTH))
+                                    .child(
+                                        h_flex()
+                                            .w_full()
+                                            .border_b_1()
+                                            .border_color(cx.theme().border)
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .px_2()
+                                                    .py_1()
+                                                    .text_xs()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child(old_label),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .px_2()
+                                                    .py_1()
+                                                    .text_xs()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child(new_label),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_h_0()
+                                            .on_scroll_wheel(
+                                                cx.listener(Self::on_diff_scroll_wheel),
+                                            )
+                                            .child(list)
+                                            .vertical_scrollbar(&diff_scroll_handle),
+                                    ),
+                            ),
+                    )
+                    .horizontal_scrollbar(&horizontal_scroll_handle),
             )
             .into_any_element()
     }
@@ -344,7 +438,8 @@ impl DiffViewer {
             .text_sm()
             .text_color(foreground)
             .font_family(cx.theme().mono_font_family.clone())
-            .whitespace_nowrap()
+            .when(self.diff_fit_to_width, |this| this.truncate())
+            .when(!self.diff_fit_to_width, |this| this.whitespace_nowrap())
             .child(row.text.clone())
             .child(
                 div()
@@ -550,7 +645,8 @@ impl DiffViewer {
                     .text_sm()
                     .text_color(text_color)
                     .font_family(cx.theme().mono_font_family.clone())
-                    .whitespace_nowrap()
+                    .when(self.diff_fit_to_width, |this| this.truncate())
+                    .when(!self.diff_fit_to_width, |this| this.whitespace_nowrap())
                     .child(content),
             )
             .into_any_element()
@@ -569,6 +665,7 @@ impl DiffViewer {
     }
 
     fn render_file_status_banner(&self, cx: &mut Context<Self>) -> AnyElement {
+        let view = cx.entity();
         let path = self
             .selected_path
             .clone()
@@ -627,6 +724,11 @@ impl DiffViewer {
                 cx.theme().accent.opacity(if is_dark { 0.50 } else { 0.24 }),
             ),
         };
+        let hint_text = if self.selected_file_is_collapsed() {
+            "Collapsed in stream. Expand to render this file inline."
+        } else {
+            hint
+        };
 
         h_flex()
             .w_full()
@@ -660,9 +762,23 @@ impl DiffViewer {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(hint),
+                    .child(hint_text),
             )
             .child(self.render_line_stats("file", self.selected_line_stats, cx))
+            .child(
+                Button::new("toggle-file-collapse")
+                    .ghost()
+                    .label(if self.selected_file_is_collapsed() {
+                        "Expand"
+                    } else {
+                        "Collapse"
+                    })
+                    .on_click(move |_, _, cx| {
+                        view.update(cx, |this, cx| {
+                            this.toggle_selected_file_collapsed(cx);
+                        });
+                    }),
+            )
             .into_any_element()
     }
 
@@ -716,16 +832,13 @@ impl DiffViewer {
 
 impl Render for DiffViewer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.clamp_diff_scroll_offset();
+        self.clamp_diff_horizontal_scroll_offset();
         let current_scroll_offset = self.diff_scroll_handle.0.borrow().base_handle.offset();
-        let delta_y = self
-            .last_diff_scroll_offset
-            .map(|prev| current_scroll_offset.y - prev.y)
-            .unwrap_or(px(0.));
         if self.last_diff_scroll_offset != Some(current_scroll_offset) {
             self.last_diff_scroll_offset = Some(current_scroll_offset);
             self.last_scroll_activity_at = Instant::now();
         }
-        self.maybe_auto_advance_on_scroll(delta_y, cx);
         self.frame_sample_count = self.frame_sample_count.saturating_add(1);
 
         div()
@@ -737,8 +850,8 @@ impl Render for DiffViewer {
                 h_resizable("hunk-main")
                     .child(
                         resizable_panel()
-                            .size(px(320.0))
-                            .size_range(px(220.0)..px(560.0))
+                            .size(px(280.0))
+                            .size_range(px(160.0)..px(520.0))
                             .child(self.render_tree(cx)),
                     )
                     .child(resizable_panel().child(self.render_diff(cx))),

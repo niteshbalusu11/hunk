@@ -1,14 +1,15 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result};
 use gpui::{
     AnyElement, AppContext as _, Application, Context, Entity, InteractiveElement as _,
-    IntoElement, ListSizingBehavior, ParentElement as _, Render, ScrollWheelEvent, SharedString,
-    Styled as _, Task, Timer, UniformListScrollHandle, Window, WindowOptions, div, point,
-    prelude::FluentBuilder as _, px, uniform_list,
+    IntoElement, IsZero as _, ListSizingBehavior, ParentElement as _, Render, ScrollHandle,
+    ScrollWheelEvent, SharedString, StatefulInteractiveElement as _, Styled as _, Task, Timer,
+    UniformListScrollHandle, Window, WindowOptions, div, point, prelude::FluentBuilder as _, px,
+    uniform_list,
 };
 use gpui_component::{
     ActiveTheme as _, Colorize as _, Root, StyledExt as _, Theme, ThemeMode, h_flex,
@@ -27,12 +28,8 @@ use hunk::git::{ChangedFile, FileStatus, LineStats, RepoSnapshot, load_patch, lo
 const AUTO_REFRESH_INTERVAL: Duration = Duration::from_millis(900);
 const FPS_SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
 const AUTO_REFRESH_SCROLL_DEBOUNCE: Duration = Duration::from_millis(500);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FileJumpAnchor {
-    Top,
-    Bottom,
-}
+const DIFF_MIN_CONTENT_WIDTH: f32 = 1700.0;
+const DIFF_FOOTER_SPACER_ROWS: usize = 6;
 
 mod render;
 
@@ -56,10 +53,15 @@ struct DiffViewer {
     repo_root: Option<PathBuf>,
     branch_name: String,
     files: Vec<ChangedFile>,
+    collapsed_files: BTreeSet<String>,
     selected_path: Option<String>,
     selected_status: Option<FileStatus>,
     diff_rows: Vec<SideBySideRow>,
+    file_row_ranges: Vec<FileRowRange>,
+    file_line_stats: BTreeMap<String, LineStats>,
     diff_scroll_handle: UniformListScrollHandle,
+    diff_horizontal_scroll_handle: ScrollHandle,
+    diff_fit_to_width: bool,
     overall_line_stats: LineStats,
     selected_line_stats: LineStats,
     refresh_epoch: usize,
@@ -70,9 +72,8 @@ struct DiffViewer {
     patch_epoch: usize,
     patch_task: Task<()>,
     patch_loading: bool,
-    auto_next_armed: bool,
-    auto_prev_armed: bool,
-    pending_jump_anchor: Option<FileJumpAnchor>,
+    scroll_selected_after_reload: bool,
+    last_visible_row_start: Option<usize>,
     last_diff_scroll_offset: Option<gpui::Point<gpui::Pixels>>,
     last_scroll_activity_at: Instant,
     fps: f32,
@@ -92,10 +93,15 @@ impl DiffViewer {
             repo_root: None,
             branch_name: "unknown".to_string(),
             files: Vec::new(),
+            collapsed_files: BTreeSet::new(),
             selected_path: None,
             selected_status: None,
             diff_rows: Vec::new(),
+            file_row_ranges: Vec::new(),
+            file_line_stats: BTreeMap::new(),
             diff_scroll_handle: UniformListScrollHandle::new(),
+            diff_horizontal_scroll_handle: ScrollHandle::new(),
+            diff_fit_to_width: false,
             overall_line_stats: LineStats::default(),
             selected_line_stats: LineStats::default(),
             refresh_epoch: 0,
@@ -106,9 +112,8 @@ impl DiffViewer {
             patch_epoch: 0,
             patch_task: Task::ready(()),
             patch_loading: false,
-            auto_next_armed: true,
-            auto_prev_armed: true,
-            pending_jump_anchor: None,
+            scroll_selected_after_reload: true,
+            last_visible_row_start: None,
             last_diff_scroll_offset: None,
             last_scroll_activity_at: Instant::now(),
             fps: 0.0,
@@ -125,29 +130,18 @@ impl DiffViewer {
         view
     }
 
-    fn select_file(
-        &mut self,
-        path: String,
-        jump_anchor: Option<FileJumpAnchor>,
-        cx: &mut Context<Self>,
-    ) {
-        if self.selected_path.as_deref() == Some(path.as_str()) {
-            return;
-        }
-
+    fn select_file(&mut self, path: String, cx: &mut Context<Self>) {
         self.selected_path = Some(path.clone());
         self.selected_status = self
             .files
             .iter()
             .find(|file| file.path == path)
             .map(|file| file.status);
-        self.auto_next_armed = true;
-        self.auto_prev_armed = true;
-        self.pending_jump_anchor = jump_anchor;
-        if jump_anchor != Some(FileJumpAnchor::Bottom) {
-            self.reset_diff_scroll_to_top();
-        }
-        self.request_selected_diff_reload(cx);
+        self.sync_selected_line_stats();
+        self.scroll_to_file_start(&path);
+        self.last_visible_row_start = None;
+        self.last_diff_scroll_offset = None;
+        self.last_scroll_activity_at = Instant::now();
         cx.notify();
     }
 
@@ -203,6 +197,8 @@ impl DiffViewer {
         self.files = snapshot.files;
         self.overall_line_stats = snapshot.line_stats;
         self.error_message = None;
+        self.collapsed_files
+            .retain(|path| self.files.iter().any(|file| file.path == *path));
 
         let current_selection = self
             .selected_path
@@ -210,7 +206,7 @@ impl DiffViewer {
             .filter(|selected| self.files.iter().any(|file| &file.path == *selected))
             .cloned();
         self.selected_path =
-            current_selection.or_else(|| self.files.first().map(|f| f.path.clone()));
+            current_selection.or_else(|| self.files.first().map(|file| file.path.clone()));
         self.selected_status = self.selected_path.as_ref().and_then(|selected| {
             self.files
                 .iter()
@@ -226,7 +222,10 @@ impl DiffViewer {
         }
 
         if files_changed || overall_changed || selected_changed || self.diff_rows.is_empty() {
+            self.scroll_selected_after_reload = selected_changed || self.diff_rows.is_empty();
             self.request_selected_diff_reload(cx);
+        } else {
+            self.sync_selected_line_stats();
         }
 
         cx.notify();
@@ -240,6 +239,8 @@ impl DiffViewer {
         self.selected_status = None;
         self.overall_line_stats = LineStats::default();
         self.selected_line_stats = LineStats::default();
+        self.file_row_ranges.clear();
+        self.file_line_stats.clear();
         self.diff_rows = vec![message_row(
             DiffRowKind::Empty,
             "Open this app from a Git repository to load diffs.",
@@ -252,35 +253,31 @@ impl DiffViewer {
     fn request_selected_diff_reload(&mut self, cx: &mut Context<Self>) {
         let Some(repo_root) = self.repo_root.clone() else {
             self.diff_rows.clear();
+            self.file_row_ranges.clear();
+            self.file_line_stats.clear();
             self.selected_line_stats = LineStats::default();
             self.patch_loading = false;
             return;
         };
 
-        let Some(path) = self.selected_path.clone() else {
-            self.diff_rows = vec![message_row(
-                DiffRowKind::Empty,
-                "Select a file to view its diff.",
-            )];
+        if self.files.is_empty() {
+            self.diff_rows = vec![message_row(DiffRowKind::Empty, "No changed files.")];
+            self.file_row_ranges.clear();
+            self.file_line_stats.clear();
             self.selected_line_stats = LineStats::default();
             self.patch_loading = false;
             return;
-        };
+        }
 
-        let status = self.selected_status.unwrap_or(FileStatus::Unknown);
-        let path_for_error = path.clone();
+        let files = self.files.clone();
+        let collapsed_files = self.collapsed_files.clone();
         let epoch = self.next_patch_epoch();
         self.patch_loading = true;
 
         self.patch_task = cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move {
-                    let patch = load_patch(&repo_root, &path, status)?;
-                    let rows = parse_patch_side_by_side(&patch);
-                    let stats = line_stats_from_rows(&rows);
-                    Ok::<(Vec<SideBySideRow>, LineStats), anyhow::Error>((rows, stats))
-                })
+                .spawn(async move { load_diff_stream(&repo_root, &files, &collapsed_files) })
                 .await;
 
             if let Some(this) = this.upgrade() {
@@ -291,18 +288,43 @@ impl DiffViewer {
 
                     this.patch_loading = false;
                     match result {
-                        Ok((rows, stats)) => {
-                            this.diff_rows = rows;
-                            this.selected_line_stats = stats;
-                            this.apply_pending_jump_anchor();
+                        Ok(stream) => {
+                            this.diff_rows = stream.rows;
+                            this.file_row_ranges = stream.file_ranges;
+                            this.file_line_stats = stream.file_line_stats;
+
+                            let has_selection = this.selected_path.as_ref().is_some_and(|path| {
+                                this.files.iter().any(|file| file.path == *path)
+                            });
+                            if !has_selection {
+                                this.selected_path =
+                                    this.files.first().map(|file| file.path.clone());
+                            }
+
+                            this.selected_status =
+                                this.selected_path.as_ref().and_then(|selected| {
+                                    this.files
+                                        .iter()
+                                        .find(|file| &file.path == selected)
+                                        .map(|file| file.status)
+                                });
+                            this.sync_selected_line_stats();
+                            this.last_visible_row_start = None;
+
+                            if this.scroll_selected_after_reload {
+                                this.scroll_selected_after_reload = false;
+                                this.scroll_selected_file_to_top();
+                            }
                         }
                         Err(err) => {
                             this.diff_rows = vec![message_row(
                                 DiffRowKind::Meta,
-                                format!("Failed to load patch for {path_for_error}: {err:#}"),
+                                format!("Failed to load diff stream: {err:#}"),
                             )];
+                            this.file_row_ranges.clear();
+                            this.file_line_stats.clear();
                             this.selected_line_stats = LineStats::default();
-                            this.pending_jump_anchor = None;
+                            this.scroll_selected_after_reload = false;
                         }
                     }
 
@@ -367,135 +389,190 @@ impl DiffViewer {
         self.last_scroll_activity_at.elapsed() < AUTO_REFRESH_SCROLL_DEBOUNCE
     }
 
-    fn reset_diff_scroll_to_top(&mut self) {
+    fn selected_file_is_collapsed(&self) -> bool {
+        self.selected_path
+            .as_ref()
+            .is_some_and(|path| self.collapsed_files.contains(path))
+    }
+
+    fn toggle_selected_file_collapsed(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.selected_path.clone() else {
+            return;
+        };
+
+        if self.collapsed_files.contains(path.as_str()) {
+            self.collapsed_files.remove(path.as_str());
+        } else {
+            self.collapsed_files.insert(path);
+        }
+
+        self.scroll_selected_after_reload = true;
+        self.last_diff_scroll_offset = None;
+        self.last_scroll_activity_at = Instant::now();
+        self.request_selected_diff_reload(cx);
+        cx.notify();
+    }
+
+    fn sync_selected_line_stats(&mut self) {
+        self.selected_line_stats = self
+            .selected_path
+            .as_ref()
+            .and_then(|path| self.file_line_stats.get(path))
+            .copied()
+            .unwrap_or_default();
+    }
+
+    fn scroll_selected_file_to_top(&mut self) {
+        let Some(path) = self.selected_path.clone() else {
+            return;
+        };
+        self.scroll_to_file_start(&path);
+    }
+
+    fn scroll_to_file_start(&mut self, path: &str) {
+        let Some(start_row) = self
+            .file_row_ranges
+            .iter()
+            .find(|range| range.path == path)
+            .map(|range| range.start_row)
+        else {
+            return;
+        };
+
         self.diff_scroll_handle
-            .0
-            .borrow()
-            .base_handle
-            .set_offset(point(px(0.), px(0.)));
+            .scroll_to_item_strict(start_row, gpui::ScrollStrategy::Top);
         self.last_diff_scroll_offset = None;
         self.last_scroll_activity_at = Instant::now();
     }
 
-    fn apply_pending_jump_anchor(&mut self) {
-        match self.pending_jump_anchor.take() {
-            Some(FileJumpAnchor::Bottom) => {
-                if self.diff_rows.is_empty() {
-                    return;
-                }
-
-                self.diff_scroll_handle.scroll_to_item_strict(
-                    self.diff_rows.len().saturating_sub(1),
-                    gpui::ScrollStrategy::Bottom,
-                );
-                self.last_diff_scroll_offset = None;
-                self.last_scroll_activity_at = Instant::now();
-            }
-            Some(FileJumpAnchor::Top) => {
-                self.reset_diff_scroll_to_top();
-            }
-            None => {}
-        }
-    }
-
-    fn selected_file_index(&self) -> Option<usize> {
-        let selected = self.selected_path.as_ref()?;
-        self.files.iter().position(|file| &file.path == selected)
-    }
-
-    fn maybe_auto_advance_on_scroll(&mut self, delta_y: gpui::Pixels, cx: &mut Context<Self>) {
-        if self.patch_loading || self.files.is_empty() {
+    fn sync_selected_file_from_visible_row(&mut self, row_ix: usize, cx: &mut Context<Self>) {
+        if self.last_visible_row_start == Some(row_ix) {
             return;
         }
+        self.last_visible_row_start = Some(row_ix);
 
-        let scroll_state = self.diff_scroll_handle.0.borrow();
-        let base_handle = &scroll_state.base_handle;
-        let offset_y = base_handle.offset().y;
-        let max_y = base_handle.max_offset().height;
-        drop(scroll_state);
-
-        if max_y <= px(0.) {
-            if delta_y < -px(0.5) {
-                self.auto_prev_armed = true;
-                let Some(current_ix) = self.selected_file_index() else {
-                    return;
-                };
-                let Some(next_file) = self.files.get(current_ix.saturating_add(1)) else {
-                    self.auto_next_armed = false;
-                    return;
-                };
-
-                self.auto_next_armed = false;
-                let next_path = next_file.path.clone();
-                self.select_file(next_path, Some(FileJumpAnchor::Top), cx);
-            } else if delta_y > px(0.5) {
-                self.auto_next_armed = true;
-                let Some(current_ix) = self.selected_file_index() else {
-                    return;
-                };
-                if current_ix == 0 {
-                    self.auto_prev_armed = false;
-                    return;
-                }
-
-                self.auto_prev_armed = false;
-                let previous_path = self.files[current_ix - 1].path.clone();
-                self.select_file(previous_path, Some(FileJumpAnchor::Bottom), cx);
-            }
-            return;
-        }
-
-        let distance_to_bottom = (max_y + offset_y).abs();
-        if distance_to_bottom > px(140.) {
-            self.auto_next_armed = true;
-        }
-        if offset_y < -px(140.) {
-            self.auto_prev_armed = true;
-        }
-
-        if delta_y < -px(0.5) && self.auto_next_armed && distance_to_bottom <= px(36.) {
-            let Some(current_ix) = self.selected_file_index() else {
-                return;
-            };
-            let Some(next_file) = self.files.get(current_ix.saturating_add(1)) else {
-                self.auto_next_armed = false;
-                return;
-            };
-
-            let next_path = next_file.path.clone();
-            self.auto_next_armed = false;
-            self.auto_prev_armed = true;
-            self.select_file(next_path, Some(FileJumpAnchor::Top), cx);
-            return;
-        }
-
-        if delta_y <= px(0.5) || !self.auto_prev_armed || offset_y < -px(36.) {
-            return;
-        }
-
-        let Some(current_ix) = self.selected_file_index() else {
+        let range = self
+            .file_row_ranges
+            .iter()
+            .find(|range| row_ix < range.end_row)
+            .or_else(|| self.file_row_ranges.last());
+        let Some(range) = range else {
             return;
         };
-        if current_ix == 0 {
-            self.auto_prev_armed = false;
+
+        if self.selected_path.as_deref() == Some(range.path.as_str()) {
             return;
         }
 
-        let previous_path = self.files[current_ix - 1].path.clone();
-        self.auto_prev_armed = false;
-        self.auto_next_armed = true;
-        self.select_file(previous_path, Some(FileJumpAnchor::Bottom), cx);
+        self.selected_path = Some(range.path.clone());
+        self.selected_status = Some(range.status);
+        self.sync_selected_line_stats();
+        cx.notify();
     }
 
     fn on_diff_scroll_wheel(
         &mut self,
         event: &ScrollWheelEvent,
         window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+        let delta = event.delta.pixel_delta(window.line_height());
+        if !delta.x.is_zero() && delta.x.abs() > delta.y.abs() {
+            return;
+        }
+        self.last_scroll_activity_at = Instant::now();
+    }
+
+    fn on_diff_horizontal_scroll_wheel(
+        &mut self,
+        event: &ScrollWheelEvent,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let delta = event.delta.pixel_delta(window.line_height()).y;
+        if self.diff_fit_to_width {
+            return;
+        }
+
+        let mut delta = event.delta.pixel_delta(window.line_height());
+        if !delta.x.is_zero() && !delta.y.is_zero() {
+            if delta.x.abs() > delta.y.abs() {
+                delta.y = px(0.);
+            } else {
+                delta.x = px(0.);
+            }
+        }
+        if delta.x.is_zero() {
+            return;
+        }
+
+        let mut offset = self.diff_horizontal_scroll_handle.offset();
+        offset.x += delta.x;
+        offset.y = px(0.);
+
+        let max_x = self
+            .diff_horizontal_scroll_handle
+            .max_offset()
+            .width
+            .max(px(0.));
+        offset.x = offset.x.clamp(-max_x, px(0.));
+
+        if offset != self.diff_horizontal_scroll_handle.offset() {
+            self.diff_horizontal_scroll_handle.set_offset(offset);
+            self.last_scroll_activity_at = Instant::now();
+            cx.notify();
+            cx.stop_propagation();
+        }
+    }
+
+    fn toggle_diff_fit_to_width(&mut self, cx: &mut Context<Self>) {
+        self.diff_fit_to_width = !self.diff_fit_to_width;
+        self.diff_horizontal_scroll_handle
+            .set_offset(point(px(0.), px(0.)));
         self.last_scroll_activity_at = Instant::now();
-        self.maybe_auto_advance_on_scroll(delta, cx);
+        cx.notify();
+    }
+
+    fn clamp_diff_scroll_offset(&mut self) {
+        let scroll_state = self.diff_scroll_handle.0.borrow();
+        let base_handle = &scroll_state.base_handle;
+        let offset = base_handle.offset();
+        let max_y = base_handle.max_offset().height;
+        drop(scroll_state);
+
+        let clamped_y = if max_y <= px(0.) {
+            px(0.)
+        } else {
+            offset.y.max(-max_y).min(px(0.))
+        };
+
+        if clamped_y != offset.y {
+            self.diff_scroll_handle
+                .0
+                .borrow()
+                .base_handle
+                .set_offset(point(offset.x, clamped_y));
+        }
+    }
+
+    fn clamp_diff_horizontal_scroll_offset(&mut self) {
+        if self.diff_fit_to_width {
+            self.diff_horizontal_scroll_handle
+                .set_offset(point(px(0.), px(0.)));
+            return;
+        }
+
+        let offset = self.diff_horizontal_scroll_handle.offset();
+        let max_x = self
+            .diff_horizontal_scroll_handle
+            .max_offset()
+            .width
+            .max(px(0.));
+        let clamped_x = offset.x.clamp(-max_x, px(0.));
+
+        if clamped_x != offset.x || !offset.y.is_zero() {
+            self.diff_horizontal_scroll_handle
+                .set_offset(point(clamped_x, px(0.)));
+        }
     }
 
     fn start_fps_monitor(&mut self, cx: &mut Context<Self>) {
@@ -540,6 +617,20 @@ impl DiffViewer {
 struct TreeFolder {
     folders: BTreeMap<String, TreeFolder>,
     files: BTreeMap<String, FileStatus>,
+}
+
+#[derive(Debug, Clone)]
+struct FileRowRange {
+    path: String,
+    status: FileStatus,
+    start_row: usize,
+    end_row: usize,
+}
+
+struct DiffStream {
+    rows: Vec<SideBySideRow>,
+    file_ranges: Vec<FileRowRange>,
+    file_line_stats: BTreeMap<String, LineStats>,
 }
 
 fn build_tree_items(files: &[ChangedFile]) -> Vec<TreeItem> {
@@ -610,6 +701,82 @@ fn message_row(kind: DiffRowKind, text: impl Into<String>) -> SideBySideRow {
         },
         text: text.into(),
     }
+}
+
+fn load_diff_stream(
+    repo_root: &Path,
+    files: &[ChangedFile],
+    collapsed_files: &BTreeSet<String>,
+) -> Result<DiffStream> {
+    let mut rows = Vec::new();
+    let mut file_ranges = Vec::with_capacity(files.len());
+    let mut file_line_stats = BTreeMap::new();
+
+    for file in files {
+        let start_row = rows.len();
+        rows.push(message_row(
+            DiffRowKind::Meta,
+            format!("── {} [{}] ──", file.path, file.status.tag()),
+        ));
+
+        let (parsed_rows, stats) = match load_patch(repo_root, &file.path, file.status) {
+            Ok(patch) => {
+                let parsed_rows = parse_patch_side_by_side(&patch);
+                let stats = line_stats_from_rows(&parsed_rows);
+                (parsed_rows, stats)
+            }
+            Err(err) => (
+                vec![message_row(
+                    DiffRowKind::Meta,
+                    format!("Failed to load patch for {}: {err:#}", file.path),
+                )],
+                LineStats::default(),
+            ),
+        };
+
+        file_line_stats.insert(file.path.clone(), stats);
+
+        if collapsed_files.contains(file.path.as_str()) {
+            rows.push(message_row(
+                DiffRowKind::Empty,
+                format!("File collapsed ({} changed lines hidden).", stats.changed()),
+            ));
+        } else {
+            rows.extend(parsed_rows);
+        }
+
+        rows.push(message_row(
+            DiffRowKind::Meta,
+            format!("── End of {} ──", file.path),
+        ));
+
+        let end_row = rows.len();
+        file_ranges.push(FileRowRange {
+            path: file.path.clone(),
+            status: file.status,
+            start_row,
+            end_row,
+        });
+    }
+
+    if rows.is_empty() {
+        rows.push(message_row(DiffRowKind::Empty, "No changed files."));
+    } else {
+        rows.push(message_row(DiffRowKind::Meta, "── End of change set ──"));
+        rows.push(message_row(
+            DiffRowKind::Empty,
+            "You are at the bottom of the diff stream.",
+        ));
+        for _ in 0..DIFF_FOOTER_SPACER_ROWS {
+            rows.push(message_row(DiffRowKind::Empty, ""));
+        }
+    }
+
+    Ok(DiffStream {
+        rows,
+        file_ranges,
+        file_line_stats,
+    })
 }
 
 fn line_stats_from_rows(rows: &[SideBySideRow]) -> LineStats {
