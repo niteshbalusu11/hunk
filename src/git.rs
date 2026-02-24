@@ -30,7 +30,7 @@ impl FileStatus {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChangedFile {
     pub path: String,
     pub status: FileStatus,
@@ -44,7 +44,7 @@ pub struct RepoSnapshot {
     pub line_stats: LineStats,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct LineStats {
     pub added: u64,
     pub removed: u64,

@@ -1,16 +1,17 @@
 use std::collections::BTreeMap;
+use std::ops::Range;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result};
 use gpui::{
     AnyElement, AppContext as _, Application, Context, Entity, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, SharedString, Styled as _, Window, WindowOptions, div,
-    prelude::FluentBuilder as _, px,
+    IntoElement, ListSizingBehavior, ParentElement as _, Render, ScrollWheelEvent, SharedString,
+    Styled as _, Task, Timer, UniformListScrollHandle, Window, WindowOptions, div, point,
+    prelude::FluentBuilder as _, px, uniform_list,
 };
 use gpui_component::{
-    ActiveTheme as _, Colorize as _, Root, StyledExt as _, Theme, ThemeMode,
-    button::Button,
-    h_flex,
+    ActiveTheme as _, Colorize as _, Root, StyledExt as _, Theme, ThemeMode, h_flex,
     list::ListItem,
     resizable::{h_resizable, resizable_panel},
     scroll::ScrollableElement,
@@ -21,7 +22,19 @@ use gpui_component::{
 use tracing::{error, info};
 
 use hunk::diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow, parse_patch_side_by_side};
-use hunk::git::{ChangedFile, FileStatus, LineStats, load_patch, load_snapshot};
+use hunk::git::{ChangedFile, FileStatus, LineStats, RepoSnapshot, load_patch, load_snapshot};
+
+const AUTO_REFRESH_INTERVAL: Duration = Duration::from_millis(900);
+const FPS_SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
+const AUTO_REFRESH_SCROLL_DEBOUNCE: Duration = Duration::from_millis(500);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FileJumpAnchor {
+    Top,
+    Bottom,
+}
+
+mod render;
 
 pub fn run() -> Result<()> {
     let app = Application::new();
@@ -46,8 +59,27 @@ struct DiffViewer {
     selected_path: Option<String>,
     selected_status: Option<FileStatus>,
     diff_rows: Vec<SideBySideRow>,
+    diff_scroll_handle: UniformListScrollHandle,
     overall_line_stats: LineStats,
     selected_line_stats: LineStats,
+    refresh_epoch: usize,
+    auto_refresh_task: Task<()>,
+    snapshot_epoch: usize,
+    snapshot_task: Task<()>,
+    snapshot_loading: bool,
+    patch_epoch: usize,
+    patch_task: Task<()>,
+    patch_loading: bool,
+    auto_next_armed: bool,
+    auto_prev_armed: bool,
+    pending_jump_anchor: Option<FileJumpAnchor>,
+    last_diff_scroll_offset: Option<gpui::Point<gpui::Pixels>>,
+    last_scroll_activity_at: Instant,
+    fps: f32,
+    frame_sample_count: u32,
+    frame_sample_started_at: Instant,
+    fps_epoch: usize,
+    fps_task: Task<()>,
     error_message: Option<String>,
     tree_state: Entity<TreeState>,
 }
@@ -63,111 +95,232 @@ impl DiffViewer {
             selected_path: None,
             selected_status: None,
             diff_rows: Vec::new(),
+            diff_scroll_handle: UniformListScrollHandle::new(),
             overall_line_stats: LineStats::default(),
             selected_line_stats: LineStats::default(),
+            refresh_epoch: 0,
+            auto_refresh_task: Task::ready(()),
+            snapshot_epoch: 0,
+            snapshot_task: Task::ready(()),
+            snapshot_loading: false,
+            patch_epoch: 0,
+            patch_task: Task::ready(()),
+            patch_loading: false,
+            auto_next_armed: true,
+            auto_prev_armed: true,
+            pending_jump_anchor: None,
+            last_diff_scroll_offset: None,
+            last_scroll_activity_at: Instant::now(),
+            fps: 0.0,
+            frame_sample_count: 0,
+            frame_sample_started_at: Instant::now(),
+            fps_epoch: 0,
+            fps_task: Task::ready(()),
             error_message: None,
             tree_state,
         };
-        view.refresh(cx);
+        view.request_snapshot_refresh(cx);
+        view.start_auto_refresh(cx);
+        view.start_fps_monitor(cx);
         view
     }
 
-    fn refresh(&mut self, cx: &mut Context<Self>) {
-        let snapshot = std::env::current_dir()
-            .context("failed to resolve current directory")
-            .and_then(|cwd| load_snapshot(&cwd));
-
-        match snapshot {
-            Ok(snapshot) => {
-                info!(
-                    "loaded repository snapshot from {}",
-                    snapshot.root.display()
-                );
-                self.repo_root = Some(snapshot.root);
-                self.branch_name = snapshot.branch_name;
-                self.files = snapshot.files;
-                self.overall_line_stats = snapshot.line_stats;
-                self.error_message = None;
-
-                let current_selection = self
-                    .selected_path
-                    .as_ref()
-                    .filter(|selected| self.files.iter().any(|file| &file.path == *selected))
-                    .cloned();
-
-                self.selected_path =
-                    current_selection.or_else(|| self.files.first().map(|f| f.path.clone()));
-                self.selected_status = self.selected_path.as_ref().and_then(|selected| {
-                    self.files
-                        .iter()
-                        .find(|file| &file.path == selected)
-                        .map(|file| file.status)
-                });
-
-                self.rebuild_tree(cx);
-                self.reload_selected_diff();
-            }
-            Err(err) => {
-                self.repo_root = None;
-                self.branch_name = "unknown".to_string();
-                self.files.clear();
-                self.selected_path = None;
-                self.selected_status = None;
-                self.overall_line_stats = LineStats::default();
-                self.selected_line_stats = LineStats::default();
-                self.diff_rows = vec![message_row(
-                    DiffRowKind::Empty,
-                    "Open this app from a Git repository to load diffs.",
-                )];
-                self.error_message = Some(err.to_string());
-                self.rebuild_tree(cx);
-            }
+    fn select_file(
+        &mut self,
+        path: String,
+        jump_anchor: Option<FileJumpAnchor>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selected_path.as_deref() == Some(path.as_str()) {
+            return;
         }
 
-        cx.notify();
-    }
-
-    fn select_file(&mut self, path: String, cx: &mut Context<Self>) {
         self.selected_path = Some(path.clone());
         self.selected_status = self
             .files
             .iter()
             .find(|file| file.path == path)
             .map(|file| file.status);
-        self.reload_selected_diff();
+        self.auto_next_armed = true;
+        self.auto_prev_armed = true;
+        self.pending_jump_anchor = jump_anchor;
+        if jump_anchor != Some(FileJumpAnchor::Bottom) {
+            self.reset_diff_scroll_to_top();
+        }
+        self.request_selected_diff_reload(cx);
         cx.notify();
     }
 
-    fn reload_selected_diff(&mut self) {
-        let Some(repo_root) = self.repo_root.as_ref() else {
+    fn request_snapshot_refresh(&mut self, cx: &mut Context<Self>) {
+        if self.snapshot_loading {
+            return;
+        }
+
+        let cwd_result = std::env::current_dir().context("failed to resolve current directory");
+        let epoch = self.next_snapshot_epoch();
+        self.snapshot_loading = true;
+
+        self.snapshot_task = cx.spawn(async move |this, cx| {
+            let result = match cwd_result {
+                Ok(cwd) => {
+                    cx.background_executor()
+                        .spawn(async move { load_snapshot(&cwd) })
+                        .await
+                }
+                Err(err) => Err(err),
+            };
+
+            if let Some(this) = this.upgrade() {
+                this.update(cx, |this, cx| {
+                    if epoch != this.snapshot_epoch {
+                        return;
+                    }
+
+                    this.snapshot_loading = false;
+                    match result {
+                        Ok(snapshot) => this.apply_snapshot(snapshot, cx),
+                        Err(err) => this.apply_snapshot_error(err, cx),
+                    }
+                })
+                .ok();
+            }
+        });
+    }
+
+    fn apply_snapshot(&mut self, snapshot: RepoSnapshot, cx: &mut Context<Self>) {
+        info!(
+            "loaded repository snapshot from {}",
+            snapshot.root.display()
+        );
+
+        let files_changed = self.files != snapshot.files;
+        let overall_changed = self.overall_line_stats != snapshot.line_stats;
+        let previous_selected_path = self.selected_path.clone();
+        let previous_selected_status = self.selected_status;
+
+        self.repo_root = Some(snapshot.root);
+        self.branch_name = snapshot.branch_name;
+        self.files = snapshot.files;
+        self.overall_line_stats = snapshot.line_stats;
+        self.error_message = None;
+
+        let current_selection = self
+            .selected_path
+            .as_ref()
+            .filter(|selected| self.files.iter().any(|file| &file.path == *selected))
+            .cloned();
+        self.selected_path =
+            current_selection.or_else(|| self.files.first().map(|f| f.path.clone()));
+        self.selected_status = self.selected_path.as_ref().and_then(|selected| {
+            self.files
+                .iter()
+                .find(|file| &file.path == selected)
+                .map(|file| file.status)
+        });
+
+        let selected_changed = self.selected_path != previous_selected_path
+            || self.selected_status != previous_selected_status;
+
+        if files_changed {
+            self.rebuild_tree(cx);
+        }
+
+        if files_changed || overall_changed || selected_changed || self.diff_rows.is_empty() {
+            self.request_selected_diff_reload(cx);
+        }
+
+        cx.notify();
+    }
+
+    fn apply_snapshot_error(&mut self, err: anyhow::Error, cx: &mut Context<Self>) {
+        self.repo_root = None;
+        self.branch_name = "unknown".to_string();
+        self.files.clear();
+        self.selected_path = None;
+        self.selected_status = None;
+        self.overall_line_stats = LineStats::default();
+        self.selected_line_stats = LineStats::default();
+        self.diff_rows = vec![message_row(
+            DiffRowKind::Empty,
+            "Open this app from a Git repository to load diffs.",
+        )];
+        self.error_message = Some(err.to_string());
+        self.rebuild_tree(cx);
+        cx.notify();
+    }
+
+    fn request_selected_diff_reload(&mut self, cx: &mut Context<Self>) {
+        let Some(repo_root) = self.repo_root.clone() else {
             self.diff_rows.clear();
             self.selected_line_stats = LineStats::default();
+            self.patch_loading = false;
             return;
         };
 
-        let Some(path) = self.selected_path.as_ref() else {
+        let Some(path) = self.selected_path.clone() else {
             self.diff_rows = vec![message_row(
                 DiffRowKind::Empty,
                 "Select a file to view its diff.",
             )];
             self.selected_line_stats = LineStats::default();
+            self.patch_loading = false;
             return;
         };
 
         let status = self.selected_status.unwrap_or(FileStatus::Unknown);
-        match load_patch(repo_root, path, status) {
-            Ok(patch) => {
-                self.diff_rows = parse_patch_side_by_side(&patch);
-                self.selected_line_stats = line_stats_from_rows(&self.diff_rows);
+        let path_for_error = path.clone();
+        let epoch = self.next_patch_epoch();
+        self.patch_loading = true;
+
+        self.patch_task = cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let patch = load_patch(&repo_root, &path, status)?;
+                    let rows = parse_patch_side_by_side(&patch);
+                    let stats = line_stats_from_rows(&rows);
+                    Ok::<(Vec<SideBySideRow>, LineStats), anyhow::Error>((rows, stats))
+                })
+                .await;
+
+            if let Some(this) = this.upgrade() {
+                this.update(cx, |this, cx| {
+                    if epoch != this.patch_epoch {
+                        return;
+                    }
+
+                    this.patch_loading = false;
+                    match result {
+                        Ok((rows, stats)) => {
+                            this.diff_rows = rows;
+                            this.selected_line_stats = stats;
+                            this.apply_pending_jump_anchor();
+                        }
+                        Err(err) => {
+                            this.diff_rows = vec![message_row(
+                                DiffRowKind::Meta,
+                                format!("Failed to load patch for {path_for_error}: {err:#}"),
+                            )];
+                            this.selected_line_stats = LineStats::default();
+                            this.pending_jump_anchor = None;
+                        }
+                    }
+
+                    cx.notify();
+                })
+                .ok();
             }
-            Err(err) => {
-                self.diff_rows = vec![message_row(
-                    DiffRowKind::Meta,
-                    format!("Failed to load patch for {path}: {err:#}"),
-                )];
-                self.selected_line_stats = LineStats::default();
-            }
-        }
+        });
+    }
+
+    fn next_snapshot_epoch(&mut self) -> usize {
+        self.snapshot_epoch = self.snapshot_epoch.saturating_add(1);
+        self.snapshot_epoch
+    }
+
+    fn next_patch_epoch(&mut self) -> usize {
+        self.patch_epoch = self.patch_epoch.saturating_add(1);
+        self.patch_epoch
     }
 
     fn rebuild_tree(&mut self, cx: &mut Context<Self>) {
@@ -176,657 +329,210 @@ impl DiffViewer {
             .update(cx, |state, cx| state.set_items(items, cx));
     }
 
-    fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let view = cx.entity();
-        let repo_label = self
-            .repo_root
-            .as_ref()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "No git repository found".to_string());
-        let branch_label = format!("branch: {}", self.branch_name);
-
-        h_flex()
-            .w_full()
-            .h_11()
-            .items_center()
-            .justify_between()
-            .px_3()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().background)
-            .child(
-                h_flex()
-                    .items_center()
-                    .gap_2()
-                    .child(div().text_sm().font_semibold().child("hunk"))
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_family(cx.theme().mono_font_family.clone())
-                            .text_color(cx.theme().muted_foreground)
-                            .child(branch_label),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(repo_label),
-                    ),
-            )
-            .child(
-                h_flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        Button::new("refresh")
-                            .label("Refresh")
-                            .on_click(move |_, _, cx| {
-                                view.update(cx, |this, cx| this.refresh(cx));
-                            }),
-                    )
-                    .child(
-                        h_flex()
-                            .items_center()
-                            .gap_2()
-                            .child(div().text_sm().child("Dark"))
-                            .child(
-                                Switch::new("theme-mode")
-                                    .checked(cx.theme().mode.is_dark())
-                                    .on_click(|checked, window, cx| {
-                                        let mode = if *checked {
-                                            ThemeMode::Dark
-                                        } else {
-                                            ThemeMode::Light
-                                        };
-                                        Theme::change(mode, Some(window), cx);
-                                    }),
-                            ),
-                    )
-                    .child(self.render_line_stats("overall", self.overall_line_stats, cx))
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(format!("{} files", self.files.len())),
-                    ),
-            )
+    fn start_auto_refresh(&mut self, cx: &mut Context<Self>) {
+        let epoch = self.next_refresh_epoch();
+        self.schedule_auto_refresh(epoch, cx);
     }
 
-    fn render_tree(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let view = cx.entity();
-        let selected_path = self.selected_path.clone();
-
-        v_flex().size_full().overflow_y_scrollbar().child(tree(
-            &self.tree_state,
-            move |ix, entry, _selected, _window, _cx| {
-                let item = entry.item();
-                let item_id = item.id.to_string();
-                let item_label = item.label.clone();
-                let is_folder = entry.is_folder();
-                let is_selected = selected_path.as_deref() == Some(item_id.as_str());
-                let icon = if is_folder {
-                    if entry.is_expanded() { "▾" } else { "▸" }
-                } else {
-                    "•"
-                };
-                let indent = px(10.0 + (entry.depth() as f32 * 16.0));
-
-                ListItem::new(ix)
-                    .selected(is_selected)
-                    .pl(indent)
-                    .on_click({
-                        let view = view.clone();
-                        move |_, _, cx| {
-                            if is_folder {
-                                return;
-                            }
-
-                            view.update(cx, |this, cx| {
-                                this.select_file(item_id.clone(), cx);
-                            });
-                        }
-                    })
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .items_center()
-                            .gap_2()
-                            .child(div().text_sm().child(icon))
-                            .child(div().text_sm().child(item_label)),
-                    )
-            },
-        ))
+    fn next_refresh_epoch(&mut self) -> usize {
+        self.refresh_epoch = self.refresh_epoch.saturating_add(1);
+        self.refresh_epoch
     }
 
-    fn render_diff(&self, cx: &mut Context<Self>) -> AnyElement {
-        if let Some(error_message) = &self.error_message {
-            return v_flex()
-                .size_full()
-                .items_center()
-                .justify_center()
-                .p_4()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().danger)
-                        .child(error_message.clone()),
-                )
-                .into_any_element();
+    fn schedule_auto_refresh(&mut self, epoch: usize, cx: &mut Context<Self>) {
+        if epoch != self.refresh_epoch {
+            return;
         }
 
-        let (old_label, new_label) = self.diff_column_labels();
+        self.auto_refresh_task = cx.spawn(async move |this, cx| {
+            Timer::after(AUTO_REFRESH_INTERVAL).await;
+            if let Some(this) = this.upgrade() {
+                this.update(cx, |this, cx| {
+                    if this.recently_scrolling() {
+                        let next_epoch = this.next_refresh_epoch();
+                        this.schedule_auto_refresh(next_epoch, cx);
+                        return;
+                    }
 
-        v_flex()
-            .size_full()
-            .overflow_y_scrollbar()
-            .child(self.render_file_status_banner(cx))
-            .child(
-                h_flex()
-                    .w_full()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    .child(
-                        div()
-                            .flex_1()
-                            .px_2()
-                            .py_1()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(old_label),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .px_2()
-                            .py_1()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(new_label),
-                    ),
-            )
-            .children(
-                self.diff_rows
-                    .iter()
-                    .enumerate()
-                    .map(|(ix, row)| match row.kind {
-                        DiffRowKind::Code => self.render_code_row(ix, row, cx),
-                        DiffRowKind::HunkHeader | DiffRowKind::Meta | DiffRowKind::Empty => {
-                            self.render_meta_row(ix, row, cx)
-                        }
-                    }),
-            )
-            .into_any_element()
-    }
-
-    fn render_meta_row(
-        &self,
-        ix: usize,
-        row: &SideBySideRow,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let is_dark = cx.theme().mode.is_dark();
-
-        let (background, foreground, accent) = match row.kind {
-            DiffRowKind::HunkHeader => (
-                cx.theme().primary_hover,
-                cx.theme().primary_foreground,
-                cx.theme().primary,
-            ),
-            DiffRowKind::Meta => {
-                let line = row.text.as_str();
-                if line.starts_with("new file mode") || line.starts_with("+++ b/") {
-                    (
-                        cx.theme()
-                            .background
-                            .blend(
-                                cx.theme()
-                                    .success
-                                    .opacity(if is_dark { 0.22 } else { 0.12 }),
-                            ),
-                        if is_dark {
-                            cx.theme().success.lighten(0.45)
-                        } else {
-                            cx.theme().success.darken(0.10)
-                        },
-                        cx.theme().success,
-                    )
-                } else if line.starts_with("deleted file mode") || line.starts_with("--- a/") {
-                    (
-                        cx.theme()
-                            .background
-                            .blend(cx.theme().danger.opacity(if is_dark { 0.22 } else { 0.12 })),
-                        if is_dark {
-                            cx.theme().danger.lighten(0.45)
-                        } else {
-                            cx.theme().danger.darken(0.10)
-                        },
-                        cx.theme().danger,
-                    )
-                } else if line.starts_with("diff --git") {
-                    (
-                        cx.theme()
-                            .background
-                            .blend(cx.theme().accent.opacity(if is_dark { 0.18 } else { 0.10 })),
-                        cx.theme().foreground,
-                        cx.theme().accent,
-                    )
-                } else {
-                    (
-                        cx.theme().muted,
-                        cx.theme().muted_foreground,
-                        cx.theme().border,
-                    )
-                }
+                    this.request_snapshot_refresh(cx);
+                    let next_epoch = this.next_refresh_epoch();
+                    this.schedule_auto_refresh(next_epoch, cx);
+                })
+                .ok();
             }
-            DiffRowKind::Empty => (
-                cx.theme().background,
-                cx.theme().muted_foreground,
-                cx.theme().border,
-            ),
-            DiffRowKind::Code => (
-                cx.theme().background,
-                cx.theme().foreground,
-                cx.theme().border,
-            ),
-        };
-
-        div()
-            .id(("diff-meta-row", ix))
-            .relative()
-            .w_full()
-            .px_2()
-            .py_1()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .bg(background)
-            .text_sm()
-            .text_color(foreground)
-            .font_family(cx.theme().mono_font_family.clone())
-            .child(row.text.clone())
-            .child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .top_0()
-                    .bottom_0()
-                    .w(px(2.))
-                    .bg(accent),
-            )
-            .into_any_element()
+        });
     }
 
-    fn render_code_row(
-        &self,
-        ix: usize,
-        row: &SideBySideRow,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        h_flex()
-            .id(("diff-code-row", ix))
-            .w_full()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .child(self.render_diff_cell(ix, "left", &row.left, row.right.kind, cx))
-            .child(self.render_diff_cell(ix, "right", &row.right, row.left.kind, cx))
-            .into_any_element()
+    fn recently_scrolling(&self) -> bool {
+        self.last_scroll_activity_at.elapsed() < AUTO_REFRESH_SCROLL_DEBOUNCE
     }
 
-    fn render_diff_cell(
-        &self,
-        row_ix: usize,
-        side: &'static str,
-        cell: &DiffCell,
-        peer_kind: DiffCellKind,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let cell_id = if side == "left" {
-            ("diff-cell-left", row_ix)
-        } else {
-            ("diff-cell-right", row_ix)
-        };
+    fn reset_diff_scroll_to_top(&mut self) {
+        self.diff_scroll_handle
+            .0
+            .borrow()
+            .base_handle
+            .set_offset(point(px(0.), px(0.)));
+        self.last_diff_scroll_offset = None;
+        self.last_scroll_activity_at = Instant::now();
+    }
 
-        let is_dark = cx.theme().mode.is_dark();
-        let add_alpha = if is_dark { 0.42 } else { 0.18 };
-        let remove_alpha = if is_dark { 0.42 } else { 0.18 };
-        let ghost_alpha = if is_dark { 0.24 } else { 0.11 };
+    fn apply_pending_jump_anchor(&mut self) {
+        match self.pending_jump_anchor.take() {
+            Some(FileJumpAnchor::Bottom) => {
+                if self.diff_rows.is_empty() {
+                    return;
+                }
 
-        let (background, marker_color, line_color, text_color, marker) =
-            match (cell.kind, peer_kind) {
-                (DiffCellKind::Added, _) => (
-                    cx.theme()
-                        .background
-                        .blend(cx.theme().success.opacity(add_alpha)),
-                    if is_dark {
-                        cx.theme().success.lighten(0.55)
-                    } else {
-                        cx.theme().success.darken(0.18)
-                    },
-                    if is_dark {
-                        cx.theme().success.lighten(0.52)
-                    } else {
-                        cx.theme().success.darken(0.16)
-                    },
-                    cx.theme().foreground,
-                    "+",
-                ),
-                (DiffCellKind::Removed, _) => (
-                    cx.theme()
-                        .background
-                        .blend(cx.theme().danger.opacity(remove_alpha)),
-                    if is_dark {
-                        cx.theme().danger.lighten(0.55)
-                    } else {
-                        cx.theme().danger.darken(0.18)
-                    },
-                    if is_dark {
-                        cx.theme().danger.lighten(0.52)
-                    } else {
-                        cx.theme().danger.darken(0.16)
-                    },
-                    cx.theme().foreground,
-                    "-",
-                ),
-                (DiffCellKind::None, DiffCellKind::Added) => (
-                    cx.theme()
-                        .background
-                        .blend(cx.theme().success.opacity(ghost_alpha)),
-                    if is_dark {
-                        cx.theme().muted_foreground.lighten(0.22)
-                    } else {
-                        cx.theme().muted_foreground.darken(0.08)
-                    },
-                    if is_dark {
-                        cx.theme().muted_foreground.lighten(0.16)
-                    } else {
-                        cx.theme().muted_foreground.darken(0.06)
-                    },
-                    if is_dark {
-                        cx.theme().muted_foreground.lighten(0.18)
-                    } else {
-                        cx.theme().muted_foreground.darken(0.08)
-                    },
-                    "∅",
-                ),
-                (DiffCellKind::None, DiffCellKind::Removed) => (
-                    cx.theme()
-                        .background
-                        .blend(cx.theme().danger.opacity(ghost_alpha)),
-                    if is_dark {
-                        cx.theme().muted_foreground.lighten(0.22)
-                    } else {
-                        cx.theme().muted_foreground.darken(0.08)
-                    },
-                    if is_dark {
-                        cx.theme().muted_foreground.lighten(0.16)
-                    } else {
-                        cx.theme().muted_foreground.darken(0.06)
-                    },
-                    if is_dark {
-                        cx.theme().muted_foreground.lighten(0.18)
-                    } else {
-                        cx.theme().muted_foreground.darken(0.08)
-                    },
-                    "∅",
-                ),
-                (DiffCellKind::Context, _) => (
-                    cx.theme().background,
-                    if is_dark {
-                        cx.theme().muted_foreground.lighten(0.08)
-                    } else {
-                        cx.theme().muted_foreground.darken(0.10)
-                    },
-                    if is_dark {
-                        cx.theme().muted_foreground.lighten(0.16)
-                    } else {
-                        cx.theme().muted_foreground.darken(0.12)
-                    },
-                    cx.theme().foreground,
-                    " ",
-                ),
-                (DiffCellKind::None, _) => (
-                    cx.theme().background,
-                    if is_dark {
-                        cx.theme().muted_foreground.lighten(0.08)
-                    } else {
-                        cx.theme().muted_foreground.darken(0.10)
-                    },
-                    if is_dark {
-                        cx.theme().muted_foreground.lighten(0.16)
-                    } else {
-                        cx.theme().muted_foreground.darken(0.12)
-                    },
-                    if is_dark {
-                        cx.theme().muted_foreground.lighten(0.04)
-                    } else {
-                        cx.theme().muted_foreground.darken(0.06)
-                    },
-                    "",
-                ),
+                self.diff_scroll_handle.scroll_to_item_strict(
+                    self.diff_rows.len().saturating_sub(1),
+                    gpui::ScrollStrategy::Bottom,
+                );
+                self.last_diff_scroll_offset = None;
+                self.last_scroll_activity_at = Instant::now();
+            }
+            Some(FileJumpAnchor::Top) => {
+                self.reset_diff_scroll_to_top();
+            }
+            None => {}
+        }
+    }
+
+    fn selected_file_index(&self) -> Option<usize> {
+        let selected = self.selected_path.as_ref()?;
+        self.files.iter().position(|file| &file.path == selected)
+    }
+
+    fn maybe_auto_advance_on_scroll(&mut self, delta_y: gpui::Pixels, cx: &mut Context<Self>) {
+        if self.patch_loading || self.files.is_empty() {
+            return;
+        }
+
+        let scroll_state = self.diff_scroll_handle.0.borrow();
+        let base_handle = &scroll_state.base_handle;
+        let offset_y = base_handle.offset().y;
+        let max_y = base_handle.max_offset().height;
+        drop(scroll_state);
+
+        if max_y <= px(0.) {
+            if delta_y < -px(0.5) {
+                self.auto_prev_armed = true;
+                let Some(current_ix) = self.selected_file_index() else {
+                    return;
+                };
+                let Some(next_file) = self.files.get(current_ix.saturating_add(1)) else {
+                    self.auto_next_armed = false;
+                    return;
+                };
+
+                self.auto_next_armed = false;
+                let next_path = next_file.path.clone();
+                self.select_file(next_path, Some(FileJumpAnchor::Top), cx);
+            } else if delta_y > px(0.5) {
+                self.auto_next_armed = true;
+                let Some(current_ix) = self.selected_file_index() else {
+                    return;
+                };
+                if current_ix == 0 {
+                    self.auto_prev_armed = false;
+                    return;
+                }
+
+                self.auto_prev_armed = false;
+                let previous_path = self.files[current_ix - 1].path.clone();
+                self.select_file(previous_path, Some(FileJumpAnchor::Bottom), cx);
+            }
+            return;
+        }
+
+        let distance_to_bottom = (max_y + offset_y).abs();
+        if distance_to_bottom > px(140.) {
+            self.auto_next_armed = true;
+        }
+        if offset_y < -px(140.) {
+            self.auto_prev_armed = true;
+        }
+
+        if delta_y < -px(0.5) && self.auto_next_armed && distance_to_bottom <= px(36.) {
+            let Some(current_ix) = self.selected_file_index() else {
+                return;
+            };
+            let Some(next_file) = self.files.get(current_ix.saturating_add(1)) else {
+                self.auto_next_armed = false;
+                return;
             };
 
-        let line_number = cell.line.map(|line| line.to_string()).unwrap_or_default();
-        let content = if cell.text.is_empty() && marker == "∅" {
-            "no line".to_string()
-        } else {
-            cell.text.clone()
-        };
-
-        h_flex()
-            .id(cell_id)
-            .flex_1()
-            .min_w_0()
-            .px_2()
-            .py_1()
-            .gap_2()
-            .items_start()
-            .bg(background)
-            .when(side == "left", |this| {
-                this.border_r_1().border_color(cx.theme().border)
-            })
-            .child(
-                div()
-                    .w_10()
-                    .text_xs()
-                    .text_color(line_color)
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .child(line_number),
-            )
-            .child(
-                div()
-                    .w_4()
-                    .text_sm()
-                    .text_color(marker_color)
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .child(marker),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .text_sm()
-                    .text_color(text_color)
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .child(content),
-            )
-            .into_any_element()
-    }
-
-    fn diff_column_labels(&self) -> (String, String) {
-        let selected = self
-            .selected_path
-            .clone()
-            .unwrap_or_else(|| "file".to_string());
-        match self.selected_status.unwrap_or(FileStatus::Unknown) {
-            FileStatus::Added | FileStatus::Untracked => ("/dev/null".to_string(), selected),
-            FileStatus::Deleted => (selected, "/dev/null".to_string()),
-            _ => ("Old".to_string(), "New".to_string()),
+            let next_path = next_file.path.clone();
+            self.auto_next_armed = false;
+            self.auto_prev_armed = true;
+            self.select_file(next_path, Some(FileJumpAnchor::Top), cx);
+            return;
         }
-    }
 
-    fn render_file_status_banner(&self, cx: &mut Context<Self>) -> AnyElement {
-        let path = self
-            .selected_path
-            .clone()
-            .unwrap_or_else(|| "No file selected".to_string());
+        if delta_y <= px(0.5) || !self.auto_prev_armed || offset_y < -px(36.) {
+            return;
+        }
 
-        let status = self.selected_status.unwrap_or(FileStatus::Unknown);
-        let is_dark = cx.theme().mode.is_dark();
-
-        let (label, hint, accent, background, badge_background) = match status {
-            FileStatus::Added | FileStatus::Untracked => (
-                "NEW FILE",
-                "Content exists only on the right side.",
-                cx.theme().success,
-                cx.theme()
-                    .background
-                    .blend(
-                        cx.theme()
-                            .success
-                            .opacity(if is_dark { 0.20 } else { 0.10 }),
-                    ),
-                cx.theme()
-                    .success
-                    .opacity(if is_dark { 0.50 } else { 0.24 }),
-            ),
-            FileStatus::Deleted => (
-                "DELETED FILE",
-                "Content exists only on the left side.",
-                cx.theme().danger,
-                cx.theme()
-                    .background
-                    .blend(cx.theme().danger.opacity(if is_dark { 0.20 } else { 0.10 })),
-                cx.theme().danger.opacity(if is_dark { 0.50 } else { 0.24 }),
-            ),
-            FileStatus::Renamed => (
-                "RENAMED",
-                "Showing textual changes for this path.",
-                cx.theme().warning,
-                cx.theme()
-                    .background
-                    .blend(
-                        cx.theme()
-                            .warning
-                            .opacity(if is_dark { 0.20 } else { 0.10 }),
-                    ),
-                cx.theme()
-                    .warning
-                    .opacity(if is_dark { 0.45 } else { 0.24 }),
-            ),
-            _ => (
-                "MODIFIED",
-                "Side-by-side diff view.",
-                cx.theme().accent,
-                cx.theme()
-                    .background
-                    .blend(cx.theme().accent.opacity(if is_dark { 0.14 } else { 0.08 })),
-                cx.theme().accent.opacity(if is_dark { 0.50 } else { 0.24 }),
-            ),
+        let Some(current_ix) = self.selected_file_index() else {
+            return;
         };
+        if current_ix == 0 {
+            self.auto_prev_armed = false;
+            return;
+        }
 
-        h_flex()
-            .w_full()
-            .items_center()
-            .gap_2()
-            .px_2()
-            .py_1()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .bg(background)
-            .child(
-                div()
-                    .px_2()
-                    .py_0p5()
-                    .text_xs()
-                    .font_semibold()
-                    .bg(badge_background)
-                    .border_1()
-                    .border_color(accent.opacity(if is_dark { 0.88 } else { 0.44 }))
-                    .text_color(cx.theme().foreground)
-                    .child(label),
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .text_color(cx.theme().foreground)
-                    .child(path),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(hint),
-            )
-            .child(self.render_line_stats("file", self.selected_line_stats, cx))
-            .into_any_element()
+        let previous_path = self.files[current_ix - 1].path.clone();
+        self.auto_prev_armed = false;
+        self.auto_next_armed = true;
+        self.select_file(previous_path, Some(FileJumpAnchor::Bottom), cx);
     }
 
-    fn render_line_stats(
-        &self,
-        label: &'static str,
-        stats: LineStats,
+    fn on_diff_scroll_wheel(
+        &mut self,
+        event: &ScrollWheelEvent,
+        window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
-        h_flex()
-            .items_center()
-            .gap_1()
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(label),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .text_color(if cx.theme().mode.is_dark() {
-                        cx.theme().success.lighten(0.42)
-                    } else {
-                        cx.theme().success.darken(0.05)
-                    })
-                    .child(format!("+{}", stats.added)),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .text_color(if cx.theme().mode.is_dark() {
-                        cx.theme().danger.lighten(0.42)
-                    } else {
-                        cx.theme().danger.darken(0.05)
-                    })
-                    .child(format!("-{}", stats.removed)),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .text_color(cx.theme().muted_foreground)
-                    .child(format!("chg {}", stats.changed())),
-            )
-            .into_any_element()
+    ) {
+        let delta = event.delta.pixel_delta(window.line_height()).y;
+        self.last_scroll_activity_at = Instant::now();
+        self.maybe_auto_advance_on_scroll(delta, cx);
     }
-}
 
-impl Render for DiffViewer {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .size_full()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
-            .child(self.render_toolbar(cx))
-            .child(
-                h_resizable("hunk-main")
-                    .child(
-                        resizable_panel()
-                            .size(px(320.0))
-                            .size_range(px(220.0)..px(560.0))
-                            .child(self.render_tree(cx)),
-                    )
-                    .child(resizable_panel().child(self.render_diff(cx))),
-            )
-            .children(Root::render_dialog_layer(window, cx))
-            .children(Root::render_notification_layer(window, cx))
+    fn start_fps_monitor(&mut self, cx: &mut Context<Self>) {
+        let epoch = self.next_fps_epoch();
+        self.schedule_fps_sample(epoch, cx);
+    }
+
+    fn next_fps_epoch(&mut self) -> usize {
+        self.fps_epoch = self.fps_epoch.saturating_add(1);
+        self.fps_epoch
+    }
+
+    fn schedule_fps_sample(&mut self, epoch: usize, cx: &mut Context<Self>) {
+        if epoch != self.fps_epoch {
+            return;
+        }
+
+        self.fps_task = cx.spawn(async move |this, cx| {
+            Timer::after(FPS_SAMPLE_INTERVAL).await;
+            if let Some(this) = this.upgrade() {
+                this.update(cx, |this, cx| {
+                    let elapsed = this.frame_sample_started_at.elapsed().as_secs_f32();
+                    if elapsed > 0.0 {
+                        this.fps = this.frame_sample_count as f32 / elapsed;
+                    } else {
+                        this.fps = 0.0;
+                    }
+                    this.frame_sample_count = 0;
+                    this.frame_sample_started_at = Instant::now();
+
+                    let next_epoch = this.next_fps_epoch();
+                    this.schedule_fps_sample(next_epoch, cx);
+                    cx.notify();
+                })
+                .ok();
+            }
+        });
     }
 }
 
@@ -870,12 +576,11 @@ fn build_folder_items(folder: &TreeFolder, prefix: &str) -> Vec<TreeItem> {
         );
     }
 
-    for (name, status) in &folder.files {
+    for (name, _) in &folder.files {
         let id = join_path(prefix, name);
-        let label = format!("[{}] {}", status.tag(), name);
         items.push(TreeItem::new(
             SharedString::from(id),
-            SharedString::from(label),
+            SharedString::from(name.clone()),
         ));
     }
 
