@@ -1,5 +1,6 @@
 use super::*;
 use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 
 impl DiffViewer {
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -244,8 +245,18 @@ impl DiffViewer {
         })
         .flex_grow()
         .size_full()
+        .map(|mut this| {
+            this.style().restrict_scroll_to_axis = Some(true);
+            this
+        })
+        .on_scroll_wheel(cx.listener(Self::on_diff_list_scroll_wheel))
         .track_scroll(diff_scroll_handle.clone())
         .with_sizing_behavior(ListSizingBehavior::Auto);
+
+        let scrollbar_size = px(DIFF_SCROLLBAR_SIZE);
+        let edge_inset = px(DIFF_BOTTOM_SAFE_INSET);
+        let right_inset = px(DIFF_SCROLLBAR_RIGHT_INSET);
+        let vertical_bar_bottom = edge_inset + px(DIFF_VERTICAL_SCROLLBAR_EXTRA_BOTTOM_INSET);
 
         if self.diff_fit_to_width {
             return v_flex()
@@ -283,9 +294,25 @@ impl DiffViewer {
                             div()
                                 .flex_1()
                                 .min_h_0()
-                                .on_scroll_wheel(cx.listener(Self::on_diff_scroll_wheel))
-                                .child(list)
-                                .vertical_scrollbar(&diff_scroll_handle),
+                                .relative()
+                                .child(
+                                    div()
+                                        .size_full()
+                                        .on_scroll_wheel(cx.listener(Self::on_diff_scroll_wheel))
+                                        .child(list),
+                                )
+                                .child(
+                                    div()
+                                        .absolute()
+                                        .top_0()
+                                        .right(right_inset)
+                                        .bottom(vertical_bar_bottom)
+                                        .w(scrollbar_size)
+                                        .child(
+                                            Scrollbar::vertical(&diff_scroll_handle)
+                                                .scrollbar_show(ScrollbarShow::Always),
+                                        ),
+                                ),
                         ),
                 )
                 .into_any_element();
@@ -297,59 +324,82 @@ impl DiffViewer {
             .size_full()
             .child(self.render_file_status_banner(cx))
             .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_hidden()
-                    .child(
-                        h_flex()
-                            .id("diff-horizontal-scroll-area")
-                            .size_full()
-                            .overflow_x_scroll()
-                            .overflow_y_hidden()
-                            .track_scroll(&horizontal_scroll_handle)
-                            .on_scroll_wheel(cx.listener(Self::on_diff_horizontal_scroll_wheel))
-                            .child(
-                                v_flex()
-                                    .h_full()
-                                    .min_w(px(DIFF_MIN_CONTENT_WIDTH))
-                                    .child(
-                                        h_flex()
-                                            .w_full()
-                                            .border_b_1()
-                                            .border_color(cx.theme().border)
-                                            .child(
-                                                div()
-                                                    .flex_1()
-                                                    .px_2()
-                                                    .py_1()
-                                                    .text_xs()
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child(old_label),
-                                            )
-                                            .child(
-                                                div()
-                                                    .flex_1()
-                                                    .px_2()
-                                                    .py_1()
-                                                    .text_xs()
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child(new_label),
-                                            ),
+                v_flex().flex_1().min_h_0().child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .relative()
+                        .child(
+                            div().size_full().overflow_y_hidden().child(
+                                h_flex()
+                                    .id("diff-horizontal-scroll-area")
+                                    .size_full()
+                                    .overflow_x_scroll()
+                                    .overflow_y_hidden()
+                                    .map(|mut this| {
+                                        this.style().restrict_scroll_to_axis = Some(true);
+                                        this
+                                    })
+                                    .track_scroll(&horizontal_scroll_handle)
+                                    .on_scroll_wheel(
+                                        cx.listener(Self::on_diff_horizontal_scroll_wheel),
                                     )
                                     .child(
-                                        div()
-                                            .flex_1()
-                                            .min_h_0()
-                                            .on_scroll_wheel(
-                                                cx.listener(Self::on_diff_scroll_wheel),
+                                        v_flex()
+                                            .h_full()
+                                            .min_w(px(self.diff_pan_content_width))
+                                            .child(
+                                                h_flex()
+                                                    .w(px(self.diff_pan_content_width))
+                                                    .min_w(px(self.diff_pan_content_width))
+                                                    .border_b_1()
+                                                    .border_color(cx.theme().border)
+                                                    .child(
+                                                        div()
+                                                            .w(px(self.diff_left_column_width))
+                                                            .min_w(px(self.diff_left_column_width))
+                                                            .px_2()
+                                                            .py_1()
+                                                            .text_xs()
+                                                            .text_color(cx.theme().muted_foreground)
+                                                            .child(old_label),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .w(px(self.diff_right_column_width))
+                                                            .min_w(px(self.diff_right_column_width))
+                                                            .px_2()
+                                                            .py_1()
+                                                            .text_xs()
+                                                            .text_color(cx.theme().muted_foreground)
+                                                            .child(new_label),
+                                                    ),
                                             )
-                                            .child(list)
-                                            .vertical_scrollbar(&diff_scroll_handle),
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .min_h_0()
+                                                    .on_scroll_wheel(
+                                                        cx.listener(Self::on_diff_scroll_wheel),
+                                                    )
+                                                    .child(list),
+                                            ),
                                     ),
                             ),
-                    )
-                    .horizontal_scrollbar(&horizontal_scroll_handle),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .right(right_inset)
+                                .bottom(vertical_bar_bottom)
+                                .w(scrollbar_size)
+                                .child(
+                                    Scrollbar::vertical(&diff_scroll_handle)
+                                        .scrollbar_show(ScrollbarShow::Always),
+                                ),
+                        ),
+                ),
             )
             .into_any_element()
     }
@@ -429,7 +479,7 @@ impl DiffViewer {
         div()
             .id(("diff-meta-row", ix))
             .relative()
-            .w_full()
+            .overflow_x_hidden()
             .px_2()
             .py_1()
             .border_b_1()
@@ -438,7 +488,12 @@ impl DiffViewer {
             .text_sm()
             .text_color(foreground)
             .font_family(cx.theme().mono_font_family.clone())
-            .when(self.diff_fit_to_width, |this| this.truncate())
+            .when(self.diff_fit_to_width, |this| this.w_full())
+            .when(!self.diff_fit_to_width, |this| {
+                this.w(px(self.diff_pan_content_width))
+                    .min_w(px(self.diff_pan_content_width))
+            })
+            .when(self.diff_fit_to_width, |this| this.whitespace_normal())
             .when(!self.diff_fit_to_width, |this| this.whitespace_nowrap())
             .child(row.text.clone())
             .child(
@@ -456,17 +511,58 @@ impl DiffViewer {
     fn render_code_row(
         &self,
         ix: usize,
-        row: &SideBySideRow,
+        row_data: &SideBySideRow,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        h_flex()
+        let row = h_flex()
             .id(("diff-code-row", ix))
-            .w_full()
+            .overflow_x_hidden()
             .border_b_1()
             .border_color(cx.theme().border)
-            .child(self.render_diff_cell(ix, "left", &row.left, row.right.kind, cx))
-            .child(self.render_diff_cell(ix, "right", &row.right, row.left.kind, cx))
-            .into_any_element()
+            .when(self.diff_fit_to_width, |this| this.w_full())
+            .when(!self.diff_fit_to_width, |this| {
+                this.w(px(self.diff_pan_content_width))
+                    .min_w(px(self.diff_pan_content_width))
+            });
+
+        if self.diff_fit_to_width {
+            return row
+                .child(self.render_diff_cell(
+                    ix,
+                    "left",
+                    &row_data.left,
+                    row_data.right.kind,
+                    None,
+                    cx,
+                ))
+                .child(self.render_diff_cell(
+                    ix,
+                    "right",
+                    &row_data.right,
+                    row_data.left.kind,
+                    None,
+                    cx,
+                ))
+                .into_any_element();
+        }
+
+        row.child(self.render_diff_cell(
+            ix,
+            "left",
+            &row_data.left,
+            row_data.right.kind,
+            Some(self.diff_left_column_width),
+            cx,
+        ))
+        .child(self.render_diff_cell(
+            ix,
+            "right",
+            &row_data.right,
+            row_data.left.kind,
+            Some(self.diff_right_column_width),
+            cx,
+        ))
+        .into_any_element()
     }
 
     fn render_diff_cell(
@@ -475,6 +571,7 @@ impl DiffViewer {
         side: &'static str,
         cell: &DiffCell,
         peer_kind: DiffCellKind,
+        column_width: Option<f32>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let cell_id = if side == "left" {
@@ -611,13 +708,17 @@ impl DiffViewer {
 
         h_flex()
             .id(cell_id)
-            .flex_1()
-            .min_w_0()
+            .overflow_x_hidden()
             .px_2()
             .py_1()
             .gap_2()
             .items_start()
             .bg(background)
+            .when(column_width.is_some(), |this| {
+                let width = column_width.unwrap_or_default();
+                this.w(px(width)).min_w(px(width))
+            })
+            .when(column_width.is_none(), |this| this.flex_1().min_w_0())
             .when(side == "left", |this| {
                 this.border_r_1().border_color(cx.theme().border)
             })
@@ -642,10 +743,11 @@ impl DiffViewer {
             .child(
                 div()
                     .flex_1()
+                    .min_w_0()
                     .text_sm()
                     .text_color(text_color)
                     .font_family(cx.theme().mono_font_family.clone())
-                    .when(self.diff_fit_to_width, |this| this.truncate())
+                    .when(self.diff_fit_to_width, |this| this.whitespace_normal())
                     .when(!self.diff_fit_to_width, |this| this.whitespace_nowrap())
                     .child(content),
             )
