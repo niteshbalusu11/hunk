@@ -101,30 +101,44 @@ pub fn parse_patch_side_by_side(patch: &str) -> Vec<SideBySideRow> {
             continue;
         }
 
-        if line.starts_with('-') && ix + 1 < lines.len() && lines[ix + 1].starts_with('+') {
-            let removed = line.trim_start_matches('-');
-            let added = lines[ix + 1].trim_start_matches('+');
-
-            rows.push(SideBySideRow::code(
-                DiffCell::new(Some(left_line), removed, DiffCellKind::Removed),
-                DiffCell::new(Some(right_line), added, DiffCellKind::Added),
-            ));
-
-            left_line = left_line.saturating_add(1);
-            right_line = right_line.saturating_add(1);
-            ix += 2;
-            continue;
-        }
-
         if line.starts_with('-') {
-            let removed = line.trim_start_matches('-');
-            rows.push(SideBySideRow::code(
-                DiffCell::new(Some(left_line), removed, DiffCellKind::Removed),
-                DiffCell::empty(),
-            ));
+            let start_ix = ix;
+            while ix < lines.len() && lines[ix].starts_with('-') {
+                ix += 1;
+            }
 
-            left_line = left_line.saturating_add(1);
-            ix += 1;
+            let removed = lines[start_ix..ix]
+                .iter()
+                .map(|line| line.trim_start_matches('-').to_string())
+                .collect::<Vec<_>>();
+
+            let added_start = ix;
+            while ix < lines.len() && lines[ix].starts_with('+') {
+                ix += 1;
+            }
+
+            let added = lines[added_start..ix]
+                .iter()
+                .map(|line| line.trim_start_matches('+').to_string())
+                .collect::<Vec<_>>();
+
+            let max_len = removed.len().max(added.len());
+            for entry_ix in 0..max_len {
+                let left = removed.get(entry_ix).map_or_else(DiffCell::empty, |text| {
+                    let cell = DiffCell::new(Some(left_line), text.clone(), DiffCellKind::Removed);
+                    left_line = left_line.saturating_add(1);
+                    cell
+                });
+
+                let right = added.get(entry_ix).map_or_else(DiffCell::empty, |text| {
+                    let cell = DiffCell::new(Some(right_line), text.clone(), DiffCellKind::Added);
+                    right_line = right_line.saturating_add(1);
+                    cell
+                });
+
+                rows.push(SideBySideRow::code(left, right));
+            }
+
             continue;
         }
 

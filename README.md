@@ -4,9 +4,9 @@ A macOS-first Git diff viewer built with `gpui` + `gpui-component`.
 
 ## What it includes
 
-- Fast repo snapshot loading from `git status --porcelain`
+- Fast repo snapshot loading from `git2`
 - File tree for changed files
-- Diff viewer with per-line styling and line numbers
+- Side-by-side diff viewer with per-line styling and line numbers
 - Resizable split panes (tree + diff)
 - Light/Dark mode toggle
 - Refresh action
@@ -32,6 +32,35 @@ cargo run
 ```
 
 Launch from inside a Git repository to view changes.
+
+## Hot Reload (Bacon)
+
+Install bacon once:
+
+```bash
+cargo install bacon
+```
+
+Start hot reload (default job is `run`):
+
+```bash
+bacon
+```
+
+Useful jobs:
+
+```bash
+bacon check
+bacon test
+bacon clippy
+```
+
+Keybindings in bacon UI:
+
+- `r` -> run
+- `c` -> check
+- `t` -> test
+- `l` -> clippy
 
 ## Notes
 

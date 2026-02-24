@@ -1,6 +1,4 @@
 mod app;
-mod diff;
-mod git;
 
 use anyhow::Result;
 use tracing_subscriber::EnvFilter;
