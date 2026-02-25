@@ -82,7 +82,12 @@ impl DiffViewer {
         let scrollbar_size = px(DIFF_SCROLLBAR_SIZE);
         let edge_inset = px(DIFF_BOTTOM_SAFE_INSET);
         let right_inset = px(DIFF_SCROLLBAR_RIGHT_INSET);
-        let vertical_bar_bottom = edge_inset + px(DIFF_VERTICAL_SCROLLBAR_EXTRA_BOTTOM_INSET);
+        let horizontal_bar_right = right_inset + scrollbar_size;
+        let vertical_bar_bottom = if self.diff_fit_to_width {
+            edge_inset
+        } else {
+            edge_inset + scrollbar_size
+        };
 
         if self.diff_fit_to_width {
             return v_flex()
@@ -231,6 +236,18 @@ impl DiffViewer {
                                 .w(scrollbar_size)
                                 .child(
                                     Scrollbar::vertical(&diff_list_state)
+                                        .scrollbar_show(ScrollbarShow::Always),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .right(horizontal_bar_right)
+                                .bottom(edge_inset)
+                                .h(scrollbar_size)
+                                .child(
+                                    Scrollbar::horizontal(&horizontal_scroll_handle)
                                         .scrollbar_show(ScrollbarShow::Always),
                                 ),
                         ),
@@ -580,6 +597,12 @@ impl DiffViewer {
                     this.on_diff_row_mouse_down(row_ix, event, window, cx);
                 })
             })
+            .on_mouse_down(MouseButton::Middle, {
+                let row_ix = ix;
+                cx.listener(move |this, event, window, cx| {
+                    this.on_diff_row_mouse_down(row_ix, event, window, cx);
+                })
+            })
             .on_mouse_move({
                 let row_ix = ix;
                 cx.listener(move |this, event, window, cx| {
@@ -588,6 +611,8 @@ impl DiffViewer {
             })
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_diff_row_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_diff_row_mouse_up))
+            .on_mouse_up(MouseButton::Middle, cx.listener(Self::on_diff_row_mouse_up))
+            .on_mouse_up_out(MouseButton::Middle, cx.listener(Self::on_diff_row_mouse_up))
             .px_2()
             .py_1()
             .border_b_1()
@@ -641,6 +666,12 @@ impl DiffViewer {
                     this.on_diff_row_mouse_down(row_ix, event, window, cx);
                 })
             })
+            .on_mouse_down(MouseButton::Middle, {
+                let row_ix = ix;
+                cx.listener(move |this, event, window, cx| {
+                    this.on_diff_row_mouse_down(row_ix, event, window, cx);
+                })
+            })
             .on_mouse_move({
                 let row_ix = ix;
                 cx.listener(move |this, event, window, cx| {
@@ -649,6 +680,8 @@ impl DiffViewer {
             })
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_diff_row_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_diff_row_mouse_up))
+            .on_mouse_up(MouseButton::Middle, cx.listener(Self::on_diff_row_mouse_up))
+            .on_mouse_up_out(MouseButton::Middle, cx.listener(Self::on_diff_row_mouse_up))
             .border_b_1()
             .border_color(cx.theme().border)
             .when(self.diff_fit_to_width, |this| this.w_full())

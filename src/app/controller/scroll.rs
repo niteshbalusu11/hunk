@@ -73,6 +73,58 @@ impl DiffViewer {
         Some((path, status))
     }
 
+    pub(super) fn start_horizontal_pan_drag(&mut self, event: &MouseDownEvent) -> bool {
+        if self.diff_fit_to_width {
+            return false;
+        }
+
+        let started_with_middle = event.button == MouseButton::Middle;
+        let started_with_alt_left = event.button == MouseButton::Left && event.modifiers.alt;
+        if !started_with_middle && !started_with_alt_left {
+            return false;
+        }
+
+        self.horizontal_pan_dragging = true;
+        self.horizontal_pan_last_x = Some(event.position.x);
+        self.drag_selecting_rows = false;
+        true
+    }
+
+    pub(super) fn update_horizontal_pan_drag(
+        &mut self,
+        event: &MouseMoveEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.horizontal_pan_dragging {
+            return false;
+        }
+
+        let Some(pressed_button) = event.pressed_button else {
+            self.stop_horizontal_pan_drag();
+            return false;
+        };
+        if pressed_button != MouseButton::Left && pressed_button != MouseButton::Middle {
+            self.stop_horizontal_pan_drag();
+            return false;
+        }
+
+        let last_x = self.horizontal_pan_last_x.unwrap_or(event.position.x);
+        self.horizontal_pan_last_x = Some(event.position.x);
+        let delta_x = event.position.x - last_x;
+        let changed = self.scroll_diff_horizontal_by(delta_x);
+        self.last_scroll_activity_at = Instant::now();
+        if changed {
+            cx.notify();
+        }
+        cx.stop_propagation();
+        true
+    }
+
+    pub(super) fn stop_horizontal_pan_drag(&mut self) {
+        self.horizontal_pan_dragging = false;
+        self.horizontal_pan_last_x = None;
+    }
+
     pub(super) fn on_diff_horizontal_scroll_wheel(
         &mut self,
         event: &ScrollWheelEvent,

@@ -1,6 +1,7 @@
 impl DiffViewer {
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let view = cx.entity();
+        let project_label = self.project_display_name();
         let repo_label = self
             .repo_root
             .as_ref()
@@ -47,24 +48,23 @@ impl DiffViewer {
                             .bg(brand_bg)
                             .border_1()
                             .border_color(cx.theme().accent.opacity(if is_dark { 0.62 } else { 0.42 }))
-                            .child(div().text_sm().font_semibold().child("Hunk")),
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_semibold()
+                                    .text_color(cx.theme().foreground)
+                                    .child(project_label),
+                            ),
                     )
                     .child(
                         h_flex()
                             .items_center()
-                            .gap_1()
                             .px_2()
                             .py_0p5()
                             .rounded_md()
                             .bg(chip_bg)
                             .border_1()
                             .border_color(chip_border)
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("branch"),
-                            )
                             .child(
                                 div()
                                     .text_sm()
@@ -86,12 +86,6 @@ impl DiffViewer {
                             .bg(chip_bg)
                             .border_1()
                             .border_color(chip_border)
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("repo"),
-                            )
                             .child(
                                 div()
                                     .flex_1()
@@ -244,6 +238,16 @@ impl DiffViewer {
                             .child(format!("{:>3.0} fps", self.fps.round())),
                     ),
             )
+    }
+
+    fn project_display_name(&self) -> String {
+        self.repo_root
+            .as_ref()
+            .or(self.project_path.as_ref())
+            .and_then(|path| path.file_name())
+            .map(|name| name.to_string_lossy().to_string())
+            .filter(|label| !label.is_empty())
+            .unwrap_or_else(|| "Hunk".to_string())
     }
 
 }

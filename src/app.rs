@@ -45,11 +45,10 @@ const DIFF_LINE_NUMBER_EXTRA_PADDING: f32 = 6.0;
 const DIFF_MARKER_GUTTER_WIDTH: f32 = 10.0;
 const DIFF_CELL_SIDE_PADDING_WIDTH: f32 = 20.0;
 const DIFF_PAN_COLUMN_PADDING: f32 = 28.0;
-const APP_BOTTOM_SAFE_INSET: f32 = 20.0;
+const APP_BOTTOM_SAFE_INSET: f32 = 0.0;
 const DIFF_BOTTOM_SAFE_INSET: f32 = APP_BOTTOM_SAFE_INSET;
-const DIFF_SCROLLBAR_RIGHT_INSET: f32 = 2.0;
+const DIFF_SCROLLBAR_RIGHT_INSET: f32 = 0.0;
 const DIFF_SCROLLBAR_SIZE: f32 = 16.0;
-const DIFF_VERTICAL_SCROLLBAR_EXTRA_BOTTOM_INSET: f32 = 20.0;
 const FILE_PREVIEW_MAX_BYTES: usize = 1_200_000;
 const FILE_PREVIEW_MAX_LINES: usize = 12_000;
 const FILE_PREVIEW_SCROLL_MULTIPLIER: f32 = 2.4;
@@ -296,6 +295,8 @@ struct DiffViewer {
     selection_anchor_row: Option<usize>,
     selection_head_row: Option<usize>,
     drag_selecting_rows: bool,
+    horizontal_pan_dragging: bool,
+    horizontal_pan_last_x: Option<gpui::Pixels>,
     scroll_selected_after_reload: bool,
     last_visible_row_start: Option<usize>,
     last_diff_scroll_offset: Option<gpui::Point<gpui::Pixels>>,

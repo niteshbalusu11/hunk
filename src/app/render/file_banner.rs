@@ -58,6 +58,11 @@ impl DiffViewer {
                     this.on_diff_row_mouse_down(row_ix, event, window, cx);
                 })
             })
+            .on_mouse_down(MouseButton::Middle, {
+                cx.listener(move |this, event, window, cx| {
+                    this.on_diff_row_mouse_down(row_ix, event, window, cx);
+                })
+            })
             .on_mouse_move({
                 cx.listener(move |this, event, window, cx| {
                     this.on_diff_row_mouse_move(row_ix, event, window, cx);
@@ -65,6 +70,8 @@ impl DiffViewer {
             })
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_diff_row_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_diff_row_mouse_up))
+            .on_mouse_up(MouseButton::Middle, cx.listener(Self::on_diff_row_mouse_up))
+            .on_mouse_up_out(MouseButton::Middle, cx.listener(Self::on_diff_row_mouse_up))
             .w_full()
             .items_center()
             .gap_2()

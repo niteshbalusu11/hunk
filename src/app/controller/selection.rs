@@ -50,6 +50,10 @@ impl DiffViewer {
         cx: &mut Context<Self>,
     ) {
         self.focus_handle.focus(window);
+        if self.start_horizontal_pan_drag(event) {
+            cx.stop_propagation();
+            return;
+        }
         self.drag_selecting_rows = true;
         self.select_row(row_ix, event.modifiers.shift, cx);
     }
@@ -57,10 +61,14 @@ impl DiffViewer {
     pub(super) fn on_diff_row_mouse_move(
         &mut self,
         row_ix: usize,
-        _: &MouseMoveEvent,
+        event: &MouseMoveEvent,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.update_horizontal_pan_drag(event, cx) {
+            return;
+        }
+
         if !self.drag_selecting_rows {
             return;
         }
@@ -73,6 +81,7 @@ impl DiffViewer {
         _: &mut Window,
         _: &mut Context<Self>,
     ) {
+        self.stop_horizontal_pan_drag();
         self.drag_selecting_rows = false;
     }
 

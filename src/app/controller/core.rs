@@ -195,6 +195,8 @@ impl DiffViewer {
             selection_anchor_row: None,
             selection_head_row: None,
             drag_selecting_rows: false,
+            horizontal_pan_dragging: false,
+            horizontal_pan_last_x: None,
             scroll_selected_after_reload: true,
             last_visible_row_start: None,
             last_diff_scroll_offset: None,
@@ -498,6 +500,8 @@ impl DiffViewer {
         self.selection_anchor_row = None;
         self.selection_head_row = None;
         self.drag_selecting_rows = false;
+        self.horizontal_pan_dragging = false;
+        self.horizontal_pan_last_x = None;
         self.diff_rows = vec![message_row(
             DiffRowKind::Empty,
             "Use File > Open Project... (Cmd/Ctrl+Shift+O) to load a Git repository.",
@@ -542,6 +546,8 @@ impl DiffViewer {
             self.selection_anchor_row = None;
             self.selection_head_row = None;
             self.drag_selecting_rows = false;
+            self.horizontal_pan_dragging = false;
+            self.horizontal_pan_last_x = None;
             self.sync_diff_list_state();
             self.file_row_ranges.clear();
             self.file_line_stats.clear();
@@ -557,6 +563,8 @@ impl DiffViewer {
             self.selection_anchor_row = None;
             self.selection_head_row = None;
             self.drag_selecting_rows = false;
+            self.horizontal_pan_dragging = false;
+            self.horizontal_pan_last_x = None;
             self.sync_diff_list_state();
             self.file_row_ranges.clear();
             self.file_line_stats.clear();
@@ -606,6 +614,8 @@ impl DiffViewer {
                             this.diff_row_segment_cache = stream.row_segments;
                             this.clamp_selection_to_rows();
                             this.drag_selecting_rows = false;
+                            this.horizontal_pan_dragging = false;
+                            this.horizontal_pan_last_x = None;
                             this.sync_diff_list_state();
                             this.file_row_ranges = stream.file_ranges;
                             this.file_line_stats = stream.file_line_stats;
@@ -644,6 +654,8 @@ impl DiffViewer {
                             this.selection_anchor_row = None;
                             this.selection_head_row = None;
                             this.drag_selecting_rows = false;
+                            this.horizontal_pan_dragging = false;
+                            this.horizontal_pan_last_x = None;
                             this.sync_diff_list_state();
                             this.file_row_ranges.clear();
                             this.file_line_stats.clear();
