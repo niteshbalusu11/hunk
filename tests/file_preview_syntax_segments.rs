@@ -31,3 +31,25 @@ fn plain_line_segments_fallback_to_plain_for_unknown_extension() {
     );
     assert!(segments.iter().all(|segment| !segment.changed));
 }
+
+#[test]
+fn plain_line_segments_highlight_toml_assignments() {
+    let segments = build_plain_line_segments(Some("Cargo.toml"), "name = \"hunk\" # app name");
+
+    assert!(!segments.is_empty());
+    assert!(
+        segments
+            .iter()
+            .any(|segment| segment.syntax != SyntaxTokenKind::Plain)
+    );
+    assert!(
+        segments
+            .iter()
+            .any(|segment| segment.syntax == SyntaxTokenKind::String)
+    );
+    assert!(
+        segments
+            .iter()
+            .any(|segment| segment.syntax == SyntaxTokenKind::Comment)
+    );
+}

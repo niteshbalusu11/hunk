@@ -74,11 +74,23 @@ fn apply_syntect_syntax_map(
     line: &str,
     syntax_map: &mut [SyntaxTokenKind],
 ) {
+    let is_toml = file_extension(file_path).as_deref() == Some("toml");
     let syntax_set = syntax_set();
-    let Some(syntax) = syntax_for_path(syntax_set, file_path) else {
-        return;
-    };
+    if let Some(syntax) = syntax_for_path(syntax_set, file_path) {
+        apply_syntect_scope_map(syntax_set, syntax, line, syntax_map);
+    }
 
+    if is_toml {
+        apply_toml_fallback_syntax_map(line, syntax_map);
+    }
+}
+
+fn apply_syntect_scope_map(
+    syntax_set: &SyntaxSet,
+    syntax: &SyntaxReference,
+    line: &str,
+    syntax_map: &mut [SyntaxTokenKind],
+) {
     let mut parse_state = ParseState::new(syntax);
     let Ok(ops) = parse_state.parse_line(line, syntax_set) else {
         return;
@@ -100,6 +112,275 @@ fn apply_syntect_syntax_map(
         if start >= syntax_map.len() {
             break;
         }
+    }
+}
+
+fn file_extension(file_path: Option<&str>) -> Option<String> {
+    Path::new(file_path?)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+}
+
+fn apply_toml_fallback_syntax_map(line: &str, syntax_map: &mut [SyntaxTokenKind]) {
+    if line.is_empty() || syntax_map.is_empty() {
+        return;
+    }
+
+    let chars = line.chars().collect::<Vec<_>>();
+    let content_end = find_unquoted_comment_start(&chars).unwrap_or(chars.len());
+
+    if content_end < chars.len() {
+        mark_range_if_plain(
+            syntax_map,
+            content_end,
+            chars.len(),
+            SyntaxTokenKind::Comment,
+        );
+    }
+
+    mark_toml_strings(&chars, content_end, syntax_map);
+    mark_toml_table_header(&chars, content_end, syntax_map);
+    mark_toml_key_and_operator(&chars, content_end, syntax_map);
+    mark_toml_literals(&chars, content_end, syntax_map);
+}
+
+fn find_unquoted_comment_start(chars: &[char]) -> Option<usize> {
+    let mut ix = 0_usize;
+    let mut string_delim = None;
+    let mut escaped = false;
+    while ix < chars.len() {
+        let ch = chars[ix];
+        if let Some(delim) = string_delim {
+            if delim == '"' && ch == '\\' && !escaped {
+                escaped = true;
+                ix = ix.saturating_add(1);
+                continue;
+            }
+            if ch == delim && !(delim == '"' && escaped) {
+                string_delim = None;
+            }
+            escaped = false;
+            ix = ix.saturating_add(1);
+            continue;
+        }
+
+        if ch == '"' || ch == '\'' {
+            string_delim = Some(ch);
+            escaped = false;
+            ix = ix.saturating_add(1);
+            continue;
+        }
+
+        if ch == '#' {
+            return Some(ix);
+        }
+
+        ix = ix.saturating_add(1);
+    }
+
+    None
+}
+
+fn mark_toml_strings(chars: &[char], limit: usize, syntax_map: &mut [SyntaxTokenKind]) {
+    let mut ix = 0_usize;
+    while ix < limit {
+        if chars[ix] != '"' && chars[ix] != '\'' {
+            ix = ix.saturating_add(1);
+            continue;
+        }
+
+        let start = ix;
+        let delim = chars[ix];
+        ix = ix.saturating_add(1);
+        let mut escaped = false;
+        while ix < limit {
+            let ch = chars[ix];
+            if delim == '"' && ch == '\\' && !escaped {
+                escaped = true;
+                ix = ix.saturating_add(1);
+                continue;
+            }
+
+            if ch == delim && !(delim == '"' && escaped) {
+                ix = ix.saturating_add(1);
+                break;
+            }
+
+            escaped = false;
+            ix = ix.saturating_add(1);
+        }
+
+        mark_range_if_plain(syntax_map, start, ix, SyntaxTokenKind::String);
+    }
+}
+
+fn mark_toml_table_header(chars: &[char], limit: usize, syntax_map: &mut [SyntaxTokenKind]) {
+    let Some(first_non_ws) = (0..limit).find(|&ix| !chars[ix].is_whitespace()) else {
+        return;
+    };
+    if chars[first_non_ws] != '[' {
+        return;
+    }
+
+    let Some(last_non_ws) = (0..limit).rfind(|&ix| !chars[ix].is_whitespace()) else {
+        return;
+    };
+    if chars[last_non_ws] != ']' {
+        return;
+    }
+
+    mark_range_if_plain(
+        syntax_map,
+        first_non_ws,
+        last_non_ws.saturating_add(1),
+        SyntaxTokenKind::TypeName,
+    );
+}
+
+fn mark_toml_key_and_operator(chars: &[char], limit: usize, syntax_map: &mut [SyntaxTokenKind]) {
+    let Some(equal_ix) = find_first_unquoted_char(chars, limit, '=') else {
+        return;
+    };
+
+    mark_char_if_plain(syntax_map, equal_ix, SyntaxTokenKind::Operator);
+
+    let key_start = (0..equal_ix)
+        .find(|&ix| !chars[ix].is_whitespace())
+        .unwrap_or(equal_ix);
+    let key_end = (0..equal_ix)
+        .rfind(|&ix| !chars[ix].is_whitespace())
+        .map(|ix| ix.saturating_add(1))
+        .unwrap_or(key_start);
+
+    for (ix, ch) in chars.iter().enumerate().take(key_end).skip(key_start) {
+        if ch.is_whitespace() {
+            continue;
+        }
+        mark_char_if_plain(syntax_map, ix, SyntaxTokenKind::Variable);
+    }
+}
+
+fn mark_toml_literals(chars: &[char], limit: usize, syntax_map: &mut [SyntaxTokenKind]) {
+    let mut ix = 0_usize;
+    while ix < limit {
+        if syntax_map[ix] != SyntaxTokenKind::Plain {
+            ix = ix.saturating_add(1);
+            continue;
+        }
+
+        if starts_toml_number(chars, ix, limit) {
+            let start = ix;
+            ix = consume_toml_number(chars, ix, limit);
+            mark_range_if_plain(syntax_map, start, ix, SyntaxTokenKind::Number);
+            continue;
+        }
+
+        if chars[ix].is_ascii_alphabetic() {
+            let start = ix;
+            ix = consume_toml_word(chars, ix, limit);
+            let token = chars[start..ix]
+                .iter()
+                .collect::<String>()
+                .to_ascii_lowercase();
+            if token == "true" || token == "false" {
+                mark_range_if_plain(syntax_map, start, ix, SyntaxTokenKind::Constant);
+            }
+            continue;
+        }
+
+        ix = ix.saturating_add(1);
+    }
+}
+
+fn starts_toml_number(chars: &[char], ix: usize, limit: usize) -> bool {
+    if ix >= limit {
+        return false;
+    }
+
+    if chars[ix].is_ascii_digit() {
+        return true;
+    }
+
+    (chars[ix] == '-' || chars[ix] == '+') && ix + 1 < limit && chars[ix + 1].is_ascii_digit()
+}
+
+fn consume_toml_number(chars: &[char], mut ix: usize, limit: usize) -> usize {
+    while ix < limit
+        && (chars[ix].is_ascii_alphanumeric()
+            || matches!(
+                chars[ix],
+                '_' | '.' | '-' | '+' | ':' | 'T' | 'Z' | 't' | 'z'
+            ))
+    {
+        ix = ix.saturating_add(1);
+    }
+    ix
+}
+
+fn consume_toml_word(chars: &[char], mut ix: usize, limit: usize) -> usize {
+    while ix < limit && (chars[ix].is_ascii_alphanumeric() || matches!(chars[ix], '_' | '-')) {
+        ix = ix.saturating_add(1);
+    }
+    ix
+}
+
+fn find_first_unquoted_char(chars: &[char], limit: usize, needle: char) -> Option<usize> {
+    let mut ix = 0_usize;
+    let mut string_delim = None;
+    let mut escaped = false;
+    while ix < limit {
+        let ch = chars[ix];
+        if let Some(delim) = string_delim {
+            if delim == '"' && ch == '\\' && !escaped {
+                escaped = true;
+                ix = ix.saturating_add(1);
+                continue;
+            }
+            if ch == delim && !(delim == '"' && escaped) {
+                string_delim = None;
+            }
+            escaped = false;
+            ix = ix.saturating_add(1);
+            continue;
+        }
+
+        if ch == '"' || ch == '\'' {
+            string_delim = Some(ch);
+            escaped = false;
+            ix = ix.saturating_add(1);
+            continue;
+        }
+
+        if ch == needle {
+            return Some(ix);
+        }
+
+        ix = ix.saturating_add(1);
+    }
+
+    None
+}
+
+fn mark_range_if_plain(
+    syntax_map: &mut [SyntaxTokenKind],
+    start: usize,
+    end: usize,
+    token: SyntaxTokenKind,
+) {
+    let end = end.min(syntax_map.len());
+    for kind in syntax_map.iter_mut().take(end).skip(start) {
+        if *kind == SyntaxTokenKind::Plain {
+            *kind = token;
+        }
+    }
+}
+
+fn mark_char_if_plain(syntax_map: &mut [SyntaxTokenKind], ix: usize, token: SyntaxTokenKind) {
+    if let Some(kind) = syntax_map.get_mut(ix)
+        && *kind == SyntaxTokenKind::Plain
+    {
+        *kind = token;
     }
 }
 

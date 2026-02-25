@@ -775,7 +775,6 @@ impl DiffViewer {
         let is_dark = cx.theme().mode.is_dark();
         let add_alpha = if is_dark { 0.26 } else { 0.12 };
         let remove_alpha = if is_dark { 0.26 } else { 0.12 };
-        let ghost_alpha = if is_dark { 0.12 } else { 0.06 };
         let dark_add_tint: gpui::Hsla = gpui::rgb(0x2e4736).into();
         let dark_remove_tint: gpui::Hsla = gpui::rgb(0x4a3038).into();
         let dark_add_accent: gpui::Hsla = gpui::rgb(0x8fcea0).into();
@@ -824,56 +823,6 @@ impl DiffViewer {
                     },
                     cx.theme().foreground,
                     "-",
-                ),
-                (DiffCellKind::None, DiffCellKind::Added) => (
-                    if is_dark {
-                        cx.theme().background.blend(dark_add_tint.opacity(0.36))
-                    } else {
-                        cx.theme()
-                            .background
-                            .blend(cx.theme().success.opacity(ghost_alpha))
-                    },
-                    if is_dark {
-                        cx.theme().muted_foreground.lighten(0.22)
-                    } else {
-                        cx.theme().muted_foreground.darken(0.08)
-                    },
-                    if is_dark {
-                        cx.theme().muted_foreground.lighten(0.16)
-                    } else {
-                        cx.theme().muted_foreground.darken(0.06)
-                    },
-                    if is_dark {
-                        cx.theme().muted_foreground.lighten(0.18)
-                    } else {
-                        cx.theme().muted_foreground.darken(0.08)
-                    },
-                    "",
-                ),
-                (DiffCellKind::None, DiffCellKind::Removed) => (
-                    if is_dark {
-                        cx.theme().background.blend(dark_remove_tint.opacity(0.36))
-                    } else {
-                        cx.theme()
-                            .background
-                            .blend(cx.theme().danger.opacity(ghost_alpha))
-                    },
-                    if is_dark {
-                        cx.theme().muted_foreground.lighten(0.22)
-                    } else {
-                        cx.theme().muted_foreground.darken(0.08)
-                    },
-                    if is_dark {
-                        cx.theme().muted_foreground.lighten(0.16)
-                    } else {
-                        cx.theme().muted_foreground.darken(0.06)
-                    },
-                    if is_dark {
-                        cx.theme().muted_foreground.lighten(0.18)
-                    } else {
-                        cx.theme().muted_foreground.darken(0.08)
-                    },
-                    "",
                 ),
                 (DiffCellKind::Context, _) => (
                     cx.theme().background,

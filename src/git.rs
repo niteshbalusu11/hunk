@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow};
 use git2::{
     BranchType, Cred, CredentialType, Diff, DiffFormat, DiffOptions, Error, IndexAddOption,
-    PushOptions, Reference, Repository, Signature, Status, StatusOptions, build::CheckoutBuilder,
+    PushOptions, Reference, Repository, ResetType, Signature, Status, StatusOptions,
+    build::CheckoutBuilder,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -243,13 +244,8 @@ pub fn stage_all(repo_root: &Path) -> Result<()> {
 pub fn unstage_all(repo_root: &Path) -> Result<()> {
     let repo = open_repo(repo_root)?;
 
-    if let Some(target) = repo
-        .head()
-        .ok()
-        .and_then(|head| head.peel_to_commit().ok())
-        .map(|commit| commit.into_object())
-    {
-        repo.reset_default(Some(&target), ["."])
+    if let Some(commit) = repo.head().ok().and_then(|head| head.peel_to_commit().ok()) {
+        repo.reset(commit.as_object(), ResetType::Mixed, None)
             .context("failed to unstage all files")?;
         return Ok(());
     }

@@ -40,7 +40,7 @@ impl DiffViewer {
                             } else {
                                 Some(message)
                             };
-                            this.request_snapshot_refresh(cx);
+                            this.request_snapshot_refresh_internal(true, cx);
                         }
                         Err(err) => {
                             this.git_status_message = Some(format!("Git error: {err:#}"));

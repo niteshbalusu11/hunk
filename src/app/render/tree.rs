@@ -467,10 +467,24 @@ impl DiffViewer {
         } else {
             cx.theme().background.opacity(0.0)
         };
+        let file_token = if row.kind == RepoTreeNodeKind::File {
+            file_tree_token_for_path(row.path.as_str())
+        } else {
+            SyntaxTokenKind::Plain
+        };
         let text_color = if row.ignored {
             cx.theme().muted_foreground.opacity(if is_dark { 0.88 } else { 0.95 })
+        } else if row.kind == RepoTreeNodeKind::File {
+            self.syntax_color_for_segment(cx.theme().foreground, file_token, cx)
         } else {
             cx.theme().foreground
+        };
+        let icon_color = if row.ignored {
+            cx.theme().muted_foreground
+        } else if row.kind == RepoTreeNodeKind::File {
+            self.syntax_color_for_segment(cx.theme().muted_foreground, file_token, cx)
+        } else {
+            cx.theme().muted_foreground
         };
         let chevron_icon = if row.kind == RepoTreeNodeKind::Directory {
             Some(if row.expanded {
@@ -520,7 +534,7 @@ impl DiffViewer {
                     .child(
                         Icon::new(icon)
                             .size(px(14.0))
-                            .text_color(cx.theme().muted_foreground),
+                            .text_color(icon_color),
                     ),
             )
             .child(
@@ -560,12 +574,22 @@ fn stable_row_id_for_path(path: &str) -> u64 {
     hasher.finish()
 }
 
-fn file_icon_for_path(path: &str) -> IconName {
-    let extension = std::path::Path::new(path)
+fn path_extension(path: &str) -> Option<String> {
+    std::path::Path::new(path)
         .extension()
         .and_then(|value| value.to_str())
-        .map(|value| value.to_ascii_lowercase());
-    match extension.as_deref() {
+        .map(|value| value.to_ascii_lowercase())
+}
+
+fn file_tree_token_for_path(path: &str) -> SyntaxTokenKind {
+    match path_extension(path).as_deref() {
+        Some("toml") => SyntaxTokenKind::TypeName,
+        _ => SyntaxTokenKind::Plain,
+    }
+}
+
+fn file_icon_for_path(path: &str) -> IconName {
+    match path_extension(path).as_deref() {
         Some("toml") | Some("yaml") | Some("yml") | Some("json") | Some("lock") => {
             IconName::Settings
         }
