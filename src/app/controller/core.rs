@@ -268,7 +268,7 @@ impl DiffViewer {
         self.request_snapshot_refresh_internal(false, cx);
     }
 
-    fn request_snapshot_refresh_internal(&mut self, force: bool, cx: &mut Context<Self>) {
+    pub(super) fn request_snapshot_refresh_internal(&mut self, force: bool, cx: &mut Context<Self>) {
         if self.snapshot_loading && !force {
             return;
         }
