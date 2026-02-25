@@ -43,10 +43,10 @@ Build a GPUI diff viewer that matches VS Code quality for:
 
 ### Phase 2: Viewer Layout + Typography
 
-- [ ] Replace wrapped code lines with editor-like horizontal flow by default.
-- [ ] Apply measured column widths (remove hardcoded assumptions).
-- [ ] Implement sticky hunk headers and clearer file boundaries.
-- [ ] Improve gutter contrast, markers, spacing, and visual rhythm.
+- [x] Replace wrapped code lines with editor-like horizontal flow by default.
+- [x] Apply measured column widths (remove hardcoded assumptions).
+- [x] Implement sticky hunk headers and clearer file boundaries.
+- [x] Improve gutter contrast, markers, spacing, and visual rhythm.
 
 ### Phase 3: Interaction Model
 
@@ -70,4 +70,4 @@ Build a GPUI diff viewer that matches VS Code quality for:
 ## Current Status
 
 - Phase 1 foundation complete.
-- Phase 2 started (fixed-width pan columns + no-wrap line flow in pan mode).
+- Phase 2 initial pass complete (fixed-width pan columns + no-wrap line flow + sticky hunk header + gutter polish).

@@ -1,3 +1,4 @@
+use super::data::DiffStreamRowKind;
 use super::*;
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
@@ -276,6 +277,7 @@ impl DiffViewer {
         if visible_row < self.diff_rows.len() {
             self.sync_selected_file_from_visible_row(visible_row, cx);
         }
+        let sticky_hunk_banner = self.render_visible_hunk_banner(visible_row, cx);
 
         let list = list(diff_list_state.clone(), {
             cx.processor(move |this, ix: usize, _window, cx| {
@@ -308,6 +310,7 @@ impl DiffViewer {
             return v_flex()
                 .size_full()
                 .child(self.render_file_status_banner(cx))
+                .child(sticky_hunk_banner)
                 .child(
                     v_flex()
                         .flex_1()
@@ -371,6 +374,7 @@ impl DiffViewer {
         v_flex()
             .size_full()
             .child(self.render_file_status_banner(cx))
+            .child(sticky_hunk_banner)
             .child(
                 v_flex().flex_1().min_h_0().child(
                     div()
@@ -455,6 +459,112 @@ impl DiffViewer {
                 ),
             )
             .into_any_element()
+    }
+
+    fn render_visible_hunk_banner(&self, visible_row: usize, cx: &mut Context<Self>) -> AnyElement {
+        let Some((path, header)) = self.visible_hunk_header(visible_row) else {
+            return div().w_full().h(px(0.)).into_any_element();
+        };
+
+        let is_dark = cx.theme().mode.is_dark();
+        h_flex()
+            .w_full()
+            .items_center()
+            .gap_2()
+            .px_2()
+            .py_1()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .bg(cx
+                .theme()
+                .background
+                .blend(
+                    cx.theme()
+                        .primary
+                        .opacity(if is_dark { 0.24 } else { 0.10 }),
+                ))
+            .child(
+                div()
+                    .px_2()
+                    .py_0p5()
+                    .text_xs()
+                    .font_semibold()
+                    .font_family(cx.theme().mono_font_family.clone())
+                    .bg(cx
+                        .theme()
+                        .primary
+                        .opacity(if is_dark { 0.42 } else { 0.24 }))
+                    .text_color(cx.theme().primary_foreground)
+                    .child("HUNK"),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .font_family(cx.theme().mono_font_family.clone())
+                    .text_color(cx.theme().muted_foreground)
+                    .child(path),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .font_family(cx.theme().mono_font_family.clone())
+                    .text_color(if is_dark {
+                        cx.theme().primary.lighten(0.48)
+                    } else {
+                        cx.theme().primary.darken(0.12)
+                    })
+                    .child(header),
+            )
+            .into_any_element()
+    }
+
+    fn visible_hunk_header(&self, visible_row: usize) -> Option<(String, String)> {
+        if self.diff_rows.is_empty() {
+            return None;
+        }
+
+        let capped = visible_row.min(self.diff_rows.len().saturating_sub(1));
+
+        if self.diff_row_metadata.len() == self.diff_rows.len() {
+            let current_file = self
+                .diff_row_metadata
+                .get(capped)
+                .and_then(|row| row.file_path.clone());
+
+            for ix in (0..=capped).rev() {
+                let meta = self.diff_row_metadata.get(ix)?;
+                if current_file.is_some() && meta.file_path != current_file {
+                    break;
+                }
+
+                if meta.kind == DiffStreamRowKind::CoreHunkHeader {
+                    let path = meta
+                        .file_path
+                        .clone()
+                        .or_else(|| self.selected_path.clone())
+                        .unwrap_or_else(|| "file".to_string());
+                    let header = self.diff_rows.get(ix)?.text.clone();
+                    return Some((path, header));
+                }
+
+                if matches!(meta.kind, DiffStreamRowKind::FileHeader) {
+                    break;
+                }
+            }
+        }
+
+        for ix in (0..=capped).rev() {
+            let row = self.diff_rows.get(ix)?;
+            if row.kind == DiffRowKind::HunkHeader {
+                let path = self
+                    .selected_path
+                    .clone()
+                    .unwrap_or_else(|| "file".to_string());
+                return Some((path, row.text.clone()));
+            }
+        }
+
+        None
     }
 
     fn render_meta_row(
@@ -763,6 +873,11 @@ impl DiffViewer {
         };
 
         let should_draw_right_divider = side == "left";
+        let gutter_background = cx
+            .theme()
+            .background
+            .blend(cx.theme().muted.opacity(if is_dark { 0.26 } else { 0.52 }));
+        let gutter_width = line_number_width + DIFF_MARKER_GUTTER_WIDTH + 12.0;
 
         let base = h_flex()
             .id(cell_id)
@@ -776,22 +891,33 @@ impl DiffViewer {
                 this.border_r_1().border_color(cx.theme().border)
             })
             .child(
-                div()
-                    .w(px(line_number_width))
-                    .text_xs()
-                    .text_color(line_color)
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .whitespace_nowrap()
-                    .child(line_number),
-            )
-            .child(
-                div()
-                    .w(px(DIFF_MARKER_GUTTER_WIDTH))
-                    .text_sm()
-                    .text_color(marker_color)
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .whitespace_nowrap()
-                    .child(marker),
+                h_flex()
+                    .items_start()
+                    .gap_2()
+                    .w(px(gutter_width))
+                    .min_w(px(gutter_width))
+                    .px_1p5()
+                    .py_0p5()
+                    .rounded_sm()
+                    .bg(gutter_background)
+                    .child(
+                        div()
+                            .w(px(line_number_width))
+                            .text_xs()
+                            .text_color(line_color)
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .whitespace_nowrap()
+                            .child(line_number),
+                    )
+                    .child(
+                        div()
+                            .w(px(DIFF_MARKER_GUTTER_WIDTH))
+                            .text_xs()
+                            .text_color(marker_color)
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .whitespace_nowrap()
+                            .child(marker),
+                    ),
             )
             .child(
                 div()
