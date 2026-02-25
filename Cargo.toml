@@ -12,14 +12,14 @@ category = "public.app-category.developer-tools"
 icon = ["assets/icons/Hunk.icns"]
 
 [dependencies]
-anyhow = "1.0"
-dirs = "6.0"
-git2 = { version = "0.20", features = ["https", "ssh"] }
-gpui = { package = "gpui", version = "*" }
+anyhow = "1.0.102"
+dirs = "6.0.0"
+git2 = { version = "0.20.4", features = ["https", "ssh"] }
+gpui = { package = "gpui", version = "0.2.2", features = ["runtime_shaders"] }
 gpui-component = { version = "0.5.1", features = ["tree-sitter-languages"] }
 gpui-component-assets = "0.5.1"
-serde = { version = "1.0", features = ["derive"] }
-toml = "0.9"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-syntect = "5.3"
+serde = { version = "1.0.228", features = ["derive"] }
+syntect = "5.3.0"
+toml = "1.0.3"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
