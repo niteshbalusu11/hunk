@@ -23,6 +23,19 @@ impl DiffViewer {
                 )
                 .into_any_element();
         }
+        if self.repo_root.is_some() && self.files.is_empty() {
+            return v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("No files changed"),
+                )
+                .into_any_element();
+        }
 
         let (old_label, new_label) = self.diff_column_labels();
         let diff_list_state = self.diff_list_state.clone();
