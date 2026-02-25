@@ -26,11 +26,14 @@ impl DiffViewer {
 
         let (old_label, new_label) = self.diff_column_labels();
         let diff_list_state = self.diff_list_state.clone();
-        let visible_row = diff_list_state.logical_scroll_top().item_ix;
+        let logical_top = diff_list_state.logical_scroll_top();
+        let visible_row = logical_top.item_ix;
         if visible_row < self.diff_rows.len() {
             self.sync_selected_file_from_visible_row(visible_row, cx);
         }
         let sticky_hunk_banner = self.render_visible_hunk_banner(visible_row, cx);
+        let sticky_file_banner =
+            self.render_visible_file_banner(visible_row, logical_top.offset_in_item, cx);
 
         let list = list(diff_list_state.clone(), {
             cx.processor(move |this, ix: usize, _window, cx| {
@@ -92,6 +95,7 @@ impl DiffViewer {
                                         .child(new_label),
                                 ),
                         )
+                        .child(sticky_file_banner)
                         .child(
                             div()
                                 .flex_1()
@@ -182,6 +186,7 @@ impl DiffViewer {
                                                             .child(new_label),
                                                     ),
                                             )
+                                            .child(sticky_file_banner)
                                             .child(
                                                 div()
                                                     .flex_1()
@@ -211,6 +216,24 @@ impl DiffViewer {
                 ),
             )
             .into_any_element()
+    }
+
+    fn render_visible_file_banner(
+        &self,
+        visible_row: usize,
+        top_offset: gpui::Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some((header_row_ix, path, status)) = self.visible_file_header(visible_row) else {
+            return div().w_full().h(px(0.)).into_any_element();
+        };
+
+        if visible_row == header_row_ix && top_offset.is_zero() {
+            return div().w_full().h(px(0.)).into_any_element();
+        }
+
+        let stats = self.file_line_stats.get(path.as_str()).copied().unwrap_or_default();
+        self.render_sticky_file_status_banner_row(header_row_ix, path.as_str(), status, stats, cx)
     }
 
     fn render_visible_hunk_banner(&self, visible_row: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -318,6 +341,42 @@ impl DiffViewer {
         }
 
         None
+    }
+
+    fn visible_file_header(&self, visible_row: usize) -> Option<(usize, String, FileStatus)> {
+        if self.diff_rows.is_empty() {
+            return None;
+        }
+
+        let capped = visible_row.min(self.diff_rows.len().saturating_sub(1));
+
+        if self.diff_row_metadata.len() == self.diff_rows.len() {
+            for ix in (0..=capped).rev() {
+                let meta = self.diff_row_metadata.get(ix)?;
+                if meta.kind == DiffStreamRowKind::EmptyState {
+                    return None;
+                }
+                if meta.kind != DiffStreamRowKind::FileHeader {
+                    continue;
+                }
+
+                let path = meta.file_path.clone()?;
+                let status = meta.file_status.unwrap_or_else(|| {
+                    self.files
+                        .iter()
+                        .find(|file| file.path == path)
+                        .map(|file| file.status)
+                        .unwrap_or(FileStatus::Unknown)
+                });
+                return Some((ix, path, status));
+            }
+        }
+
+        self.file_row_ranges
+            .iter()
+            .find(|range| capped >= range.start_row && capped < range.end_row)
+            .or_else(|| self.file_row_ranges.last())
+            .map(|range| (range.start_row, range.path.clone(), range.status))
     }
 
     fn render_meta_row(

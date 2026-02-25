@@ -5,13 +5,13 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use gpui::{
-    AnyElement, App, AppContext as _, Application, ClipboardItem, Context, Entity, FocusHandle,
-    InteractiveElement as _, IntoElement, IsZero as _, KeyBinding, ListAlignment, ListOffset,
-    ListSizingBehavior, ListState, Menu, MenuItem, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, OsAction, ParentElement as _, PathPromptOptions, Render, ScrollHandle,
-    ScrollWheelEvent, SharedString, StatefulInteractiveElement as _, Styled as _, SystemMenuType,
-    Task, Timer, TitlebarOptions, Window, WindowOptions, actions, div, list, point,
-    prelude::FluentBuilder as _, px,
+    Animation, AnimationExt as _, AnyElement, App, AppContext as _, Application, ClipboardItem,
+    Context, Entity, FocusHandle, InteractiveElement as _, IntoElement, IsZero as _, KeyBinding,
+    ListAlignment, ListOffset, ListSizingBehavior, ListState, Menu, MenuItem, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, OsAction, ParentElement as _, PathPromptOptions,
+    Render, ScrollHandle, ScrollWheelEvent, SharedString, StatefulInteractiveElement as _,
+    Styled as _, SystemMenuType, Task, Timer, TitlebarOptions, Window, WindowOptions, actions, div,
+    list, point, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     ActiveTheme as _, Colorize as _, Root, StyledExt as _, Theme, ThemeMode, h_flex,
