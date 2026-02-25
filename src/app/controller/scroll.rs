@@ -144,13 +144,26 @@ impl DiffViewer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let delta = event.delta.pixel_delta(window.line_height());
+        let mut delta = event.delta.pixel_delta(window.line_height());
+        if delta.x.is_zero() && event.modifiers.shift && !delta.y.is_zero() {
+            delta.x = delta.y;
+            delta.y = px(0.);
+        }
+        let horizontal_intent =
+            !delta.x.is_zero() && (delta.y.is_zero() || delta.x.abs() >= delta.y.abs());
+        if horizontal_intent {
+            cx.stop_propagation();
+            return;
+        }
+
         if delta.y.is_zero() {
             return;
         }
 
         self.file_preview_list_state
-            .scroll_by(delta.y * FILE_PREVIEW_SCROLL_MULTIPLIER);
+            // GPUI list's scroll_by axis sign is opposite of native wheel delta for this use case.
+            // Invert once so preview behavior matches diff view and OS natural-scroll settings.
+            .scroll_by(delta.y * -FILE_PREVIEW_SCROLL_MULTIPLIER);
         self.last_scroll_activity_at = Instant::now();
         cx.notify();
         cx.stop_propagation();

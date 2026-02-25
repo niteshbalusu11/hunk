@@ -222,8 +222,10 @@ impl DiffViewer {
                 let mut button = Button::new("sidebar-mode-diff")
                     .compact()
                     .rounded(px(7.0))
-                    .label("≋")
+                    .icon(Icon::new(IconName::ChevronsUpDown).size(px(14.0)))
                     .min_w(px(30.0))
+                    .h(px(28.0))
+                    .tooltip("Diff tree")
                     .on_click(move |_, _, cx| {
                         view.update(cx, |this, cx| {
                             this.set_sidebar_tree_mode(SidebarTreeMode::Diff, cx);
@@ -241,8 +243,10 @@ impl DiffViewer {
                 let mut button = Button::new("sidebar-mode-files")
                     .compact()
                     .rounded(px(7.0))
-                    .label("🗂")
+                    .icon(Icon::new(IconName::FolderOpen).size(px(14.0)))
                     .min_w(px(30.0))
+                    .h(px(28.0))
+                    .tooltip("Files tree")
                     .on_click(move |_, _, cx| {
                         view.update(cx, |this, cx| {
                             this.set_sidebar_tree_mode(SidebarTreeMode::Files, cx);
@@ -374,7 +378,14 @@ impl DiffViewer {
                     .compact()
                     .outline()
                     .rounded(px(5.0))
-                    .label(if currently_staged { "✔" } else { " " })
+                    .icon(
+                        Icon::new(if currently_staged {
+                            IconName::Check
+                        } else {
+                            IconName::Dash
+                        })
+                        .size(px(10.0)),
+                    )
                     .min_w(px(16.0))
                     .h(px(16.0))
                     .bg(if currently_staged {
@@ -394,9 +405,15 @@ impl DiffViewer {
             .child(
                 div()
                     .w_3()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(if is_collapsed { "▸" } else { "▾" }),
+                    .child(
+                        Icon::new(if is_collapsed {
+                            IconName::ChevronRight
+                        } else {
+                            IconName::ChevronDown
+                        })
+                        .size(px(12.0))
+                        .text_color(cx.theme().muted_foreground),
+                    ),
             )
             .child(
                 div()
@@ -455,17 +472,21 @@ impl DiffViewer {
         } else {
             cx.theme().foreground
         };
-        let chevron = if row.kind == RepoTreeNodeKind::Directory {
-            if row.expanded { "▾" } else { "▸" }
+        let chevron_icon = if row.kind == RepoTreeNodeKind::Directory {
+            Some(if row.expanded {
+                IconName::ChevronDown
+            } else {
+                IconName::ChevronRight
+            })
         } else {
-            " "
+            None
         };
         let icon = match row.kind {
             RepoTreeNodeKind::Directory => {
                 if row.expanded {
-                    "📂"
+                    IconName::FolderOpen
                 } else {
-                    "📁"
+                    IconName::FolderClosed
                 }
             }
             RepoTreeNodeKind::File => file_icon_for_path(row.path.as_str()),
@@ -485,16 +506,22 @@ impl DiffViewer {
             .child(
                 div()
                     .w(px(14.0))
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(chevron),
+                    .when_some(chevron_icon, |this, icon_name| {
+                        this.child(
+                            Icon::new(icon_name)
+                                .size(px(12.0))
+                                .text_color(cx.theme().muted_foreground),
+                        )
+                    }),
             )
             .child(
                 div()
                     .w(px(18.0))
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(icon),
+                    .child(
+                        Icon::new(icon)
+                            .size(px(14.0))
+                            .text_color(cx.theme().muted_foreground),
+                    ),
             )
             .child(
                 div()
@@ -505,15 +532,6 @@ impl DiffViewer {
                     .text_color(text_color)
                     .child(row.name.clone()),
             )
-            .when(row.ignored, |this| {
-                this.child(
-                    div()
-                        .text_xs()
-                        .font_medium()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("ignored"),
-                )
-            })
             .on_click({
                 let view = view.clone();
                 let path = row.path.clone();
@@ -549,19 +567,20 @@ fn stable_row_id_for_path(path: &str) -> u64 {
     hasher.finish()
 }
 
-fn file_icon_for_path(path: &str) -> &'static str {
+fn file_icon_for_path(path: &str) -> IconName {
     let extension = std::path::Path::new(path)
         .extension()
         .and_then(|value| value.to_str())
         .map(|value| value.to_ascii_lowercase());
     match extension.as_deref() {
-        Some("rs") => "🦀",
-        Some("md") => "📝",
-        Some("toml") | Some("yaml") | Some("yml") | Some("json") => "⚙",
-        Some("png") | Some("jpg") | Some("jpeg") | Some("gif") | Some("svg") => "🖼",
-        Some("sh") => "🖥",
-        Some("lock") => "🔒",
-        _ => "📄",
+        Some("toml") | Some("yaml") | Some("yml") | Some("json") | Some("lock") => {
+            IconName::Settings
+        }
+        Some("png") | Some("jpg") | Some("jpeg") | Some("gif") | Some("svg") => {
+            IconName::GalleryVerticalEnd
+        }
+        Some("md") => IconName::BookOpen,
+        _ => IconName::File,
     }
 }
 

@@ -21,6 +21,7 @@ use gpui_component::{
     tree::{TreeItem, TreeState},
     v_flex,
 };
+use gpui_component_assets::Assets;
 use tracing::error;
 
 use hunk::config::{AppConfig, ConfigStore, DiffViewMode, ThemePreference};
@@ -163,7 +164,7 @@ fn apply_soft_dark_theme(cx: &mut App) {
 }
 
 pub fn run() -> Result<()> {
-    let app = Application::new();
+    let app = Application::new().with_assets(Assets);
     app.on_reopen(|cx| {
         if cx.windows().is_empty() {
             open_main_window(cx);

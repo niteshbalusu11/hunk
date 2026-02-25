@@ -84,14 +84,16 @@ impl DiffViewer {
                 Button::new(("toggle-file-collapse", stable_row_id))
                     .ghost()
                     .compact()
-                    .label(if is_collapsed {
-                        "▶"
-                    } else {
-                        "▼"
-                    })
+                    .icon(
+                        Icon::new(if is_collapsed {
+                            IconName::ChevronRight
+                        } else {
+                            IconName::ChevronDown
+                        })
+                        .size(px(14.0)),
+                    )
                     .min_w(px(24.0))
                     .h(px(24.0))
-                    .text_sm()
                     .text_color(arrow_color)
                     .on_click(move |_, _, cx| {
                         cx.stop_propagation();
