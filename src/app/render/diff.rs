@@ -63,7 +63,6 @@ impl DiffViewer {
         if self.diff_fit_to_width {
             return v_flex()
                 .size_full()
-                .child(self.render_file_status_banner(cx))
                 .child(sticky_hunk_banner)
                 .child(
                     v_flex()
@@ -127,7 +126,6 @@ impl DiffViewer {
 
         v_flex()
             .size_full()
-            .child(self.render_file_status_banner(cx))
             .child(sticky_hunk_banner)
             .child(
                 v_flex().flex_1().min_h_0().child(
@@ -301,6 +299,10 @@ impl DiffViewer {
                     return Some((path, header));
                 }
 
+                if matches!(meta.kind, DiffStreamRowKind::FileHeader) {
+                    break;
+                }
+
             }
         }
 
@@ -325,6 +327,21 @@ impl DiffViewer {
         is_selected: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if let Some(meta) = self.diff_row_metadata.get(ix)
+            && meta.kind == DiffStreamRowKind::FileHeader
+            && let (Some(path), Some(status)) = (meta.file_path.as_deref(), meta.file_status)
+        {
+            let stats = self.file_line_stats.get(path).copied().unwrap_or_default();
+            return self.render_file_status_banner_row(
+                ix,
+                path,
+                status,
+                stats,
+                is_selected,
+                cx,
+            );
+        }
+
         let stable_row_id = self.diff_row_stable_id(ix);
         let is_dark = cx.theme().mode.is_dark();
 
@@ -562,23 +579,31 @@ impl DiffViewer {
         };
 
         let is_dark = cx.theme().mode.is_dark();
-        let add_alpha = if is_dark { 0.22 } else { 0.12 };
-        let remove_alpha = if is_dark { 0.22 } else { 0.12 };
-        let ghost_alpha = if is_dark { 0.10 } else { 0.06 };
+        let add_alpha = if is_dark { 0.26 } else { 0.12 };
+        let remove_alpha = if is_dark { 0.26 } else { 0.12 };
+        let ghost_alpha = if is_dark { 0.12 } else { 0.06 };
+        let dark_add_tint: gpui::Hsla = gpui::rgb(0x2e4736).into();
+        let dark_remove_tint: gpui::Hsla = gpui::rgb(0x4a3038).into();
+        let dark_add_accent: gpui::Hsla = gpui::rgb(0x8fcea0).into();
+        let dark_remove_accent: gpui::Hsla = gpui::rgb(0xeea9b4).into();
 
         let (mut background, marker_color, line_color, text_color, marker) =
             match (cell.kind, peer_kind) {
                 (DiffCellKind::Added, _) => (
-                    cx.theme()
-                        .background
-                        .blend(cx.theme().success.opacity(add_alpha)),
                     if is_dark {
-                        cx.theme().success.lighten(0.55)
+                        cx.theme().background.blend(dark_add_tint.opacity(0.62))
+                    } else {
+                        cx.theme()
+                            .background
+                            .blend(cx.theme().success.opacity(add_alpha))
+                    },
+                    if is_dark {
+                        dark_add_accent
                     } else {
                         cx.theme().success.darken(0.18)
                     },
                     if is_dark {
-                        cx.theme().success.lighten(0.52)
+                        dark_add_accent.lighten(0.08)
                     } else {
                         cx.theme().success.darken(0.16)
                     },
@@ -586,16 +611,20 @@ impl DiffViewer {
                     "+",
                 ),
                 (DiffCellKind::Removed, _) => (
-                    cx.theme()
-                        .background
-                        .blend(cx.theme().danger.opacity(remove_alpha)),
                     if is_dark {
-                        cx.theme().danger.lighten(0.55)
+                        cx.theme().background.blend(dark_remove_tint.opacity(0.62))
+                    } else {
+                        cx.theme()
+                            .background
+                            .blend(cx.theme().danger.opacity(remove_alpha))
+                    },
+                    if is_dark {
+                        dark_remove_accent
                     } else {
                         cx.theme().danger.darken(0.18)
                     },
                     if is_dark {
-                        cx.theme().danger.lighten(0.52)
+                        dark_remove_accent.lighten(0.06)
                     } else {
                         cx.theme().danger.darken(0.16)
                     },
@@ -603,9 +632,13 @@ impl DiffViewer {
                     "-",
                 ),
                 (DiffCellKind::None, DiffCellKind::Added) => (
-                    cx.theme()
-                        .background
-                        .blend(cx.theme().success.opacity(ghost_alpha)),
+                    if is_dark {
+                        cx.theme().background.blend(dark_add_tint.opacity(0.36))
+                    } else {
+                        cx.theme()
+                            .background
+                            .blend(cx.theme().success.opacity(ghost_alpha))
+                    },
                     if is_dark {
                         cx.theme().muted_foreground.lighten(0.22)
                     } else {
@@ -624,9 +657,13 @@ impl DiffViewer {
                     "",
                 ),
                 (DiffCellKind::None, DiffCellKind::Removed) => (
-                    cx.theme()
-                        .background
-                        .blend(cx.theme().danger.opacity(ghost_alpha)),
+                    if is_dark {
+                        cx.theme().background.blend(dark_remove_tint.opacity(0.36))
+                    } else {
+                        cx.theme()
+                            .background
+                            .blend(cx.theme().danger.opacity(ghost_alpha))
+                    },
                     if is_dark {
                         cx.theme().muted_foreground.lighten(0.22)
                     } else {
@@ -647,12 +684,12 @@ impl DiffViewer {
                 (DiffCellKind::Context, _) => (
                     cx.theme().background,
                     if is_dark {
-                        cx.theme().muted_foreground.lighten(0.08)
+                        cx.theme().muted_foreground.lighten(0.14)
                     } else {
                         cx.theme().muted_foreground.darken(0.10)
                     },
                     if is_dark {
-                        cx.theme().muted_foreground.lighten(0.16)
+                        cx.theme().muted_foreground.lighten(0.18)
                     } else {
                         cx.theme().muted_foreground.darken(0.12)
                     },
@@ -662,17 +699,17 @@ impl DiffViewer {
                 (DiffCellKind::None, _) => (
                     cx.theme().background,
                     if is_dark {
-                        cx.theme().muted_foreground.lighten(0.08)
+                        cx.theme().muted_foreground.lighten(0.14)
                     } else {
                         cx.theme().muted_foreground.darken(0.10)
                     },
                     if is_dark {
-                        cx.theme().muted_foreground.lighten(0.16)
+                        cx.theme().muted_foreground.lighten(0.18)
                     } else {
                         cx.theme().muted_foreground.darken(0.12)
                     },
                     if is_dark {
-                        cx.theme().muted_foreground.lighten(0.04)
+                        cx.theme().muted_foreground.lighten(0.08)
                     } else {
                         cx.theme().muted_foreground.darken(0.06)
                     },
@@ -701,7 +738,7 @@ impl DiffViewer {
         let gutter_background = cx
             .theme()
             .background
-            .blend(cx.theme().muted.opacity(if is_dark { 0.26 } else { 0.52 }));
+            .blend(cx.theme().muted.opacity(if is_dark { 0.34 } else { 0.52 }));
         let gutter_width = line_number_width + DIFF_MARKER_GUTTER_WIDTH + 12.0;
 
         let base = h_flex()
@@ -725,6 +762,8 @@ impl DiffViewer {
                     .py_0p5()
                     .rounded_sm()
                     .bg(gutter_background)
+                    .border_1()
+                    .border_color(cx.theme().border.opacity(if is_dark { 0.74 } else { 0.56 }))
                     .child(
                         div()
                             .w(px(line_number_width))
@@ -772,7 +811,7 @@ impl DiffViewer {
                             .whitespace_nowrap()
                             .text_color(segment_color)
                             .when(segment.changed, |this| {
-                                this.bg(marker_color.opacity(if is_dark { 0.16 } else { 0.12 }))
+                                this.bg(marker_color.opacity(if is_dark { 0.22 } else { 0.12 }))
                             })
                             .child(segment_text)
                     }))

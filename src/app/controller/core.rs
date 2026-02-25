@@ -113,7 +113,6 @@ impl DiffViewer {
             diff_left_line_number_width: line_number_column_width(DIFF_LINE_NUMBER_MIN_DIGITS),
             diff_right_line_number_width: line_number_column_width(DIFF_LINE_NUMBER_MIN_DIGITS),
             overall_line_stats: LineStats::default(),
-            selected_line_stats: LineStats::default(),
             refresh_epoch: 0,
             auto_refresh_task: Task::ready(()),
             snapshot_epoch: 0,
@@ -168,7 +167,6 @@ impl DiffViewer {
             .iter()
             .find(|file| file.path == path)
             .map(|file| file.status);
-        self.sync_selected_line_stats();
         self.scroll_to_file_start(&path);
         self.last_visible_row_start = None;
         self.last_diff_scroll_offset = None;
@@ -333,8 +331,6 @@ impl DiffViewer {
         if files_changed || overall_changed || selected_changed || self.diff_rows.is_empty() {
             self.scroll_selected_after_reload = selected_changed || self.diff_rows.is_empty();
             self.request_selected_diff_reload(cx);
-        } else {
-            self.sync_selected_line_stats();
         }
 
         cx.notify();
@@ -351,7 +347,6 @@ impl DiffViewer {
         self.selected_path = None;
         self.selected_status = None;
         self.overall_line_stats = LineStats::default();
-        self.selected_line_stats = LineStats::default();
         self.file_row_ranges.clear();
         self.file_line_stats.clear();
         self.diff_row_metadata.clear();
@@ -379,7 +374,6 @@ impl DiffViewer {
             self.sync_diff_list_state();
             self.file_row_ranges.clear();
             self.file_line_stats.clear();
-            self.selected_line_stats = LineStats::default();
             self.recompute_diff_pan_layout();
             self.patch_loading = false;
             return;
@@ -394,7 +388,6 @@ impl DiffViewer {
             self.sync_diff_list_state();
             self.file_row_ranges.clear();
             self.file_line_stats.clear();
-            self.selected_line_stats = LineStats::default();
             self.recompute_diff_pan_layout();
             self.patch_loading = false;
             return;
@@ -452,7 +445,6 @@ impl DiffViewer {
                                         .find(|file| &file.path == selected)
                                         .map(|file| file.status)
                                 });
-                            this.sync_selected_line_stats();
                             this.last_visible_row_start = None;
 
                             if this.scroll_selected_after_reload {
@@ -473,7 +465,6 @@ impl DiffViewer {
                             this.sync_diff_list_state();
                             this.file_row_ranges.clear();
                             this.file_line_stats.clear();
-                            this.selected_line_stats = LineStats::default();
                             this.recompute_diff_pan_layout();
                             this.scroll_selected_after_reload = false;
                         }

@@ -25,6 +25,7 @@ pub(super) struct FileRowRange {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum DiffStreamRowKind {
+    FileHeader,
     CoreCode,
     CoreHunkHeader,
     CoreMeta,
@@ -137,6 +138,17 @@ pub(super) fn load_diff_stream(
     for file in files {
         let start_row = rows.len();
         let mut file_row_ordinal = 0_usize;
+        push_stream_row(
+            &mut rows,
+            &mut row_metadata,
+            message_row(DiffRowKind::Meta, file.path.clone()),
+            DiffStreamRowKind::FileHeader,
+            Some(file.path.as_str()),
+            Some(file.status),
+            file_row_ordinal,
+        );
+        file_row_ordinal = file_row_ordinal.saturating_add(1);
+
         let loaded_file = load_file_diff_rows(repo_root, file);
         file_line_stats.insert(file.path.clone(), loaded_file.stats);
 
@@ -291,6 +303,7 @@ fn hash_cell(cell: &DiffCell, hasher: &mut impl Hasher) {
 
 fn stable_kind_tag(kind: DiffStreamRowKind) -> &'static str {
     match kind {
+        DiffStreamRowKind::FileHeader => "file-header",
         DiffStreamRowKind::CoreCode => "core-code",
         DiffStreamRowKind::CoreHunkHeader => "core-hunk-header",
         DiffStreamRowKind::CoreMeta => "core-meta",
@@ -386,8 +399,7 @@ mod tests {
     #[test]
     fn stable_row_id_changes_when_ordinal_changes() {
         let row = message_row(DiffRowKind::Meta, "header");
-        let first =
-            compute_stable_row_id(Some("src/lib.rs"), DiffStreamRowKind::CoreMeta, 0, &row);
+        let first = compute_stable_row_id(Some("src/lib.rs"), DiffStreamRowKind::CoreMeta, 0, &row);
         let second =
             compute_stable_row_id(Some("src/lib.rs"), DiffStreamRowKind::CoreMeta, 1, &row);
 

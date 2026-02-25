@@ -1,35 +1,22 @@
 impl DiffViewer {
-    pub(super) fn selected_file_is_collapsed(&self) -> bool {
-        self.selected_path
-            .as_ref()
-            .is_some_and(|path| self.collapsed_files.contains(path))
-    }
-
-    pub(super) fn toggle_selected_file_collapsed(&mut self, cx: &mut Context<Self>) {
-        let Some(path) = self.selected_path.clone() else {
-            return;
-        };
-
+    pub(super) fn toggle_file_collapsed(&mut self, path: String, cx: &mut Context<Self>) {
         if self.collapsed_files.contains(path.as_str()) {
             self.collapsed_files.remove(path.as_str());
         } else {
-            self.collapsed_files.insert(path);
+            self.collapsed_files.insert(path.clone());
         }
 
+        self.selected_path = Some(path.clone());
+        self.selected_status = self
+            .files
+            .iter()
+            .find(|file| file.path == path)
+            .map(|file| file.status);
         self.scroll_selected_after_reload = true;
         self.last_diff_scroll_offset = None;
         self.last_scroll_activity_at = Instant::now();
         self.request_selected_diff_reload(cx);
         cx.notify();
-    }
-
-    fn sync_selected_line_stats(&mut self) {
-        self.selected_line_stats = self
-            .selected_path
-            .as_ref()
-            .and_then(|path| self.file_line_stats.get(path))
-            .copied()
-            .unwrap_or_default();
     }
 
     fn clamp_selection_to_rows(&mut self) {
@@ -109,7 +96,6 @@ impl DiffViewer {
         {
             self.selected_path = Some(path);
             self.selected_status = Some(status);
-            self.sync_selected_line_stats();
         }
 
         cx.notify();
@@ -201,7 +187,6 @@ impl DiffViewer {
 
         self.selected_path = Some(path.clone());
         self.selected_status = Some(status);
-        self.sync_selected_line_stats();
         self.scroll_to_file_start(&path);
         self.select_row(start_row, false, cx);
         cx.notify();

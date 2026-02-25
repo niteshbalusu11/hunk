@@ -95,11 +95,38 @@ fn apply_soft_light_theme(cx: &mut App) {
     }
 }
 
+fn apply_soft_dark_theme(cx: &mut App) {
+    let mut dark_theme = (*Theme::global(cx).dark_theme).clone();
+
+    // Match a softer charcoal palette so colored diff cues stand out without eye strain.
+    dark_theme.colors.background = Some("#1f2126".into());
+    dark_theme.colors.list = Some("#1f2126".into());
+    dark_theme.colors.popover = Some("#242831".into());
+    dark_theme.colors.table = Some("#1f2126".into());
+    dark_theme.colors.sidebar = Some("#1b1e24".into());
+    dark_theme.colors.title_bar = Some("#1a1d22".into());
+    dark_theme.colors.list_even = Some("#21242b".into());
+    dark_theme.colors.list_head = Some("#292d36".into());
+    dark_theme.colors.secondary = Some("#2a2f38".into());
+    dark_theme.colors.secondary_hover = Some("#343b47".into());
+    dark_theme.colors.secondary_active = Some("#3b4452".into());
+    dark_theme.colors.muted = Some("#272c35".into());
+    dark_theme.colors.muted_foreground = Some("#a3adbb".into());
+    dark_theme.colors.border = Some("#3d4554".into());
+
+    Theme::global_mut(cx).dark_theme = Rc::new(dark_theme);
+
+    if Theme::global(cx).mode.is_dark() {
+        Theme::change(ThemeMode::Dark, None, cx);
+    }
+}
+
 pub fn run() -> Result<()> {
     let app = Application::new();
     app.run(|cx| {
         gpui_component::init(cx);
         apply_soft_light_theme(cx);
+        apply_soft_dark_theme(cx);
         cx.on_action(quit_app);
         cx.bind_keys([
             KeyBinding::new("down", SelectNextLine, Some("DiffViewer")),
@@ -199,7 +226,6 @@ struct DiffViewer {
     diff_left_line_number_width: f32,
     diff_right_line_number_width: f32,
     overall_line_stats: LineStats,
-    selected_line_stats: LineStats,
     refresh_epoch: usize,
     auto_refresh_task: Task<()>,
     snapshot_epoch: usize,

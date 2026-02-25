@@ -52,7 +52,6 @@ impl DiffViewer {
 
         self.selected_path = Some(next_path);
         self.selected_status = Some(next_status);
-        self.sync_selected_line_stats();
         cx.notify();
     }
 
