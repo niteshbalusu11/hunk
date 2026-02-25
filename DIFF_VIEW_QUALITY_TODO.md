@@ -35,7 +35,7 @@ Build a GPUI diff viewer that matches VS Code quality for:
 - [x] Keep current UI behavior by adapting structured model back to `SideBySideRow`.
 - [x] Add stable row IDs and explicit row metadata for future selection/navigation state.
 - [x] Split stream construction from rendering concerns (remove synthetic presentation rows from core model).
-- [ ] Add Phase 1 regression tests for parsing edge-cases:
+- [x] Add Phase 1 regression tests for parsing edge-cases:
 - empty file changes
 - no-newline markers
 - mixed meta lines around hunks
@@ -56,8 +56,8 @@ Build a GPUI diff viewer that matches VS Code quality for:
 
 ### Phase 4: Semantic Diff Fidelity
 
-- [ ] Add intra-line diff spans for modified pairs.
-- [ ] Add syntax highlighting pipeline hooks.
+- [x] Add intra-line diff spans for modified pairs.
+- [x] Add syntax highlighting pipeline hooks.
 - [ ] Add whitespace/EOL visibility toggles.
 
 ### Phase 5: Hardening
@@ -72,3 +72,4 @@ Build a GPUI diff viewer that matches VS Code quality for:
 - Phase 1 foundation complete.
 - Phase 2 initial pass complete (fixed-width pan columns + no-wrap line flow + sticky hunk header + gutter polish).
 - Phase 3 initial pass complete (line-range selection, copy, keyboard navigation).
+- Phase 4 initial pass complete (intra-line spans + Rust syntax hook pipeline).

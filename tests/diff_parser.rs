@@ -125,3 +125,38 @@ fn keeps_multiple_hunks_as_separate_structures() {
     assert_eq!(document.hunks[1].old_start, 10);
     assert_eq!(document.hunks[1].new_start, 10);
 }
+
+#[test]
+fn handles_empty_patch_for_document_and_rows() {
+    let document = parse_patch_document("");
+    assert!(document.prelude.is_empty());
+    assert!(document.hunks.is_empty());
+    assert!(document.epilogue.is_empty());
+
+    let rows = parse_patch_side_by_side("");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].kind, DiffRowKind::Empty);
+    assert_eq!(rows[0].text, "No diff for this file.");
+}
+
+#[test]
+fn keeps_meta_lines_before_and_after_hunk() {
+    let patch = "\
+diff --git a/a.rs b/a.rs
+index 123..456 100644
+--- a/a.rs
++++ b/a.rs
+@@ -1,1 +1,1 @@
+-old
++new
+rename from a.rs
+rename to b.rs";
+
+    let document = parse_patch_document(patch);
+    assert_eq!(document.prelude.len(), 4);
+    assert_eq!(document.hunks.len(), 1);
+    assert_eq!(
+        document.epilogue,
+        vec!["rename from a.rs", "rename to b.rs"]
+    );
+}

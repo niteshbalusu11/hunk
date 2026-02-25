@@ -13,3 +13,4 @@ serde = { version = "1.0", features = ["derive"] }
 toml = "0.9"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+syntect = "5.3"

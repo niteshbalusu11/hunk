@@ -7,9 +7,10 @@ use anyhow::Result;
 use gpui::{
     AnyElement, App, AppContext as _, Application, ClipboardItem, Context, Entity, FocusHandle,
     InteractiveElement as _, IntoElement, IsZero as _, KeyBinding, ListAlignment, ListOffset,
-    ListSizingBehavior, ListState, MouseButton, MouseDownEvent, ParentElement as _, Render,
-    ScrollHandle, ScrollWheelEvent, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Task, Timer, Window, WindowOptions, actions, div, list, point, prelude::FluentBuilder as _, px,
+    ListSizingBehavior, ListState, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ParentElement as _, Render, ScrollHandle, ScrollWheelEvent, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Task, Timer, Window, WindowOptions, actions, div,
+    list, point, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     ActiveTheme as _, Colorize as _, Root, StyledExt as _, Theme, ThemeMode, h_flex,
@@ -46,6 +47,7 @@ const DIFF_FOOTER_SPACER_ROWS: usize = 2;
 
 mod controller;
 mod data;
+mod highlight;
 mod render;
 
 actions!(
@@ -155,6 +157,7 @@ struct DiffViewer {
     focus_handle: FocusHandle,
     selection_anchor_row: Option<usize>,
     selection_head_row: Option<usize>,
+    drag_selecting_rows: bool,
     scroll_selected_after_reload: bool,
     last_visible_row_start: Option<usize>,
     last_diff_scroll_offset: Option<gpui::Point<gpui::Pixels>>,
