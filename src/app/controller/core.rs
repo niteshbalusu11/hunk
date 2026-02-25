@@ -167,6 +167,7 @@ impl DiffViewer {
             selected_status: None,
             diff_rows: Vec::new(),
             diff_row_metadata: Vec::new(),
+            diff_row_segment_cache: BTreeMap::new(),
             file_row_ranges: Vec::new(),
             file_line_stats: BTreeMap::new(),
             diff_list_state: ListState::new(0, ListAlignment::Top, px(360.0)),
@@ -185,6 +186,7 @@ impl DiffViewer {
             snapshot_epoch: 0,
             snapshot_task: Task::ready(()),
             snapshot_loading: false,
+            last_snapshot_fingerprint: None,
             open_project_task: Task::ready(()),
             patch_epoch: 0,
             patch_task: Task::ready(()),
@@ -269,11 +271,24 @@ impl DiffViewer {
             return;
         }
 
+        enum SnapshotRefreshResult {
+            Unchanged(RepoSnapshotFingerprint),
+            Loaded {
+                fingerprint: RepoSnapshotFingerprint,
+                snapshot: RepoSnapshot,
+            },
+        }
+
         let source_dir_result = self
             .project_path
             .clone()
             .map(Ok)
             .unwrap_or_else(|| std::env::current_dir().context("failed to resolve current directory"));
+        let previous_fingerprint = if force {
+            None
+        } else {
+            self.last_snapshot_fingerprint.clone()
+        };
         let epoch = self.next_snapshot_epoch();
         self.snapshot_loading = true;
 
@@ -282,7 +297,18 @@ impl DiffViewer {
             let result = match source_dir_result {
                 Ok(source_dir) => {
                     cx.background_executor()
-                        .spawn(async move { load_snapshot(&source_dir) })
+                        .spawn(async move {
+                            let fingerprint = load_snapshot_fingerprint(&source_dir)?;
+                            if previous_fingerprint.as_ref() == Some(&fingerprint) {
+                                return Ok(SnapshotRefreshResult::Unchanged(fingerprint));
+                            }
+
+                            let snapshot = load_snapshot(&source_dir)?;
+                            Ok(SnapshotRefreshResult::Loaded {
+                                fingerprint,
+                                snapshot,
+                            })
+                        })
                         .await
                 }
                 Err(err) => Err(err),
@@ -297,9 +323,18 @@ impl DiffViewer {
                     this.snapshot_loading = false;
                     let elapsed = started_at.elapsed();
                     match result {
-                        Ok(snapshot) => {
+                        Ok(SnapshotRefreshResult::Loaded {
+                            fingerprint,
+                            snapshot,
+                        }) => {
                             info!("snapshot refresh completed in {:?}", elapsed);
+                            this.last_snapshot_fingerprint = Some(fingerprint);
                             this.apply_snapshot(snapshot, cx)
+                        }
+                        Ok(SnapshotRefreshResult::Unchanged(fingerprint)) => {
+                            info!("snapshot refresh skipped in {:?} (no repo changes)", elapsed);
+                            this.last_snapshot_fingerprint = Some(fingerprint);
+                            cx.notify();
                         }
                         Err(err) => {
                             error!("snapshot refresh failed after {:?}: {err:#}", elapsed);
@@ -445,6 +480,7 @@ impl DiffViewer {
     fn apply_snapshot_error(&mut self, err: anyhow::Error, cx: &mut Context<Self>) {
         let missing_repository = Self::is_missing_repository_error(&err);
 
+        self.last_snapshot_fingerprint = None;
         self.repo_root = None;
         self.branch_name = "unknown".to_string();
         self.branch_has_upstream = false;
@@ -458,6 +494,7 @@ impl DiffViewer {
         self.file_row_ranges.clear();
         self.file_line_stats.clear();
         self.diff_row_metadata.clear();
+        self.diff_row_segment_cache.clear();
         self.selection_anchor_row = None;
         self.selection_head_row = None;
         self.drag_selecting_rows = false;
@@ -501,6 +538,7 @@ impl DiffViewer {
         let Some(repo_root) = self.repo_root.clone() else {
             self.diff_rows.clear();
             self.diff_row_metadata.clear();
+            self.diff_row_segment_cache.clear();
             self.selection_anchor_row = None;
             self.selection_head_row = None;
             self.drag_selecting_rows = false;
@@ -515,6 +553,7 @@ impl DiffViewer {
         if self.files.is_empty() {
             self.diff_rows = vec![message_row(DiffRowKind::Empty, "No changed files.")];
             self.diff_row_metadata.clear();
+            self.diff_row_segment_cache.clear();
             self.selection_anchor_row = None;
             self.selection_head_row = None;
             self.drag_selecting_rows = false;
@@ -528,6 +567,7 @@ impl DiffViewer {
 
         let files = self.files.clone();
         let collapsed_files = self.collapsed_files.clone();
+        let previous_file_line_stats = self.file_line_stats.clone();
         let epoch = self.next_patch_epoch();
         self.patch_loading = true;
 
@@ -535,7 +575,14 @@ impl DiffViewer {
             let started_at = Instant::now();
             let result = cx
                 .background_executor()
-                .spawn(async move { load_diff_stream(&repo_root, &files, &collapsed_files) })
+                .spawn(async move {
+                    load_diff_stream(
+                        &repo_root,
+                        &files,
+                        &collapsed_files,
+                        &previous_file_line_stats,
+                    )
+                })
                 .await;
 
             if let Some(this) = this.upgrade() {
@@ -556,6 +603,7 @@ impl DiffViewer {
                             );
                             this.diff_rows = stream.rows;
                             this.diff_row_metadata = stream.row_metadata;
+                            this.diff_row_segment_cache = stream.row_segments;
                             this.clamp_selection_to_rows();
                             this.drag_selecting_rows = false;
                             this.sync_diff_list_state();
@@ -592,6 +640,7 @@ impl DiffViewer {
                                 format!("Failed to load diff stream: {err:#}"),
                             )];
                             this.diff_row_metadata.clear();
+                            this.diff_row_segment_cache.clear();
                             this.selection_anchor_row = None;
                             this.selection_head_row = None;
                             this.drag_selecting_rows = false;

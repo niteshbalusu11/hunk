@@ -117,9 +117,10 @@ impl DiffViewer {
                     this.file_preview_loading = false;
                     match result {
                         Ok(document) => {
-                            this.file_preview_document = Some(document.clone());
+                            let line_count = document.lines.len();
+                            this.file_preview_document = Some(document);
                             this.file_preview_error = None;
-                            this.file_preview_list_state.reset(document.lines.len());
+                            this.file_preview_list_state.reset(line_count);
                         }
                         Err(err) => {
                             this.file_preview_document = None;

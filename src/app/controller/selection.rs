@@ -221,7 +221,8 @@ impl DiffViewer {
                         lines.push(row.text.clone());
                     }
                 }
-                DiffRowKind::HunkHeader | DiffRowKind::Meta | DiffRowKind::Empty => {
+                DiffRowKind::HunkHeader => {}
+                DiffRowKind::Meta | DiffRowKind::Empty => {
                     lines.push(row.text.clone());
                 }
             }

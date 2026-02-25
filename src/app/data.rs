@@ -6,9 +6,13 @@ use std::path::Path;
 
 use anyhow::{Result, anyhow};
 
+use super::highlight::{
+    StyledSegment, SyntaxTokenKind, build_line_segments, build_plain_line_segments,
+    render_with_whitespace_markers,
+};
 use super::*;
 use hunk::diff::parse_patch_side_by_side;
-use hunk::git::{RepoTreeEntry, RepoTreeEntryKind, load_patch};
+use hunk::git::{RepoTreeEntry, RepoTreeEntryKind, load_patch_from_open_repo, open_repo_for_patch};
 
 #[derive(Default)]
 struct DiffTreeFolder {
@@ -63,8 +67,23 @@ pub(super) struct RepoTreeRow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct FilePreviewDocument {
     pub(super) lines: Vec<String>,
+    pub(super) line_segments: Vec<Vec<CachedStyledSegment>>,
     pub(super) byte_len: usize,
     pub(super) truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CachedStyledSegment {
+    pub(super) plain_text: String,
+    pub(super) whitespace_text: String,
+    pub(super) syntax: SyntaxTokenKind,
+    pub(super) changed: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct DiffRowSegmentCache {
+    pub(super) left: Vec<CachedStyledSegment>,
+    pub(super) right: Vec<CachedStyledSegment>,
 }
 
 #[derive(Debug, Clone)]
@@ -97,6 +116,7 @@ pub(super) struct DiffStreamRowMeta {
 pub(super) struct DiffStream {
     pub(super) rows: Vec<SideBySideRow>,
     pub(super) row_metadata: Vec<DiffStreamRowMeta>,
+    pub(super) row_segments: BTreeMap<u64, DiffRowSegmentCache>,
     pub(super) file_ranges: Vec<FileRowRange>,
     pub(super) file_line_stats: BTreeMap<String, LineStats>,
 }
@@ -221,8 +241,14 @@ pub(super) fn load_file_preview(
         truncated = true;
     }
 
+    let line_segments = lines
+        .iter()
+        .map(|line| cached_segments_from_styled(build_plain_line_segments(Some(file_path), line)))
+        .collect::<Vec<_>>();
+
     Ok(FilePreviewDocument {
         lines,
+        line_segments,
         byte_len,
         truncated,
     })
@@ -313,11 +339,14 @@ pub(super) fn load_diff_stream(
     repo_root: &Path,
     files: &[ChangedFile],
     collapsed_files: &BTreeSet<String>,
+    previous_file_line_stats: &BTreeMap<String, LineStats>,
 ) -> Result<DiffStream> {
     let mut rows = Vec::new();
     let mut row_metadata = Vec::new();
+    let mut row_segments = BTreeMap::new();
     let mut file_ranges = Vec::with_capacity(files.len());
     let mut file_line_stats = BTreeMap::new();
+    let repo = open_repo_for_patch(repo_root)?;
 
     for file in files {
         let start_row = rows.len();
@@ -333,53 +362,67 @@ pub(super) fn load_diff_stream(
         );
         file_row_ordinal = file_row_ordinal.saturating_add(1);
 
-        let loaded_file = load_file_diff_rows(repo_root, file);
-        file_line_stats.insert(file.path.clone(), loaded_file.stats);
-
         if collapsed_files.contains(file.path.as_str()) {
+            let collapsed_stats = previous_file_line_stats
+                .get(file.path.as_str())
+                .copied()
+                .unwrap_or_default();
+            file_line_stats.insert(file.path.clone(), collapsed_stats);
+            let collapsed_message = if collapsed_stats.changed() > 0 {
+                format!(
+                    "File collapsed ({} changed lines hidden).",
+                    collapsed_stats.changed()
+                )
+            } else {
+                "File collapsed. Expand to load its diff.".to_string()
+            };
             push_stream_row(
                 &mut rows,
                 &mut row_metadata,
-                message_row(
-                    DiffRowKind::Empty,
-                    format!(
-                        "File collapsed ({} changed lines hidden).",
-                        loaded_file.stats.changed()
-                    ),
-                ),
+                message_row(DiffRowKind::Empty, collapsed_message),
                 DiffStreamRowKind::FileCollapsed,
                 Some(file.path.as_str()),
                 Some(file.status),
                 file_row_ordinal,
             );
-        } else if let Some(load_error) = loaded_file.load_error {
-            push_stream_row(
-                &mut rows,
-                &mut row_metadata,
-                message_row(DiffRowKind::Meta, load_error),
-                DiffStreamRowKind::FileError,
-                Some(file.path.as_str()),
-                Some(file.status),
-                file_row_ordinal,
-            );
         } else {
-            for row in loaded_file.core_rows.into_iter().filter(|row| {
-                matches!(
-                    row.kind,
-                    DiffRowKind::Code | DiffRowKind::HunkHeader | DiffRowKind::Empty
-                )
-            }) {
-                let row_kind = stream_kind_for_core_row(&row);
+            let loaded_file = load_file_diff_rows(&repo, file);
+            file_line_stats.insert(file.path.clone(), loaded_file.stats);
+            if let Some(load_error) = loaded_file.load_error {
                 push_stream_row(
                     &mut rows,
                     &mut row_metadata,
-                    row,
-                    row_kind,
+                    message_row(DiffRowKind::Meta, load_error),
+                    DiffStreamRowKind::FileError,
                     Some(file.path.as_str()),
                     Some(file.status),
                     file_row_ordinal,
                 );
-                file_row_ordinal = file_row_ordinal.saturating_add(1);
+            } else {
+                for row in loaded_file.core_rows.into_iter().filter(|row| {
+                    matches!(
+                        row.kind,
+                        DiffRowKind::Code | DiffRowKind::HunkHeader | DiffRowKind::Empty
+                    )
+                }) {
+                    let row_kind = stream_kind_for_core_row(&row);
+                    let stable_id = push_stream_row(
+                        &mut rows,
+                        &mut row_metadata,
+                        row.clone(),
+                        row_kind,
+                        Some(file.path.as_str()),
+                        Some(file.status),
+                        file_row_ordinal,
+                    );
+                    if row.kind == DiffRowKind::Code {
+                        row_segments.insert(
+                            stable_id,
+                            build_diff_row_segment_cache(Some(file.path.as_str()), &row),
+                        );
+                    }
+                    file_row_ordinal = file_row_ordinal.saturating_add(1);
+                }
             }
         }
 
@@ -407,12 +450,13 @@ pub(super) fn load_diff_stream(
     Ok(DiffStream {
         rows,
         row_metadata,
+        row_segments,
         file_ranges,
         file_line_stats,
     })
 }
 
-fn load_file_diff_rows(repo_root: &Path, file: &ChangedFile) -> LoadedFileDiffRows {
+fn load_file_diff_rows(repo: &git2::Repository, file: &ChangedFile) -> LoadedFileDiffRows {
     if is_probably_binary_extension(file.path.as_str()) {
         return LoadedFileDiffRows {
             core_rows: Vec::new(),
@@ -424,7 +468,7 @@ fn load_file_diff_rows(repo_root: &Path, file: &ChangedFile) -> LoadedFileDiffRo
         };
     }
 
-    match load_patch(repo_root, &file.path, file.status) {
+    match load_patch_from_open_repo(repo, &file.path, file.status) {
         Ok(patch) => {
             if is_binary_patch(patch.as_str()) {
                 return LoadedFileDiffRows {
@@ -462,6 +506,46 @@ fn load_file_diff_rows(repo_root: &Path, file: &ChangedFile) -> LoadedFileDiffRo
             load_error: Some(format!("Failed to load patch for {}: {err:#}", file.path)),
         },
     }
+}
+
+pub(super) fn cached_segments_from_styled(
+    segments: Vec<StyledSegment>,
+) -> Vec<CachedStyledSegment> {
+    segments
+        .into_iter()
+        .map(|segment| {
+            let plain_text = segment.text;
+            let whitespace_text = render_with_whitespace_markers(plain_text.as_str());
+            CachedStyledSegment {
+                plain_text,
+                whitespace_text,
+                syntax: segment.syntax,
+                changed: segment.changed,
+            }
+        })
+        .collect::<Vec<_>>()
+}
+
+fn build_diff_row_segment_cache(
+    file_path: Option<&str>,
+    row: &SideBySideRow,
+) -> DiffRowSegmentCache {
+    let left = cached_segments_from_styled(build_line_segments(
+        file_path,
+        &row.left.text,
+        row.left.kind,
+        &row.right.text,
+        row.right.kind,
+    ));
+    let right = cached_segments_from_styled(build_line_segments(
+        file_path,
+        &row.right.text,
+        row.right.kind,
+        &row.left.text,
+        row.left.kind,
+    ));
+
+    DiffRowSegmentCache { left, right }
 }
 
 fn is_probably_binary_extension(path: &str) -> bool {
@@ -553,7 +637,7 @@ fn push_stream_row(
     file_path: Option<&str>,
     file_status: Option<FileStatus>,
     ordinal: usize,
-) {
+) -> u64 {
     let stable_id = compute_stable_row_id(file_path, kind, ordinal, &row);
     rows.push(row);
     row_metadata.push(DiffStreamRowMeta {
@@ -562,6 +646,7 @@ fn push_stream_row(
         file_status,
         kind,
     });
+    stable_id
 }
 
 fn compute_stable_row_id(

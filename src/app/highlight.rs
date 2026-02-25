@@ -56,6 +56,19 @@ pub(super) fn build_plain_line_segments(file_path: Option<&str>, line: &str) -> 
     merge_styled_segments(&chars, &syntax_map, &changed_map)
 }
 
+#[allow(dead_code)]
+pub(super) fn render_with_whitespace_markers(text: &str) -> String {
+    let mut rendered = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            ' ' => rendered.push('·'),
+            '\t' => rendered.push('⇥'),
+            _ => rendered.push(ch),
+        }
+    }
+    rendered
+}
+
 fn apply_syntect_syntax_map(
     file_path: Option<&str>,
     line: &str,

@@ -65,10 +65,13 @@ impl DiffViewer {
                 let Some(document) = this.file_preview_document.as_ref() else {
                     return div().into_any_element();
                 };
-                let Some(line) = document.lines.get(ix) else {
+                let Some(_line) = document.lines.get(ix) else {
                     return div().into_any_element();
                 };
-                this.render_file_preview_line(ix + 1, line.as_str(), file_path.as_str(), line_number_width, cx)
+                let Some(segments) = document.line_segments.get(ix) else {
+                    return div().into_any_element();
+                };
+                this.render_file_preview_line(ix + 1, segments, line_number_width, cx)
             })
         })
         .flex_grow()
@@ -132,24 +135,16 @@ impl DiffViewer {
     fn render_file_preview_line(
         &self,
         line_number: usize,
-        line: &str,
-        file_path: &str,
+        segments: &[CachedStyledSegment],
         line_number_width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let is_dark = cx.theme().mode.is_dark();
         let default_text = cx.theme().foreground;
-        let segments = build_plain_line_segments(Some(file_path), line);
-        let has_segments = !segments.is_empty();
         let gutter_bg = cx
             .theme()
             .background
             .blend(cx.theme().muted.opacity(if is_dark { 0.34 } else { 0.52 }));
-        let rendered_text = if self.diff_show_whitespace {
-            self.render_with_whitespace_markers(line)
-        } else {
-            line.to_string()
-        };
 
         h_flex()
             .w_full()
@@ -192,24 +187,15 @@ impl DiffViewer {
                     .when(!self.diff_fit_to_width, |this| {
                         this.flex_nowrap().whitespace_nowrap()
                     })
-                    .children(segments.into_iter().map(|segment| {
+                    .children(segments.iter().map(|segment| {
                         let text = if self.diff_show_whitespace {
-                            self.render_with_whitespace_markers(&segment.text)
+                            segment.whitespace_text.clone()
                         } else {
-                            segment.text
+                            segment.plain_text.clone()
                         };
                         let color = self.syntax_color_for_segment(default_text, segment.syntax, cx);
                         div().flex_none().whitespace_nowrap().text_color(color).child(text)
                     }))
-                    .when(!has_segments, |this| {
-                        this.child(
-                            div()
-                                .flex_none()
-                                .whitespace_nowrap()
-                                .text_color(default_text)
-                                .child(rendered_text),
-                        )
-                    })
                     .when(self.diff_show_eol_markers, |this| {
                         this.child(
                             div()

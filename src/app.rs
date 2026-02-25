@@ -26,12 +26,12 @@ use tracing::error;
 
 use hunk::config::{AppConfig, ConfigStore, DiffViewMode, ThemePreference};
 use hunk::diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
-use hunk::git::{ChangedFile, FileStatus, LineStats, LocalBranch};
+use hunk::git::{ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFingerprint};
 use hunk::state::{AppState, AppStateStore};
 
 use data::{
-    DiffStreamRowMeta, FilePreviewDocument, FileRowRange, RepoTreeNode, RightPaneMode,
-    SidebarTreeMode,
+    DiffRowSegmentCache, DiffStreamRowMeta, FilePreviewDocument, FileRowRange, RepoTreeNode,
+    RightPaneMode, SidebarTreeMode,
 };
 
 const AUTO_REFRESH_INTERVAL: Duration = Duration::from_millis(900);
@@ -268,6 +268,7 @@ struct DiffViewer {
     selected_status: Option<FileStatus>,
     diff_rows: Vec<SideBySideRow>,
     diff_row_metadata: Vec<DiffStreamRowMeta>,
+    diff_row_segment_cache: BTreeMap<u64, DiffRowSegmentCache>,
     file_row_ranges: Vec<FileRowRange>,
     file_line_stats: BTreeMap<String, LineStats>,
     diff_list_state: ListState,
@@ -286,6 +287,7 @@ struct DiffViewer {
     snapshot_epoch: usize,
     snapshot_task: Task<()>,
     snapshot_loading: bool,
+    last_snapshot_fingerprint: Option<RepoSnapshotFingerprint>,
     open_project_task: Task<()>,
     patch_epoch: usize,
     patch_task: Task<()>,

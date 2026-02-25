@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
@@ -81,6 +82,15 @@ pub struct RepoSnapshot {
     pub last_commit_subject: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoSnapshotFingerprint {
+    root: PathBuf,
+    branch_name: String,
+    head_target: Option<String>,
+    changed_file_count: usize,
+    changed_file_signature: u64,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct LineStats {
     pub added: u64,
@@ -99,50 +109,7 @@ pub fn load_snapshot(cwd: &Path) -> Result<RepoSnapshot> {
     let repo = Repository::discover(cwd).context("failed to discover git repository")?;
     let root = repo_root(&repo)?;
     let branch_name = current_branch_name(&repo);
-
-    let mut options = StatusOptions::new();
-    options
-        .include_untracked(true)
-        .recurse_untracked_dirs(true)
-        .renames_head_to_index(true)
-        .renames_index_to_workdir(true)
-        .include_unmodified(false);
-
-    let statuses = repo
-        .statuses(Some(&mut options))
-        .context("failed to load repository status")?;
-
-    let mut file_map = BTreeMap::<String, ChangedFile>::new();
-
-    for entry in statuses.iter() {
-        let Some(path) = entry.path() else {
-            continue;
-        };
-
-        let normalized = normalize_path(path);
-        if normalized.is_empty() {
-            continue;
-        }
-
-        let status_bits = entry.status();
-        let incoming = ChangedFile {
-            path: normalized.clone(),
-            status: map_status(status_bits),
-            staged: is_staged(status_bits),
-            untracked: status_bits.is_wt_new() && !status_bits.is_index_new(),
-        };
-
-        file_map
-            .entry(normalized)
-            .and_modify(|existing| {
-                existing.staged |= incoming.staged;
-                existing.untracked &= incoming.untracked;
-                existing.status = merge_file_status(existing.status, incoming.status);
-            })
-            .or_insert(incoming);
-    }
-
-    let files = file_map.into_values().collect::<Vec<_>>();
+    let files = load_changed_files(&repo)?;
     let line_stats = repo_line_stats(&repo)?;
     let branches = list_local_branches(&repo, &branch_name)?;
     let branch_has_upstream = current_branch_has_upstream(&repo, &branch_name);
@@ -161,9 +128,28 @@ pub fn load_snapshot(cwd: &Path) -> Result<RepoSnapshot> {
     })
 }
 
-pub fn load_patch(repo_root: &Path, file_path: &str, _: FileStatus) -> Result<String> {
-    let repo = open_repo(repo_root)?;
+pub fn load_snapshot_fingerprint(cwd: &Path) -> Result<RepoSnapshotFingerprint> {
+    let repo = Repository::discover(cwd).context("failed to discover git repository")?;
+    let root = repo_root(&repo)?;
+    let branch_name = current_branch_name(&repo);
+    let files = load_changed_files(&repo)?;
+    Ok(snapshot_fingerprint(&repo, root, branch_name, &files))
+}
 
+pub fn load_patch(repo_root: &Path, file_path: &str, status: FileStatus) -> Result<String> {
+    let repo = open_repo_for_patch(repo_root)?;
+    load_patch_from_open_repo(&repo, file_path, status)
+}
+
+pub fn open_repo_for_patch(repo_root: &Path) -> Result<Repository> {
+    open_repo(repo_root)
+}
+
+pub fn load_patch_from_open_repo(
+    repo: &Repository,
+    file_path: &str,
+    _: FileStatus,
+) -> Result<String> {
     if let Some(head_tree) = repo.head().ok().and_then(|head| head.peel_to_tree().ok()) {
         let mut options = diff_options(file_path);
         let diff = repo
@@ -536,6 +522,78 @@ fn repo_root(repo: &Repository) -> Result<PathBuf> {
         .parent()
         .map(|path| path.to_path_buf())
         .context("failed to resolve repository root")
+}
+
+fn load_changed_files(repo: &Repository) -> Result<Vec<ChangedFile>> {
+    let mut options = StatusOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .renames_head_to_index(true)
+        .renames_index_to_workdir(true)
+        .include_unmodified(false);
+
+    let statuses = repo
+        .statuses(Some(&mut options))
+        .context("failed to load repository status")?;
+
+    let mut file_map = BTreeMap::<String, ChangedFile>::new();
+    for entry in statuses.iter() {
+        let Some(path) = entry.path() else {
+            continue;
+        };
+
+        let normalized = normalize_path(path);
+        if normalized.is_empty() {
+            continue;
+        }
+
+        let status_bits = entry.status();
+        let incoming = ChangedFile {
+            path: normalized.clone(),
+            status: map_status(status_bits),
+            staged: is_staged(status_bits),
+            untracked: status_bits.is_wt_new() && !status_bits.is_index_new(),
+        };
+
+        file_map
+            .entry(normalized)
+            .and_modify(|existing| {
+                existing.staged |= incoming.staged;
+                existing.untracked &= incoming.untracked;
+                existing.status = merge_file_status(existing.status, incoming.status);
+            })
+            .or_insert(incoming);
+    }
+
+    Ok(file_map.into_values().collect::<Vec<_>>())
+}
+
+fn snapshot_fingerprint(
+    repo: &Repository,
+    root: PathBuf,
+    branch_name: String,
+    files: &[ChangedFile],
+) -> RepoSnapshotFingerprint {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for file in files {
+        file.path.hash(&mut hasher);
+        file.status.tag().hash(&mut hasher);
+        file.staged.hash(&mut hasher);
+        file.untracked.hash(&mut hasher);
+    }
+
+    RepoSnapshotFingerprint {
+        root,
+        branch_name,
+        head_target: repo
+            .head()
+            .ok()
+            .and_then(|head| head.target())
+            .map(|oid| oid.to_string()),
+        changed_file_count: files.len(),
+        changed_file_signature: hasher.finish(),
+    }
 }
 
 fn map_status(status: Status) -> FileStatus {

@@ -9,7 +9,8 @@ use super::data::{
 use super::*;
 use hunk::git::{
     RepoSnapshot, checkout_or_create_branch, commit_staged, load_repo_tree, load_snapshot,
-    push_current_branch, sanitize_branch_name, stage_all, stage_file, unstage_all, unstage_file,
+    load_snapshot_fingerprint, push_current_branch, sanitize_branch_name, stage_all, stage_file,
+    unstage_all, unstage_file,
 };
 
 include!("core.rs");

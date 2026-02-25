@@ -481,6 +481,29 @@ impl DiffViewer {
         }
 
         let stable_row_id = self.diff_row_stable_id(ix);
+        if row.kind == DiffRowKind::HunkHeader {
+            let is_dark = cx.theme().mode.is_dark();
+            let divider_bg = if is_selected {
+                cx.theme()
+                    .primary
+                    .opacity(if is_dark { 0.40 } else { 0.20 })
+            } else {
+                cx.theme().muted.opacity(if is_dark { 0.38 } else { 0.52 })
+            };
+            return div()
+                .id(("diff-hunk-divider-row", stable_row_id))
+                .h(px(6.0))
+                .border_b_1()
+                .border_color(cx.theme().border.opacity(if is_dark { 0.92 } else { 0.70 }))
+                .bg(divider_bg)
+                .when(self.diff_fit_to_width, |this| this.w_full())
+                .when(!self.diff_fit_to_width, |this| {
+                    this.w(px(self.diff_pan_content_width))
+                        .min_w(px(self.diff_pan_content_width))
+                })
+                .into_any_element();
+        }
+
         let is_dark = cx.theme().mode.is_dark();
 
         let (background, foreground, accent) = match row.kind {
@@ -864,8 +887,25 @@ impl DiffViewer {
         }
 
         let line_number = cell.line.map(|line| line.to_string()).unwrap_or_default();
-        let styled_segments =
-            build_line_segments(file_path, &cell.text, cell.kind, peer_text, peer_kind);
+        let cached_row_segments = self.diff_row_segment_cache.get(&row_stable_id);
+        let segment_cache = if side == "left" {
+            cached_row_segments.map(|segments| &segments.left)
+        } else {
+            cached_row_segments.map(|segments| &segments.right)
+        };
+        let fallback_segments;
+        let styled_segments = if let Some(cached) = segment_cache {
+            cached
+        } else {
+            fallback_segments = cached_segments_from_styled(build_line_segments(
+                file_path,
+                &cell.text,
+                cell.kind,
+                peer_text,
+                peer_kind,
+            ));
+            &fallback_segments
+        };
         let line_number_width = if side == "left" {
             self.diff_left_line_number_width
         } else {
@@ -936,11 +976,11 @@ impl DiffViewer {
                     .when(!self.diff_fit_to_width, |this| {
                         this.flex_nowrap().whitespace_nowrap()
                     })
-                    .children(styled_segments.into_iter().map(|segment| {
+                    .children(styled_segments.iter().map(|segment| {
                         let segment_text = if self.diff_show_whitespace {
-                            self.render_with_whitespace_markers(&segment.text)
+                            segment.whitespace_text.clone()
                         } else {
-                            segment.text
+                            segment.plain_text.clone()
                         };
                         let segment_color =
                             self.syntax_color_for_segment(text_color, segment.syntax, cx);
@@ -1008,18 +1048,6 @@ impl DiffViewer {
             SyntaxTokenKind::Variable => github(0xffa657, 0x953800),
             SyntaxTokenKind::Operator => github(0xff7b72, 0xcf222e),
         }
-    }
-
-    fn render_with_whitespace_markers(&self, text: &str) -> String {
-        let mut rendered = String::with_capacity(text.len());
-        for ch in text.chars() {
-            match ch {
-                ' ' => rendered.push('·'),
-                '\t' => rendered.push('⇥'),
-                _ => rendered.push(ch),
-            }
-        }
-        rendered
     }
 
     fn diff_row_stable_id(&self, row_ix: usize) -> u64 {
