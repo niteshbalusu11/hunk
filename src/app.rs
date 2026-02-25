@@ -30,8 +30,8 @@ use hunk::git::{ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFin
 use hunk::state::{AppState, AppStateStore};
 
 use data::{
-    DiffRowSegmentCache, DiffStreamRowMeta, FilePreviewDocument, FileRowRange, RepoTreeNode,
-    RightPaneMode, SidebarTreeMode,
+    DiffRowSegmentCache, DiffStreamRowMeta, FileRowRange, RepoTreeNode, RightPaneMode,
+    SidebarTreeMode,
 };
 
 const AUTO_REFRESH_INTERVAL: Duration = Duration::from_millis(900);
@@ -49,9 +49,7 @@ const APP_BOTTOM_SAFE_INSET: f32 = 0.0;
 const DIFF_BOTTOM_SAFE_INSET: f32 = APP_BOTTOM_SAFE_INSET;
 const DIFF_SCROLLBAR_RIGHT_INSET: f32 = 0.0;
 const DIFF_SCROLLBAR_SIZE: f32 = 16.0;
-const FILE_PREVIEW_MAX_BYTES: usize = 1_200_000;
-const FILE_PREVIEW_MAX_LINES: usize = 12_000;
-const FILE_PREVIEW_SCROLL_MULTIPLIER: f32 = 2.4;
+const FILE_EDITOR_MAX_BYTES: usize = 2_400_000;
 
 mod controller;
 mod data;
@@ -72,6 +70,7 @@ actions!(
         NextFile,
         PreviousFile,
         OpenProject,
+        SaveCurrentFile,
         QuitApp,
     ]
 );
@@ -191,6 +190,8 @@ pub fn run() -> Result<()> {
             KeyBinding::new("alt-up", PreviousFile, Some("DiffViewer")),
             KeyBinding::new("cmd-shift-o", OpenProject, None),
             KeyBinding::new("ctrl-shift-o", OpenProject, None),
+            KeyBinding::new("cmd-s", SaveCurrentFile, None),
+            KeyBinding::new("ctrl-s", SaveCurrentFile, None),
             KeyBinding::new("cmd-q", QuitApp, None),
         ]);
         cx.set_menus(vec![
@@ -204,7 +205,10 @@ pub fn run() -> Result<()> {
             },
             Menu {
                 name: "File".into(),
-                items: vec![MenuItem::action("Open Project...", OpenProject)],
+                items: vec![
+                    MenuItem::action("Open Project...", OpenProject),
+                    MenuItem::action("Save File", SaveCurrentFile),
+                ],
             },
             Menu {
                 name: "Edit".into(),
@@ -319,11 +323,15 @@ struct DiffViewer {
     repo_tree_loading: bool,
     repo_tree_error: Option<String>,
     right_pane_mode: RightPaneMode,
-    file_preview_path: Option<String>,
-    file_preview_document: Option<FilePreviewDocument>,
-    file_preview_loading: bool,
-    file_preview_error: Option<String>,
-    file_preview_epoch: usize,
-    file_preview_task: Task<()>,
-    file_preview_list_state: ListState,
+    editor_input_state: Entity<InputState>,
+    editor_path: Option<String>,
+    editor_loading: bool,
+    editor_error: Option<String>,
+    editor_dirty: bool,
+    editor_last_saved_text: Option<String>,
+    editor_epoch: usize,
+    editor_task: Task<()>,
+    editor_save_loading: bool,
+    editor_save_epoch: usize,
+    editor_save_task: Task<()>,
 }

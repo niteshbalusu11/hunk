@@ -2,13 +2,13 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
+use std::io::Write as _;
 use std::path::Path;
 
 use anyhow::{Result, anyhow};
 
 use super::highlight::{
-    StyledSegment, SyntaxTokenKind, build_line_segments, build_plain_line_segments,
-    render_with_whitespace_markers,
+    StyledSegment, SyntaxTokenKind, build_line_segments, render_with_whitespace_markers,
 };
 use super::*;
 use hunk::diff::parse_patch_side_by_side;
@@ -36,7 +36,7 @@ pub(super) enum SidebarTreeMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RightPaneMode {
     Diff,
-    FilePreview,
+    FileEditor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,11 +65,10 @@ pub(super) struct RepoTreeRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct FilePreviewDocument {
-    pub(super) lines: Vec<String>,
-    pub(super) line_segments: Vec<Vec<CachedStyledSegment>>,
+pub(super) struct FileEditorDocument {
+    pub(super) text: String,
     pub(super) byte_len: usize,
-    pub(super) truncated: bool,
+    pub(super) language: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -208,50 +207,88 @@ pub(super) fn flatten_repo_tree_rows(
     rows
 }
 
-pub(super) fn load_file_preview(
+pub(super) fn load_file_editor_document(
     repo_root: &Path,
     file_path: &str,
     max_bytes: usize,
-    max_lines: usize,
-) -> Result<FilePreviewDocument> {
+) -> Result<FileEditorDocument> {
     let absolute_path = repo_root.join(file_path);
     let bytes = fs::read(&absolute_path)
         .map_err(|err| anyhow!("failed to read {}: {err}", absolute_path.display()))?;
     if bytes.len() > max_bytes {
         return Err(anyhow!(
-            "file is too large to preview ({} bytes, max {})",
+            "file is too large to edit ({} bytes, max {})",
             bytes.len(),
             max_bytes
         ));
     }
     if is_probably_binary_bytes(&bytes) {
-        return Err(anyhow!("binary file preview is not supported"));
+        return Err(anyhow!("binary file editing is not supported"));
     }
 
     let text = String::from_utf8(bytes)
-        .map_err(|_| anyhow!("file is not UTF-8 text and cannot be previewed"))?;
-    let byte_len = text.len();
-    let mut lines = text
-        .split('\n')
-        .map(ToString::to_string)
-        .collect::<Vec<_>>();
-    let mut truncated = false;
-    if lines.len() > max_lines {
-        lines.truncate(max_lines);
-        truncated = true;
+        .map_err(|_| anyhow!("file is not UTF-8 text and cannot be edited"))?;
+
+    Ok(FileEditorDocument {
+        byte_len: text.len(),
+        language: editor_language_hint(file_path),
+        text,
+    })
+}
+
+pub(super) fn save_file_editor_document(
+    repo_root: &Path,
+    file_path: &str,
+    text: &str,
+) -> Result<()> {
+    let absolute_path = repo_root.join(file_path);
+    let parent = absolute_path.parent().ok_or_else(|| {
+        anyhow!(
+            "cannot save {}: resolved path has no parent",
+            absolute_path.display()
+        )
+    })?;
+
+    let mut temp_name = absolute_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("hunk-save")
+        .to_string();
+    temp_name.push_str(".hunk-tmp.");
+    temp_name.push_str(&std::process::id().to_string());
+    temp_name.push('.');
+    temp_name.push_str(
+        &std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+            .to_string(),
+    );
+
+    let temp_path = parent.join(temp_name);
+    let mut temp_file =
+        fs::File::create(&temp_path).map_err(|err| anyhow!("failed to create temp file: {err}"))?;
+    temp_file
+        .write_all(text.as_bytes())
+        .map_err(|err| anyhow!("failed to write temp file {}: {err}", temp_path.display()))?;
+    temp_file
+        .sync_all()
+        .map_err(|err| anyhow!("failed to fsync temp file {}: {err}", temp_path.display()))?;
+    drop(temp_file);
+
+    if let Err(err) = fs::rename(&temp_path, &absolute_path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(anyhow!(
+            "failed to move {} into place: {err}",
+            absolute_path.display()
+        ));
     }
 
-    let line_segments = lines
-        .iter()
-        .map(|line| cached_segments_from_styled(build_plain_line_segments(Some(file_path), line)))
-        .collect::<Vec<_>>();
+    if let Ok(dir_handle) = fs::File::open(parent) {
+        let _ = dir_handle.sync_all();
+    }
 
-    Ok(FilePreviewDocument {
-        lines,
-        line_segments,
-        byte_len,
-        truncated,
-    })
+    Ok(())
 }
 
 fn join_path(prefix: &str, name: &str) -> String {
@@ -316,6 +353,23 @@ fn append_repo_tree_rows(
 
 fn is_probably_binary_bytes(bytes: &[u8]) -> bool {
     bytes.contains(&0)
+}
+
+fn editor_language_hint(file_path: &str) -> String {
+    let path = Path::new(file_path);
+    if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
+        return extension.to_ascii_lowercase();
+    }
+
+    if let Some(name) = path.file_name().and_then(|file| file.to_str()) {
+        match name {
+            "Dockerfile" => return "dockerfile".to_string(),
+            "Makefile" => return "make".to_string(),
+            _ => {}
+        }
+    }
+
+    "text".to_string()
 }
 
 pub(super) fn message_row(kind: DiffRowKind, text: impl Into<String>) -> SideBySideRow {

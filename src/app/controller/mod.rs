@@ -4,7 +4,7 @@ use tracing::{error, info};
 use super::data::{
     DiffStreamRowKind, RepoTreeNodeKind, RightPaneMode, SidebarTreeMode, build_repo_tree,
     build_tree_items, decimal_digits, display_width, line_number_column_width, load_diff_stream,
-    load_file_preview, message_row,
+    load_file_editor_document, message_row, save_file_editor_document,
 };
 use super::*;
 use hunk::git::{
@@ -16,6 +16,7 @@ use hunk::git::{
 include!("core.rs");
 include!("git_ops.rs");
 include!("file_tree.rs");
+include!("editor.rs");
 include!("selection.rs");
 include!("scroll.rs");
 include!("fps.rs");

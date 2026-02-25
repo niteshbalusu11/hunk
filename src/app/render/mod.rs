@@ -1,5 +1,5 @@
 use super::data::{
-    CachedStyledSegment, DiffStreamRowKind, RepoTreeNodeKind, RightPaneMode, SidebarTreeMode,
+    DiffStreamRowKind, RepoTreeNodeKind, RightPaneMode, SidebarTreeMode,
     cached_segments_from_styled, flatten_repo_tree_rows,
 };
 use super::highlight::{SyntaxTokenKind, build_line_segments};
@@ -18,5 +18,5 @@ include!("commit.rs");
 include!("file_banner.rs");
 include!("file_status.rs");
 include!("diff.rs");
-include!("file_preview.rs");
+include!("file_editor.rs");
 include!("root.rs");

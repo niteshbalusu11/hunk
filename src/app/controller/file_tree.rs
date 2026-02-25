@@ -39,8 +39,8 @@ impl DiffViewer {
             .iter()
             .find(|file| file.path == path)
             .map(|file| file.status);
-        self.right_pane_mode = RightPaneMode::FilePreview;
-        self.request_file_preview_reload(path, cx);
+        self.right_pane_mode = RightPaneMode::FileEditor;
+        self.request_file_editor_reload(path, cx);
         cx.notify();
     }
 
@@ -79,71 +79,9 @@ impl DiffViewer {
         });
     }
 
-    fn request_file_preview_reload(&mut self, path: String, cx: &mut Context<Self>) {
-        let Some(repo_root) = self.repo_root.clone() else {
-            self.file_preview_loading = false;
-            self.file_preview_error = Some("No repository is open.".to_string());
-            self.file_preview_document = None;
-            self.file_preview_list_state.reset(0);
-            cx.notify();
-            return;
-        };
-
-        let epoch = self.next_file_preview_epoch();
-        self.file_preview_loading = true;
-        self.file_preview_error = None;
-        self.file_preview_document = None;
-        self.file_preview_path = Some(path.clone());
-        cx.notify();
-
-        self.file_preview_task = cx.spawn(async move |this, cx| {
-            let target_path = path.clone();
-            let result = cx.background_executor().spawn(async move {
-                load_file_preview(
-                    &repo_root,
-                    target_path.as_str(),
-                    FILE_PREVIEW_MAX_BYTES,
-                    FILE_PREVIEW_MAX_LINES,
-                )
-            });
-            let result = result.await;
-
-            if let Some(this) = this.upgrade() {
-                this.update(cx, |this, cx| {
-                    if epoch != this.file_preview_epoch {
-                        return;
-                    }
-
-                    this.file_preview_loading = false;
-                    match result {
-                        Ok(document) => {
-                            let line_count = document.lines.len();
-                            this.file_preview_document = Some(document);
-                            this.file_preview_error = None;
-                            this.file_preview_list_state.reset(line_count);
-                        }
-                        Err(err) => {
-                            this.file_preview_document = None;
-                            this.file_preview_error = Some(format!("Preview unavailable: {err}"));
-                            this.file_preview_list_state.reset(0);
-                        }
-                    }
-
-                    cx.notify();
-                })
-                .ok();
-            }
-        });
-    }
-
     fn next_repo_tree_epoch(&mut self) -> usize {
         self.repo_tree_epoch = self.repo_tree_epoch.saturating_add(1);
         self.repo_tree_epoch
-    }
-
-    fn next_file_preview_epoch(&mut self) -> usize {
-        self.file_preview_epoch = self.file_preview_epoch.saturating_add(1);
-        self.file_preview_epoch
     }
 }
 
@@ -165,15 +103,11 @@ fn apply_repo_tree_reload(
                 .retain(|path| repo_tree_has_directory(&this.repo_tree_nodes, path.as_str()));
             if let Some(path) = this.selected_path.clone()
                 && this.sidebar_tree_mode == SidebarTreeMode::Files
-                && this.right_pane_mode == RightPaneMode::FilePreview
+                && this.right_pane_mode == RightPaneMode::FileEditor
                 && !repo_tree_contains_path(&this.repo_tree_nodes, path.as_str())
             {
                 this.right_pane_mode = RightPaneMode::Diff;
-                this.file_preview_path = None;
-                this.file_preview_document = None;
-                this.file_preview_error = None;
-                this.file_preview_loading = false;
-                this.file_preview_list_state.reset(0);
+                this.clear_editor_state(cx);
             }
         }
         Err(err) => {

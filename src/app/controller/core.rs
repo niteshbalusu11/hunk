@@ -141,6 +141,13 @@ impl DiffViewer {
         });
         let commit_input_state = cx
             .new(|cx| InputState::new(window, cx).multi_line(true).rows(4).placeholder("Commit message"));
+        let editor_input_state = cx.new(|cx| {
+            InputState::new(window, cx)
+                .code_editor("text")
+                .line_number(false)
+                .soft_wrap(false)
+                .placeholder("Select a file from Files tree to edit it.")
+        });
 
         let mut view = Self {
             config_store,
@@ -219,14 +226,24 @@ impl DiffViewer {
             repo_tree_loading: false,
             repo_tree_error: None,
             right_pane_mode: RightPaneMode::Diff,
-            file_preview_path: None,
-            file_preview_document: None,
-            file_preview_loading: false,
-            file_preview_error: None,
-            file_preview_epoch: 0,
-            file_preview_task: Task::ready(()),
-            file_preview_list_state: ListState::new(0, ListAlignment::Top, px(22.0)),
+            editor_input_state,
+            editor_path: None,
+            editor_loading: false,
+            editor_error: None,
+            editor_dirty: false,
+            editor_last_saved_text: None,
+            editor_epoch: 0,
+            editor_task: Task::ready(()),
+            editor_save_loading: false,
+            editor_save_epoch: 0,
+            editor_save_task: Task::ready(()),
         };
+
+        let editor_state = view.editor_input_state.clone();
+        cx.observe(&editor_state, |this, _, cx| {
+            this.sync_editor_dirty_from_input(cx);
+        })
+        .detach();
 
         view.apply_theme_preference(window, cx);
         cx.observe_window_appearance(window, |this, window, cx| {
@@ -438,11 +455,7 @@ impl DiffViewer {
             self.repo_tree_expanded_dirs.clear();
             self.repo_tree_error = None;
             self.right_pane_mode = RightPaneMode::Diff;
-            self.file_preview_path = None;
-            self.file_preview_document = None;
-            self.file_preview_loading = false;
-            self.file_preview_error = None;
-            self.file_preview_list_state.reset(0);
+            self.clear_editor_state(cx);
         }
         self.collapsed_files
             .retain(|path| self.files.iter().any(|file| file.path == *path));
@@ -521,11 +534,7 @@ impl DiffViewer {
         self.repo_tree_loading = false;
         self.repo_tree_error = None;
         self.right_pane_mode = RightPaneMode::Diff;
-        self.file_preview_path = None;
-        self.file_preview_document = None;
-        self.file_preview_loading = false;
-        self.file_preview_error = None;
-        self.file_preview_list_state.reset(0);
+        self.clear_editor_state(cx);
         self.rebuild_tree(cx);
         cx.notify();
     }
