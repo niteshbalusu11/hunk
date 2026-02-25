@@ -87,10 +87,61 @@ fn syntax_for_path<'a>(
     syntax_set: &'a SyntaxSet,
     file_path: Option<&str>,
 ) -> Option<&'a SyntaxReference> {
-    let extension = Path::new(file_path?).extension()?.to_str()?;
-    syntax_set
-        .find_syntax_by_extension(extension)
-        .or_else(|| syntax_set.find_syntax_by_extension(&extension.to_ascii_lowercase()))
+    let path = Path::new(file_path?);
+    let file_name = path.file_name()?.to_str()?;
+    if let Some(tokens) = special_file_tokens(file_name)
+        && let Some(syntax) = find_first_syntax_by_tokens(syntax_set, tokens)
+    {
+        return Some(syntax);
+    }
+
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    if let Some(tokens) = language_tokens_for_extension(&extension)
+        && let Some(syntax) = find_first_syntax_by_tokens(syntax_set, tokens)
+    {
+        return Some(syntax);
+    }
+
+    syntax_set.find_syntax_by_extension(&extension)
+}
+
+fn find_first_syntax_by_tokens<'a>(
+    syntax_set: &'a SyntaxSet,
+    tokens: &[&str],
+) -> Option<&'a SyntaxReference> {
+    tokens
+        .iter()
+        .find_map(|token| syntax_set.find_syntax_by_token(token))
+}
+
+fn special_file_tokens(file_name: &str) -> Option<&'static [&'static str]> {
+    if file_name.eq_ignore_ascii_case("dockerfile") {
+        return Some(&["dockerfile", "docker", "sh"]);
+    }
+    None
+}
+
+fn language_tokens_for_extension(extension: &str) -> Option<&'static [&'static str]> {
+    match extension {
+        // JavaScript / TypeScript
+        "js" | "jsx" | "mjs" | "cjs" => Some(&["js", "javascript"]),
+        "ts" | "tsx" => Some(&["ts", "typescript", "js"]),
+        // Systems languages
+        "go" => Some(&["go"]),
+        "rs" => Some(&["rs", "rust"]),
+        "swift" => Some(&["swift"]),
+        "kt" | "kts" => Some(&["kotlin", "java"]),
+        "java" => Some(&["java"]),
+        // C / C++
+        "c" | "h" => Some(&["c", "cpp"]),
+        "cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx" => Some(&["cpp", "c++", "c"]),
+        // Scripting and config
+        "py" | "pyi" => Some(&["py", "python"]),
+        "json" | "jsonc" => Some(&["json", "js"]),
+        "yml" | "yaml" => Some(&["yaml", "yml"]),
+        "toml" => Some(&["toml"]),
+        _ => None,
+    }
 }
 
 fn syntax_token_from_scope_stack(scope_stack: &ScopeStack) -> SyntaxTokenKind {
@@ -412,5 +463,48 @@ mod tests {
                 SyntaxTokenKind::Keyword | SyntaxTokenKind::TypeName
             )
         }));
+    }
+
+    #[test]
+    fn resolves_supported_languages() {
+        let syntax_set = syntax_set();
+        let required_paths = [
+            "file.js",
+            "file.ts",
+            "file.go",
+            "file.rs",
+            "file.py",
+            "Main.java",
+            "file.c",
+            "file.cpp",
+            "Dockerfile",
+            "config.yaml",
+            "file.json",
+        ];
+
+        for path in required_paths {
+            assert!(
+                syntax_for_path(syntax_set, Some(path)).is_some(),
+                "expected syntax for {path}"
+            );
+        }
+
+        // Depending on the syntect bundle version, some grammars may be absent.
+        let optional_paths = ["file.swift", "file.kt", "file.tsx", "Cargo.toml"];
+        for path in optional_paths {
+            let _ = syntax_for_path(syntax_set, Some(path));
+        }
+    }
+
+    #[test]
+    fn resolves_json_as_json_family() {
+        let syntax_set = syntax_set();
+        let syntax = syntax_for_path(syntax_set, Some("payload.json")).expect("json syntax");
+        let syntax_name = syntax.name.to_ascii_lowercase();
+        assert!(
+            syntax_name.contains("json") || syntax_name.contains("javascript"),
+            "unexpected json syntax mapping: {}",
+            syntax.name
+        );
     }
 }
