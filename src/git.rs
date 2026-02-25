@@ -1,7 +1,11 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
-use git2::{Diff, DiffFormat, DiffOptions, Repository, Status, StatusOptions};
+use anyhow::{Context, Result, anyhow};
+use git2::{
+    BranchType, Cred, CredentialType, Diff, DiffFormat, DiffOptions, Error, IndexAddOption,
+    PushOptions, Reference, Repository, Signature, Status, StatusOptions, build::CheckoutBuilder,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileStatus {
@@ -34,14 +38,32 @@ impl FileStatus {
 pub struct ChangedFile {
     pub path: String,
     pub status: FileStatus,
+    pub staged: bool,
+    pub untracked: bool,
+}
+
+impl ChangedFile {
+    pub fn is_tracked(&self) -> bool {
+        !self.untracked
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalBranch {
+    pub name: String,
+    pub is_current: bool,
+    pub tip_unix_time: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
 pub struct RepoSnapshot {
     pub root: PathBuf,
     pub branch_name: String,
+    pub branch_has_upstream: bool,
+    pub branches: Vec<LocalBranch>,
     pub files: Vec<ChangedFile>,
     pub line_stats: LineStats,
+    pub last_commit_subject: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -73,34 +95,55 @@ pub fn load_snapshot(cwd: &Path) -> Result<RepoSnapshot> {
         .statuses(Some(&mut options))
         .context("failed to load repository status")?;
 
-    let mut files = statuses
-        .iter()
-        .filter_map(|entry| {
-            entry.path().map(|path| ChangedFile {
-                path: normalize_path(path),
-                status: map_status(entry.status()),
+    let mut file_map = BTreeMap::<String, ChangedFile>::new();
+
+    for entry in statuses.iter() {
+        let Some(path) = entry.path() else {
+            continue;
+        };
+
+        let normalized = normalize_path(path);
+        if normalized.is_empty() {
+            continue;
+        }
+
+        let status_bits = entry.status();
+        let incoming = ChangedFile {
+            path: normalized.clone(),
+            status: map_status(status_bits),
+            staged: is_staged(status_bits),
+            untracked: status_bits.is_wt_new() && !status_bits.is_index_new(),
+        };
+
+        file_map
+            .entry(normalized)
+            .and_modify(|existing| {
+                existing.staged |= incoming.staged;
+                existing.untracked &= incoming.untracked;
+                existing.status = merge_file_status(existing.status, incoming.status);
             })
-        })
-        .filter(|file| !file.path.is_empty())
-        .collect::<Vec<_>>();
+            .or_insert(incoming);
+    }
 
-    files.sort_by(|a, b| a.path.cmp(&b.path));
-    files.dedup_by(|a, b| a.path == b.path);
-
+    let files = file_map.into_values().collect::<Vec<_>>();
     let line_stats = repo_line_stats(&repo)?;
+    let branches = list_local_branches(&repo, &branch_name)?;
+    let branch_has_upstream = current_branch_has_upstream(&repo, &branch_name);
+    let last_commit_subject = last_commit_subject(&repo);
 
     Ok(RepoSnapshot {
         root,
         branch_name,
+        branch_has_upstream,
+        branches,
         files,
         line_stats,
+        last_commit_subject,
     })
 }
 
 pub fn load_patch(repo_root: &Path, file_path: &str, _: FileStatus) -> Result<String> {
-    let repo = Repository::open(repo_root)
-        .or_else(|_| Repository::discover(repo_root))
-        .context("failed to open git repository")?;
+    let repo = open_repo(repo_root)?;
 
     if let Some(head_tree) = repo.head().ok().and_then(|head| head.peel_to_tree().ok()) {
         let mut options = diff_options(file_path);
@@ -126,6 +169,336 @@ pub fn load_patch(repo_root: &Path, file_path: &str, _: FileStatus) -> Result<St
     }
 
     Ok(patch)
+}
+
+pub fn stage_file(repo_root: &Path, file_path: &str) -> Result<()> {
+    let repo = open_repo(repo_root)?;
+    let mut index = repo.index().context("failed to read index")?;
+    let status = repo
+        .status_file(Path::new(file_path))
+        .unwrap_or(Status::WT_NEW);
+
+    if status.is_wt_deleted() {
+        index
+            .remove_path(Path::new(file_path))
+            .with_context(|| format!("failed to stage deletion for {file_path}"))?;
+    } else {
+        index
+            .add_path(Path::new(file_path))
+            .with_context(|| format!("failed to stage {file_path}"))?;
+    }
+
+    index.write().context("failed to write index")
+}
+
+pub fn unstage_file(repo_root: &Path, file_path: &str) -> Result<()> {
+    let repo = open_repo(repo_root)?;
+    let target = repo
+        .head()
+        .ok()
+        .and_then(|head| head.peel_to_commit().ok())
+        .map(|commit| commit.into_object());
+
+    if let Some(target) = target.as_ref() {
+        repo.reset_default(Some(target), [file_path])
+            .with_context(|| format!("failed to unstage {file_path}"))?;
+        return Ok(());
+    }
+
+    let mut index = repo.index().context("failed to read index")?;
+    if index.get_path(Path::new(file_path), 0).is_some() {
+        index
+            .remove_path(Path::new(file_path))
+            .with_context(|| format!("failed to unstage {file_path}"))?;
+        index.write().context("failed to write index")?;
+    }
+    Ok(())
+}
+
+pub fn stage_all(repo_root: &Path) -> Result<()> {
+    let repo = open_repo(repo_root)?;
+    let mut index = repo.index().context("failed to read index")?;
+
+    index
+        .add_all(["*"], IndexAddOption::DEFAULT, None)
+        .context("failed to add files to index")?;
+    index
+        .update_all(["*"], None)
+        .context("failed to refresh tracked files in index")?;
+    index.write().context("failed to write index")
+}
+
+pub fn unstage_all(repo_root: &Path) -> Result<()> {
+    let repo = open_repo(repo_root)?;
+
+    if let Some(target) = repo
+        .head()
+        .ok()
+        .and_then(|head| head.peel_to_commit().ok())
+        .map(|commit| commit.into_object())
+    {
+        repo.reset_default(Some(&target), ["*"])
+            .context("failed to unstage all files")?;
+        return Ok(());
+    }
+
+    let mut index = repo.index().context("failed to read index")?;
+    index.clear().context("failed to clear index")?;
+    index.write().context("failed to write index")
+}
+
+pub fn commit_staged(repo_root: &Path, message: &str) -> Result<()> {
+    let trimmed = message.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow!("commit message cannot be empty"));
+    }
+
+    let repo = open_repo(repo_root)?;
+    let mut index = repo.index().context("failed to read index")?;
+    if index.is_empty() {
+        return Err(anyhow!("no staged changes to commit"));
+    }
+
+    let tree_oid = index
+        .write_tree()
+        .context("failed to write tree from index")?;
+    let tree = repo
+        .find_tree(tree_oid)
+        .context("failed to find staged tree")?;
+
+    let parent_commit = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
+    if let Some(parent) = parent_commit.as_ref()
+        && parent.tree_id() == tree_oid
+    {
+        return Err(anyhow!("no staged changes to commit"));
+    }
+
+    let signature = default_signature(&repo)?;
+    let parents = parent_commit.iter().collect::<Vec<_>>();
+    repo.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        trimmed,
+        &tree,
+        parents.as_slice(),
+    )
+    .context("failed to create commit")?;
+
+    index.write().context("failed to write index")?;
+    Ok(())
+}
+
+pub fn checkout_or_create_branch(repo_root: &Path, branch_name: &str) -> Result<()> {
+    let branch_name = branch_name.trim();
+    if branch_name.is_empty() {
+        return Err(anyhow!("branch name cannot be empty"));
+    }
+
+    if !is_valid_branch_name(branch_name) {
+        return Err(anyhow!("invalid branch name: {branch_name}"));
+    }
+
+    let repo = open_repo(repo_root)?;
+    let refname = format!("refs/heads/{branch_name}");
+
+    if repo.find_branch(branch_name, BranchType::Local).is_err()
+        && let Some(commit) = repo.head().ok().and_then(|head| head.peel_to_commit().ok())
+    {
+        repo.branch(branch_name, &commit, false)
+            .with_context(|| format!("failed to create branch {branch_name}"))?;
+    }
+
+    repo.set_head(&refname)
+        .with_context(|| format!("failed to set HEAD to {branch_name}"))?;
+
+    if repo.head().ok().and_then(|head| head.target()).is_some() {
+        let mut checkout = CheckoutBuilder::new();
+        checkout.safe();
+        repo.checkout_head(Some(&mut checkout))
+            .with_context(|| format!("failed to checkout {branch_name}"))?;
+    }
+
+    Ok(())
+}
+
+pub fn push_current_branch(repo_root: &Path, branch_name: &str, has_upstream: bool) -> Result<()> {
+    let repo = open_repo(repo_root)?;
+    let branch_ref = format!("refs/heads/{branch_name}");
+
+    let remote_name = if has_upstream {
+        repo.branch_upstream_remote(&branch_ref)
+            .ok()
+            .and_then(|buf| buf.as_str().map(|name| name.to_string()))
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| anyhow!("failed to resolve upstream remote for {branch_name}"))?
+    } else {
+        preferred_remote_name(&repo)?
+    };
+
+    let config = repo.config().ok();
+    let mut callbacks = git2::RemoteCallbacks::new();
+    callbacks.credentials(move |url, username_from_url, allowed| {
+        if allowed.contains(CredentialType::SSH_KEY) {
+            let username = username_from_url.unwrap_or("git");
+            if let Ok(cred) = Cred::ssh_key_from_agent(username) {
+                return Ok(cred);
+            }
+        }
+
+        if allowed.contains(CredentialType::USER_PASS_PLAINTEXT)
+            && let Some(config) = config.as_ref()
+            && let Ok(cred) = Cred::credential_helper(config, url, username_from_url)
+        {
+            return Ok(cred);
+        }
+
+        if allowed.contains(CredentialType::USERNAME) {
+            return Cred::username(username_from_url.unwrap_or("git"));
+        }
+
+        if allowed.contains(CredentialType::DEFAULT) {
+            return Cred::default();
+        }
+
+        Err(Error::from_str("no authentication method available"))
+    });
+    callbacks.push_update_reference(|reference, status| {
+        if let Some(status) = status {
+            Err(Error::from_str(&format!(
+                "remote rejected {reference}: {status}"
+            )))
+        } else {
+            Ok(())
+        }
+    });
+
+    let mut push_options = PushOptions::new();
+    push_options.remote_callbacks(callbacks);
+
+    let refspec = format!("+refs/heads/{branch_name}:refs/heads/{branch_name}");
+    let mut remote = repo
+        .find_remote(&remote_name)
+        .with_context(|| format!("failed to find remote {remote_name}"))?;
+    remote
+        .push(&[refspec], Some(&mut push_options))
+        .with_context(|| format!("failed to push branch {branch_name} to {remote_name}"))?;
+
+    if !has_upstream {
+        let mut branch = repo
+            .find_branch(branch_name, BranchType::Local)
+            .with_context(|| format!("failed to resolve local branch {branch_name}"))?;
+        branch
+            .set_upstream(Some(&format!("{remote_name}/{branch_name}")))
+            .with_context(|| format!("failed to set upstream for {branch_name}"))?;
+    }
+
+    Ok(())
+}
+
+pub fn sanitize_branch_name(input: &str) -> String {
+    let lowered = input.trim().to_lowercase();
+
+    let mut normalized = String::with_capacity(lowered.len());
+    let mut last_dash = false;
+    for ch in lowered.chars() {
+        let mapped = match ch {
+            'a'..='z' | '0'..='9' | '/' | '.' | '_' | '-' => ch,
+            c if c.is_whitespace() => '-',
+            _ => '-',
+        };
+
+        if mapped == '-' {
+            if last_dash {
+                continue;
+            }
+            last_dash = true;
+        } else {
+            last_dash = false;
+        }
+
+        normalized.push(mapped);
+    }
+
+    let mut segments = Vec::new();
+    for segment in normalized.split('/') {
+        let mut clean = segment
+            .trim_matches(|c: char| c == '-' || c == '.')
+            .replace("@{", "-")
+            .replace(['~', '^', ':', '?', '*', '[', '\\'], "-");
+
+        while clean.contains("--") {
+            clean = clean.replace("--", "-");
+        }
+
+        while clean.contains("..") {
+            clean = clean.replace("..", ".");
+        }
+
+        if clean.ends_with(".lock") {
+            clean = clean
+                .trim_end_matches(".lock")
+                .trim_end_matches('.')
+                .to_string();
+        }
+
+        if !clean.is_empty() {
+            segments.push(clean);
+        }
+    }
+
+    let mut candidate = if segments.is_empty() {
+        "branch".to_string()
+    } else {
+        segments.join("/")
+    };
+
+    if candidate.eq_ignore_ascii_case("head") {
+        candidate = "head-branch".to_string();
+    }
+
+    candidate = candidate.trim_matches('/').to_string();
+
+    if !is_valid_branch_name(&candidate) {
+        candidate = candidate
+            .chars()
+            .map(|ch| match ch {
+                'a'..='z' | '0'..='9' | '-' | '_' | '.' | '/' => ch,
+                _ => '-',
+            })
+            .collect::<String>();
+
+        candidate = candidate
+            .split('/')
+            .filter_map(|segment| {
+                let segment = segment.trim_matches(|c: char| c == '-' || c == '.');
+                if segment.is_empty() {
+                    None
+                } else {
+                    Some(segment.to_string())
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("/");
+    }
+
+    if candidate.is_empty() {
+        candidate = "branch".to_string();
+    }
+
+    if !is_valid_branch_name(&candidate) {
+        "branch-new".to_string()
+    } else {
+        candidate
+    }
+}
+
+pub fn is_valid_branch_name(name: &str) -> bool {
+    if name.trim().is_empty() {
+        return false;
+    }
+
+    Reference::is_valid_name(format!("refs/heads/{name}").as_str())
 }
 
 fn repo_root(repo: &Repository) -> Result<PathBuf> {
@@ -169,6 +542,35 @@ fn map_status(status: Status) -> FileStatus {
     }
 
     FileStatus::Unknown
+}
+
+fn merge_file_status(existing: FileStatus, incoming: FileStatus) -> FileStatus {
+    let priority = |status: FileStatus| -> u8 {
+        match status {
+            FileStatus::Conflicted => 7,
+            FileStatus::Deleted => 6,
+            FileStatus::Renamed => 5,
+            FileStatus::TypeChange => 4,
+            FileStatus::Added => 3,
+            FileStatus::Untracked => 2,
+            FileStatus::Modified => 1,
+            FileStatus::Unknown => 0,
+        }
+    };
+
+    if priority(incoming) >= priority(existing) {
+        incoming
+    } else {
+        existing
+    }
+}
+
+fn is_staged(status: Status) -> bool {
+    status.is_index_new()
+        || status.is_index_modified()
+        || status.is_index_deleted()
+        || status.is_index_renamed()
+        || status.is_index_typechange()
 }
 
 fn normalize_path(path: &str) -> String {
@@ -224,6 +626,66 @@ fn current_branch_name(repo: &Repository) -> String {
     }
 }
 
+fn current_branch_has_upstream(repo: &Repository, branch_name: &str) -> bool {
+    if branch_name.is_empty() || branch_name == "unknown" || branch_name.starts_with("detached") {
+        return false;
+    }
+
+    repo.find_branch(branch_name, BranchType::Local)
+        .ok()
+        .and_then(|branch| branch.upstream().ok())
+        .is_some()
+}
+
+fn list_local_branches(repo: &Repository, current_branch_name: &str) -> Result<Vec<LocalBranch>> {
+    let mut branches = Vec::new();
+
+    for branch_result in repo
+        .branches(Some(BranchType::Local))
+        .context("failed to read local branches")?
+    {
+        let (branch, _) = branch_result.context("failed to read branch entry")?;
+        let Some(name) = branch
+            .name()
+            .context("failed to read branch name")?
+            .map(|name| name.to_string())
+        else {
+            continue;
+        };
+
+        let tip_unix_time = branch
+            .get()
+            .target()
+            .and_then(|oid| repo.find_commit(oid).ok())
+            .map(|commit| commit.time().seconds());
+
+        branches.push(LocalBranch {
+            is_current: name == current_branch_name,
+            name,
+            tip_unix_time,
+        });
+    }
+
+    branches.sort_by(|a, b| {
+        b.is_current
+            .cmp(&a.is_current)
+            .then_with(|| b.tip_unix_time.cmp(&a.tip_unix_time))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+
+    Ok(branches)
+}
+
+fn last_commit_subject(repo: &Repository) -> Option<String> {
+    let commit = repo.head().ok()?.peel_to_commit().ok()?;
+    let subject = commit.summary()?.trim();
+    if subject.is_empty() {
+        None
+    } else {
+        Some(subject.to_string())
+    }
+}
+
 fn repo_line_stats(repo: &Repository) -> Result<LineStats> {
     if let Some(head_tree) = repo.head().ok().and_then(|head| head.peel_to_tree().ok()) {
         let mut options = DiffOptions::new();
@@ -268,4 +730,32 @@ fn apply_common_diff_options(options: &mut DiffOptions) {
         .include_untracked(true)
         .recurse_untracked_dirs(true)
         .show_untracked_content(true);
+}
+
+fn preferred_remote_name(repo: &Repository) -> Result<String> {
+    let remotes = repo.remotes().context("failed to list remotes")?;
+
+    if remotes.iter().flatten().any(|remote| remote == "origin") {
+        return Ok("origin".to_string());
+    }
+
+    remotes
+        .iter()
+        .flatten()
+        .next()
+        .map(|remote| remote.to_string())
+        .ok_or_else(|| anyhow!("no git remotes configured"))
+}
+
+fn open_repo(repo_root: &Path) -> Result<Repository> {
+    Repository::open(repo_root)
+        .or_else(|_| Repository::discover(repo_root))
+        .context("failed to open git repository")
+}
+
+fn default_signature(repo: &Repository) -> Result<Signature<'static>> {
+    repo.signature().or_else(|_| {
+        Signature::now("hunk", "hunk@local")
+            .context("missing git user.name/user.email and failed to construct fallback signature")
+    })
 }

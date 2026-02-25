@@ -71,13 +71,28 @@ impl DiffViewer {
         let diff_show_whitespace = config.show_whitespace;
         let diff_show_eol_markers = config.show_eol_markers;
         let tree_state = cx.new(|cx| TreeState::new(cx));
+        let branch_input_state = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("Select or create branch")
+        });
+        let commit_input_state = cx
+            .new(|cx| InputState::new(window, cx).multi_line(true).rows(4).placeholder("Commit message"));
 
         let mut view = Self {
             config_store,
             config,
             repo_root: None,
             branch_name: "unknown".to_string(),
+            branch_has_upstream: false,
+            branches: Vec::new(),
             files: Vec::new(),
+            branch_picker_open: false,
+            branch_input_state,
+            commit_input_state,
+            last_commit_subject: None,
+            git_action_epoch: 0,
+            git_action_task: Task::ready(()),
+            git_action_loading: false,
+            git_status_message: None,
             collapsed_files: BTreeSet::new(),
             selected_path: None,
             selected_status: None,
@@ -206,8 +221,11 @@ impl DiffViewer {
 
         self.repo_root = Some(snapshot.root);
         self.branch_name = snapshot.branch_name;
+        self.branch_has_upstream = snapshot.branch_has_upstream;
+        self.branches = snapshot.branches;
         self.files = snapshot.files;
         self.overall_line_stats = snapshot.line_stats;
+        self.last_commit_subject = snapshot.last_commit_subject;
         self.error_message = None;
         self.collapsed_files
             .retain(|path| self.files.iter().any(|file| file.path == *path));
@@ -246,7 +264,10 @@ impl DiffViewer {
     fn apply_snapshot_error(&mut self, err: anyhow::Error, cx: &mut Context<Self>) {
         self.repo_root = None;
         self.branch_name = "unknown".to_string();
+        self.branch_has_upstream = false;
+        self.branches.clear();
         self.files.clear();
+        self.last_commit_subject = None;
         self.selected_path = None;
         self.selected_status = None;
         self.overall_line_stats = LineStats::default();

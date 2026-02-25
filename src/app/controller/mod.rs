@@ -6,9 +6,13 @@ use super::data::{
     load_diff_stream, message_row,
 };
 use super::*;
-use hunk::git::{RepoSnapshot, load_snapshot};
+use hunk::git::{
+    RepoSnapshot, checkout_or_create_branch, commit_staged, load_snapshot, push_current_branch,
+    sanitize_branch_name, stage_all, stage_file, unstage_all, unstage_file,
+};
 
 include!("core.rs");
+include!("git_ops.rs");
 include!("selection.rs");
 include!("scroll.rs");
 include!("fps.rs");

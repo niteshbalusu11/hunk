@@ -14,17 +14,17 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme as _, Colorize as _, Root, StyledExt as _, Theme, ThemeMode, h_flex,
-    list::ListItem,
+    input::InputState,
     resizable::{h_resizable, resizable_panel},
     scroll::ScrollableElement,
-    tree::{TreeItem, TreeState, tree},
+    tree::{TreeItem, TreeState},
     v_flex,
 };
 use tracing::error;
 
 use hunk::config::{AppConfig, ConfigStore, DiffViewMode, ThemePreference};
 use hunk::diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
-use hunk::git::{ChangedFile, FileStatus, LineStats};
+use hunk::git::{ChangedFile, FileStatus, LineStats, LocalBranch};
 
 use data::{DiffStreamRowMeta, FileRowRange};
 
@@ -128,7 +128,17 @@ struct DiffViewer {
     config: AppConfig,
     repo_root: Option<PathBuf>,
     branch_name: String,
+    branch_has_upstream: bool,
+    branches: Vec<LocalBranch>,
     files: Vec<ChangedFile>,
+    branch_picker_open: bool,
+    branch_input_state: Entity<InputState>,
+    commit_input_state: Entity<InputState>,
+    last_commit_subject: Option<String>,
+    git_action_epoch: usize,
+    git_action_task: Task<()>,
+    git_action_loading: bool,
+    git_status_message: Option<String>,
     collapsed_files: BTreeSet<String>,
     selected_path: Option<String>,
     selected_status: Option<FileStatus>,
