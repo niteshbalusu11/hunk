@@ -219,28 +219,29 @@ impl DiffViewer {
         }
 
         let (old_label, new_label) = self.diff_column_labels();
-        let diff_scroll_handle = self.diff_scroll_handle.clone();
-        let list = uniform_list("diff-rows", self.diff_rows.len(), {
-            cx.processor(move |this, visible_range: Range<usize>, _window, cx| {
-                if visible_range.start < visible_range.end {
-                    this.sync_selected_file_from_visible_row(visible_range.start, cx);
-                }
+        let _pan_width_hints = (
+            self.diff_pan_content_width,
+            self.diff_left_column_width,
+            self.diff_right_column_width,
+        );
+        let diff_list_state = self.diff_list_state.clone();
+        let visible_row = diff_list_state.logical_scroll_top().item_ix;
+        if visible_row < self.diff_rows.len() {
+            self.sync_selected_file_from_visible_row(visible_row, cx);
+        }
 
-                let mut items = Vec::with_capacity(visible_range.len());
-                for ix in visible_range {
-                    let Some(row) = this.diff_rows.get(ix) else {
-                        continue;
-                    };
+        let list = list(diff_list_state.clone(), {
+            cx.processor(move |this, ix: usize, _window, cx| {
+                let Some(row) = this.diff_rows.get(ix) else {
+                    return div().into_any_element();
+                };
 
-                    let row_element = match row.kind {
-                        DiffRowKind::Code => this.render_code_row(ix, row, cx),
-                        DiffRowKind::HunkHeader | DiffRowKind::Meta | DiffRowKind::Empty => {
-                            this.render_meta_row(ix, row, cx)
-                        }
-                    };
-                    items.push(row_element);
+                match row.kind {
+                    DiffRowKind::Code => this.render_code_row(ix, row, cx),
+                    DiffRowKind::HunkHeader | DiffRowKind::Meta | DiffRowKind::Empty => {
+                        this.render_meta_row(ix, row, cx)
+                    }
                 }
-                items
             })
         })
         .flex_grow()
@@ -249,8 +250,6 @@ impl DiffViewer {
             this.style().restrict_scroll_to_axis = Some(true);
             this
         })
-        .on_scroll_wheel(cx.listener(Self::on_diff_list_scroll_wheel))
-        .track_scroll(diff_scroll_handle.clone())
         .with_sizing_behavior(ListSizingBehavior::Auto);
 
         let scrollbar_size = px(DIFF_SCROLLBAR_SIZE);
@@ -298,7 +297,9 @@ impl DiffViewer {
                                 .child(
                                     div()
                                         .size_full()
-                                        .on_scroll_wheel(cx.listener(Self::on_diff_scroll_wheel))
+                                        .on_scroll_wheel(
+                                            cx.listener(Self::on_diff_list_scroll_wheel),
+                                        )
                                         .child(list),
                                 )
                                 .child(
@@ -309,7 +310,7 @@ impl DiffViewer {
                                         .bottom(vertical_bar_bottom)
                                         .w(scrollbar_size)
                                         .child(
-                                            Scrollbar::vertical(&diff_scroll_handle)
+                                            Scrollbar::vertical(&diff_list_state)
                                                 .scrollbar_show(ScrollbarShow::Always),
                                         ),
                                 ),
@@ -347,17 +348,16 @@ impl DiffViewer {
                                     .child(
                                         v_flex()
                                             .h_full()
-                                            .min_w(px(self.diff_pan_content_width))
+                                            .w_full()
                                             .child(
                                                 h_flex()
-                                                    .w(px(self.diff_pan_content_width))
-                                                    .min_w(px(self.diff_pan_content_width))
+                                                    .w_full()
                                                     .border_b_1()
                                                     .border_color(cx.theme().border)
                                                     .child(
                                                         div()
-                                                            .w(px(self.diff_left_column_width))
-                                                            .min_w(px(self.diff_left_column_width))
+                                                            .flex_1()
+                                                            .min_w_0()
                                                             .px_2()
                                                             .py_1()
                                                             .text_xs()
@@ -366,8 +366,8 @@ impl DiffViewer {
                                                     )
                                                     .child(
                                                         div()
-                                                            .w(px(self.diff_right_column_width))
-                                                            .min_w(px(self.diff_right_column_width))
+                                                            .flex_1()
+                                                            .min_w_0()
                                                             .px_2()
                                                             .py_1()
                                                             .text_xs()
@@ -380,7 +380,9 @@ impl DiffViewer {
                                                     .flex_1()
                                                     .min_h_0()
                                                     .on_scroll_wheel(
-                                                        cx.listener(Self::on_diff_scroll_wheel),
+                                                        cx.listener(
+                                                            Self::on_diff_list_scroll_wheel,
+                                                        ),
                                                     )
                                                     .child(list),
                                             ),
@@ -395,7 +397,7 @@ impl DiffViewer {
                                 .bottom(vertical_bar_bottom)
                                 .w(scrollbar_size)
                                 .child(
-                                    Scrollbar::vertical(&diff_scroll_handle)
+                                    Scrollbar::vertical(&diff_list_state)
                                         .scrollbar_show(ScrollbarShow::Always),
                                 ),
                         ),
@@ -489,12 +491,8 @@ impl DiffViewer {
             .text_color(foreground)
             .font_family(cx.theme().mono_font_family.clone())
             .when(self.diff_fit_to_width, |this| this.w_full())
-            .when(!self.diff_fit_to_width, |this| {
-                this.w(px(self.diff_pan_content_width))
-                    .min_w(px(self.diff_pan_content_width))
-            })
-            .when(self.diff_fit_to_width, |this| this.whitespace_normal())
-            .when(!self.diff_fit_to_width, |this| this.whitespace_nowrap())
+            .when(!self.diff_fit_to_width, |this| this.w_full())
+            .whitespace_normal()
             .child(row.text.clone())
             .child(
                 div()
@@ -520,10 +518,7 @@ impl DiffViewer {
             .border_b_1()
             .border_color(cx.theme().border)
             .when(self.diff_fit_to_width, |this| this.w_full())
-            .when(!self.diff_fit_to_width, |this| {
-                this.w(px(self.diff_pan_content_width))
-                    .min_w(px(self.diff_pan_content_width))
-            });
+            .when(!self.diff_fit_to_width, |this| this.w_full());
 
         if self.diff_fit_to_width {
             return row
@@ -715,8 +710,8 @@ impl DiffViewer {
             .items_start()
             .bg(background)
             .when(column_width.is_some(), |this| {
-                let width = column_width.unwrap_or_default();
-                this.w(px(width)).min_w(px(width))
+                let _ = column_width.unwrap_or_default();
+                this.flex_1().min_w_0()
             })
             .when(column_width.is_none(), |this| this.flex_1().min_w_0())
             .when(side == "left", |this| {
@@ -747,8 +742,7 @@ impl DiffViewer {
                     .text_sm()
                     .text_color(text_color)
                     .font_family(cx.theme().mono_font_family.clone())
-                    .when(self.diff_fit_to_width, |this| this.whitespace_normal())
-                    .when(!self.diff_fit_to_width, |this| this.whitespace_nowrap())
+                    .whitespace_normal()
                     .child(content),
             )
             .into_any_element()
@@ -934,9 +928,8 @@ impl DiffViewer {
 
 impl Render for DiffViewer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.clamp_diff_scroll_offset();
         self.clamp_diff_horizontal_scroll_offset();
-        let current_scroll_offset = self.diff_scroll_handle.0.borrow().base_handle.offset();
+        let current_scroll_offset = self.diff_list_state.scroll_px_offset_for_scrollbar();
         if self.last_diff_scroll_offset != Some(current_scroll_offset) {
             self.last_diff_scroll_offset = Some(current_scroll_offset);
             self.last_scroll_activity_at = Instant::now();

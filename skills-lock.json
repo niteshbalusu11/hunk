@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "skills": {
+    "gpui": {
+      "source": "AprilNEA/gpui-skills",
+      "sourceType": "github",
+      "computedHash": "7ba3b39697eaaf1f295a05d85fa2de3ace14c47967f6069ad8cefb964b0340bb"
+    },
+    "gpui-component": {
+      "source": "AprilNEA/gpui-skills",
+      "sourceType": "github",
+      "computedHash": "acf6afcdf0b2147b414cf53f2ccca53e345839a37923c595aeae045a943102c0"
+    }
+  }
+}

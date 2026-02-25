@@ -1,15 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result};
 use gpui::{
     AnyElement, AppContext as _, Application, Context, Entity, InteractiveElement as _,
-    IntoElement, IsZero as _, ListSizingBehavior, ParentElement as _, Render, ScrollHandle,
-    ScrollWheelEvent, SharedString, StatefulInteractiveElement as _, Styled as _, Task, Timer,
-    UniformListScrollHandle, Window, WindowOptions, div, point, prelude::FluentBuilder as _, px,
-    uniform_list,
+    IntoElement, IsZero as _, ListAlignment, ListOffset, ListSizingBehavior, ListState,
+    ParentElement as _, Render, ScrollHandle, ScrollWheelEvent, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Task, Timer, Window, WindowOptions, div, list,
+    point, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     ActiveTheme as _, Colorize as _, Root, StyledExt as _, Theme, ThemeMode, h_flex,
@@ -28,12 +27,11 @@ use hunk::git::{ChangedFile, FileStatus, LineStats, RepoSnapshot, load_patch, lo
 const AUTO_REFRESH_INTERVAL: Duration = Duration::from_millis(900);
 const FPS_SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
 const AUTO_REFRESH_SCROLL_DEBOUNCE: Duration = Duration::from_millis(500);
-const DIFF_MIN_CONTENT_WIDTH: f32 = 1700.0;
+const DIFF_MIN_CONTENT_WIDTH: f32 = 960.0;
 const DIFF_MIN_COLUMN_WIDTH: f32 = DIFF_MIN_CONTENT_WIDTH / 2.0;
 const DIFF_CELL_GUTTER_WIDTH: f32 = 80.0;
-const DIFF_META_ROW_PADDING: f32 = 16.0;
 const DIFF_MONO_CHAR_WIDTH: f32 = 8.0;
-const DIFF_PAN_WIDTH_SAFETY_MULTIPLIER: f32 = 1.35;
+const DIFF_PAN_COLUMN_PADDING: f32 = 28.0;
 const DIFF_BOTTOM_SAFE_INSET: f32 = 24.0;
 const DIFF_SCROLLBAR_RIGHT_INSET: f32 = 2.0;
 const DIFF_SCROLLBAR_SIZE: f32 = 16.0;
@@ -68,7 +66,7 @@ struct DiffViewer {
     diff_rows: Vec<SideBySideRow>,
     file_row_ranges: Vec<FileRowRange>,
     file_line_stats: BTreeMap<String, LineStats>,
-    diff_scroll_handle: UniformListScrollHandle,
+    diff_list_state: ListState,
     diff_horizontal_scroll_handle: ScrollHandle,
     diff_fit_to_width: bool,
     diff_left_column_width: f32,
@@ -111,7 +109,7 @@ impl DiffViewer {
             diff_rows: Vec::new(),
             file_row_ranges: Vec::new(),
             file_line_stats: BTreeMap::new(),
-            diff_scroll_handle: UniformListScrollHandle::new(),
+            diff_list_state: ListState::new(0, ListAlignment::Top, px(360.0)),
             diff_horizontal_scroll_handle: ScrollHandle::new(),
             diff_fit_to_width: false,
             diff_left_column_width: DIFF_MIN_COLUMN_WIDTH,
@@ -260,6 +258,7 @@ impl DiffViewer {
             DiffRowKind::Empty,
             "Open this app from a Git repository to load diffs.",
         )];
+        self.sync_diff_list_state();
         self.recompute_diff_pan_layout();
         self.error_message = Some(err.to_string());
         self.rebuild_tree(cx);
@@ -269,6 +268,7 @@ impl DiffViewer {
     fn request_selected_diff_reload(&mut self, cx: &mut Context<Self>) {
         let Some(repo_root) = self.repo_root.clone() else {
             self.diff_rows.clear();
+            self.sync_diff_list_state();
             self.file_row_ranges.clear();
             self.file_line_stats.clear();
             self.selected_line_stats = LineStats::default();
@@ -279,6 +279,7 @@ impl DiffViewer {
 
         if self.files.is_empty() {
             self.diff_rows = vec![message_row(DiffRowKind::Empty, "No changed files.")];
+            self.sync_diff_list_state();
             self.file_row_ranges.clear();
             self.file_line_stats.clear();
             self.selected_line_stats = LineStats::default();
@@ -308,6 +309,7 @@ impl DiffViewer {
                     match result {
                         Ok(stream) => {
                             this.diff_rows = stream.rows;
+                            this.sync_diff_list_state();
                             this.file_row_ranges = stream.file_ranges;
                             this.file_line_stats = stream.file_line_stats;
                             this.recompute_diff_pan_layout();
@@ -340,6 +342,7 @@ impl DiffViewer {
                                 DiffRowKind::Meta,
                                 format!("Failed to load diff stream: {err:#}"),
                             )];
+                            this.sync_diff_list_state();
                             this.file_row_ranges.clear();
                             this.file_line_stats.clear();
                             this.selected_line_stats = LineStats::default();
@@ -459,8 +462,10 @@ impl DiffViewer {
             return;
         };
 
-        self.diff_scroll_handle
-            .scroll_to_item_strict(start_row, gpui::ScrollStrategy::Top);
+        self.diff_list_state.scroll_to(ListOffset {
+            item_ix: start_row,
+            offset_in_item: px(0.),
+        });
         self.last_diff_scroll_offset = None;
         self.last_scroll_activity_at = Instant::now();
     }
@@ -488,19 +493,6 @@ impl DiffViewer {
         self.selected_status = Some(range.status);
         self.sync_selected_line_stats();
         cx.notify();
-    }
-
-    fn on_diff_scroll_wheel(
-        &mut self,
-        event: &ScrollWheelEvent,
-        window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) {
-        let delta = event.delta.pixel_delta(window.line_height());
-        if !delta.x.is_zero() && delta.x.abs() > delta.y.abs() {
-            return;
-        }
-        self.last_scroll_activity_at = Instant::now();
     }
 
     fn on_diff_horizontal_scroll_wheel(
@@ -603,7 +595,6 @@ impl DiffViewer {
     fn recompute_diff_pan_layout(&mut self) {
         let mut max_left_chars = 0usize;
         let mut max_right_chars = 0usize;
-        let mut max_meta_chars = 0usize;
 
         for row in &self.diff_rows {
             match row.kind {
@@ -611,50 +602,22 @@ impl DiffViewer {
                     max_left_chars = max_left_chars.max(display_width(&row.left.text));
                     max_right_chars = max_right_chars.max(display_width(&row.right.text));
                 }
-                DiffRowKind::HunkHeader | DiffRowKind::Meta | DiffRowKind::Empty => {
-                    max_meta_chars = max_meta_chars.max(display_width(&row.text));
-                }
+                DiffRowKind::HunkHeader | DiffRowKind::Meta | DiffRowKind::Empty => {}
             }
         }
 
-        let left_width = ((max_left_chars as f32 * DIFF_MONO_CHAR_WIDTH + DIFF_CELL_GUTTER_WIDTH)
-            * DIFF_PAN_WIDTH_SAFETY_MULTIPLIER)
+        let left_width = (max_left_chars as f32 * DIFF_MONO_CHAR_WIDTH
+            + DIFF_CELL_GUTTER_WIDTH
+            + DIFF_PAN_COLUMN_PADDING)
             .max(DIFF_MIN_COLUMN_WIDTH);
-        let right_width = ((max_right_chars as f32 * DIFF_MONO_CHAR_WIDTH
-            + DIFF_CELL_GUTTER_WIDTH)
-            * DIFF_PAN_WIDTH_SAFETY_MULTIPLIER)
+        let right_width = (max_right_chars as f32 * DIFF_MONO_CHAR_WIDTH
+            + DIFF_CELL_GUTTER_WIDTH
+            + DIFF_PAN_COLUMN_PADDING)
             .max(DIFF_MIN_COLUMN_WIDTH);
-        let meta_width = ((max_meta_chars as f32 * DIFF_MONO_CHAR_WIDTH + DIFF_META_ROW_PADDING)
-            * DIFF_PAN_WIDTH_SAFETY_MULTIPLIER)
-            .max(DIFF_MIN_CONTENT_WIDTH);
 
         self.diff_left_column_width = left_width;
         self.diff_right_column_width = right_width;
-        self.diff_pan_content_width = (left_width + right_width)
-            .max(meta_width)
-            .max(DIFF_MIN_CONTENT_WIDTH);
-    }
-
-    fn clamp_diff_scroll_offset(&mut self) {
-        let scroll_state = self.diff_scroll_handle.0.borrow();
-        let base_handle = &scroll_state.base_handle;
-        let offset = base_handle.offset();
-        let max_y = base_handle.max_offset().height;
-        drop(scroll_state);
-
-        let clamped_y = if max_y <= px(0.) {
-            px(0.)
-        } else {
-            offset.y.max(-max_y).min(px(0.))
-        };
-
-        if clamped_y != offset.y {
-            self.diff_scroll_handle
-                .0
-                .borrow()
-                .base_handle
-                .set_offset(point(offset.x, clamped_y));
-        }
+        self.diff_pan_content_width = (left_width + right_width).max(DIFF_MIN_CONTENT_WIDTH);
     }
 
     fn clamp_diff_horizontal_scroll_offset(&mut self) {
@@ -676,6 +639,22 @@ impl DiffViewer {
             self.diff_horizontal_scroll_handle
                 .set_offset(point(clamped_x, px(0.)));
         }
+    }
+
+    fn sync_diff_list_state(&self) {
+        let previous_top = self.diff_list_state.logical_scroll_top();
+        self.diff_list_state.reset(self.diff_rows.len());
+        let clamped_item_ix = if self.diff_rows.is_empty() {
+            0
+        } else {
+            previous_top
+                .item_ix
+                .min(self.diff_rows.len().saturating_sub(1))
+        };
+        self.diff_list_state.scroll_to(ListOffset {
+            item_ix: clamped_item_ix,
+            offset_in_item: px(0.),
+        });
     }
 
     fn start_fps_monitor(&mut self, cx: &mut Context<Self>) {
