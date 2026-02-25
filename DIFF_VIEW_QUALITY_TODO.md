@@ -58,7 +58,7 @@ Build a GPUI diff viewer that matches VS Code quality for:
 
 - [x] Add intra-line diff spans for modified pairs.
 - [x] Add syntax highlighting pipeline hooks.
-- [ ] Add whitespace/EOL visibility toggles.
+- [x] Add whitespace/EOL visibility toggles.
 
 ### Phase 5: Hardening
 
@@ -72,4 +72,4 @@ Build a GPUI diff viewer that matches VS Code quality for:
 - Phase 1 foundation complete.
 - Phase 2 initial pass complete (fixed-width pan columns + no-wrap line flow + sticky hunk header + gutter polish).
 - Phase 3 initial pass complete (line-range selection, copy, keyboard navigation).
-- Phase 4 initial pass complete (intra-line spans + Rust syntax hook pipeline).
+- Phase 4 complete (intra-line spans + multi-language syntect syntax pipeline + whitespace/EOL toggles).

@@ -183,6 +183,20 @@ impl DiffViewer {
         cx.notify();
     }
 
+    pub(super) fn toggle_diff_show_whitespace(&mut self, cx: &mut Context<Self>) {
+        self.diff_show_whitespace = !self.diff_show_whitespace;
+        self.config.show_whitespace = self.diff_show_whitespace;
+        self.persist_config();
+        cx.notify();
+    }
+
+    pub(super) fn toggle_diff_show_eol_markers(&mut self, cx: &mut Context<Self>) {
+        self.diff_show_eol_markers = !self.diff_show_eol_markers;
+        self.config.show_eol_markers = self.diff_show_eol_markers;
+        self.persist_config();
+        cx.notify();
+    }
+
     fn recompute_diff_pan_layout(&mut self) {
         let mut max_left_chars = 0usize;
         let mut max_right_chars = 0usize;

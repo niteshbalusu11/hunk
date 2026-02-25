@@ -763,6 +763,11 @@ impl DiffViewer {
                         this.flex_nowrap().whitespace_nowrap()
                     })
                     .children(styled_segments.into_iter().map(|segment| {
+                        let segment_text = if self.diff_show_whitespace {
+                            self.render_with_whitespace_markers(&segment.text)
+                        } else {
+                            segment.text
+                        };
                         let segment_color =
                             self.syntax_color_for_segment(text_color, segment.syntax, cx);
                         div()
@@ -772,8 +777,24 @@ impl DiffViewer {
                             .when(segment.changed, |this| {
                                 this.bg(marker_color.opacity(if is_dark { 0.16 } else { 0.12 }))
                             })
-                            .child(segment.text)
-                    })),
+                            .child(segment_text)
+                    }))
+                    .when(
+                        self.diff_show_eol_markers && cell.kind != DiffCellKind::None,
+                        |this| {
+                            this.child(
+                                div()
+                                    .flex_none()
+                                    .whitespace_nowrap()
+                                    .text_color(
+                                        cx.theme()
+                                            .muted_foreground
+                                            .opacity(if is_dark { 0.90 } else { 0.95 }),
+                                    )
+                                    .child("↵"),
+                            )
+                        },
+                    ),
             );
 
         if let Some(width) = column_width {
@@ -813,6 +834,18 @@ impl DiffViewer {
             SyntaxTokenKind::Variable => github(0xffa657, 0x953800),
             SyntaxTokenKind::Operator => github(0xff7b72, 0xcf222e),
         }
+    }
+
+    fn render_with_whitespace_markers(&self, text: &str) -> String {
+        let mut rendered = String::with_capacity(text.len());
+        for ch in text.chars() {
+            match ch {
+                ' ' => rendered.push('·'),
+                '\t' => rendered.push('⇥'),
+                _ => rendered.push(ch),
+            }
+        }
+        rendered
     }
 
     fn diff_row_stable_id(&self, row_ix: usize) -> u64 {

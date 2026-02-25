@@ -139,6 +139,8 @@ struct DiffViewer {
     diff_list_state: ListState,
     diff_horizontal_scroll_handle: ScrollHandle,
     diff_fit_to_width: bool,
+    diff_show_whitespace: bool,
+    diff_show_eol_markers: bool,
     diff_left_column_width: f32,
     diff_right_column_width: f32,
     diff_pan_content_width: f32,

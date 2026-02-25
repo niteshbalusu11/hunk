@@ -29,6 +29,8 @@ pub enum DiffViewMode {
 pub struct AppConfig {
     pub theme: ThemePreference,
     pub diff_view: DiffViewMode,
+    pub show_whitespace: bool,
+    pub show_eol_markers: bool,
 }
 
 #[derive(Debug, Clone)]

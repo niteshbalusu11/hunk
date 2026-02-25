@@ -68,6 +68,8 @@ impl DiffViewer {
     pub(super) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let (config_store, config) = Self::load_app_config();
         let diff_fit_to_width = matches!(config.diff_view, DiffViewMode::Fit);
+        let diff_show_whitespace = config.show_whitespace;
+        let diff_show_eol_markers = config.show_eol_markers;
         let tree_state = cx.new(|cx| TreeState::new(cx));
 
         let mut view = Self {
@@ -86,6 +88,8 @@ impl DiffViewer {
             diff_list_state: ListState::new(0, ListAlignment::Top, px(360.0)),
             diff_horizontal_scroll_handle: ScrollHandle::new(),
             diff_fit_to_width,
+            diff_show_whitespace,
+            diff_show_eol_markers,
             diff_left_column_width: DIFF_MIN_COLUMN_WIDTH,
             diff_right_column_width: DIFF_MIN_COLUMN_WIDTH,
             diff_pan_content_width: DIFF_MIN_CONTENT_WIDTH,
@@ -155,6 +159,7 @@ impl DiffViewer {
         self.snapshot_loading = true;
 
         self.snapshot_task = cx.spawn(async move |this, cx| {
+            let started_at = Instant::now();
             let result = match cwd_result {
                 Ok(cwd) => {
                     cx.background_executor()
@@ -171,9 +176,16 @@ impl DiffViewer {
                     }
 
                     this.snapshot_loading = false;
+                    let elapsed = started_at.elapsed();
                     match result {
-                        Ok(snapshot) => this.apply_snapshot(snapshot, cx),
-                        Err(err) => this.apply_snapshot_error(err, cx),
+                        Ok(snapshot) => {
+                            info!("snapshot refresh completed in {:?}", elapsed);
+                            this.apply_snapshot(snapshot, cx)
+                        }
+                        Err(err) => {
+                            error!("snapshot refresh failed after {:?}: {err:#}", elapsed);
+                            this.apply_snapshot_error(err, cx)
+                        }
                     }
                 })
                 .ok();
@@ -293,6 +305,7 @@ impl DiffViewer {
         self.patch_loading = true;
 
         self.patch_task = cx.spawn(async move |this, cx| {
+            let started_at = Instant::now();
             let result = cx
                 .background_executor()
                 .spawn(async move { load_diff_stream(&repo_root, &files, &collapsed_files) })
@@ -305,8 +318,15 @@ impl DiffViewer {
                     }
 
                     this.patch_loading = false;
+                    let elapsed = started_at.elapsed();
                     match result {
                         Ok(stream) => {
+                            info!(
+                                "diff stream loaded in {:?} (rows={}, files={})",
+                                elapsed,
+                                stream.rows.len(),
+                                stream.file_ranges.len()
+                            );
                             this.diff_rows = stream.rows;
                             this.diff_row_metadata = stream.row_metadata;
                             this.clamp_selection_to_rows();
@@ -340,6 +360,7 @@ impl DiffViewer {
                             }
                         }
                         Err(err) => {
+                            error!("diff stream load failed after {:?}: {err:#}", elapsed);
                             this.diff_rows = vec![message_row(
                                 DiffRowKind::Meta,
                                 format!("Failed to load diff stream: {err:#}"),

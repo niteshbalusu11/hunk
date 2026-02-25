@@ -110,7 +110,8 @@ impl DiffViewer {
                         ),
                     )
                     .child(self.render_line_stats("overall", self.overall_line_stats, cx))
-                    .child(
+                    .child({
+                        let view = view.clone();
                         Button::new("toggle-diff-fit")
                             .ghost()
                             .label(if self.diff_fit_to_width { "Pan" } else { "Fit" })
@@ -118,8 +119,38 @@ impl DiffViewer {
                                 view.update(cx, |this, cx| {
                                     this.toggle_diff_fit_to_width(cx);
                                 });
-                            }),
-                    )
+                            })
+                    })
+                    .child({
+                        let view = view.clone();
+                        Button::new("toggle-diff-whitespace")
+                            .ghost()
+                            .label(if self.diff_show_whitespace {
+                                "Whitespace: On"
+                            } else {
+                                "Whitespace: Off"
+                            })
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.toggle_diff_show_whitespace(cx);
+                                });
+                            })
+                    })
+                    .child({
+                        let view = view.clone();
+                        Button::new("toggle-diff-eol")
+                            .ghost()
+                            .label(if self.diff_show_eol_markers {
+                                "EOL: On"
+                            } else {
+                                "EOL: Off"
+                            })
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.toggle_diff_show_eol_markers(cx);
+                                });
+                            })
+                    })
                     .child(
                         div()
                             .text_sm()
