@@ -462,6 +462,12 @@ impl DiffViewer {
     fn render_commit_footer(&self, cx: &mut Context<Self>) -> AnyElement {
         let view = cx.entity();
         let push_label = if self.branch_has_upstream { "Push" } else { "Publish" };
+        let last_commit_text = self
+            .last_commit_subject
+            .as_deref()
+            .map(str::trim_end)
+            .filter(|text| !text.is_empty())
+            .unwrap_or("No commits yet");
 
         v_flex()
             .w_full()
@@ -525,28 +531,22 @@ impl DiffViewer {
                     })
             })
             .child(
-                v_flex()
+                div()
                     .w_full()
-                    .gap_0p5()
+                    .min_h(px(24.0))
                     .pt_0p5()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_semibold()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Last commit"),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_family(cx.theme().mono_font_family.clone())
-                            .text_color(cx.theme().foreground)
-                            .child(
-                                self.last_commit_subject
-                                    .clone()
-                                    .unwrap_or_else(|| "No commits yet".to_string()),
-                            ),
-                    ),
+                    .pb_1()
+                    .px_1()
+                    .py_0p5()
+                    .rounded_sm()
+                    .border_1()
+                    .border_color(cx.theme().border.opacity(0.8))
+                    .bg(cx.theme().background.blend(cx.theme().muted.opacity(0.10)))
+                    .text_xs()
+                    .font_family(cx.theme().mono_font_family.clone())
+                    .text_color(cx.theme().foreground)
+                    .whitespace_normal()
+                    .child(last_commit_text.to_string()),
             )
             .into_any_element()
     }

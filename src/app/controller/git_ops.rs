@@ -158,13 +158,7 @@ impl DiffViewer {
             Ok(()) => {
                 self.git_action_loading = false;
                 self.git_status_message = Some("Created commit".to_string());
-                self.last_commit_subject = message
-                    .lines()
-                    .next()
-                    .map(str::trim)
-                    .filter(|line| !line.is_empty())
-                    .map(ToString::to_string)
-                    .or_else(|| self.last_commit_subject.clone());
+                self.last_commit_subject = Some(message.trim_end().to_string());
                 self.commit_input_state.update(cx, |state, cx| {
                     state.set_value("", window, cx);
                 });
