@@ -60,6 +60,7 @@ pub struct RepoSnapshot {
     pub root: PathBuf,
     pub branch_name: String,
     pub branch_has_upstream: bool,
+    pub branch_ahead_count: usize,
     pub branches: Vec<LocalBranch>,
     pub files: Vec<ChangedFile>,
     pub line_stats: LineStats,
@@ -129,12 +130,14 @@ pub fn load_snapshot(cwd: &Path) -> Result<RepoSnapshot> {
     let line_stats = repo_line_stats(&repo)?;
     let branches = list_local_branches(&repo, &branch_name)?;
     let branch_has_upstream = current_branch_has_upstream(&repo, &branch_name);
+    let branch_ahead_count = current_branch_ahead_count(&repo, &branch_name);
     let last_commit_subject = last_commit_subject(&repo);
 
     Ok(RepoSnapshot {
         root,
         branch_name,
         branch_has_upstream,
+        branch_ahead_count,
         branches,
         files,
         line_stats,
@@ -635,6 +638,29 @@ fn current_branch_has_upstream(repo: &Repository, branch_name: &str) -> bool {
         .ok()
         .and_then(|branch| branch.upstream().ok())
         .is_some()
+}
+
+fn current_branch_ahead_count(repo: &Repository, branch_name: &str) -> usize {
+    if branch_name.is_empty() || branch_name == "unknown" || branch_name.starts_with("detached") {
+        return 0;
+    }
+
+    let Ok(local_branch) = repo.find_branch(branch_name, BranchType::Local) else {
+        return 0;
+    };
+    let Ok(upstream_branch) = local_branch.upstream() else {
+        return 0;
+    };
+
+    let local_oid = local_branch.get().target();
+    let upstream_oid = upstream_branch.get().target();
+    let (Some(local_oid), Some(upstream_oid)) = (local_oid, upstream_oid) else {
+        return 0;
+    };
+
+    repo.graph_ahead_behind(local_oid, upstream_oid)
+        .map(|(ahead, _behind)| ahead)
+        .unwrap_or(0)
 }
 
 fn list_local_branches(repo: &Repository, current_branch_name: &str) -> Result<Vec<LocalBranch>> {

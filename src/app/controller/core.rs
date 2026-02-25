@@ -83,6 +83,7 @@ impl DiffViewer {
             repo_root: None,
             branch_name: "unknown".to_string(),
             branch_has_upstream: false,
+            branch_ahead_count: 0,
             branches: Vec::new(),
             files: Vec::new(),
             branch_picker_open: false,
@@ -222,6 +223,7 @@ impl DiffViewer {
         self.repo_root = Some(snapshot.root);
         self.branch_name = snapshot.branch_name;
         self.branch_has_upstream = snapshot.branch_has_upstream;
+        self.branch_ahead_count = snapshot.branch_ahead_count;
         self.branches = snapshot.branches;
         self.files = snapshot.files;
         self.overall_line_stats = snapshot.line_stats;
@@ -265,6 +267,7 @@ impl DiffViewer {
         self.repo_root = None;
         self.branch_name = "unknown".to_string();
         self.branch_has_upstream = false;
+        self.branch_ahead_count = 0;
         self.branches.clear();
         self.files.clear();
         self.last_commit_subject = None;
