@@ -1,10 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use gpui::{
-    AnyElement, AppContext as _, Application, Context, Entity, InteractiveElement as _,
+    AnyElement, App, AppContext as _, Application, Context, Entity, InteractiveElement as _,
     IntoElement, IsZero as _, ListAlignment, ListOffset, ListSizingBehavior, ListState,
     ParentElement as _, Render, ScrollHandle, ScrollWheelEvent, SharedString,
     StatefulInteractiveElement as _, Styled as _, Task, Timer, Window, WindowOptions, div, list,
@@ -15,12 +16,12 @@ use gpui_component::{
     list::ListItem,
     resizable::{h_resizable, resizable_panel},
     scroll::ScrollableElement,
-    switch::Switch,
     tree::{TreeItem, TreeState, tree},
     v_flex,
 };
 use tracing::error;
 
+use hunk::config::{AppConfig, ConfigStore, DiffViewMode, ThemePreference};
 use hunk::diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
 use hunk::git::{ChangedFile, FileStatus, LineStats};
 
@@ -47,10 +48,37 @@ mod controller;
 mod data;
 mod render;
 
+fn apply_soft_light_theme(cx: &mut App) {
+    let mut light_theme = (*Theme::global(cx).light_theme).clone();
+
+    // Reduce eye strain in light mode by shifting from pure white to a soft off-white palette.
+    light_theme.colors.background = Some("#f5f6f8".into());
+    light_theme.colors.list = Some("#f5f6f8".into());
+    light_theme.colors.popover = Some("#f5f6f8".into());
+    light_theme.colors.table = Some("#f5f6f8".into());
+    light_theme.colors.sidebar = Some("#f5f6f8".into());
+    light_theme.colors.title_bar = Some("#f5f6f8".into());
+    light_theme.colors.list_even = Some("#f1f2f5".into());
+    light_theme.colors.list_head = Some("#eef0f4".into());
+    light_theme.colors.secondary = Some("#eceef3".into());
+    light_theme.colors.secondary_hover = Some("#e4e7ee".into());
+    light_theme.colors.secondary_active = Some("#dce1ea".into());
+    light_theme.colors.muted = Some("#e9ecf2".into());
+    light_theme.colors.muted_foreground = Some("#616977".into());
+    light_theme.colors.border = Some("#d2d8e3".into());
+
+    Theme::global_mut(cx).light_theme = Rc::new(light_theme);
+
+    if !Theme::global(cx).mode.is_dark() {
+        Theme::change(ThemeMode::Light, None, cx);
+    }
+}
+
 pub fn run() -> Result<()> {
     let app = Application::new();
     app.run(|cx| {
         gpui_component::init(cx);
+        apply_soft_light_theme(cx);
 
         if let Err(err) = cx.open_window(WindowOptions::default(), |window, cx| {
             let view = cx.new(|cx| DiffViewer::new(window, cx));
@@ -64,6 +92,8 @@ pub fn run() -> Result<()> {
 }
 
 struct DiffViewer {
+    config_store: Option<ConfigStore>,
+    config: AppConfig,
     repo_root: Option<PathBuf>,
     branch_name: String,
     files: Vec<ChangedFile>,

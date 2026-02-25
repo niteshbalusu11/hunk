@@ -1,5 +1,6 @@
 use super::*;
 use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 
 impl DiffViewer {
@@ -11,6 +12,13 @@ impl DiffViewer {
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "No git repository found".to_string());
         let branch_label = format!("branch: {}", self.branch_name);
+        let selected_theme = self.config.theme;
+        let theme_label = match self.config.theme {
+            ThemePreference::System => "System",
+            ThemePreference::Light => "Light",
+            ThemePreference::Dark => "Dark",
+        };
+        let theme_button_label = format!("Theme ({theme_label})");
 
         h_flex()
             .w_full()
@@ -45,22 +53,66 @@ impl DiffViewer {
                     .items_center()
                     .gap_2()
                     .child(
-                        h_flex()
-                            .items_center()
-                            .gap_2()
-                            .child(div().text_sm().child("Dark"))
-                            .child(
-                                Switch::new("theme-mode")
-                                    .checked(cx.theme().mode.is_dark())
-                                    .on_click(|checked, window, cx| {
-                                        let mode = if *checked {
-                                            ThemeMode::Dark
-                                        } else {
-                                            ThemeMode::Light
-                                        };
-                                        Theme::change(mode, Some(window), cx);
-                                    }),
-                            ),
+                        h_flex().items_center().gap_1().child(
+                            Button::new("theme-dropdown")
+                                .outline()
+                                .compact()
+                                .dropdown_caret(true)
+                                .label(theme_button_label)
+                                .dropdown_menu({
+                                    let view = view.clone();
+                                    move |menu, _, _| {
+                                        menu.item(
+                                            PopupMenuItem::new("System")
+                                                .checked(selected_theme == ThemePreference::System)
+                                                .on_click({
+                                                    let view = view.clone();
+                                                    move |_, window, cx| {
+                                                        view.update(cx, |this, cx| {
+                                                            this.set_theme_preference(
+                                                                ThemePreference::System,
+                                                                window,
+                                                                cx,
+                                                            );
+                                                        });
+                                                    }
+                                                }),
+                                        )
+                                        .item(
+                                            PopupMenuItem::new("Light")
+                                                .checked(selected_theme == ThemePreference::Light)
+                                                .on_click({
+                                                    let view = view.clone();
+                                                    move |_, window, cx| {
+                                                        view.update(cx, |this, cx| {
+                                                            this.set_theme_preference(
+                                                                ThemePreference::Light,
+                                                                window,
+                                                                cx,
+                                                            );
+                                                        });
+                                                    }
+                                                }),
+                                        )
+                                        .item(
+                                            PopupMenuItem::new("Dark")
+                                                .checked(selected_theme == ThemePreference::Dark)
+                                                .on_click({
+                                                    let view = view.clone();
+                                                    move |_, window, cx| {
+                                                        view.update(cx, |this, cx| {
+                                                            this.set_theme_preference(
+                                                                ThemePreference::Dark,
+                                                                window,
+                                                                cx,
+                                                            );
+                                                        });
+                                                    }
+                                                }),
+                                        )
+                                    }
+                                }),
+                        ),
                     )
                     .child(self.render_line_stats("overall", self.overall_line_stats, cx))
                     .child(

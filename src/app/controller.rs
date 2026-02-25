@@ -1,5 +1,5 @@
 use anyhow::Context as _;
-use tracing::info;
+use tracing::{error, info};
 
 use super::data::{
     build_tree_items, decimal_digits, display_width, line_number_column_width, load_diff_stream,
@@ -9,10 +9,80 @@ use super::*;
 use hunk::git::{RepoSnapshot, load_snapshot};
 
 impl DiffViewer {
-    pub(super) fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn load_app_config() -> (Option<ConfigStore>, AppConfig) {
+        let store = match ConfigStore::new() {
+            Ok(store) => store,
+            Err(err) => {
+                error!("failed to initialize config path: {err:#}");
+                return (None, AppConfig::default());
+            }
+        };
+
+        match store.load_or_create_default() {
+            Ok(config) => (Some(store), config),
+            Err(err) => {
+                error!(
+                    "failed to load app config from {}: {err:#}",
+                    store.path().display()
+                );
+                (Some(store), AppConfig::default())
+            }
+        }
+    }
+
+    fn apply_theme_preference(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let mode = match self.config.theme {
+            ThemePreference::System => ThemeMode::from(window.appearance()),
+            ThemePreference::Light => ThemeMode::Light,
+            ThemePreference::Dark => ThemeMode::Dark,
+        };
+        Theme::change(mode, Some(window), cx);
+    }
+
+    fn persist_config(&self) {
+        let Some(store) = &self.config_store else {
+            return;
+        };
+
+        if let Err(err) = store.save(&self.config) {
+            error!(
+                "failed to save app config to {}: {err:#}",
+                store.path().display()
+            );
+        }
+    }
+
+    fn sync_theme_with_system_if_needed(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.config.theme != ThemePreference::System {
+            return;
+        }
+        self.apply_theme_preference(window, cx);
+    }
+
+    pub(super) fn set_theme_preference(
+        &mut self,
+        theme: ThemePreference,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.config.theme == theme {
+            return;
+        }
+
+        self.config.theme = theme;
+        self.apply_theme_preference(window, cx);
+        self.persist_config();
+        cx.notify();
+    }
+
+    pub(super) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let (config_store, config) = Self::load_app_config();
+        let diff_fit_to_width = matches!(config.diff_view, DiffViewMode::Fit);
         let tree_state = cx.new(|cx| TreeState::new(cx));
 
         let mut view = Self {
+            config_store,
+            config,
             repo_root: None,
             branch_name: "unknown".to_string(),
             files: Vec::new(),
@@ -24,7 +94,7 @@ impl DiffViewer {
             file_line_stats: BTreeMap::new(),
             diff_list_state: ListState::new(0, ListAlignment::Top, px(360.0)),
             diff_horizontal_scroll_handle: ScrollHandle::new(),
-            diff_fit_to_width: false,
+            diff_fit_to_width,
             diff_left_column_width: DIFF_MIN_COLUMN_WIDTH,
             diff_right_column_width: DIFF_MIN_COLUMN_WIDTH,
             diff_pan_content_width: DIFF_MIN_CONTENT_WIDTH,
@@ -52,6 +122,13 @@ impl DiffViewer {
             error_message: None,
             tree_state,
         };
+
+        view.apply_theme_preference(window, cx);
+        cx.observe_window_appearance(window, |this, window, cx| {
+            this.sync_theme_with_system_if_needed(window, cx);
+        })
+        .detach();
+
         view.request_snapshot_refresh(cx);
         view.start_auto_refresh(cx);
         view.start_fps_monitor(cx);
@@ -505,6 +582,12 @@ impl DiffViewer {
 
     pub(super) fn toggle_diff_fit_to_width(&mut self, cx: &mut Context<Self>) {
         self.diff_fit_to_width = !self.diff_fit_to_width;
+        self.config.diff_view = if self.diff_fit_to_width {
+            DiffViewMode::Fit
+        } else {
+            DiffViewMode::Pan
+        };
+        self.persist_config();
         self.diff_horizontal_scroll_handle
             .set_offset(point(px(0.), px(0.)));
         self.last_scroll_activity_at = Instant::now();
