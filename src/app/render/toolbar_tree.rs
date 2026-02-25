@@ -212,7 +212,7 @@ impl DiffViewer {
                         h_flex()
                             .items_center()
                             .gap_1()
-                            .child({
+                            .child(if staged_count == 0 {
                                 let view = view.clone();
                                 Button::new("stage-all")
                                     .compact()
@@ -224,8 +224,8 @@ impl DiffViewer {
                                             this.stage_all_files(cx);
                                         });
                                     })
-                            })
-                            .child({
+                                    .into_any_element()
+                            } else {
                                 let view = view.clone();
                                 Button::new("unstage-all")
                                     .compact()
@@ -237,6 +237,7 @@ impl DiffViewer {
                                             this.unstage_all_files(cx);
                                         });
                                     })
+                                    .into_any_element()
                             }),
                     ),
             )
