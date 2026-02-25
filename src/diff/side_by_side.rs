@@ -27,6 +27,11 @@ pub fn parse_patch_side_by_side(patch: &str) -> Vec<SideBySideRow> {
 }
 
 fn append_hunk_rows(hunk: &DiffHunk, rows: &mut Vec<SideBySideRow>) {
+    rows.push(SideBySideRow::meta(
+        DiffRowKind::HunkHeader,
+        hunk.header.clone(),
+    ));
+
     let mut ix = 0_usize;
     while ix < hunk.lines.len() {
         let line = &hunk.lines[ix];

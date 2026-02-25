@@ -308,6 +308,8 @@ struct DiffViewer {
     tree_state: Entity<TreeState>,
     sidebar_tree_mode: SidebarTreeMode,
     repo_tree_nodes: Vec<RepoTreeNode>,
+    repo_tree_file_count: usize,
+    repo_tree_folder_count: usize,
     repo_tree_expanded_dirs: BTreeSet<String>,
     repo_tree_epoch: usize,
     repo_tree_task: Task<()>,

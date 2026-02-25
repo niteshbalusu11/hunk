@@ -36,7 +36,7 @@ Implement a full repository tree (alongside existing diff tree) with a bottom sw
 
 ### 6. Tests and quality gates
 - [x] Add unit tests under `tests/` for tree-building behavior.
-- [ ] Add tests for syntax segment generation for plain-file rendering.
+- [x] Add tests for syntax segment generation for plain-file rendering.
 - [x] Run `cargo fmt`.
 - [x] Run `cargo test`.
 - [x] Run `cargo clippy --all-targets --all-features -- -D warnings`.

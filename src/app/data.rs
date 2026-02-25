@@ -363,11 +363,12 @@ pub(super) fn load_diff_stream(
                 file_row_ordinal,
             );
         } else {
-            for row in loaded_file
-                .core_rows
-                .into_iter()
-                .filter(|row| matches!(row.kind, DiffRowKind::Code | DiffRowKind::Empty))
-            {
+            for row in loaded_file.core_rows.into_iter().filter(|row| {
+                matches!(
+                    row.kind,
+                    DiffRowKind::Code | DiffRowKind::HunkHeader | DiffRowKind::Empty
+                )
+            }) {
                 let row_kind = stream_kind_for_core_row(&row);
                 push_stream_row(
                     &mut rows,

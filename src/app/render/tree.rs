@@ -21,8 +21,8 @@ impl DiffViewer {
             SidebarTreeMode::Files => {
                 format!(
                     "{} files • {} folders",
-                    self.repo_tree_file_count(),
-                    self.repo_tree_folder_count()
+                    self.repo_tree_file_count,
+                    self.repo_tree_folder_count
                 )
             }
         };
@@ -550,13 +550,6 @@ impl DiffViewer {
             .into_any_element()
     }
 
-    fn repo_tree_file_count(&self) -> usize {
-        count_repo_tree_kind(&self.repo_tree_nodes, RepoTreeNodeKind::File)
-    }
-
-    fn repo_tree_folder_count(&self) -> usize {
-        count_repo_tree_kind(&self.repo_tree_nodes, RepoTreeNodeKind::Directory)
-    }
 }
 
 fn stable_row_id_for_path(path: &str) -> u64 {
@@ -582,14 +575,4 @@ fn file_icon_for_path(path: &str) -> IconName {
         Some("md") => IconName::BookOpen,
         _ => IconName::File,
     }
-}
-
-fn count_repo_tree_kind(nodes: &[RepoTreeNode], kind: RepoTreeNodeKind) -> usize {
-    nodes
-        .iter()
-        .map(|node| {
-            let self_count = usize::from(node.kind == kind);
-            self_count + count_repo_tree_kind(&node.children, kind)
-        })
-        .sum::<usize>()
 }

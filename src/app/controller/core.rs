@@ -207,6 +207,8 @@ impl DiffViewer {
             tree_state,
             sidebar_tree_mode: SidebarTreeMode::Diff,
             repo_tree_nodes: Vec::new(),
+            repo_tree_file_count: 0,
+            repo_tree_folder_count: 0,
             repo_tree_expanded_dirs: BTreeSet::new(),
             repo_tree_epoch: 0,
             repo_tree_task: Task::ready(()),
@@ -394,6 +396,8 @@ impl DiffViewer {
         self.error_message = None;
         if root_changed {
             self.repo_tree_nodes.clear();
+            self.repo_tree_file_count = 0;
+            self.repo_tree_folder_count = 0;
             self.repo_tree_expanded_dirs.clear();
             self.repo_tree_error = None;
             self.right_pane_mode = RightPaneMode::Diff;
@@ -470,6 +474,8 @@ impl DiffViewer {
             Some(err.to_string())
         };
         self.repo_tree_nodes.clear();
+        self.repo_tree_file_count = 0;
+        self.repo_tree_folder_count = 0;
         self.repo_tree_expanded_dirs.clear();
         self.repo_tree_loading = false;
         self.repo_tree_error = None;

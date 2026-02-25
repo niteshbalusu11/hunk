@@ -38,7 +38,7 @@ pub fn parse_patch_document(patch: &str) -> DiffDocument {
                             DiffLineKind::Context,
                             Some(old_line),
                             Some(new_line),
-                            hunk_line.trim_start_matches(' '),
+                            hunk_line.strip_prefix(' ').unwrap_or(hunk_line),
                         ));
                         old_line = old_line.saturating_add(1);
                         new_line = new_line.saturating_add(1);
@@ -48,7 +48,7 @@ pub fn parse_patch_document(patch: &str) -> DiffDocument {
                             DiffLineKind::Removed,
                             Some(old_line),
                             None,
-                            hunk_line.trim_start_matches('-'),
+                            hunk_line.strip_prefix('-').unwrap_or(hunk_line),
                         ));
                         old_line = old_line.saturating_add(1);
                     }
@@ -57,7 +57,7 @@ pub fn parse_patch_document(patch: &str) -> DiffDocument {
                             DiffLineKind::Added,
                             None,
                             Some(new_line),
-                            hunk_line.trim_start_matches('+'),
+                            hunk_line.strip_prefix('+').unwrap_or(hunk_line),
                         ));
                         new_line = new_line.saturating_add(1);
                     }

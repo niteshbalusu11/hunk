@@ -153,14 +153,14 @@ index 123..456 100644
 
     let rows = parse_patch_side_by_side(patch);
 
-    assert!(
-        rows.iter()
-            .all(|row| { matches!(row.kind, DiffRowKind::Code | DiffRowKind::Empty) })
-    );
-    assert!(
-        rows.iter()
-            .all(|row| !row.text.starts_with("diff --git") && !row.text.starts_with("@@"))
-    );
+    assert!(rows.iter().all(|row| {
+        matches!(
+            row.kind,
+            DiffRowKind::Code | DiffRowKind::HunkHeader | DiffRowKind::Empty
+        )
+    }));
+    assert!(rows.iter().any(|row| row.kind == DiffRowKind::HunkHeader));
+    assert!(rows.iter().all(|row| !row.text.starts_with("diff --git")));
 }
 
 #[test]
@@ -182,5 +182,76 @@ rename to b.rs";
     assert_eq!(
         document.epilogue,
         vec!["rename from a.rs", "rename to b.rs"]
+    );
+}
+
+#[test]
+fn preserves_leading_diff_marker_characters_in_payload() {
+    let patch = "\
+@@ -1,3 +1,3 @@
+-++left-plus
+- --left-space
++--right-minus
++  right-space
+ shared";
+
+    let document = parse_patch_document(patch);
+    assert_eq!(document.hunks.len(), 1);
+    let lines = &document.hunks[0].lines;
+    assert_eq!(lines.len(), 5);
+
+    assert_eq!(lines[0].kind, DiffLineKind::Removed);
+    assert_eq!(lines[0].text, "++left-plus");
+
+    assert_eq!(lines[1].kind, DiffLineKind::Removed);
+    assert_eq!(lines[1].text, " --left-space");
+
+    assert_eq!(lines[2].kind, DiffLineKind::Added);
+    assert_eq!(lines[2].text, "--right-minus");
+
+    assert_eq!(lines[3].kind, DiffLineKind::Added);
+    assert_eq!(lines[3].text, "  right-space");
+
+    assert_eq!(lines[4].kind, DiffLineKind::Context);
+    assert_eq!(lines[4].text, "shared");
+}
+
+#[test]
+fn parses_new_file_patch_with_only_added_lines() {
+    let patch = "\
+diff --git a/src/new_file.rs b/src/new_file.rs
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/src/new_file.rs
+@@ -0,0 +1,2 @@
++fn main() {}
++println!(\"hello\");";
+
+    let document = parse_patch_document(patch);
+    assert_eq!(document.hunks.len(), 1);
+    assert_eq!(document.hunks[0].lines.len(), 2);
+    assert!(
+        document.hunks[0]
+            .lines
+            .iter()
+            .all(|line| line.kind == DiffLineKind::Added)
+    );
+
+    let rows = parse_patch_side_by_side(patch);
+    let code_rows = rows
+        .iter()
+        .filter(|row| row.kind == DiffRowKind::Code)
+        .collect::<Vec<_>>();
+    assert_eq!(code_rows.len(), 2);
+    assert!(
+        code_rows
+            .iter()
+            .all(|row| row.left.kind == DiffCellKind::None)
+    );
+    assert!(
+        code_rows
+            .iter()
+            .all(|row| row.right.kind == DiffCellKind::Added)
     );
 }

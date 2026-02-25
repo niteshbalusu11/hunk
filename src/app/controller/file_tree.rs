@@ -41,11 +41,14 @@ impl DiffViewer {
             .map(|file| file.status);
         self.right_pane_mode = RightPaneMode::FilePreview;
         self.request_file_preview_reload(path, cx);
+        cx.notify();
     }
 
     pub(super) fn request_repo_tree_reload(&mut self, cx: &mut Context<Self>) {
         let Some(repo_root) = self.repo_root.clone() else {
             self.repo_tree_nodes.clear();
+            self.repo_tree_file_count = 0;
+            self.repo_tree_folder_count = 0;
             self.repo_tree_expanded_dirs.clear();
             self.repo_tree_loading = false;
             self.repo_tree_error = None;
@@ -91,6 +94,7 @@ impl DiffViewer {
         self.file_preview_error = None;
         self.file_preview_document = None;
         self.file_preview_path = Some(path.clone());
+        cx.notify();
 
         self.file_preview_task = cx.spawn(async move |this, cx| {
             let target_path = path.clone();
@@ -151,6 +155,10 @@ fn apply_repo_tree_reload(
     match result {
         Ok(entries) => {
             this.repo_tree_nodes = build_repo_tree(&entries);
+            this.repo_tree_file_count =
+                count_repo_tree_kind(&this.repo_tree_nodes, RepoTreeNodeKind::File);
+            this.repo_tree_folder_count =
+                count_repo_tree_kind(&this.repo_tree_nodes, RepoTreeNodeKind::Directory);
             this.repo_tree_error = None;
             this.repo_tree_expanded_dirs
                 .retain(|path| repo_tree_has_directory(&this.repo_tree_nodes, path.as_str()));
@@ -170,6 +178,8 @@ fn apply_repo_tree_reload(
         Err(err) => {
             this.repo_tree_error = Some(format!("Failed to load repository tree: {err:#}"));
             this.repo_tree_nodes.clear();
+            this.repo_tree_file_count = 0;
+            this.repo_tree_folder_count = 0;
             this.repo_tree_expanded_dirs.clear();
         }
     }
@@ -199,4 +209,14 @@ fn repo_tree_has_directory(nodes: &[RepoTreeNode], path: &str) -> bool {
         }
     }
     false
+}
+
+fn count_repo_tree_kind(nodes: &[RepoTreeNode], kind: RepoTreeNodeKind) -> usize {
+    nodes
+        .iter()
+        .map(|node| {
+            let self_count = usize::from(node.kind == kind);
+            self_count + count_repo_tree_kind(&node.children, kind)
+        })
+        .sum::<usize>()
 }

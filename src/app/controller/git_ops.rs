@@ -21,6 +21,7 @@ impl DiffViewer {
         let epoch = self.next_git_action_epoch();
         self.git_action_loading = true;
         self.git_status_message = None;
+        cx.notify();
 
         self.git_action_task = cx.spawn(async move |this, cx| {
             let result = cx.background_executor().spawn(async move { action(repo_root) }).await;
@@ -139,7 +140,7 @@ impl DiffViewer {
         });
     }
 
-    pub(super) fn commit_from_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn commit_from_input(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         if self.git_action_loading {
             return;
         }
@@ -157,26 +158,53 @@ impl DiffViewer {
             return;
         };
 
+        let epoch = self.next_git_action_epoch();
         self.git_action_loading = true;
         self.git_status_message = None;
-
-        match commit_staged(&repo_root, &message) {
-            Ok(()) => {
-                self.git_action_loading = false;
-                self.git_status_message = Some("Created commit".to_string());
-                self.last_commit_subject = Some(message.trim_end().to_string());
-                self.commit_input_state.update(cx, |state, cx| {
-                    state.set_value("", window, cx);
-                });
-                self.request_snapshot_refresh(cx);
-            }
-            Err(err) => {
-                self.git_action_loading = false;
-                self.git_status_message = Some(format!("Git error: {err:#}"));
-            }
-        }
-
         cx.notify();
+
+        self.git_action_task = cx.spawn(async move |this, cx| {
+            let result = cx.background_executor().spawn(async move {
+                commit_staged(&repo_root, &message)?;
+                Ok::<String, anyhow::Error>(message.trim_end().to_string())
+            });
+            let result = result.await;
+
+            if let Some(this) = this.upgrade() {
+                this.update(cx, |this, cx| {
+                    if epoch != this.git_action_epoch {
+                        return;
+                    }
+
+                    this.git_action_loading = false;
+                    match result {
+                        Ok(subject) => {
+                            this.git_status_message = Some("Created commit".to_string());
+                            this.last_commit_subject = Some(subject);
+
+                            let commit_input_state = this.commit_input_state.clone();
+                            if let Some(window_handle) = cx.windows().into_iter().next()
+                                && let Err(err) = cx.update_window(window_handle, |_, window, cx| {
+                                    commit_input_state.update(cx, |state, cx| {
+                                        state.set_value("", window, cx);
+                                    });
+                                })
+                            {
+                                error!("failed to clear commit input after commit: {err:#}");
+                            }
+
+                            this.request_snapshot_refresh(cx);
+                        }
+                        Err(err) => {
+                            this.git_status_message = Some(format!("Git error: {err:#}"));
+                        }
+                    }
+
+                    cx.notify();
+                })
+                .ok();
+            }
+        });
     }
 
     pub(super) fn toggle_branch_picker(&mut self, cx: &mut Context<Self>) {

@@ -246,10 +246,10 @@ pub fn stage_all(repo_root: &Path) -> Result<()> {
     let mut index = repo.index().context("failed to read index")?;
 
     index
-        .add_all(["*"], IndexAddOption::DEFAULT, None)
+        .add_all(["."], IndexAddOption::DEFAULT, None)
         .context("failed to add files to index")?;
     index
-        .update_all(["*"], None)
+        .update_all(["."], None)
         .context("failed to refresh tracked files in index")?;
     index.write().context("failed to write index")
 }
@@ -263,7 +263,7 @@ pub fn unstage_all(repo_root: &Path) -> Result<()> {
         .and_then(|head| head.peel_to_commit().ok())
         .map(|commit| commit.into_object())
     {
-        repo.reset_default(Some(&target), ["*"])
+        repo.reset_default(Some(&target), ["."])
             .context("failed to unstage all files")?;
         return Ok(());
     }
@@ -402,7 +402,7 @@ pub fn push_current_branch(repo_root: &Path, branch_name: &str, has_upstream: bo
     let mut push_options = PushOptions::new();
     push_options.remote_callbacks(callbacks);
 
-    let refspec = format!("+refs/heads/{branch_name}:refs/heads/{branch_name}");
+    let refspec = format!("refs/heads/{branch_name}:refs/heads/{branch_name}");
     let mut remote = repo
         .find_remote(&remote_name)
         .with_context(|| format!("failed to find remote {remote_name}"))?;
