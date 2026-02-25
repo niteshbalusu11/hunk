@@ -8,7 +8,7 @@ impl Render for DiffViewer {
         }
         self.frame_sample_count = self.frame_sample_count.saturating_add(1);
 
-        div()
+        v_flex()
             .size_full()
             .key_context("DiffViewer")
             .track_focus(&self.focus_handle)
@@ -26,14 +26,20 @@ impl Render for DiffViewer {
             .text_color(cx.theme().foreground)
             .child(self.render_toolbar(cx))
             .child(
-                h_resizable("hunk-main")
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .pb(px(APP_BOTTOM_SAFE_INSET))
                     .child(
-                        resizable_panel()
-                            .size(px(280.0))
-                            .size_range(px(160.0)..px(520.0))
-                            .child(self.render_tree(cx)),
-                    )
-                    .child(resizable_panel().child(self.render_diff(cx))),
+                        h_resizable("hunk-main")
+                            .child(
+                                resizable_panel()
+                                    .size(px(280.0))
+                                    .size_range(px(160.0)..px(520.0))
+                                    .child(self.render_tree(cx)),
+                            )
+                            .child(resizable_panel().child(self.render_diff(cx))),
+                    ),
             )
             .children(Root::render_dialog_layer(window, cx))
             .children(Root::render_notification_layer(window, cx))

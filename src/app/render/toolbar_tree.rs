@@ -473,7 +473,8 @@ impl DiffViewer {
             .w_full()
             .gap_1()
             .px_1()
-            .py_1()
+            .pt_1()
+            .pb_1()
             .border_t_1()
             .border_color(cx.theme().border)
             .child(
@@ -514,7 +515,7 @@ impl DiffViewer {
             })
             .child(
                 Input::new(&self.commit_input_state)
-                    .h(px(88.0))
+                    .h(px(40.0))
                     .disabled(self.git_action_loading),
             )
             .child({
@@ -533,9 +534,9 @@ impl DiffViewer {
             .child(
                 div()
                     .w_full()
-                    .min_h(px(24.0))
-                    .pt_0p5()
-                    .pb_1()
+                    .min_h(px(28.0))
+                    .pt_1()
+                    .pb_1p5()
                     .px_1()
                     .py_0p5()
                     .rounded_sm()
