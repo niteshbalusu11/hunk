@@ -6,7 +6,6 @@ impl DiffViewer {
             .as_ref()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "No git repository found".to_string());
-        let branch_label = format!("branch: {}", self.branch_name);
         let selected_theme = self.config.theme;
         let theme_label = match self.config.theme {
             ThemePreference::System => "System",
@@ -14,37 +13,101 @@ impl DiffViewer {
             ThemePreference::Dark => "Dark",
         };
         let theme_button_label = format!("Theme ({theme_label})");
+        let is_dark = cx.theme().mode.is_dark();
+        let chip_bg = cx.theme().muted.opacity(if is_dark { 0.30 } else { 0.55 });
+        let chip_border = cx.theme().border.opacity(if is_dark { 0.88 } else { 0.70 });
+        let brand_bg = cx
+            .theme()
+            .accent
+            .opacity(if is_dark { 0.26 } else { 0.14 });
 
         h_flex()
             .w_full()
             .h_11()
             .items_center()
             .justify_between()
+            .gap_2()
             .px_3()
             .border_b_1()
             .border_color(cx.theme().border)
             .bg(cx.theme().background)
             .child(
                 h_flex()
+                    .flex_1()
+                    .min_w_0()
                     .items_center()
                     .gap_2()
-                    .child(div().text_sm().font_semibold().child("hunk"))
+                    .overflow_x_hidden()
                     .child(
-                        div()
-                            .text_xs()
-                            .font_family(cx.theme().mono_font_family.clone())
-                            .text_color(cx.theme().muted_foreground)
-                            .child(branch_label),
+                        h_flex()
+                            .items_center()
+                            .px_2()
+                            .py_0p5()
+                            .rounded_md()
+                            .bg(brand_bg)
+                            .border_1()
+                            .border_color(cx.theme().accent.opacity(if is_dark { 0.62 } else { 0.42 }))
+                            .child(div().text_sm().font_semibold().child("Hunk")),
                     )
                     .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(repo_label),
+                        h_flex()
+                            .items_center()
+                            .gap_1()
+                            .px_2()
+                            .py_0p5()
+                            .rounded_md()
+                            .bg(chip_bg)
+                            .border_1()
+                            .border_color(chip_border)
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("branch"),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_family(cx.theme().mono_font_family.clone())
+                                    .text_color(cx.theme().foreground)
+                                    .child(self.branch_name.clone()),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .items_center()
+                            .gap_1()
+                            .overflow_x_hidden()
+                            .px_2()
+                            .py_0p5()
+                            .rounded_md()
+                            .bg(chip_bg)
+                            .border_1()
+                            .border_color(chip_border)
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("repo"),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .overflow_x_hidden()
+                                    .whitespace_nowrap()
+                                    .text_sm()
+                                    .font_family(cx.theme().mono_font_family.clone())
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(repo_label),
+                            ),
                     ),
             )
             .child(
                 h_flex()
+                    .flex_none()
                     .items_center()
                     .gap_2()
                     .child(
