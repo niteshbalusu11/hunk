@@ -9,6 +9,10 @@ struct DiffCellRenderSpec<'a> {
 
 impl DiffViewer {
     fn render_diff(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        if self.repo_discovery_failed {
+            return self.render_open_project_empty_state(cx);
+        }
+
         if let Some(error_message) = &self.error_message {
             return v_flex()
                 .size_full()
@@ -227,6 +231,64 @@ impl DiffViewer {
                                 ),
                         ),
                 ),
+            )
+            .into_any_element()
+    }
+
+    fn render_open_project_empty_state(&self, cx: &mut Context<Self>) -> AnyElement {
+        let view = cx.entity();
+        let is_dark = cx.theme().mode.is_dark();
+
+        v_flex()
+            .size_full()
+            .items_center()
+            .justify_center()
+            .p_6()
+            .child(
+                v_flex()
+                    .items_center()
+                    .gap_3()
+                    .max_w(px(520.0))
+                    .px_8()
+                    .py_6()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(cx.theme().border.opacity(if is_dark { 0.92 } else { 0.74 }))
+                    .bg(cx.theme().sidebar.blend(cx.theme().muted.opacity(if is_dark {
+                        0.22
+                    } else {
+                        0.34
+                    })))
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_semibold()
+                            .text_color(cx.theme().foreground)
+                            .child("Open a project"),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Choose a folder that contains a Git repository."),
+                    )
+                    .child(
+                        Button::new("open-project-empty-state")
+                            .primary()
+                            .rounded(px(8.0))
+                            .label("Open Project Folder")
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.open_project_picker(cx);
+                                });
+                            }),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Shortcut: Cmd/Ctrl+Shift+O"),
+                    ),
             )
             .into_any_element()
     }

@@ -282,6 +282,7 @@ struct DiffViewer {
     frame_sample_started_at: Instant,
     fps_epoch: usize,
     fps_task: Task<()>,
+    repo_discovery_failed: bool,
     error_message: Option<String>,
     tree_state: Entity<TreeState>,
 }

@@ -135,6 +135,7 @@ impl DiffViewer {
             frame_sample_started_at: Instant::now(),
             fps_epoch: 0,
             fps_task: Task::ready(()),
+            repo_discovery_failed: false,
             error_message: None,
             tree_state,
         };
@@ -226,7 +227,7 @@ impl DiffViewer {
         });
     }
 
-    fn open_project_picker(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn open_project_picker(&mut self, cx: &mut Context<Self>) {
         let prompt = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
@@ -303,6 +304,7 @@ impl DiffViewer {
         self.files = files;
         self.overall_line_stats = line_stats;
         self.last_commit_subject = last_commit_subject;
+        self.repo_discovery_failed = false;
         self.error_message = None;
         self.collapsed_files
             .retain(|path| self.files.iter().any(|file| file.path == *path));
@@ -337,6 +339,8 @@ impl DiffViewer {
     }
 
     fn apply_snapshot_error(&mut self, err: anyhow::Error, cx: &mut Context<Self>) {
+        let missing_repository = Self::is_missing_repository_error(&err);
+
         self.repo_root = None;
         self.branch_name = "unknown".to_string();
         self.branch_has_upstream = false;
@@ -359,9 +363,22 @@ impl DiffViewer {
         )];
         self.sync_diff_list_state();
         self.recompute_diff_pan_layout();
-        self.error_message = Some(err.to_string());
+        self.repo_discovery_failed = missing_repository;
+        self.error_message = if missing_repository {
+            None
+        } else {
+            Some(err.to_string())
+        };
         self.rebuild_tree(cx);
         cx.notify();
+    }
+
+    fn is_missing_repository_error(err: &anyhow::Error) -> bool {
+        err.chain().any(|cause| {
+            let message = cause.to_string();
+            message.contains("failed to discover git repository")
+                || message.contains("could not find repository")
+        })
     }
 
     fn request_selected_diff_reload(&mut self, cx: &mut Context<Self>) {
