@@ -515,7 +515,7 @@ impl DiffViewer {
             })
             .child(
                 Input::new(&self.commit_input_state)
-                    .h(px(40.0))
+                    .h(px(76.0))
                     .disabled(self.git_action_loading),
             )
             .child({
