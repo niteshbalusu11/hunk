@@ -80,6 +80,7 @@ impl DiffViewer {
         let mut view = Self {
             config_store,
             config,
+            project_path: None,
             repo_root: None,
             branch_name: "unknown".to_string(),
             branch_has_upstream: false,
@@ -118,6 +119,7 @@ impl DiffViewer {
             snapshot_epoch: 0,
             snapshot_task: Task::ready(()),
             snapshot_loading: false,
+            open_project_task: Task::ready(()),
             patch_epoch: 0,
             patch_task: Task::ready(()),
             patch_loading: false,
@@ -150,6 +152,15 @@ impl DiffViewer {
         view
     }
 
+    pub(super) fn open_project_action(
+        &mut self,
+        _: &OpenProject,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_project_picker(cx);
+    }
+
     pub(super) fn select_file(&mut self, path: String, cx: &mut Context<Self>) {
         self.selected_path = Some(path.clone());
         self.selected_status = self
@@ -166,20 +177,28 @@ impl DiffViewer {
     }
 
     pub(super) fn request_snapshot_refresh(&mut self, cx: &mut Context<Self>) {
-        if self.snapshot_loading {
+        self.request_snapshot_refresh_internal(false, cx);
+    }
+
+    fn request_snapshot_refresh_internal(&mut self, force: bool, cx: &mut Context<Self>) {
+        if self.snapshot_loading && !force {
             return;
         }
 
-        let cwd_result = std::env::current_dir().context("failed to resolve current directory");
+        let source_dir_result = self
+            .project_path
+            .clone()
+            .map(Ok)
+            .unwrap_or_else(|| std::env::current_dir().context("failed to resolve current directory"));
         let epoch = self.next_snapshot_epoch();
         self.snapshot_loading = true;
 
         self.snapshot_task = cx.spawn(async move |this, cx| {
             let started_at = Instant::now();
-            let result = match cwd_result {
-                Ok(cwd) => {
+            let result = match source_dir_result {
+                Ok(source_dir) => {
                     cx.background_executor()
-                        .spawn(async move { load_snapshot(&cwd) })
+                        .spawn(async move { load_snapshot(&source_dir) })
                         .await
                 }
                 Err(err) => Err(err),
@@ -209,25 +228,83 @@ impl DiffViewer {
         });
     }
 
-    fn apply_snapshot(&mut self, snapshot: RepoSnapshot, cx: &mut Context<Self>) {
-        info!(
-            "loaded repository snapshot from {}",
-            snapshot.root.display()
-        );
+    fn open_project_picker(&mut self, cx: &mut Context<Self>) {
+        let prompt = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Open Project".into()),
+        });
 
-        let files_changed = self.files != snapshot.files;
-        let overall_changed = self.overall_line_stats != snapshot.line_stats;
+        self.open_project_task = cx.spawn(async move |this, cx| {
+            let selection = match prompt.await {
+                Ok(selection) => selection,
+                Err(err) => {
+                    error!("project picker prompt channel closed: {err}");
+                    return;
+                }
+            };
+
+            let selected_path = match selection {
+                Ok(Some(paths)) => paths.into_iter().next(),
+                Ok(None) => None,
+                Err(err) => {
+                    if let Some(this) = this.upgrade() {
+                        this.update(cx, |this, cx| {
+                            this.git_status_message =
+                                Some(format!("Failed to open folder picker: {err:#}"));
+                            cx.notify();
+                        })
+                        .ok();
+                    }
+                    return;
+                }
+            };
+
+            let Some(selected_path) = selected_path else {
+                return;
+            };
+
+            if let Some(this) = this.upgrade() {
+                this.update(cx, |this, cx| {
+                    this.project_path = Some(selected_path);
+                    this.git_status_message = None;
+                    this.request_snapshot_refresh_internal(true, cx);
+                    cx.notify();
+                })
+                .ok();
+            }
+        });
+    }
+
+    fn apply_snapshot(&mut self, snapshot: RepoSnapshot, cx: &mut Context<Self>) {
+        let RepoSnapshot {
+            root,
+            branch_name,
+            branch_has_upstream,
+            branch_ahead_count,
+            branches,
+            files,
+            line_stats,
+            last_commit_subject,
+        } = snapshot;
+
+        info!("loaded repository snapshot from {}", root.display());
+
+        let files_changed = self.files != files;
+        let overall_changed = self.overall_line_stats != line_stats;
         let previous_selected_path = self.selected_path.clone();
         let previous_selected_status = self.selected_status;
 
-        self.repo_root = Some(snapshot.root);
-        self.branch_name = snapshot.branch_name;
-        self.branch_has_upstream = snapshot.branch_has_upstream;
-        self.branch_ahead_count = snapshot.branch_ahead_count;
-        self.branches = snapshot.branches;
-        self.files = snapshot.files;
-        self.overall_line_stats = snapshot.line_stats;
-        self.last_commit_subject = snapshot.last_commit_subject;
+        self.project_path = Some(root.clone());
+        self.repo_root = Some(root);
+        self.branch_name = branch_name;
+        self.branch_has_upstream = branch_has_upstream;
+        self.branch_ahead_count = branch_ahead_count;
+        self.branches = branches;
+        self.files = files;
+        self.overall_line_stats = line_stats;
+        self.last_commit_subject = last_commit_subject;
         self.error_message = None;
         self.collapsed_files
             .retain(|path| self.files.iter().any(|file| file.path == *path));
@@ -283,7 +360,7 @@ impl DiffViewer {
         self.drag_selecting_rows = false;
         self.diff_rows = vec![message_row(
             DiffRowKind::Empty,
-            "Open this app from a Git repository to load diffs.",
+            "Use File > Open Project... (Cmd/Ctrl+Shift+O) to load a Git repository.",
         )];
         self.sync_diff_list_state();
         self.recompute_diff_pan_layout();

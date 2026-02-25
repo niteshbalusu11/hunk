@@ -22,6 +22,7 @@ impl Render for DiffViewer {
             .on_action(cx.listener(Self::previous_hunk_action))
             .on_action(cx.listener(Self::next_file_action))
             .on_action(cx.listener(Self::previous_file_action))
+            .on_action(cx.listener(Self::open_project_action))
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(self.render_toolbar(cx))

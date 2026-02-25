@@ -8,10 +8,10 @@ use gpui::{
     AnyElement, App, AppContext as _, Application, ClipboardItem, Context, Entity, FocusHandle,
     InteractiveElement as _, IntoElement, IsZero as _, KeyBinding, ListAlignment, ListOffset,
     ListSizingBehavior, ListState, Menu, MenuItem, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, OsAction, ParentElement as _, Render, ScrollHandle, ScrollWheelEvent,
-    SharedString, StatefulInteractiveElement as _, Styled as _, SystemMenuType, Task, Timer,
-    TitlebarOptions, Window, WindowOptions, actions, div, list, point, prelude::FluentBuilder as _,
-    px,
+    MouseUpEvent, OsAction, ParentElement as _, PathPromptOptions, Render, ScrollHandle,
+    ScrollWheelEvent, SharedString, StatefulInteractiveElement as _, Styled as _, SystemMenuType,
+    Task, Timer, TitlebarOptions, Window, WindowOptions, actions, div, list, point,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     ActiveTheme as _, Colorize as _, Root, StyledExt as _, Theme, ThemeMode, h_flex,
@@ -65,6 +65,7 @@ actions!(
         PreviousHunk,
         NextFile,
         PreviousFile,
+        OpenProject,
         QuitApp,
     ]
 );
@@ -114,6 +115,8 @@ pub fn run() -> Result<()> {
             KeyBinding::new("shift-f7", PreviousHunk, Some("DiffViewer")),
             KeyBinding::new("alt-down", NextFile, Some("DiffViewer")),
             KeyBinding::new("alt-up", PreviousFile, Some("DiffViewer")),
+            KeyBinding::new("cmd-shift-o", OpenProject, None),
+            KeyBinding::new("ctrl-shift-o", OpenProject, None),
             KeyBinding::new("cmd-q", QuitApp, None),
         ]);
         cx.set_menus(vec![
@@ -124,6 +127,10 @@ pub fn run() -> Result<()> {
                     MenuItem::separator(),
                     MenuItem::action("Quit Hunk", QuitApp),
                 ],
+            },
+            Menu {
+                name: "File".into(),
+                items: vec![MenuItem::action("Open Project...", OpenProject)],
             },
             Menu {
                 name: "Edit".into(),
@@ -160,6 +167,7 @@ fn quit_app(_: &QuitApp, cx: &mut App) {
 struct DiffViewer {
     config_store: Option<ConfigStore>,
     config: AppConfig,
+    project_path: Option<PathBuf>,
     repo_root: Option<PathBuf>,
     branch_name: String,
     branch_has_upstream: bool,
@@ -198,6 +206,7 @@ struct DiffViewer {
     snapshot_epoch: usize,
     snapshot_task: Task<()>,
     snapshot_loading: bool,
+    open_project_task: Task<()>,
     patch_epoch: usize,
     patch_task: Task<()>,
     patch_loading: bool,

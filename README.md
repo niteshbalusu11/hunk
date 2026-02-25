@@ -31,7 +31,7 @@ xcodebuild -downloadComponent MetalToolchain
 cargo run
 ```
 
-Launch from inside a Git repository to view changes.
+Launch from anywhere, then use `File > Open Project...` (or `Cmd/Ctrl+Shift+O`) to choose a Git repository.
 
 `cargo run` starts from Terminal, so macOS may still present it like a terminal-launched app.
 For a proper Dock app identity (name/icon) and normal app launching behavior, build and open the macOS bundle:
