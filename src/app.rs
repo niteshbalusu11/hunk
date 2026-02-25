@@ -7,10 +7,11 @@ use anyhow::Result;
 use gpui::{
     AnyElement, App, AppContext as _, Application, ClipboardItem, Context, Entity, FocusHandle,
     InteractiveElement as _, IntoElement, IsZero as _, KeyBinding, ListAlignment, ListOffset,
-    ListSizingBehavior, ListState, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ParentElement as _, Render, ScrollHandle, ScrollWheelEvent, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Task, Timer, Window, WindowOptions, actions, div,
-    list, point, prelude::FluentBuilder as _, px,
+    ListSizingBehavior, ListState, Menu, MenuItem, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, OsAction, ParentElement as _, Render, ScrollHandle, ScrollWheelEvent,
+    SharedString, StatefulInteractiveElement as _, Styled as _, SystemMenuType, Task, Timer,
+    TitlebarOptions, Window, WindowOptions, actions, div, list, point, prelude::FluentBuilder as _,
+    px,
 };
 use gpui_component::{
     ActiveTheme as _, Colorize as _, Root, StyledExt as _, Theme, ThemeMode, h_flex,
@@ -64,6 +65,7 @@ actions!(
         PreviousHunk,
         NextFile,
         PreviousFile,
+        QuitApp,
     ]
 );
 
@@ -98,6 +100,7 @@ pub fn run() -> Result<()> {
     app.run(|cx| {
         gpui_component::init(cx);
         apply_soft_light_theme(cx);
+        cx.on_action(quit_app);
         cx.bind_keys([
             KeyBinding::new("down", SelectNextLine, Some("DiffViewer")),
             KeyBinding::new("up", SelectPreviousLine, Some("DiffViewer")),
@@ -111,9 +114,35 @@ pub fn run() -> Result<()> {
             KeyBinding::new("shift-f7", PreviousHunk, Some("DiffViewer")),
             KeyBinding::new("alt-down", NextFile, Some("DiffViewer")),
             KeyBinding::new("alt-up", PreviousFile, Some("DiffViewer")),
+            KeyBinding::new("cmd-q", QuitApp, None),
         ]);
+        cx.set_menus(vec![
+            Menu {
+                name: "Hunk".into(),
+                items: vec![
+                    MenuItem::os_submenu("Services", SystemMenuType::Services),
+                    MenuItem::separator(),
+                    MenuItem::action("Quit Hunk", QuitApp),
+                ],
+            },
+            Menu {
+                name: "Edit".into(),
+                items: vec![
+                    MenuItem::os_action("Copy", CopySelection, OsAction::Copy),
+                    MenuItem::os_action("Select All", SelectAllDiffRows, OsAction::SelectAll),
+                ],
+            },
+        ]);
+        cx.activate(true);
 
-        if let Err(err) = cx.open_window(WindowOptions::default(), |window, cx| {
+        let window_options = WindowOptions {
+            titlebar: Some(TitlebarOptions {
+                title: Some("Hunk".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        if let Err(err) = cx.open_window(window_options, |window, cx| {
             let view = cx.new(|cx| DiffViewer::new(window, cx));
             cx.new(|cx| Root::new(view, window, cx))
         }) {
@@ -122,6 +151,10 @@ pub fn run() -> Result<()> {
     });
 
     Ok(())
+}
+
+fn quit_app(_: &QuitApp, cx: &mut App) {
+    cx.quit();
 }
 
 struct DiffViewer {

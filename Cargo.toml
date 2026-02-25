@@ -3,6 +3,14 @@ name = "hunk"
 version = "0.1.0"
 edition = "2024"
 
+[package.metadata.bundle]
+name = "Hunk"
+identifier = "com.prodata.hunk"
+short_description = "Fast git diff viewer."
+long_description = "A fast, simple git diff viewer built with GPUI."
+category = "public.app-category.developer-tools"
+icon = ["assets/icons/Hunk.icns"]
+
 [dependencies]
 anyhow = "1.0"
 dirs = "6.0"
