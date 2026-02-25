@@ -1,4 +1,5 @@
 #:schema https://dystroy.org/bacon/.bacon.schema.json
+#:tombi schema.strict = false
 
 default_job = "run"
 env.CARGO_TERM_COLOR = "always"
@@ -23,7 +24,14 @@ need_stdout = true
 watch = ["Cargo.toml", "Cargo.lock", "src", "tests"]
 
 [jobs.clippy]
-command = ["cargo", "clippy", "--all-targets", "--all-features", "--color", "always"]
+command = [
+  "cargo",
+  "clippy",
+  "--all-targets",
+  "--all-features",
+  "--color",
+  "always"
+]
 need_stdout = false
 watch = ["Cargo.toml", "Cargo.lock", "src", "tests"]
 
