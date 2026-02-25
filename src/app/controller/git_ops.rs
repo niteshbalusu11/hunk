@@ -133,7 +133,11 @@ impl DiffViewer {
         });
     }
 
-    pub(super) fn commit_from_input(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn commit_from_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.git_action_loading {
+            return;
+        }
+
         let message = self.commit_input_state.read(cx).value().to_string();
         if message.trim().is_empty() {
             self.git_status_message = Some("Commit message cannot be empty.".to_string());
@@ -141,10 +145,38 @@ impl DiffViewer {
             return;
         }
 
-        self.run_git_action(cx, move |repo_root| {
-            commit_staged(&repo_root, &message)?;
-            Ok("Created commit".to_string())
-        });
+        let Some(repo_root) = self.repo_root.clone() else {
+            self.git_status_message = Some("No git repository available.".to_string());
+            cx.notify();
+            return;
+        };
+
+        self.git_action_loading = true;
+        self.git_status_message = None;
+
+        match commit_staged(&repo_root, &message) {
+            Ok(()) => {
+                self.git_action_loading = false;
+                self.git_status_message = Some("Created commit".to_string());
+                self.last_commit_subject = message
+                    .lines()
+                    .next()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(ToString::to_string)
+                    .or_else(|| self.last_commit_subject.clone());
+                self.commit_input_state.update(cx, |state, cx| {
+                    state.set_value("", window, cx);
+                });
+                self.request_snapshot_refresh(cx);
+            }
+            Err(err) => {
+                self.git_action_loading = false;
+                self.git_status_message = Some(format!("Git error: {err:#}"));
+            }
+        }
+
+        cx.notify();
     }
 
     pub(super) fn toggle_branch_picker(&mut self, cx: &mut Context<Self>) {

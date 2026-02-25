@@ -273,8 +273,7 @@ impl DiffViewer {
             .child(
                 v_flex()
                     .w_full()
-                    .child(self.render_commit_footer(cx))
-                    .child(self.render_last_commit_footer(cx)),
+                    .child(self.render_commit_footer(cx)),
             )
     }
 
@@ -519,42 +518,34 @@ impl DiffViewer {
                     .compact()
                     .label("Commit")
                     .disabled(self.git_action_loading)
-                    .on_click(move |_, _, cx| {
+                    .on_click(move |_, window, cx| {
                         view.update(cx, |this, cx| {
-                            this.commit_from_input(cx);
+                            this.commit_from_input(window, cx);
                         });
                     })
             })
-            .into_any_element()
-    }
-
-    fn render_last_commit_footer(&self, cx: &mut Context<Self>) -> AnyElement {
-        v_flex()
-            .w_full()
-            .min_h(px(52.0))
-            .gap_0p5()
-            .px_2()
-            .py_1()
-            .pb_2()
-            .border_t_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().background)
             .child(
-                div()
-                    .text_xs()
-                    .font_semibold()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Last commit"),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .text_color(cx.theme().foreground)
+                v_flex()
+                    .w_full()
+                    .gap_0p5()
+                    .pt_0p5()
                     .child(
-                        self.last_commit_subject
-                            .clone()
-                            .unwrap_or_else(|| "No commits yet".to_string()),
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Last commit"),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .text_color(cx.theme().foreground)
+                            .child(
+                                self.last_commit_subject
+                                    .clone()
+                                    .unwrap_or_else(|| "No commits yet".to_string()),
+                            ),
                     ),
             )
             .into_any_element()
