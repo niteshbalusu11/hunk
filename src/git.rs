@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
@@ -55,6 +56,19 @@ pub struct LocalBranch {
     pub tip_unix_time: Option<i64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepoTreeEntryKind {
+    Directory,
+    File,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoTreeEntry {
+    pub path: String,
+    pub kind: RepoTreeEntryKind,
+    pub ignored: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct RepoSnapshot {
     pub root: PathBuf,
@@ -78,6 +92,8 @@ impl LineStats {
         self.added + self.removed
     }
 }
+
+const MAX_REPO_TREE_ENTRIES: usize = 60_000;
 
 pub fn load_snapshot(cwd: &Path) -> Result<RepoSnapshot> {
     let repo = Repository::discover(cwd).context("failed to discover git repository")?;
@@ -172,6 +188,13 @@ pub fn load_patch(repo_root: &Path, file_path: &str, _: FileStatus) -> Result<St
     }
 
     Ok(patch)
+}
+
+pub fn load_repo_tree(repo_root: &Path) -> Result<Vec<RepoTreeEntry>> {
+    let repo = open_repo(repo_root)?;
+    let mut entries = Vec::new();
+    walk_repo_tree(repo_root, repo_root, &repo, &mut entries)?;
+    Ok(entries)
 }
 
 pub fn stage_file(repo_root: &Path, file_path: &str) -> Result<()> {
@@ -578,6 +601,92 @@ fn is_staged(status: Status) -> bool {
 
 fn normalize_path(path: &str) -> String {
     path.trim().trim_end_matches('/').to_string()
+}
+
+fn walk_repo_tree(
+    root: &Path,
+    current: &Path,
+    repo: &Repository,
+    entries: &mut Vec<RepoTreeEntry>,
+) -> Result<()> {
+    if entries.len() >= MAX_REPO_TREE_ENTRIES {
+        return Ok(());
+    }
+
+    let mut children = read_dir_sorted(current)?;
+    for child in children.drain(..) {
+        if entries.len() >= MAX_REPO_TREE_ENTRIES {
+            break;
+        }
+
+        let name = child.file_name();
+        if name.to_string_lossy() == ".git" {
+            continue;
+        }
+
+        let Ok(file_type) = child.file_type() else {
+            continue;
+        };
+
+        let child_path = child.path();
+        let Ok(relative) = child_path.strip_prefix(root) else {
+            continue;
+        };
+        let relative_path = normalize_path(&relative.to_string_lossy());
+        if relative_path.is_empty() {
+            continue;
+        }
+
+        if file_type.is_dir() {
+            let ignored = path_is_ignored(repo, relative_path.as_str(), true);
+            entries.push(RepoTreeEntry {
+                path: relative_path,
+                kind: RepoTreeEntryKind::Directory,
+                ignored,
+            });
+            walk_repo_tree(root, &child_path, repo, entries)?;
+            continue;
+        }
+
+        if file_type.is_file() {
+            let ignored = path_is_ignored(repo, relative_path.as_str(), false);
+            entries.push(RepoTreeEntry {
+                path: relative_path,
+                kind: RepoTreeEntryKind::File,
+                ignored,
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn read_dir_sorted(path: &Path) -> Result<Vec<fs::DirEntry>> {
+    let mut entries = fs::read_dir(path)
+        .with_context(|| format!("failed to read directory {}", path.display()))?
+        .filter_map(Result::ok)
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        left.file_name()
+            .to_string_lossy()
+            .cmp(&right.file_name().to_string_lossy())
+    });
+    Ok(entries)
+}
+
+fn path_is_ignored(repo: &Repository, path: &str, is_dir: bool) -> bool {
+    if repo.status_should_ignore(Path::new(path)).unwrap_or(false) {
+        return true;
+    }
+
+    if is_dir {
+        let dir_path = format!("{path}/");
+        return repo
+            .status_should_ignore(Path::new(dir_path.as_str()))
+            .unwrap_or(false);
+    }
+
+    false
 }
 
 fn diff_options(file_path: &str) -> DiffOptions {

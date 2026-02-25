@@ -44,6 +44,18 @@ pub(super) fn build_line_segments(
     merge_styled_segments(&chars, &syntax_map, &changed_map)
 }
 
+pub(super) fn build_plain_line_segments(file_path: Option<&str>, line: &str) -> Vec<StyledSegment> {
+    if line.is_empty() {
+        return Vec::new();
+    }
+
+    let chars = line.chars().collect::<Vec<_>>();
+    let mut syntax_map = vec![SyntaxTokenKind::Plain; chars.len()];
+    apply_syntect_syntax_map(file_path, line, &mut syntax_map);
+    let changed_map = vec![false; chars.len()];
+    merge_styled_segments(&chars, &syntax_map, &changed_map)
+}
+
 fn apply_syntect_syntax_map(
     file_path: Option<&str>,
     line: &str,

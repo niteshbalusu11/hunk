@@ -1,5 +1,7 @@
-use super::data::DiffStreamRowKind;
-use super::highlight::{SyntaxTokenKind, build_line_segments};
+use super::data::{
+    DiffStreamRowKind, RepoTreeNodeKind, RightPaneMode, SidebarTreeMode, flatten_repo_tree_rows,
+};
+use super::highlight::{SyntaxTokenKind, build_line_segments, build_plain_line_segments};
 use super::*;
 use gpui_component::Disableable as _;
 use gpui_component::animation::cubic_bezier;
@@ -14,4 +16,5 @@ include!("commit.rs");
 include!("file_banner.rs");
 include!("file_status.rs");
 include!("diff.rs");
+include!("file_preview.rs");
 include!("root.rs");

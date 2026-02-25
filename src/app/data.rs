@@ -1,18 +1,70 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 
 use super::*;
 use hunk::diff::parse_patch_side_by_side;
-use hunk::git::load_patch;
+use hunk::git::{RepoTreeEntry, RepoTreeEntryKind, load_patch};
 
 #[derive(Default)]
-struct TreeFolder {
-    folders: BTreeMap<String, TreeFolder>,
+struct DiffTreeFolder {
+    folders: BTreeMap<String, DiffTreeFolder>,
     files: BTreeMap<String, FileStatus>,
+}
+
+#[derive(Default)]
+struct RepoTreeFolder {
+    ignored: bool,
+    folders: BTreeMap<String, RepoTreeFolder>,
+    files: BTreeMap<String, bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SidebarTreeMode {
+    Diff,
+    Files,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RightPaneMode {
+    Diff,
+    FilePreview,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RepoTreeNodeKind {
+    Directory,
+    File,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RepoTreeNode {
+    pub(super) path: String,
+    pub(super) name: String,
+    pub(super) kind: RepoTreeNodeKind,
+    pub(super) ignored: bool,
+    pub(super) children: Vec<RepoTreeNode>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RepoTreeRow {
+    pub(super) path: String,
+    pub(super) name: String,
+    pub(super) kind: RepoTreeNodeKind,
+    pub(super) ignored: bool,
+    pub(super) depth: usize,
+    pub(super) expanded: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct FilePreviewDocument {
+    pub(super) lines: Vec<String>,
+    pub(super) byte_len: usize,
+    pub(super) truncated: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -56,7 +108,7 @@ struct LoadedFileDiffRows {
 }
 
 pub(super) fn build_tree_items(files: &[ChangedFile]) -> Vec<TreeItem> {
-    let mut root = TreeFolder::default();
+    let mut root = DiffTreeFolder::default();
 
     for file in files {
         let mut cursor = &mut root;
@@ -73,7 +125,7 @@ pub(super) fn build_tree_items(files: &[ChangedFile]) -> Vec<TreeItem> {
     build_folder_items(&root, "")
 }
 
-fn build_folder_items(folder: &TreeFolder, prefix: &str) -> Vec<TreeItem> {
+fn build_folder_items(folder: &DiffTreeFolder, prefix: &str) -> Vec<TreeItem> {
     let mut items = Vec::new();
 
     for (name, child_folder) in &folder.folders {
@@ -100,12 +152,144 @@ fn build_folder_items(folder: &TreeFolder, prefix: &str) -> Vec<TreeItem> {
     items
 }
 
+pub(super) fn build_repo_tree(entries: &[RepoTreeEntry]) -> Vec<RepoTreeNode> {
+    let mut root = RepoTreeFolder::default();
+
+    for entry in entries {
+        let mut parts = entry.path.split('/').peekable();
+        let mut cursor = &mut root;
+        while let Some(part) = parts.next() {
+            if parts.peek().is_some() {
+                cursor = cursor.folders.entry(part.to_string()).or_default();
+                continue;
+            }
+
+            match entry.kind {
+                RepoTreeEntryKind::Directory => {
+                    let folder = cursor.folders.entry(part.to_string()).or_default();
+                    folder.ignored = entry.ignored;
+                }
+                RepoTreeEntryKind::File => {
+                    cursor.files.insert(part.to_string(), entry.ignored);
+                }
+            }
+        }
+    }
+
+    build_repo_tree_nodes(&root, "")
+}
+
+pub(super) fn flatten_repo_tree_rows(
+    nodes: &[RepoTreeNode],
+    expanded_dirs: &BTreeSet<String>,
+) -> Vec<RepoTreeRow> {
+    let mut rows = Vec::new();
+    append_repo_tree_rows(nodes, expanded_dirs, 0, &mut rows);
+    rows
+}
+
+pub(super) fn load_file_preview(
+    repo_root: &Path,
+    file_path: &str,
+    max_bytes: usize,
+    max_lines: usize,
+) -> Result<FilePreviewDocument> {
+    let absolute_path = repo_root.join(file_path);
+    let bytes = fs::read(&absolute_path)
+        .map_err(|err| anyhow!("failed to read {}: {err}", absolute_path.display()))?;
+    if bytes.len() > max_bytes {
+        return Err(anyhow!(
+            "file is too large to preview ({} bytes, max {})",
+            bytes.len(),
+            max_bytes
+        ));
+    }
+    if is_probably_binary_bytes(&bytes) {
+        return Err(anyhow!("binary file preview is not supported"));
+    }
+
+    let text = String::from_utf8(bytes)
+        .map_err(|_| anyhow!("file is not UTF-8 text and cannot be previewed"))?;
+    let byte_len = text.len();
+    let mut lines = text
+        .split('\n')
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    let mut truncated = false;
+    if lines.len() > max_lines {
+        lines.truncate(max_lines);
+        truncated = true;
+    }
+
+    Ok(FilePreviewDocument {
+        lines,
+        byte_len,
+        truncated,
+    })
+}
+
 fn join_path(prefix: &str, name: &str) -> String {
     if prefix.is_empty() {
         name.to_string()
     } else {
         format!("{prefix}/{name}")
     }
+}
+
+fn build_repo_tree_nodes(folder: &RepoTreeFolder, prefix: &str) -> Vec<RepoTreeNode> {
+    let mut nodes = Vec::new();
+
+    for (name, child_folder) in &folder.folders {
+        let path = join_path(prefix, name);
+        nodes.push(RepoTreeNode {
+            path: path.clone(),
+            name: name.clone(),
+            kind: RepoTreeNodeKind::Directory,
+            ignored: child_folder.ignored,
+            children: build_repo_tree_nodes(child_folder, &path),
+        });
+    }
+
+    for (name, ignored) in &folder.files {
+        let path = join_path(prefix, name);
+        nodes.push(RepoTreeNode {
+            path,
+            name: name.clone(),
+            kind: RepoTreeNodeKind::File,
+            ignored: *ignored,
+            children: Vec::new(),
+        });
+    }
+
+    nodes
+}
+
+fn append_repo_tree_rows(
+    nodes: &[RepoTreeNode],
+    expanded_dirs: &BTreeSet<String>,
+    depth: usize,
+    rows: &mut Vec<RepoTreeRow>,
+) {
+    for node in nodes {
+        let expanded =
+            node.kind == RepoTreeNodeKind::Directory && expanded_dirs.contains(node.path.as_str());
+        rows.push(RepoTreeRow {
+            path: node.path.clone(),
+            name: node.name.clone(),
+            kind: node.kind,
+            ignored: node.ignored,
+            depth,
+            expanded,
+        });
+
+        if expanded && node.kind == RepoTreeNodeKind::Directory {
+            append_repo_tree_rows(&node.children, expanded_dirs, depth + 1, rows);
+        }
+    }
+}
+
+fn is_probably_binary_bytes(bytes: &[u8]) -> bool {
+    bytes.contains(&0)
 }
 
 pub(super) fn message_row(kind: DiffRowKind, text: impl Into<String>) -> SideBySideRow {

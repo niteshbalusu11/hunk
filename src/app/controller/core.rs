@@ -205,6 +205,21 @@ impl DiffViewer {
             repo_discovery_failed: false,
             error_message: None,
             tree_state,
+            sidebar_tree_mode: SidebarTreeMode::Diff,
+            repo_tree_nodes: Vec::new(),
+            repo_tree_expanded_dirs: BTreeSet::new(),
+            repo_tree_epoch: 0,
+            repo_tree_task: Task::ready(()),
+            repo_tree_loading: false,
+            repo_tree_error: None,
+            right_pane_mode: RightPaneMode::Diff,
+            file_preview_path: None,
+            file_preview_document: None,
+            file_preview_loading: false,
+            file_preview_error: None,
+            file_preview_epoch: 0,
+            file_preview_task: Task::ready(()),
+            file_preview_list_state: ListState::new(0, ListAlignment::Top, px(22.0)),
         };
 
         view.apply_theme_preference(window, cx);
@@ -235,6 +250,7 @@ impl DiffViewer {
             .iter()
             .find(|file| file.path == path)
             .map(|file| file.status);
+        self.right_pane_mode = RightPaneMode::Diff;
         self.scroll_to_file_start(&path);
         self.last_visible_row_start = None;
         self.last_diff_scroll_offset = None;
@@ -357,6 +373,7 @@ impl DiffViewer {
         } = snapshot;
 
         info!("loaded repository snapshot from {}", root.display());
+        let root_changed = self.repo_root.as_ref() != Some(&root);
 
         let files_changed = self.files != files;
         let overall_changed = self.overall_line_stats != line_stats;
@@ -375,6 +392,17 @@ impl DiffViewer {
         self.last_commit_subject = last_commit_subject;
         self.repo_discovery_failed = false;
         self.error_message = None;
+        if root_changed {
+            self.repo_tree_nodes.clear();
+            self.repo_tree_expanded_dirs.clear();
+            self.repo_tree_error = None;
+            self.right_pane_mode = RightPaneMode::Diff;
+            self.file_preview_path = None;
+            self.file_preview_document = None;
+            self.file_preview_loading = false;
+            self.file_preview_error = None;
+            self.file_preview_list_state.reset(0);
+        }
         self.collapsed_files
             .retain(|path| self.files.iter().any(|file| file.path == *path));
 
@@ -397,6 +425,9 @@ impl DiffViewer {
 
         if files_changed {
             self.rebuild_tree(cx);
+        }
+        if root_changed {
+            self.request_repo_tree_reload(cx);
         }
 
         if files_changed || overall_changed || selected_changed || self.diff_rows.is_empty() {
@@ -438,6 +469,16 @@ impl DiffViewer {
         } else {
             Some(err.to_string())
         };
+        self.repo_tree_nodes.clear();
+        self.repo_tree_expanded_dirs.clear();
+        self.repo_tree_loading = false;
+        self.repo_tree_error = None;
+        self.right_pane_mode = RightPaneMode::Diff;
+        self.file_preview_path = None;
+        self.file_preview_document = None;
+        self.file_preview_loading = false;
+        self.file_preview_error = None;
+        self.file_preview_list_state.reset(0);
         self.rebuild_tree(cx);
         cx.notify();
     }

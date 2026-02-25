@@ -138,6 +138,24 @@ impl DiffViewer {
         }
     }
 
+    pub(super) fn on_file_preview_scroll_wheel(
+        &mut self,
+        event: &ScrollWheelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let delta = event.delta.pixel_delta(window.line_height());
+        if delta.y.is_zero() {
+            return;
+        }
+
+        self.file_preview_list_state
+            .scroll_by(delta.y * FILE_PREVIEW_SCROLL_MULTIPLIER);
+        self.last_scroll_activity_at = Instant::now();
+        cx.notify();
+        cx.stop_propagation();
+    }
+
     fn scroll_diff_horizontal_by(&mut self, delta_x: gpui::Pixels) -> bool {
         if delta_x.is_zero() {
             return false;

@@ -28,7 +28,10 @@ use hunk::diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
 use hunk::git::{ChangedFile, FileStatus, LineStats, LocalBranch};
 use hunk::state::{AppState, AppStateStore};
 
-use data::{DiffStreamRowMeta, FileRowRange};
+use data::{
+    DiffStreamRowMeta, FilePreviewDocument, FileRowRange, RepoTreeNode, RightPaneMode,
+    SidebarTreeMode,
+};
 
 const AUTO_REFRESH_INTERVAL: Duration = Duration::from_millis(900);
 const FPS_SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
@@ -46,6 +49,9 @@ const DIFF_BOTTOM_SAFE_INSET: f32 = APP_BOTTOM_SAFE_INSET;
 const DIFF_SCROLLBAR_RIGHT_INSET: f32 = 2.0;
 const DIFF_SCROLLBAR_SIZE: f32 = 16.0;
 const DIFF_VERTICAL_SCROLLBAR_EXTRA_BOTTOM_INSET: f32 = 20.0;
+const FILE_PREVIEW_MAX_BYTES: usize = 1_200_000;
+const FILE_PREVIEW_MAX_LINES: usize = 12_000;
+const FILE_PREVIEW_SCROLL_MULTIPLIER: f32 = 2.4;
 
 mod controller;
 mod data;
@@ -299,4 +305,19 @@ struct DiffViewer {
     repo_discovery_failed: bool,
     error_message: Option<String>,
     tree_state: Entity<TreeState>,
+    sidebar_tree_mode: SidebarTreeMode,
+    repo_tree_nodes: Vec<RepoTreeNode>,
+    repo_tree_expanded_dirs: BTreeSet<String>,
+    repo_tree_epoch: usize,
+    repo_tree_task: Task<()>,
+    repo_tree_loading: bool,
+    repo_tree_error: Option<String>,
+    right_pane_mode: RightPaneMode,
+    file_preview_path: Option<String>,
+    file_preview_document: Option<FilePreviewDocument>,
+    file_preview_loading: bool,
+    file_preview_error: Option<String>,
+    file_preview_epoch: usize,
+    file_preview_task: Task<()>,
+    file_preview_list_state: ListState,
 }
