@@ -301,9 +301,6 @@ impl DiffViewer {
                     return Some((path, header));
                 }
 
-                if matches!(meta.kind, DiffStreamRowKind::FileHeader) {
-                    break;
-                }
             }
         }
 

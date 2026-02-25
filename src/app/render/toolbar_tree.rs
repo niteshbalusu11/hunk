@@ -651,49 +651,20 @@ impl DiffViewer {
         let status = self.selected_status.unwrap_or(FileStatus::Unknown);
         let is_dark = cx.theme().mode.is_dark();
 
-        let (label, hint, accent, background, badge_background) = match status {
-            FileStatus::Added | FileStatus::Untracked => (
-                "NEW FILE",
-                "Content exists only on the right side.",
-                cx.theme().success,
-                cx.theme()
-                    .background
-                    .blend(cx.theme().success.opacity(if is_dark { 0.20 } else { 0.10 })),
-                cx.theme().success.opacity(if is_dark { 0.50 } else { 0.24 }),
-            ),
-            FileStatus::Deleted => (
-                "DELETED FILE",
-                "Content exists only on the left side.",
-                cx.theme().danger,
-                cx.theme()
-                    .background
-                    .blend(cx.theme().danger.opacity(if is_dark { 0.20 } else { 0.10 })),
-                cx.theme().danger.opacity(if is_dark { 0.50 } else { 0.24 }),
-            ),
-            FileStatus::Renamed => (
-                "RENAMED",
-                "Showing textual changes for this path.",
-                cx.theme().warning,
-                cx.theme()
-                    .background
-                    .blend(cx.theme().warning.opacity(if is_dark { 0.20 } else { 0.10 })),
-                cx.theme().warning.opacity(if is_dark { 0.45 } else { 0.24 }),
-            ),
-            _ => (
-                "MODIFIED",
-                "Side-by-side diff view.",
-                cx.theme().accent,
-                cx.theme()
-                    .background
-                    .blend(cx.theme().accent.opacity(if is_dark { 0.14 } else { 0.08 })),
-                cx.theme().accent.opacity(if is_dark { 0.50 } else { 0.24 }),
-            ),
+        let (label, accent) = match status {
+            FileStatus::Added | FileStatus::Untracked => ("NEW FILE", cx.theme().success),
+            FileStatus::Deleted => ("DELETED FILE", cx.theme().danger),
+            FileStatus::Renamed => ("RENAMED", cx.theme().accent),
+            FileStatus::Modified => ("MODIFIED", cx.theme().warning),
+            FileStatus::TypeChange => ("TYPE CHANGED", cx.theme().warning),
+            FileStatus::Conflicted => ("CONFLICTED", cx.theme().danger),
+            FileStatus::Unknown => ("MODIFIED", cx.theme().muted_foreground),
         };
-        let hint_text = if self.selected_file_is_collapsed() {
-            "Collapsed in stream. Expand to render this file inline."
-        } else {
-            hint
-        };
+        let background = cx
+            .theme()
+            .background
+            .blend(accent.opacity(if is_dark { 0.20 } else { 0.10 }));
+        let badge_background = accent.opacity(if is_dark { 0.28 } else { 0.17 });
 
         h_flex()
             .w_full()
@@ -704,6 +675,26 @@ impl DiffViewer {
             .border_b_1()
             .border_color(cx.theme().border)
             .bg(background)
+            .child({
+                let view = view.clone();
+                Button::new("toggle-file-collapse")
+                    .ghost()
+                    .compact()
+                    .label(if self.selected_file_is_collapsed() {
+                        "▶"
+                    } else {
+                        "▼"
+                    })
+                    .min_w(px(24.0))
+                    .h(px(24.0))
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .on_click(move |_, _, cx| {
+                        view.update(cx, |this, cx| {
+                            this.toggle_selected_file_collapsed(cx);
+                        });
+                    })
+            })
             .child(
                 div()
                     .px_2()
@@ -723,27 +714,7 @@ impl DiffViewer {
                     .text_color(cx.theme().foreground)
                     .child(path),
             )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(hint_text),
-            )
             .child(self.render_line_stats("file", self.selected_line_stats, cx))
-            .child(
-                Button::new("toggle-file-collapse")
-                    .ghost()
-                    .label(if self.selected_file_is_collapsed() {
-                        "Expand"
-                    } else {
-                        "Collapse"
-                    })
-                    .on_click(move |_, _, cx| {
-                        view.update(cx, |this, cx| {
-                            this.toggle_selected_file_collapsed(cx);
-                        });
-                    }),
-            )
             .into_any_element()
     }
 

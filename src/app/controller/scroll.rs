@@ -58,13 +58,7 @@ impl DiffViewer {
 
     fn selected_file_from_row_metadata(&self, row_ix: usize) -> Option<(String, FileStatus)> {
         let row = self.diff_row_metadata.get(row_ix)?;
-        if matches!(
-            row.kind,
-            DiffStreamRowKind::StreamSummary
-                | DiffStreamRowKind::StreamEndMessage
-                | DiffStreamRowKind::Spacer
-                | DiffStreamRowKind::EmptyState
-        ) {
+        if row.kind == DiffStreamRowKind::EmptyState {
             return None;
         }
 

@@ -25,16 +25,11 @@ pub(super) struct FileRowRange {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum DiffStreamRowKind {
-    FileHeader,
     CoreCode,
     CoreHunkHeader,
     CoreMeta,
     FileCollapsed,
     FileError,
-    FileFooter,
-    StreamSummary,
-    StreamEndMessage,
-    Spacer,
     EmptyState,
 }
 
@@ -142,20 +137,6 @@ pub(super) fn load_diff_stream(
     for file in files {
         let start_row = rows.len();
         let mut file_row_ordinal = 0_usize;
-        push_stream_row(
-            &mut rows,
-            &mut row_metadata,
-            message_row(
-                DiffRowKind::Meta,
-                format!("── {} [{}] ──", file.path, file.status.tag()),
-            ),
-            DiffStreamRowKind::FileHeader,
-            Some(file.path.as_str()),
-            Some(file.status),
-            file_row_ordinal,
-        );
-        file_row_ordinal = file_row_ordinal.saturating_add(1);
-
         let loaded_file = load_file_diff_rows(repo_root, file);
         file_line_stats.insert(file.path.clone(), loaded_file.stats);
 
@@ -175,7 +156,6 @@ pub(super) fn load_diff_stream(
                 Some(file.status),
                 file_row_ordinal,
             );
-            file_row_ordinal = file_row_ordinal.saturating_add(1);
         } else if let Some(load_error) = loaded_file.load_error {
             push_stream_row(
                 &mut rows,
@@ -186,9 +166,12 @@ pub(super) fn load_diff_stream(
                 Some(file.status),
                 file_row_ordinal,
             );
-            file_row_ordinal = file_row_ordinal.saturating_add(1);
         } else {
-            for row in loaded_file.core_rows {
+            for row in loaded_file
+                .core_rows
+                .into_iter()
+                .filter(|row| matches!(row.kind, DiffRowKind::Code | DiffRowKind::Empty))
+            {
                 let row_kind = stream_kind_for_core_row(&row);
                 push_stream_row(
                     &mut rows,
@@ -202,16 +185,6 @@ pub(super) fn load_diff_stream(
                 file_row_ordinal = file_row_ordinal.saturating_add(1);
             }
         }
-
-        push_stream_row(
-            &mut rows,
-            &mut row_metadata,
-            message_row(DiffRowKind::Meta, format!("── End of {} ──", file.path)),
-            DiffStreamRowKind::FileFooter,
-            Some(file.path.as_str()),
-            Some(file.status),
-            file_row_ordinal,
-        );
 
         let end_row = rows.len();
         file_ranges.push(FileRowRange {
@@ -232,43 +205,6 @@ pub(super) fn load_diff_stream(
             None,
             0,
         );
-    } else {
-        let mut stream_ordinal = 0_usize;
-        push_stream_row(
-            &mut rows,
-            &mut row_metadata,
-            message_row(DiffRowKind::Meta, "── End of change set ──"),
-            DiffStreamRowKind::StreamSummary,
-            None,
-            None,
-            stream_ordinal,
-        );
-        stream_ordinal = stream_ordinal.saturating_add(1);
-        push_stream_row(
-            &mut rows,
-            &mut row_metadata,
-            message_row(
-                DiffRowKind::Empty,
-                "You are at the bottom of the diff stream.",
-            ),
-            DiffStreamRowKind::StreamEndMessage,
-            None,
-            None,
-            stream_ordinal,
-        );
-        stream_ordinal = stream_ordinal.saturating_add(1);
-        for _ in 0..DIFF_FOOTER_SPACER_ROWS {
-            push_stream_row(
-                &mut rows,
-                &mut row_metadata,
-                message_row(DiffRowKind::Empty, ""),
-                DiffStreamRowKind::Spacer,
-                None,
-                None,
-                stream_ordinal,
-            );
-            stream_ordinal = stream_ordinal.saturating_add(1);
-        }
     }
 
     Ok(DiffStream {
@@ -355,16 +291,11 @@ fn hash_cell(cell: &DiffCell, hasher: &mut impl Hasher) {
 
 fn stable_kind_tag(kind: DiffStreamRowKind) -> &'static str {
     match kind {
-        DiffStreamRowKind::FileHeader => "file-header",
         DiffStreamRowKind::CoreCode => "core-code",
         DiffStreamRowKind::CoreHunkHeader => "core-hunk-header",
         DiffStreamRowKind::CoreMeta => "core-meta",
         DiffStreamRowKind::FileCollapsed => "file-collapsed",
         DiffStreamRowKind::FileError => "file-error",
-        DiffStreamRowKind::FileFooter => "file-footer",
-        DiffStreamRowKind::StreamSummary => "stream-summary",
-        DiffStreamRowKind::StreamEndMessage => "stream-end-message",
-        DiffStreamRowKind::Spacer => "spacer",
         DiffStreamRowKind::EmptyState => "empty-state",
     }
 }
@@ -456,9 +387,9 @@ mod tests {
     fn stable_row_id_changes_when_ordinal_changes() {
         let row = message_row(DiffRowKind::Meta, "header");
         let first =
-            compute_stable_row_id(Some("src/lib.rs"), DiffStreamRowKind::FileHeader, 0, &row);
+            compute_stable_row_id(Some("src/lib.rs"), DiffStreamRowKind::CoreMeta, 0, &row);
         let second =
-            compute_stable_row_id(Some("src/lib.rs"), DiffStreamRowKind::FileHeader, 1, &row);
+            compute_stable_row_id(Some("src/lib.rs"), DiffStreamRowKind::CoreMeta, 1, &row);
 
         assert_ne!(first, second);
     }

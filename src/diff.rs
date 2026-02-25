@@ -213,23 +213,8 @@ pub fn parse_patch_side_by_side(patch: &str) -> Vec<SideBySideRow> {
     let mut rows = Vec::new();
     let document = parse_patch_document(patch);
 
-    for line in document.prelude {
-        rows.push(SideBySideRow::meta(DiffRowKind::Meta, line));
-    }
-
     for hunk in document.hunks {
-        rows.push(SideBySideRow::meta(
-            DiffRowKind::HunkHeader,
-            hunk.header.clone(),
-        ));
         append_hunk_rows(&hunk, &mut rows);
-        for line in hunk.trailing_meta {
-            rows.push(SideBySideRow::meta(DiffRowKind::Meta, line));
-        }
-    }
-
-    for line in document.epilogue {
-        rows.push(SideBySideRow::meta(DiffRowKind::Meta, line));
     }
 
     if rows.is_empty() {

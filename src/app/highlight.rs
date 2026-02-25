@@ -140,6 +140,7 @@ fn language_tokens_for_extension(extension: &str) -> Option<&'static [&'static s
         "json" | "jsonc" => Some(&["json", "js"]),
         "yml" | "yaml" => Some(&["yaml", "yml"]),
         "toml" => Some(&["toml"]),
+        "tf" | "tfvars" | "hcl" => Some(&["terraform", "tf", "hcl"]),
         _ => None,
     }
 }
@@ -506,5 +507,27 @@ mod tests {
             "unexpected json syntax mapping: {}",
             syntax.name
         );
+    }
+
+    #[test]
+    fn resolves_terraform_family_when_available() {
+        let syntax_set = syntax_set();
+        let dependency_supports_terraform = syntax_set.find_syntax_by_extension("tf").is_some()
+            || syntax_set.find_syntax_by_extension("tfvars").is_some()
+            || ["terraform", "tf", "hcl"]
+                .iter()
+                .any(|token| syntax_set.find_syntax_by_token(token).is_some());
+
+        if !dependency_supports_terraform {
+            return;
+        }
+
+        let terraform_paths = ["main.tf", "vars.tfvars", "config.hcl"];
+        for path in terraform_paths {
+            assert!(
+                syntax_for_path(syntax_set, Some(path)).is_some(),
+                "expected terraform-family syntax for {path}"
+            );
+        }
     }
 }

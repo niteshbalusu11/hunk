@@ -140,6 +140,30 @@ fn handles_empty_patch_for_document_and_rows() {
 }
 
 #[test]
+fn side_by_side_hides_patch_metadata_rows() {
+    let patch = "\
+diff --git a/file.txt b/file.txt
+index 123..456 100644
+--- a/file.txt
++++ b/file.txt
+@@ -1,2 +1,2 @@
+-old
++new
+ keep";
+
+    let rows = parse_patch_side_by_side(patch);
+
+    assert!(
+        rows.iter()
+            .all(|row| { matches!(row.kind, DiffRowKind::Code | DiffRowKind::Empty) })
+    );
+    assert!(
+        rows.iter()
+            .all(|row| !row.text.starts_with("diff --git") && !row.text.starts_with("@@"))
+    );
+}
+
+#[test]
 fn keeps_meta_lines_before_and_after_hunk() {
     let patch = "\
 diff --git a/a.rs b/a.rs
