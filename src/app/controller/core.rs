@@ -20,6 +20,33 @@ impl DiffViewer {
         }
     }
 
+    fn load_app_state() -> (Option<AppStateStore>, AppState) {
+        let store = match AppStateStore::new() {
+            Ok(store) => store,
+            Err(err) => {
+                error!("failed to initialize app state path: {err:#}");
+                return (None, AppState::default());
+            }
+        };
+
+        match store.load_or_default() {
+            Ok(state) => (Some(store), state),
+            Err(err) => {
+                error!("failed to load app state from {}: {err:#}", store.path().display());
+                (Some(store), AppState::default())
+            }
+        }
+    }
+
+    fn load_legacy_last_project_path(config_store: &ConfigStore) -> Option<PathBuf> {
+        let raw = std::fs::read_to_string(config_store.path()).ok()?;
+        let value = raw.parse::<toml::Value>().ok()?;
+        value
+            .get("last_project_path")
+            .and_then(toml::Value::as_str)
+            .map(PathBuf::from)
+    }
+
     fn apply_theme_preference(&self, window: &mut Window, cx: &mut Context<Self>) {
         let mode = match self.config.theme {
             ThemePreference::System => ThemeMode::from(window.appearance()),
@@ -40,6 +67,28 @@ impl DiffViewer {
                 store.path().display()
             );
         }
+    }
+
+    fn persist_state(&self) {
+        let Some(store) = &self.state_store else {
+            return;
+        };
+
+        if let Err(err) = store.save(&self.state) {
+            error!(
+                "failed to save app state to {}: {err:#}",
+                store.path().display()
+            );
+        }
+    }
+
+    fn set_last_project_path(&mut self, project_path: Option<PathBuf>) {
+        if self.state.last_project_path == project_path {
+            return;
+        }
+
+        self.state.last_project_path = project_path;
+        self.persist_state();
     }
 
     fn sync_theme_with_system_if_needed(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -67,6 +116,22 @@ impl DiffViewer {
 
     pub(super) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let (config_store, config) = Self::load_app_config();
+        let (state_store, mut state) = Self::load_app_state();
+        if state.last_project_path.is_none()
+            && let Some(config_store) = config_store.as_ref()
+            && let Some(last_project_path) = Self::load_legacy_last_project_path(config_store)
+        {
+            state.last_project_path = Some(last_project_path);
+            if let Some(state_store) = state_store.as_ref()
+                && let Err(err) = state_store.save(&state)
+            {
+                error!(
+                    "failed to migrate app state to {}: {err:#}",
+                    state_store.path().display()
+                );
+            }
+        }
+        let last_project_path = state.last_project_path.clone();
         let diff_fit_to_width = matches!(config.diff_view, DiffViewMode::Fit);
         let diff_show_whitespace = config.show_whitespace;
         let diff_show_eol_markers = config.show_eol_markers;
@@ -80,7 +145,9 @@ impl DiffViewer {
         let mut view = Self {
             config_store,
             config,
-            project_path: None,
+            state_store,
+            state,
+            project_path: last_project_path,
             repo_root: None,
             branch_name: "unknown".to_string(),
             branch_has_upstream: false,
@@ -266,7 +333,8 @@ impl DiffViewer {
 
             if let Some(this) = this.upgrade() {
                 this.update(cx, |this, cx| {
-                    this.project_path = Some(selected_path);
+                    this.project_path = Some(selected_path.clone());
+                    this.set_last_project_path(Some(selected_path));
                     this.git_status_message = None;
                     this.request_snapshot_refresh_internal(true, cx);
                     cx.notify();
@@ -296,6 +364,7 @@ impl DiffViewer {
         let previous_selected_status = self.selected_status;
 
         self.project_path = Some(root.clone());
+        self.set_last_project_path(Some(root.clone()));
         self.repo_root = Some(root);
         self.branch_name = branch_name;
         self.branch_has_upstream = branch_has_upstream;

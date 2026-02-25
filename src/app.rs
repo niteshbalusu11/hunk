@@ -26,6 +26,7 @@ use tracing::error;
 use hunk::config::{AppConfig, ConfigStore, DiffViewMode, ThemePreference};
 use hunk::diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
 use hunk::git::{ChangedFile, FileStatus, LineStats, LocalBranch};
+use hunk::state::{AppState, AppStateStore};
 
 use data::{DiffStreamRowMeta, FileRowRange};
 
@@ -157,6 +158,13 @@ fn apply_soft_dark_theme(cx: &mut App) {
 
 pub fn run() -> Result<()> {
     let app = Application::new();
+    app.on_reopen(|cx| {
+        if cx.windows().is_empty() {
+            open_main_window(cx);
+        }
+        cx.activate(true);
+    });
+
     app.run(|cx| {
         gpui_component::init(cx);
         apply_soft_light_theme(cx);
@@ -201,23 +209,27 @@ pub fn run() -> Result<()> {
             },
         ]);
         cx.activate(true);
-
-        let window_options = WindowOptions {
-            titlebar: Some(TitlebarOptions {
-                title: Some("Hunk".into()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        if let Err(err) = cx.open_window(window_options, |window, cx| {
-            let view = cx.new(|cx| DiffViewer::new(window, cx));
-            cx.new(|cx| Root::new(view, window, cx))
-        }) {
-            error!("failed to open window: {err:#}");
-        }
+        open_main_window(cx);
     });
 
     Ok(())
+}
+
+fn open_main_window(cx: &mut App) {
+    let window_options = WindowOptions {
+        titlebar: Some(TitlebarOptions {
+            title: Some("Hunk".into()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    if let Err(err) = cx.open_window(window_options, |window, cx| {
+        let view = cx.new(|cx| DiffViewer::new(window, cx));
+        cx.new(|cx| Root::new(view, window, cx))
+    }) {
+        error!("failed to open window: {err:#}");
+    }
 }
 
 fn quit_app(_: &QuitApp, cx: &mut App) {
@@ -227,6 +239,8 @@ fn quit_app(_: &QuitApp, cx: &mut App) {
 struct DiffViewer {
     config_store: Option<ConfigStore>,
     config: AppConfig,
+    state_store: Option<AppStateStore>,
+    state: AppState,
     project_path: Option<PathBuf>,
     repo_root: Option<PathBuf>,
     branch_name: String,
