@@ -25,7 +25,7 @@ use hunk::config::{AppConfig, ConfigStore, DiffViewMode, ThemePreference};
 use hunk::diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
 use hunk::git::{ChangedFile, FileStatus, LineStats};
 
-use data::FileRowRange;
+use data::{DiffStreamRowMeta, FileRowRange};
 
 const AUTO_REFRESH_INTERVAL: Duration = Duration::from_millis(900);
 const FPS_SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
@@ -101,6 +101,7 @@ struct DiffViewer {
     selected_path: Option<String>,
     selected_status: Option<FileStatus>,
     diff_rows: Vec<SideBySideRow>,
+    diff_row_metadata: Vec<DiffStreamRowMeta>,
     file_row_ranges: Vec<FileRowRange>,
     file_line_stats: BTreeMap<String, LineStats>,
     diff_list_state: ListState,

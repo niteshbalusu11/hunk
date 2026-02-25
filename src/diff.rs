@@ -67,6 +67,141 @@ impl SideBySideRow {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiffLineKind {
+    Context,
+    Added,
+    Removed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiffLine {
+    pub kind: DiffLineKind,
+    pub old_line: Option<u32>,
+    pub new_line: Option<u32>,
+    pub text: String,
+}
+
+impl DiffLine {
+    fn new(
+        kind: DiffLineKind,
+        old_line: Option<u32>,
+        new_line: Option<u32>,
+        text: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind,
+            old_line,
+            new_line,
+            text: text.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiffHunk {
+    pub header: String,
+    pub old_start: u32,
+    pub new_start: u32,
+    pub lines: Vec<DiffLine>,
+    pub trailing_meta: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DiffDocument {
+    pub prelude: Vec<String>,
+    pub hunks: Vec<DiffHunk>,
+    pub epilogue: Vec<String>,
+}
+
+pub fn parse_patch_document(patch: &str) -> DiffDocument {
+    let mut document = DiffDocument::default();
+    if patch.trim().is_empty() {
+        return document;
+    }
+
+    let lines = patch.lines().collect::<Vec<_>>();
+    let mut ix = 0_usize;
+
+    while ix < lines.len() {
+        let line = lines[ix];
+
+        if line.starts_with("@@") {
+            let (old_start, new_start) = parse_hunk_header(line).unwrap_or((0, 0));
+            ix += 1;
+
+            let mut old_line = old_start;
+            let mut new_line = new_start;
+            let mut hunk_lines = Vec::new();
+            let mut trailing_meta = Vec::new();
+
+            while ix < lines.len() {
+                let hunk_line = lines[ix];
+
+                if hunk_line.starts_with("@@") || hunk_line.starts_with("diff --git") {
+                    break;
+                }
+                if is_meta_line(hunk_line) && !hunk_line.starts_with("\\ No newline at end of file")
+                {
+                    break;
+                }
+
+                match hunk_line.chars().next() {
+                    Some(' ') => {
+                        hunk_lines.push(DiffLine::new(
+                            DiffLineKind::Context,
+                            Some(old_line),
+                            Some(new_line),
+                            hunk_line.trim_start_matches(' '),
+                        ));
+                        old_line = old_line.saturating_add(1);
+                        new_line = new_line.saturating_add(1);
+                    }
+                    Some('-') => {
+                        hunk_lines.push(DiffLine::new(
+                            DiffLineKind::Removed,
+                            Some(old_line),
+                            None,
+                            hunk_line.trim_start_matches('-'),
+                        ));
+                        old_line = old_line.saturating_add(1);
+                    }
+                    Some('+') => {
+                        hunk_lines.push(DiffLine::new(
+                            DiffLineKind::Added,
+                            None,
+                            Some(new_line),
+                            hunk_line.trim_start_matches('+'),
+                        ));
+                        new_line = new_line.saturating_add(1);
+                    }
+                    _ => trailing_meta.push(hunk_line.to_string()),
+                }
+
+                ix += 1;
+            }
+
+            document.hunks.push(DiffHunk {
+                header: line.to_string(),
+                old_start,
+                new_start,
+                lines: hunk_lines,
+                trailing_meta,
+            });
+            continue;
+        }
+
+        if document.hunks.is_empty() {
+            document.prelude.push(line.to_string());
+        } else {
+            document.epilogue.push(line.to_string());
+        }
+        ix += 1;
+    }
+
+    document
+}
+
 pub fn parse_patch_side_by_side(patch: &str) -> Vec<SideBySideRow> {
     if patch.trim().is_empty() {
         return vec![SideBySideRow::meta(
@@ -75,103 +210,84 @@ pub fn parse_patch_side_by_side(patch: &str) -> Vec<SideBySideRow> {
         )];
     }
 
-    let lines = patch.lines().collect::<Vec<_>>();
     let mut rows = Vec::new();
+    let document = parse_patch_document(patch);
 
-    let mut left_line = 0_u32;
-    let mut right_line = 0_u32;
-
-    let mut ix = 0_usize;
-    while ix < lines.len() {
-        let line = lines[ix];
-
-        if line.starts_with("@@") {
-            if let Some((left_start, right_start)) = parse_hunk_header(line) {
-                left_line = left_start;
-                right_line = right_start;
-            }
-            rows.push(SideBySideRow::meta(DiffRowKind::HunkHeader, line));
-            ix += 1;
-            continue;
-        }
-
-        if is_meta_line(line) {
-            rows.push(SideBySideRow::meta(DiffRowKind::Meta, line));
-            ix += 1;
-            continue;
-        }
-
-        if line.starts_with('-') {
-            let start_ix = ix;
-            while ix < lines.len() && lines[ix].starts_with('-') {
-                ix += 1;
-            }
-
-            let removed = lines[start_ix..ix]
-                .iter()
-                .map(|line| line.trim_start_matches('-').to_string())
-                .collect::<Vec<_>>();
-
-            let added_start = ix;
-            while ix < lines.len() && lines[ix].starts_with('+') {
-                ix += 1;
-            }
-
-            let added = lines[added_start..ix]
-                .iter()
-                .map(|line| line.trim_start_matches('+').to_string())
-                .collect::<Vec<_>>();
-
-            let max_len = removed.len().max(added.len());
-            for entry_ix in 0..max_len {
-                let left = removed.get(entry_ix).map_or_else(DiffCell::empty, |text| {
-                    let cell = DiffCell::new(Some(left_line), text.clone(), DiffCellKind::Removed);
-                    left_line = left_line.saturating_add(1);
-                    cell
-                });
-
-                let right = added.get(entry_ix).map_or_else(DiffCell::empty, |text| {
-                    let cell = DiffCell::new(Some(right_line), text.clone(), DiffCellKind::Added);
-                    right_line = right_line.saturating_add(1);
-                    cell
-                });
-
-                rows.push(SideBySideRow::code(left, right));
-            }
-
-            continue;
-        }
-
-        if line.starts_with('+') {
-            let added = line.trim_start_matches('+');
-            rows.push(SideBySideRow::code(
-                DiffCell::empty(),
-                DiffCell::new(Some(right_line), added, DiffCellKind::Added),
-            ));
-
-            right_line = right_line.saturating_add(1);
-            ix += 1;
-            continue;
-        }
-
-        if line.starts_with(' ') {
-            let context = line.trim_start_matches(' ');
-            rows.push(SideBySideRow::code(
-                DiffCell::new(Some(left_line), context, DiffCellKind::Context),
-                DiffCell::new(Some(right_line), context, DiffCellKind::Context),
-            ));
-
-            left_line = left_line.saturating_add(1);
-            right_line = right_line.saturating_add(1);
-            ix += 1;
-            continue;
-        }
-
+    for line in document.prelude {
         rows.push(SideBySideRow::meta(DiffRowKind::Meta, line));
-        ix += 1;
+    }
+
+    for hunk in document.hunks {
+        rows.push(SideBySideRow::meta(
+            DiffRowKind::HunkHeader,
+            hunk.header.clone(),
+        ));
+        append_hunk_rows(&hunk, &mut rows);
+        for line in hunk.trailing_meta {
+            rows.push(SideBySideRow::meta(DiffRowKind::Meta, line));
+        }
+    }
+
+    for line in document.epilogue {
+        rows.push(SideBySideRow::meta(DiffRowKind::Meta, line));
+    }
+
+    if rows.is_empty() {
+        rows.push(SideBySideRow::meta(
+            DiffRowKind::Empty,
+            "No diff for this file.",
+        ));
     }
 
     rows
+}
+
+fn append_hunk_rows(hunk: &DiffHunk, rows: &mut Vec<SideBySideRow>) {
+    let mut ix = 0_usize;
+    while ix < hunk.lines.len() {
+        let line = &hunk.lines[ix];
+        match line.kind {
+            DiffLineKind::Removed => {
+                let removed_start = ix;
+                while ix < hunk.lines.len() && hunk.lines[ix].kind == DiffLineKind::Removed {
+                    ix += 1;
+                }
+
+                let added_start = ix;
+                while ix < hunk.lines.len() && hunk.lines[ix].kind == DiffLineKind::Added {
+                    ix += 1;
+                }
+
+                let removed = &hunk.lines[removed_start..added_start];
+                let added = &hunk.lines[added_start..ix];
+                let max_len = removed.len().max(added.len());
+
+                for entry_ix in 0..max_len {
+                    let left = removed.get(entry_ix).map_or_else(DiffCell::empty, |line| {
+                        DiffCell::new(line.old_line, line.text.clone(), DiffCellKind::Removed)
+                    });
+                    let right = added.get(entry_ix).map_or_else(DiffCell::empty, |line| {
+                        DiffCell::new(line.new_line, line.text.clone(), DiffCellKind::Added)
+                    });
+                    rows.push(SideBySideRow::code(left, right));
+                }
+            }
+            DiffLineKind::Added => {
+                rows.push(SideBySideRow::code(
+                    DiffCell::empty(),
+                    DiffCell::new(line.new_line, line.text.clone(), DiffCellKind::Added),
+                ));
+                ix += 1;
+            }
+            DiffLineKind::Context => {
+                rows.push(SideBySideRow::code(
+                    DiffCell::new(line.old_line, line.text.clone(), DiffCellKind::Context),
+                    DiffCell::new(line.new_line, line.text.clone(), DiffCellKind::Context),
+                ));
+                ix += 1;
+            }
+        }
+    }
 }
 
 fn is_meta_line(line: &str) -> bool {

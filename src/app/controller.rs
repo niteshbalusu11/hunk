@@ -2,8 +2,8 @@ use anyhow::Context as _;
 use tracing::{error, info};
 
 use super::data::{
-    build_tree_items, decimal_digits, display_width, line_number_column_width, load_diff_stream,
-    message_row,
+    DiffStreamRowKind, build_tree_items, decimal_digits, display_width, line_number_column_width,
+    load_diff_stream, message_row,
 };
 use super::*;
 use hunk::git::{RepoSnapshot, load_snapshot};
@@ -90,6 +90,7 @@ impl DiffViewer {
             selected_path: None,
             selected_status: None,
             diff_rows: Vec::new(),
+            diff_row_metadata: Vec::new(),
             file_row_ranges: Vec::new(),
             file_line_stats: BTreeMap::new(),
             diff_list_state: ListState::new(0, ListAlignment::Top, px(360.0)),
@@ -246,6 +247,7 @@ impl DiffViewer {
         self.selected_line_stats = LineStats::default();
         self.file_row_ranges.clear();
         self.file_line_stats.clear();
+        self.diff_row_metadata.clear();
         self.diff_rows = vec![message_row(
             DiffRowKind::Empty,
             "Open this app from a Git repository to load diffs.",
@@ -260,6 +262,7 @@ impl DiffViewer {
     fn request_selected_diff_reload(&mut self, cx: &mut Context<Self>) {
         let Some(repo_root) = self.repo_root.clone() else {
             self.diff_rows.clear();
+            self.diff_row_metadata.clear();
             self.sync_diff_list_state();
             self.file_row_ranges.clear();
             self.file_line_stats.clear();
@@ -271,6 +274,7 @@ impl DiffViewer {
 
         if self.files.is_empty() {
             self.diff_rows = vec![message_row(DiffRowKind::Empty, "No changed files.")];
+            self.diff_row_metadata.clear();
             self.sync_diff_list_state();
             self.file_row_ranges.clear();
             self.file_line_stats.clear();
@@ -301,6 +305,7 @@ impl DiffViewer {
                     match result {
                         Ok(stream) => {
                             this.diff_rows = stream.rows;
+                            this.diff_row_metadata = stream.row_metadata;
                             this.sync_diff_list_state();
                             this.file_row_ranges = stream.file_ranges;
                             this.file_line_stats = stream.file_line_stats;
@@ -334,6 +339,7 @@ impl DiffViewer {
                                 DiffRowKind::Meta,
                                 format!("Failed to load diff stream: {err:#}"),
                             )];
+                            this.diff_row_metadata.clear();
                             this.sync_diff_list_state();
                             this.file_row_ranges.clear();
                             this.file_line_stats.clear();
@@ -472,23 +478,50 @@ impl DiffViewer {
         }
         self.last_visible_row_start = Some(row_ix);
 
-        let range = self
-            .file_row_ranges
-            .iter()
-            .find(|range| row_ix < range.end_row)
-            .or_else(|| self.file_row_ranges.last());
-        let Some(range) = range else {
+        let Some((next_path, next_status)) =
+            self.selected_file_from_row_metadata(row_ix).or_else(|| {
+                self.file_row_ranges
+                    .iter()
+                    .find(|range| row_ix < range.end_row)
+                    .or_else(|| self.file_row_ranges.last())
+                    .map(|range| (range.path.clone(), range.status))
+            })
+        else {
             return;
         };
 
-        if self.selected_path.as_deref() == Some(range.path.as_str()) {
+        if self.selected_path.as_deref() == Some(next_path.as_str()) {
             return;
         }
 
-        self.selected_path = Some(range.path.clone());
-        self.selected_status = Some(range.status);
+        self.selected_path = Some(next_path);
+        self.selected_status = Some(next_status);
         self.sync_selected_line_stats();
         cx.notify();
+    }
+
+    fn selected_file_from_row_metadata(&self, row_ix: usize) -> Option<(String, FileStatus)> {
+        let row = self.diff_row_metadata.get(row_ix)?;
+        if matches!(
+            row.kind,
+            DiffStreamRowKind::StreamSummary
+                | DiffStreamRowKind::StreamEndMessage
+                | DiffStreamRowKind::Spacer
+                | DiffStreamRowKind::EmptyState
+        ) {
+            return None;
+        }
+
+        let _stable_row_id = row.stable_id;
+        let path = row.file_path.clone()?;
+        let status = row.file_status.or_else(|| {
+            self.files
+                .iter()
+                .find(|file| file.path == path)
+                .map(|file| file.status)
+        })?;
+
+        Some((path, status))
     }
 
     pub(super) fn on_diff_horizontal_scroll_wheel(

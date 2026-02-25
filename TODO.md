@@ -1,5 +1,6 @@
 # Hunk Diff Viewer TODO
 
+- [ ] Execute diff quality roadmap in `DIFF_VIEW_QUALITY_TODO.md`
 - [x] Pin dependencies and bootstrap project files
 - [x] Implement Git status + per-file diff loading
 - [x] Parse unified diff into render rows

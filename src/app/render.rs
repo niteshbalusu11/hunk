@@ -395,16 +395,19 @@ impl DiffViewer {
                                     .child(
                                         v_flex()
                                             .h_full()
-                                            .w_full()
+                                            .w(px(self.diff_pan_content_width))
+                                            .min_w(px(self.diff_pan_content_width))
                                             .child(
                                                 h_flex()
-                                                    .w_full()
+                                                    .w(px(self.diff_pan_content_width))
+                                                    .min_w(px(self.diff_pan_content_width))
                                                     .border_b_1()
                                                     .border_color(cx.theme().border)
                                                     .child(
                                                         div()
-                                                            .flex_1()
-                                                            .min_w_0()
+                                                            .w(px(self.diff_left_column_width))
+                                                            .min_w(px(self.diff_left_column_width))
+                                                            .max_w(px(self.diff_left_column_width))
                                                             .px_2()
                                                             .py_1()
                                                             .text_xs()
@@ -413,8 +416,9 @@ impl DiffViewer {
                                                     )
                                                     .child(
                                                         div()
-                                                            .flex_1()
-                                                            .min_w_0()
+                                                            .w(px(self.diff_right_column_width))
+                                                            .min_w(px(self.diff_right_column_width))
+                                                            .max_w(px(self.diff_right_column_width))
                                                             .px_2()
                                                             .py_1()
                                                             .text_xs()
@@ -459,6 +463,7 @@ impl DiffViewer {
         row: &SideBySideRow,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let stable_row_id = self.diff_row_stable_id(ix);
         let is_dark = cx.theme().mode.is_dark();
 
         let (background, foreground, accent) = match row.kind {
@@ -526,7 +531,7 @@ impl DiffViewer {
         };
 
         div()
-            .id(("diff-meta-row", ix))
+            .id(("diff-meta-row", stable_row_id))
             .relative()
             .overflow_x_hidden()
             .px_2()
@@ -538,8 +543,12 @@ impl DiffViewer {
             .text_color(foreground)
             .font_family(cx.theme().mono_font_family.clone())
             .when(self.diff_fit_to_width, |this| this.w_full())
-            .when(!self.diff_fit_to_width, |this| this.w_full())
-            .whitespace_normal()
+            .when(!self.diff_fit_to_width, |this| {
+                this.w(px(self.diff_pan_content_width))
+                    .min_w(px(self.diff_pan_content_width))
+            })
+            .when(self.diff_fit_to_width, |this| this.whitespace_normal())
+            .when(!self.diff_fit_to_width, |this| this.whitespace_nowrap())
             .child(row.text.clone())
             .child(
                 div()
@@ -559,18 +568,22 @@ impl DiffViewer {
         row_data: &SideBySideRow,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let stable_row_id = self.diff_row_stable_id(ix);
         let row = h_flex()
-            .id(("diff-code-row", ix))
+            .id(("diff-code-row", stable_row_id))
             .overflow_x_hidden()
             .border_b_1()
             .border_color(cx.theme().border)
             .when(self.diff_fit_to_width, |this| this.w_full())
-            .when(!self.diff_fit_to_width, |this| this.w_full());
+            .when(!self.diff_fit_to_width, |this| {
+                this.w(px(self.diff_pan_content_width))
+                    .min_w(px(self.diff_pan_content_width))
+            });
 
         if self.diff_fit_to_width {
             return row
                 .child(self.render_diff_cell(
-                    ix,
+                    stable_row_id,
                     "left",
                     &row_data.left,
                     row_data.right.kind,
@@ -578,7 +591,7 @@ impl DiffViewer {
                     cx,
                 ))
                 .child(self.render_diff_cell(
-                    ix,
+                    stable_row_id,
                     "right",
                     &row_data.right,
                     row_data.left.kind,
@@ -589,7 +602,7 @@ impl DiffViewer {
         }
 
         row.child(self.render_diff_cell(
-            ix,
+            stable_row_id,
             "left",
             &row_data.left,
             row_data.right.kind,
@@ -597,7 +610,7 @@ impl DiffViewer {
             cx,
         ))
         .child(self.render_diff_cell(
-            ix,
+            stable_row_id,
             "right",
             &row_data.right,
             row_data.left.kind,
@@ -609,7 +622,7 @@ impl DiffViewer {
 
     fn render_diff_cell(
         &self,
-        row_ix: usize,
+        row_stable_id: u64,
         side: &'static str,
         cell: &DiffCell,
         peer_kind: DiffCellKind,
@@ -617,9 +630,9 @@ impl DiffViewer {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let cell_id = if side == "left" {
-            ("diff-cell-left", row_ix)
+            ("diff-cell-left", row_stable_id)
         } else {
-            ("diff-cell-right", row_ix)
+            ("diff-cell-right", row_stable_id)
         };
 
         let is_dark = cx.theme().mode.is_dark();
@@ -751,7 +764,7 @@ impl DiffViewer {
 
         let should_draw_right_divider = side == "left";
 
-        h_flex()
+        let base = h_flex()
             .id(cell_id)
             .overflow_x_hidden()
             .px_2()
@@ -759,8 +772,6 @@ impl DiffViewer {
             .gap_2()
             .items_start()
             .bg(background)
-            .when(column_width.is_some(), |this| this.flex_1().min_w_0())
-            .when(column_width.is_none(), |this| this.flex_1().min_w_0())
             .when(should_draw_right_divider, |this| {
                 this.border_r_1().border_color(cx.theme().border)
             })
@@ -789,10 +800,27 @@ impl DiffViewer {
                     .text_sm()
                     .text_color(text_color)
                     .font_family(cx.theme().mono_font_family.clone())
-                    .whitespace_normal()
+                    .when(self.diff_fit_to_width, |this| this.whitespace_normal())
+                    .when(!self.diff_fit_to_width, |this| this.whitespace_nowrap())
                     .child(content),
-            )
-            .into_any_element()
+            );
+
+        if let Some(width) = column_width {
+            return base
+                .w(px(width))
+                .min_w(px(width))
+                .max_w(px(width))
+                .into_any_element();
+        }
+
+        base.flex_1().min_w_0().into_any_element()
+    }
+
+    fn diff_row_stable_id(&self, row_ix: usize) -> u64 {
+        self.diff_row_metadata
+            .get(row_ix)
+            .map(|row| row.stable_id)
+            .unwrap_or(row_ix as u64)
     }
 
     fn diff_column_labels(&self) -> (String, String) {

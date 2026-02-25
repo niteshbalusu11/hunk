@@ -5,6 +5,7 @@ Hunk is a fast diff viewer that is extremely simple written in Rust.
 
 - Make sure code is scalable.
 - Don't make files over 1000 lines long.
+- Tests always in the tests directory
 - Make sure clippy passes
 - Make sure builds pass
 - GPUI docs https://raw.githubusercontent.com/zed-industries/zed/refs/heads/main/crates/gpui/README.md
