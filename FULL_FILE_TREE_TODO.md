@@ -49,6 +49,16 @@ Implement a full repository tree (alongside existing diff tree) with a bottom sw
 ## Goal
 Upgrade file preview into a proper code editor for repository files, with safe save behavior, keyboard-first editing, and performance that matches current diff/file rendering.
 
+## Current priority (requested)
+Deliver a single file editor mode (no preview toggle) with syntax highlighting and line numbers that feels like a standard editor (VS Code-style expectations).
+
+### A. Editor parity plan
+- [x] Keep one right-pane file mode only: editable code editor.
+- [x] Restore line numbers with polished gutter styling (no heavy dark slab look).
+- [x] Ensure reliable syntax highlighting by file type (Rust/TOML/TS/JS/JSON/Markdown/etc.).
+- [x] Keep save/reload workflow in-place (`Cmd/Ctrl+S`) with dirty-state feedback.
+- [ ] Validate parity manually on representative repo files (`.rs`, `.toml`, `.md`, `.json`).
+
 ## Architecture decisions
 
 ### 0. Dependency and design spike
@@ -101,7 +111,7 @@ Upgrade file preview into a proper code editor for repository files, with safe s
 - [ ] Add tests under `tests/` for undo/redo correctness and history bounds.
 - [ ] Add tests under `tests/` for save behavior (dirty flags, external change conflict, read-only errors).
 - [ ] Add tests under `tests/` for non-UTF8/binary/large-file fallback behavior.
-- [ ] Add tests under `tests/` for editor state transitions (preview <-> editor <-> diff).
+- [ ] Add tests under `tests/` for editor state transitions (editor <-> diff and file-switch behavior).
 - [x] Run `cargo fmt`.
 - [x] Run `cargo test`.
 - [x] Run `cargo clippy --all-targets --all-features -- -D warnings`.

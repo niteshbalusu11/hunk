@@ -357,16 +357,54 @@ fn is_probably_binary_bytes(bytes: &[u8]) -> bool {
 
 fn editor_language_hint(file_path: &str) -> String {
     let path = Path::new(file_path);
-    if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
-        return extension.to_ascii_lowercase();
-    }
 
     if let Some(name) = path.file_name().and_then(|file| file.to_str()) {
         match name {
-            "Dockerfile" => return "dockerfile".to_string(),
+            "Dockerfile" => return "text".to_string(),
             "Makefile" => return "make".to_string(),
+            "CMakeLists.txt" => return "cmake".to_string(),
+            ".zshrc" | ".bashrc" | ".bash_profile" => return "bash".to_string(),
+            "Cargo.toml" | "Cargo.lock" => return "toml".to_string(),
             _ => {}
         }
+    }
+
+    if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
+        let extension = extension.to_ascii_lowercase();
+        let language = match extension.as_str() {
+            "rs" => "rust",
+            "toml" => "toml",
+            "js" | "mjs" | "cjs" | "jsx" => "javascript",
+            "tsx" => "tsx",
+            "ts" => "typescript",
+            "json" | "jsonc" => "json",
+            "yaml" | "yml" => "yaml",
+            "md" | "markdown" | "mdx" => "markdown",
+            "py" => "python",
+            "rb" => "ruby",
+            "go" => "go",
+            "java" => "java",
+            "swift" => "swift",
+            "c" | "h" => "c",
+            "cc" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" => "cpp",
+            "cs" => "csharp",
+            "cmake" => "cmake",
+            "graphql" | "gql" => "graphql",
+            "bash" | "sh" | "zsh" => "bash",
+            "html" | "htm" => "html",
+            "css" | "scss" | "sass" => "css",
+            "ejs" => "ejs",
+            "erb" => "erb",
+            "ex" | "exs" => "elixir",
+            "sql" => "sql",
+            "proto" => "proto",
+            "scala" => "scala",
+            "zig" => "zig",
+            "diff" | "patch" => "diff",
+            "lock" => "toml",
+            _ => "text",
+        };
+        return language.to_string();
     }
 
     "text".to_string()
@@ -833,5 +871,25 @@ mod tests {
             compute_stable_row_id(Some("src/lib.rs"), DiffStreamRowKind::CoreMeta, 1, &row);
 
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn editor_language_hint_maps_rust_and_ts() {
+        assert_eq!(editor_language_hint("src/main.rs"), "rust");
+        assert_eq!(editor_language_hint("web/app.ts"), "typescript");
+        assert_eq!(editor_language_hint("web/app.tsx"), "tsx");
+        assert_eq!(editor_language_hint("web/app.jsx"), "javascript");
+    }
+
+    #[test]
+    fn editor_language_hint_uses_filename_for_special_cases() {
+        assert_eq!(editor_language_hint("Dockerfile"), "text");
+        assert_eq!(editor_language_hint("Cargo.lock"), "toml");
+        assert_eq!(editor_language_hint("CMakeLists.txt"), "cmake");
+    }
+
+    #[test]
+    fn editor_language_hint_falls_back_to_text_for_unknown_extensions() {
+        assert_eq!(editor_language_hint("docs/schema.xml"), "text");
     }
 }

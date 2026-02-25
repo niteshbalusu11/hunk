@@ -46,6 +46,7 @@ impl DiffViewer {
 
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
+        let editor_font_size = cx.theme().mono_font_size * 1.2;
         let status_color = if self.editor_save_loading {
             cx.theme().warning
         } else if self.editor_dirty {
@@ -146,15 +147,11 @@ impl DiffViewer {
                     .child(
                         Input::new(&self.editor_input_state)
                             .h_full()
+                            .text_size(editor_font_size)
                             .disabled(self.editor_loading || self.editor_save_loading)
                             .rounded(px(8.0))
                             .border_1()
-                            .border_color(cx.theme().border.opacity(if is_dark { 0.92 } else { 0.78 }))
-                            .bg(cx.theme().background.blend(cx.theme().muted.opacity(if is_dark {
-                                0.22
-                            } else {
-                                0.10
-                            }))),
+                            .border_color(cx.theme().border.opacity(if is_dark { 0.92 } else { 0.78 })),
                     ),
             )
             .into_any_element()

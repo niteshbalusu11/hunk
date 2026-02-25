@@ -6,15 +6,16 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use gpui::{
     Animation, AnimationExt as _, AnyElement, App, AppContext as _, Application, ClipboardItem,
-    Context, Entity, FocusHandle, InteractiveElement as _, IntoElement, IsZero as _, KeyBinding,
-    ListAlignment, ListOffset, ListSizingBehavior, ListState, Menu, MenuItem, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, OsAction, ParentElement as _, PathPromptOptions,
-    Render, ScrollHandle, ScrollWheelEvent, SharedString, StatefulInteractiveElement as _,
-    Styled as _, SystemMenuType, Task, Timer, TitlebarOptions, Window, WindowOptions, actions, div,
-    list, point, prelude::FluentBuilder as _, px,
+    Context, Entity, FocusHandle, Hsla, InteractiveElement as _, IntoElement, IsZero as _,
+    KeyBinding, ListAlignment, ListOffset, ListSizingBehavior, ListState, Menu, MenuItem,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, OsAction, ParentElement as _,
+    PathPromptOptions, Render, ScrollHandle, ScrollWheelEvent, SharedString,
+    StatefulInteractiveElement as _, Styled as _, SystemMenuType, Task, Timer, TitlebarOptions,
+    Window, WindowOptions, actions, div, list, point, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     ActiveTheme as _, Colorize as _, Root, StyledExt as _, Theme, ThemeMode, h_flex,
+    highlighter::HighlightThemeStyle,
     input::InputState,
     resizable::{h_resizable, resizable_panel},
     scroll::ScrollableElement,
@@ -95,8 +96,33 @@ fn preferred_mono_font_family() -> &'static str {
     }
 }
 
+fn hsla_hex(hex: &str) -> Option<Hsla> {
+    Hsla::parse_hex(hex).ok()
+}
+
+fn editor_highlight_style(
+    base: Option<HighlightThemeStyle>,
+    fallback: HighlightThemeStyle,
+    mode: ThemeMode,
+) -> HighlightThemeStyle {
+    let mut style = base.unwrap_or(fallback);
+    if mode.is_dark() {
+        style.editor_background = hsla_hex("#20252f");
+        style.editor_active_line = hsla_hex("#2a3140");
+        style.editor_line_number = hsla_hex("#748094");
+        style.editor_active_line_number = hsla_hex("#ced7e6");
+    } else {
+        style.editor_background = hsla_hex("#f4f6fa");
+        style.editor_active_line = hsla_hex("#e7edf7");
+        style.editor_line_number = hsla_hex("#8d97a8");
+        style.editor_active_line_number = hsla_hex("#4a5363");
+    }
+    style
+}
+
 fn apply_soft_light_theme(cx: &mut App) {
     let mut light_theme = (*Theme::global(cx).light_theme).clone();
+    let fallback_highlight = Theme::global(cx).highlight_theme.style.clone();
 
     // Reduce eye strain in light mode by shifting from pure white to a soft off-white palette.
     light_theme.colors.background = Some("#f5f6f8".into());
@@ -120,6 +146,11 @@ fn apply_soft_light_theme(cx: &mut App) {
     light_theme.radius = Some(8);
     light_theme.radius_lg = Some(10);
     light_theme.shadow = Some(false);
+    light_theme.highlight = Some(editor_highlight_style(
+        light_theme.highlight.clone(),
+        fallback_highlight,
+        ThemeMode::Light,
+    ));
 
     Theme::global_mut(cx).light_theme = Rc::new(light_theme);
 
@@ -130,6 +161,7 @@ fn apply_soft_light_theme(cx: &mut App) {
 
 fn apply_soft_dark_theme(cx: &mut App) {
     let mut dark_theme = (*Theme::global(cx).dark_theme).clone();
+    let fallback_highlight = Theme::global(cx).highlight_theme.style.clone();
 
     // Match a softer charcoal palette so colored diff cues stand out without eye strain.
     dark_theme.colors.background = Some("#1f2126".into());
@@ -153,6 +185,11 @@ fn apply_soft_dark_theme(cx: &mut App) {
     dark_theme.radius = Some(8);
     dark_theme.radius_lg = Some(10);
     dark_theme.shadow = Some(false);
+    dark_theme.highlight = Some(editor_highlight_style(
+        dark_theme.highlight.clone(),
+        fallback_highlight,
+        ThemeMode::Dark,
+    ));
 
     Theme::global_mut(cx).dark_theme = Rc::new(dark_theme);
 

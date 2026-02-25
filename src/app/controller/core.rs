@@ -144,7 +144,7 @@ impl DiffViewer {
         let editor_input_state = cx.new(|cx| {
             InputState::new(window, cx)
                 .code_editor("text")
-                .line_number(false)
+                .line_number(true)
                 .soft_wrap(false)
                 .placeholder("Select a file from Files tree to edit it.")
         });
