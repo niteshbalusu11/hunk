@@ -240,6 +240,20 @@ impl DiffViewer {
                             }),
                     ),
             )
+            .when_some(self.git_status_message.as_ref(), |this, message| {
+                this.child(
+                    div()
+                        .w_full()
+                        .px_2()
+                        .py_0p5()
+                        .border_b_1()
+                        .border_color(cx.theme().border)
+                        .text_xs()
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .text_color(cx.theme().muted_foreground)
+                        .child(message.clone()),
+                )
+            })
             .child(
                 div()
                     .flex_1()
@@ -255,7 +269,12 @@ impl DiffViewer {
                             .child(self.render_changes_section("Untracked", &untracked_files, cx)),
                     ),
             )
-            .child(self.render_commit_footer(cx))
+            .child(
+                v_flex()
+                    .w_full()
+                    .child(self.render_commit_footer(cx))
+                    .child(self.render_last_commit_footer(cx)),
+            )
     }
 
     fn render_changes_section(
@@ -505,35 +524,36 @@ impl DiffViewer {
                         });
                     })
             })
-            .when_some(self.git_status_message.as_ref(), |this, message| {
-                this.child(
-                    div()
-                        .text_xs()
-                        .font_family(cx.theme().mono_font_family.clone())
-                        .text_color(cx.theme().muted_foreground)
-                        .child(message.clone()),
-                )
-            })
+            .into_any_element()
+    }
+
+    fn render_last_commit_footer(&self, cx: &mut Context<Self>) -> AnyElement {
+        v_flex()
+            .w_full()
+            .min_h(px(52.0))
+            .gap_0p5()
+            .px_2()
+            .py_1()
+            .pb_2()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().background)
             .child(
-                v_flex()
-                    .w_full()
-                    .gap_0p5()
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Last commit"),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .font_family(cx.theme().mono_font_family.clone())
+                    .text_color(cx.theme().foreground)
                     .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Last commit"),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_family(cx.theme().mono_font_family.clone())
-                            .text_color(cx.theme().foreground)
-                            .child(
-                                self.last_commit_subject
-                                    .clone()
-                                    .unwrap_or_else(|| "No commits yet".to_string()),
-                            ),
+                        self.last_commit_subject
+                            .clone()
+                            .unwrap_or_else(|| "No commits yet".to_string()),
                     ),
             )
             .into_any_element()

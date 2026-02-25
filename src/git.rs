@@ -678,11 +678,23 @@ fn list_local_branches(repo: &Repository, current_branch_name: &str) -> Result<V
 
 fn last_commit_subject(repo: &Repository) -> Option<String> {
     let commit = repo.head().ok()?.peel_to_commit().ok()?;
-    let subject = commit.summary()?.trim();
-    if subject.is_empty() {
+    let subject = commit.summary().unwrap_or_default().trim().to_string();
+    if !subject.is_empty() {
+        return Some(subject);
+    }
+
+    let fallback = commit
+        .message()
+        .unwrap_or_default()
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if fallback.is_empty() {
         None
     } else {
-        Some(subject.to_string())
+        Some(fallback)
     }
 }
 
