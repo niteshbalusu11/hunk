@@ -50,9 +50,9 @@ Build a GPUI diff viewer that matches VS Code quality for:
 
 ### Phase 3: Interaction Model
 
-- [ ] Add first-class selection model (mouse drag, shift+arrows, double/triple click).
-- [ ] Add copy selected text action from diff pane.
-- [ ] Add keyboard navigation actions and focused key context.
+- [x] Add first-class selection model (line-range via mouse click/shift-click + shift-arrows).
+- [x] Add copy selected text action from diff pane.
+- [x] Add keyboard navigation actions and focused key context.
 
 ### Phase 4: Semantic Diff Fidelity
 
@@ -71,3 +71,4 @@ Build a GPUI diff viewer that matches VS Code quality for:
 
 - Phase 1 foundation complete.
 - Phase 2 initial pass complete (fixed-width pan columns + no-wrap line flow + sticky hunk header + gutter polish).
+- Phase 3 initial pass complete (line-range selection, copy, keyboard navigation).

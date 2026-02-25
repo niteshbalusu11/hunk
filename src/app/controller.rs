@@ -111,6 +111,9 @@ impl DiffViewer {
             patch_epoch: 0,
             patch_task: Task::ready(()),
             patch_loading: false,
+            focus_handle: cx.focus_handle(),
+            selection_anchor_row: None,
+            selection_head_row: None,
             scroll_selected_after_reload: true,
             last_visible_row_start: None,
             last_diff_scroll_offset: None,
@@ -248,6 +251,8 @@ impl DiffViewer {
         self.file_row_ranges.clear();
         self.file_line_stats.clear();
         self.diff_row_metadata.clear();
+        self.selection_anchor_row = None;
+        self.selection_head_row = None;
         self.diff_rows = vec![message_row(
             DiffRowKind::Empty,
             "Open this app from a Git repository to load diffs.",
@@ -263,6 +268,8 @@ impl DiffViewer {
         let Some(repo_root) = self.repo_root.clone() else {
             self.diff_rows.clear();
             self.diff_row_metadata.clear();
+            self.selection_anchor_row = None;
+            self.selection_head_row = None;
             self.sync_diff_list_state();
             self.file_row_ranges.clear();
             self.file_line_stats.clear();
@@ -275,6 +282,8 @@ impl DiffViewer {
         if self.files.is_empty() {
             self.diff_rows = vec![message_row(DiffRowKind::Empty, "No changed files.")];
             self.diff_row_metadata.clear();
+            self.selection_anchor_row = None;
+            self.selection_head_row = None;
             self.sync_diff_list_state();
             self.file_row_ranges.clear();
             self.file_line_stats.clear();
@@ -306,6 +315,7 @@ impl DiffViewer {
                         Ok(stream) => {
                             this.diff_rows = stream.rows;
                             this.diff_row_metadata = stream.row_metadata;
+                            this.clamp_selection_to_rows();
                             this.sync_diff_list_state();
                             this.file_row_ranges = stream.file_ranges;
                             this.file_line_stats = stream.file_line_stats;
@@ -340,6 +350,8 @@ impl DiffViewer {
                                 format!("Failed to load diff stream: {err:#}"),
                             )];
                             this.diff_row_metadata.clear();
+                            this.selection_anchor_row = None;
+                            this.selection_head_row = None;
                             this.sync_diff_list_state();
                             this.file_row_ranges.clear();
                             this.file_line_stats.clear();
@@ -441,6 +453,291 @@ impl DiffViewer {
             .and_then(|path| self.file_line_stats.get(path))
             .copied()
             .unwrap_or_default();
+    }
+
+    fn clamp_selection_to_rows(&mut self) {
+        if self.diff_rows.is_empty() {
+            self.selection_anchor_row = None;
+            self.selection_head_row = None;
+            return;
+        }
+
+        let max_ix = self.diff_rows.len().saturating_sub(1);
+        self.selection_anchor_row = self.selection_anchor_row.map(|ix| ix.min(max_ix));
+        self.selection_head_row = self.selection_head_row.map(|ix| ix.min(max_ix));
+    }
+
+    pub(super) fn selected_row_range(&self) -> Option<(usize, usize)> {
+        let anchor = self.selection_anchor_row?;
+        let head = self.selection_head_row?;
+        Some((anchor.min(head), anchor.max(head)))
+    }
+
+    pub(super) fn is_row_selected(&self, row_ix: usize) -> bool {
+        self.selected_row_range()
+            .is_some_and(|(start, end)| row_ix >= start && row_ix <= end)
+    }
+
+    pub(super) fn on_diff_row_mouse_down(
+        &mut self,
+        row_ix: usize,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.focus_handle.focus(window);
+        self.select_row(row_ix, event.modifiers.shift, cx);
+    }
+
+    fn select_row(&mut self, row_ix: usize, extend_selection: bool, cx: &mut Context<Self>) {
+        if self.diff_rows.is_empty() {
+            self.selection_anchor_row = None;
+            self.selection_head_row = None;
+            return;
+        }
+
+        let target_ix = row_ix.min(self.diff_rows.len().saturating_sub(1));
+        if extend_selection && self.selection_anchor_row.is_some() {
+            self.selection_head_row = Some(target_ix);
+        } else {
+            self.selection_anchor_row = Some(target_ix);
+            self.selection_head_row = Some(target_ix);
+        }
+
+        if let Some((path, status)) = self.selected_file_from_row_metadata(target_ix)
+            && self.selected_path.as_deref() != Some(path.as_str())
+        {
+            self.selected_path = Some(path);
+            self.selected_status = Some(status);
+            self.sync_selected_line_stats();
+        }
+
+        cx.notify();
+    }
+
+    fn select_row_and_scroll(
+        &mut self,
+        row_ix: usize,
+        extend_selection: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_row(row_ix, extend_selection, cx);
+        self.diff_list_state.scroll_to(ListOffset {
+            item_ix: row_ix.min(self.diff_rows.len().saturating_sub(1)),
+            offset_in_item: px(0.),
+        });
+        self.last_diff_scroll_offset = None;
+        self.last_scroll_activity_at = Instant::now();
+    }
+
+    fn move_selection_by(&mut self, delta: isize, extend_selection: bool, cx: &mut Context<Self>) {
+        if self.diff_rows.is_empty() {
+            return;
+        }
+
+        let max_ix = self.diff_rows.len().saturating_sub(1) as isize;
+        let base_ix = self
+            .selection_head_row
+            .map(|ix| ix as isize)
+            .unwrap_or(self.diff_list_state.logical_scroll_top().item_ix as isize);
+        let target_ix = (base_ix + delta).clamp(0, max_ix) as usize;
+        self.select_row_and_scroll(target_ix, extend_selection, cx);
+    }
+
+    fn select_all_rows(&mut self, cx: &mut Context<Self>) {
+        if self.diff_rows.is_empty() {
+            return;
+        }
+
+        self.selection_anchor_row = Some(0);
+        self.selection_head_row = Some(self.diff_rows.len().saturating_sub(1));
+        cx.notify();
+    }
+
+    fn select_hunk_relative(&mut self, direction: isize, cx: &mut Context<Self>) {
+        if self.diff_rows.is_empty() {
+            return;
+        }
+
+        let start_ix = self
+            .selection_head_row
+            .unwrap_or(self.diff_list_state.logical_scroll_top().item_ix)
+            .min(self.diff_rows.len().saturating_sub(1));
+
+        let target = if direction >= 0 {
+            ((start_ix + 1)..self.diff_rows.len())
+                .find(|ix| self.diff_rows[*ix].kind == DiffRowKind::HunkHeader)
+        } else {
+            (0..start_ix)
+                .rev()
+                .find(|ix| self.diff_rows[*ix].kind == DiffRowKind::HunkHeader)
+        };
+
+        if let Some(target_ix) = target {
+            self.select_row_and_scroll(target_ix, false, cx);
+        }
+    }
+
+    fn select_file_relative(&mut self, direction: isize, cx: &mut Context<Self>) {
+        if self.file_row_ranges.is_empty() {
+            return;
+        }
+
+        let current_ix = self
+            .selected_path
+            .as_ref()
+            .and_then(|path| {
+                self.file_row_ranges
+                    .iter()
+                    .position(|range| range.path == *path)
+            })
+            .unwrap_or(0);
+        let max_ix = self.file_row_ranges.len().saturating_sub(1) as isize;
+        let target_ix = (current_ix as isize + direction).clamp(0, max_ix) as usize;
+        let (path, status, start_row) = {
+            let range = &self.file_row_ranges[target_ix];
+            (range.path.clone(), range.status, range.start_row)
+        };
+
+        self.selected_path = Some(path.clone());
+        self.selected_status = Some(status);
+        self.sync_selected_line_stats();
+        self.scroll_to_file_start(&path);
+        self.select_row(start_row, false, cx);
+        cx.notify();
+    }
+
+    fn selected_rows_as_text(&self) -> Option<String> {
+        let (start, end) = self.selected_row_range()?;
+        if self.diff_rows.is_empty() {
+            return None;
+        }
+
+        let mut lines = Vec::new();
+        for row_ix in start..=end.min(self.diff_rows.len().saturating_sub(1)) {
+            let row = &self.diff_rows[row_ix];
+            match row.kind {
+                DiffRowKind::Code => {
+                    if row.left.kind == DiffCellKind::Removed {
+                        lines.push(format!("-{}", row.left.text));
+                    }
+                    if row.right.kind == DiffCellKind::Added {
+                        lines.push(format!("+{}", row.right.text));
+                    }
+                    if row.left.kind == DiffCellKind::Context {
+                        lines.push(format!(" {}", row.left.text));
+                    }
+                    if row.left.kind == DiffCellKind::None
+                        && row.right.kind == DiffCellKind::None
+                        && !row.text.is_empty()
+                    {
+                        lines.push(row.text.clone());
+                    }
+                }
+                DiffRowKind::HunkHeader | DiffRowKind::Meta | DiffRowKind::Empty => {
+                    lines.push(row.text.clone());
+                }
+            }
+        }
+
+        if lines.is_empty() {
+            None
+        } else {
+            Some(lines.join("\n"))
+        }
+    }
+
+    pub(super) fn select_next_line_action(
+        &mut self,
+        _: &SelectNextLine,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_selection_by(1, false, cx);
+    }
+
+    pub(super) fn select_previous_line_action(
+        &mut self,
+        _: &SelectPreviousLine,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_selection_by(-1, false, cx);
+    }
+
+    pub(super) fn extend_selection_next_line_action(
+        &mut self,
+        _: &ExtendSelectionNextLine,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_selection_by(1, true, cx);
+    }
+
+    pub(super) fn extend_selection_previous_line_action(
+        &mut self,
+        _: &ExtendSelectionPreviousLine,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_selection_by(-1, true, cx);
+    }
+
+    pub(super) fn copy_selection_action(
+        &mut self,
+        _: &CopySelection,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(selection_text) = self.selected_rows_as_text() else {
+            return;
+        };
+        cx.write_to_clipboard(ClipboardItem::new_string(selection_text));
+    }
+
+    pub(super) fn select_all_rows_action(
+        &mut self,
+        _: &SelectAllDiffRows,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_all_rows(cx);
+    }
+
+    pub(super) fn next_hunk_action(
+        &mut self,
+        _: &NextHunk,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_hunk_relative(1, cx);
+    }
+
+    pub(super) fn previous_hunk_action(
+        &mut self,
+        _: &PreviousHunk,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_hunk_relative(-1, cx);
+    }
+
+    pub(super) fn next_file_action(
+        &mut self,
+        _: &NextFile,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_file_relative(1, cx);
+    }
+
+    pub(super) fn previous_file_action(
+        &mut self,
+        _: &PreviousFile,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_file_relative(-1, cx);
     }
 
     fn scroll_selected_file_to_top(&mut self) {

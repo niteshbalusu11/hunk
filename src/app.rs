@@ -5,11 +5,11 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use gpui::{
-    AnyElement, App, AppContext as _, Application, Context, Entity, InteractiveElement as _,
-    IntoElement, IsZero as _, ListAlignment, ListOffset, ListSizingBehavior, ListState,
-    ParentElement as _, Render, ScrollHandle, ScrollWheelEvent, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Task, Timer, Window, WindowOptions, div, list,
-    point, prelude::FluentBuilder as _, px,
+    AnyElement, App, AppContext as _, Application, ClipboardItem, Context, Entity, FocusHandle,
+    InteractiveElement as _, IntoElement, IsZero as _, KeyBinding, ListAlignment, ListOffset,
+    ListSizingBehavior, ListState, MouseButton, MouseDownEvent, ParentElement as _, Render,
+    ScrollHandle, ScrollWheelEvent, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Task, Timer, Window, WindowOptions, actions, div, list, point, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     ActiveTheme as _, Colorize as _, Root, StyledExt as _, Theme, ThemeMode, h_flex,
@@ -48,6 +48,22 @@ mod controller;
 mod data;
 mod render;
 
+actions!(
+    diff_viewer,
+    [
+        SelectNextLine,
+        SelectPreviousLine,
+        ExtendSelectionNextLine,
+        ExtendSelectionPreviousLine,
+        CopySelection,
+        SelectAllDiffRows,
+        NextHunk,
+        PreviousHunk,
+        NextFile,
+        PreviousFile,
+    ]
+);
+
 fn apply_soft_light_theme(cx: &mut App) {
     let mut light_theme = (*Theme::global(cx).light_theme).clone();
 
@@ -79,6 +95,20 @@ pub fn run() -> Result<()> {
     app.run(|cx| {
         gpui_component::init(cx);
         apply_soft_light_theme(cx);
+        cx.bind_keys([
+            KeyBinding::new("down", SelectNextLine, Some("DiffViewer")),
+            KeyBinding::new("up", SelectPreviousLine, Some("DiffViewer")),
+            KeyBinding::new("shift-down", ExtendSelectionNextLine, Some("DiffViewer")),
+            KeyBinding::new("shift-up", ExtendSelectionPreviousLine, Some("DiffViewer")),
+            KeyBinding::new("cmd-c", CopySelection, Some("DiffViewer")),
+            KeyBinding::new("ctrl-c", CopySelection, Some("DiffViewer")),
+            KeyBinding::new("cmd-a", SelectAllDiffRows, Some("DiffViewer")),
+            KeyBinding::new("ctrl-a", SelectAllDiffRows, Some("DiffViewer")),
+            KeyBinding::new("f7", NextHunk, Some("DiffViewer")),
+            KeyBinding::new("shift-f7", PreviousHunk, Some("DiffViewer")),
+            KeyBinding::new("alt-down", NextFile, Some("DiffViewer")),
+            KeyBinding::new("alt-up", PreviousFile, Some("DiffViewer")),
+        ]);
 
         if let Err(err) = cx.open_window(WindowOptions::default(), |window, cx| {
             let view = cx.new(|cx| DiffViewer::new(window, cx));
@@ -122,6 +152,9 @@ struct DiffViewer {
     patch_epoch: usize,
     patch_task: Task<()>,
     patch_loading: bool,
+    focus_handle: FocusHandle,
+    selection_anchor_row: Option<usize>,
+    selection_head_row: Option<usize>,
     scroll_selected_after_reload: bool,
     last_visible_row_start: Option<usize>,
     last_diff_scroll_offset: Option<gpui::Point<gpui::Pixels>>,

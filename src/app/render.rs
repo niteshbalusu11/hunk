@@ -4,6 +4,13 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 
+struct DiffCellRenderSpec<'a> {
+    side: &'static str,
+    cell: &'a DiffCell,
+    peer_kind: DiffCellKind,
+    column_width: Option<f32>,
+}
+
 impl DiffViewer {
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let view = cx.entity();
@@ -284,11 +291,12 @@ impl DiffViewer {
                 let Some(row) = this.diff_rows.get(ix) else {
                     return div().into_any_element();
                 };
+                let is_selected = this.is_row_selected(ix);
 
                 match row.kind {
-                    DiffRowKind::Code => this.render_code_row(ix, row, cx),
+                    DiffRowKind::Code => this.render_code_row(ix, row, is_selected, cx),
                     DiffRowKind::HunkHeader | DiffRowKind::Meta | DiffRowKind::Empty => {
-                        this.render_meta_row(ix, row, cx)
+                        this.render_meta_row(ix, row, is_selected, cx)
                     }
                 }
             })
@@ -571,6 +579,7 @@ impl DiffViewer {
         &self,
         ix: usize,
         row: &SideBySideRow,
+        is_selected: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let stable_row_id = self.diff_row_stable_id(ix);
@@ -644,11 +653,25 @@ impl DiffViewer {
             .id(("diff-meta-row", stable_row_id))
             .relative()
             .overflow_x_hidden()
+            .on_mouse_down(MouseButton::Left, {
+                let row_ix = ix;
+                cx.listener(move |this, event, window, cx| {
+                    this.on_diff_row_mouse_down(row_ix, event, window, cx);
+                })
+            })
             .px_2()
             .py_1()
             .border_b_1()
             .border_color(cx.theme().border)
-            .bg(background)
+            .bg(if is_selected {
+                background.blend(
+                    cx.theme()
+                        .primary
+                        .opacity(if is_dark { 0.32 } else { 0.18 }),
+                )
+            } else {
+                background
+            })
             .text_sm()
             .text_color(foreground)
             .font_family(cx.theme().mono_font_family.clone())
@@ -676,12 +699,19 @@ impl DiffViewer {
         &self,
         ix: usize,
         row_data: &SideBySideRow,
+        is_selected: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let stable_row_id = self.diff_row_stable_id(ix);
         let row = h_flex()
             .id(("diff-code-row", stable_row_id))
             .overflow_x_hidden()
+            .on_mouse_down(MouseButton::Left, {
+                let row_ix = ix;
+                cx.listener(move |this, event, window, cx| {
+                    this.on_diff_row_mouse_down(row_ix, event, window, cx);
+                })
+            })
             .border_b_1()
             .border_color(cx.theme().border)
             .when(self.diff_fit_to_width, |this| this.w_full())
@@ -694,18 +724,24 @@ impl DiffViewer {
             return row
                 .child(self.render_diff_cell(
                     stable_row_id,
-                    "left",
-                    &row_data.left,
-                    row_data.right.kind,
-                    None,
+                    is_selected,
+                    DiffCellRenderSpec {
+                        side: "left",
+                        cell: &row_data.left,
+                        peer_kind: row_data.right.kind,
+                        column_width: None,
+                    },
                     cx,
                 ))
                 .child(self.render_diff_cell(
                     stable_row_id,
-                    "right",
-                    &row_data.right,
-                    row_data.left.kind,
-                    None,
+                    is_selected,
+                    DiffCellRenderSpec {
+                        side: "right",
+                        cell: &row_data.right,
+                        peer_kind: row_data.left.kind,
+                        column_width: None,
+                    },
                     cx,
                 ))
                 .into_any_element();
@@ -713,18 +749,24 @@ impl DiffViewer {
 
         row.child(self.render_diff_cell(
             stable_row_id,
-            "left",
-            &row_data.left,
-            row_data.right.kind,
-            Some(self.diff_left_column_width),
+            is_selected,
+            DiffCellRenderSpec {
+                side: "left",
+                cell: &row_data.left,
+                peer_kind: row_data.right.kind,
+                column_width: Some(self.diff_left_column_width),
+            },
             cx,
         ))
         .child(self.render_diff_cell(
             stable_row_id,
-            "right",
-            &row_data.right,
-            row_data.left.kind,
-            Some(self.diff_right_column_width),
+            is_selected,
+            DiffCellRenderSpec {
+                side: "right",
+                cell: &row_data.right,
+                peer_kind: row_data.left.kind,
+                column_width: Some(self.diff_right_column_width),
+            },
             cx,
         ))
         .into_any_element()
@@ -733,12 +775,14 @@ impl DiffViewer {
     fn render_diff_cell(
         &self,
         row_stable_id: u64,
-        side: &'static str,
-        cell: &DiffCell,
-        peer_kind: DiffCellKind,
-        column_width: Option<f32>,
+        row_is_selected: bool,
+        spec: DiffCellRenderSpec<'_>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let side = spec.side;
+        let cell = spec.cell;
+        let peer_kind = spec.peer_kind;
+        let column_width = spec.column_width;
         let cell_id = if side == "left" {
             ("diff-cell-left", row_stable_id)
         } else {
@@ -750,7 +794,7 @@ impl DiffViewer {
         let remove_alpha = if is_dark { 0.42 } else { 0.18 };
         let ghost_alpha = if is_dark { 0.24 } else { 0.11 };
 
-        let (background, marker_color, line_color, text_color, marker) =
+        let (mut background, marker_color, line_color, text_color, marker) =
             match (cell.kind, peer_kind) {
                 (DiffCellKind::Added, _) => (
                     cx.theme()
@@ -863,6 +907,14 @@ impl DiffViewer {
                     "",
                 ),
             };
+        if row_is_selected {
+            background =
+                background.blend(
+                    cx.theme()
+                        .primary
+                        .opacity(if is_dark { 0.25 } else { 0.15 }),
+                );
+        }
 
         let line_number = cell.line.map(|line| line.to_string()).unwrap_or_default();
         let content = cell.text.clone();
@@ -1139,6 +1191,18 @@ impl Render for DiffViewer {
 
         div()
             .size_full()
+            .key_context("DiffViewer")
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(Self::select_next_line_action))
+            .on_action(cx.listener(Self::select_previous_line_action))
+            .on_action(cx.listener(Self::extend_selection_next_line_action))
+            .on_action(cx.listener(Self::extend_selection_previous_line_action))
+            .on_action(cx.listener(Self::copy_selection_action))
+            .on_action(cx.listener(Self::select_all_rows_action))
+            .on_action(cx.listener(Self::next_hunk_action))
+            .on_action(cx.listener(Self::previous_hunk_action))
+            .on_action(cx.listener(Self::next_file_action))
+            .on_action(cx.listener(Self::previous_file_action))
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(self.render_toolbar(cx))
