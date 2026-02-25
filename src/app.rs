@@ -69,6 +69,26 @@ actions!(
     ]
 );
 
+fn preferred_ui_font_family() -> &'static str {
+    if cfg!(target_os = "macos") {
+        ".SystemUIFont"
+    } else if cfg!(target_os = "windows") {
+        "Segoe UI"
+    } else {
+        "Inter"
+    }
+}
+
+fn preferred_mono_font_family() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Menlo"
+    } else if cfg!(target_os = "windows") {
+        "Consolas"
+    } else {
+        "DejaVu Sans Mono"
+    }
+}
+
 fn apply_soft_light_theme(cx: &mut App) {
     let mut light_theme = (*Theme::global(cx).light_theme).clone();
 
@@ -87,6 +107,13 @@ fn apply_soft_light_theme(cx: &mut App) {
     light_theme.colors.muted = Some("#e9ecf2".into());
     light_theme.colors.muted_foreground = Some("#616977".into());
     light_theme.colors.border = Some("#d2d8e3".into());
+    light_theme.font_family = Some(preferred_ui_font_family().into());
+    light_theme.font_size = Some(14.0);
+    light_theme.mono_font_family = Some(preferred_mono_font_family().into());
+    light_theme.mono_font_size = Some(13.0);
+    light_theme.radius = Some(8);
+    light_theme.radius_lg = Some(10);
+    light_theme.shadow = Some(false);
 
     Theme::global_mut(cx).light_theme = Rc::new(light_theme);
 
@@ -113,6 +140,13 @@ fn apply_soft_dark_theme(cx: &mut App) {
     dark_theme.colors.muted = Some("#272c35".into());
     dark_theme.colors.muted_foreground = Some("#a3adbb".into());
     dark_theme.colors.border = Some("#3d4554".into());
+    dark_theme.font_family = Some(preferred_ui_font_family().into());
+    dark_theme.font_size = Some(14.0);
+    dark_theme.mono_font_family = Some(preferred_mono_font_family().into());
+    dark_theme.mono_font_size = Some(13.0);
+    dark_theme.radius = Some(8);
+    dark_theme.radius_lg = Some(10);
+    dark_theme.shadow = Some(false);
 
     Theme::global_mut(cx).dark_theme = Rc::new(dark_theme);
 

@@ -9,5 +9,6 @@ use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 
 include!("toolbar_tree.rs");
+include!("file_status.rs");
 include!("diff.rs");
 include!("root.rs");

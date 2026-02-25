@@ -228,9 +228,42 @@ pub(super) fn load_diff_stream(
 }
 
 fn load_file_diff_rows(repo_root: &Path, file: &ChangedFile) -> LoadedFileDiffRows {
+    if is_probably_binary_extension(file.path.as_str()) {
+        return LoadedFileDiffRows {
+            core_rows: Vec::new(),
+            stats: LineStats::default(),
+            load_error: Some(format!(
+                "Preview unavailable for {}: binary file type.",
+                file.path
+            )),
+        };
+    }
+
     match load_patch(repo_root, &file.path, file.status) {
         Ok(patch) => {
+            if is_binary_patch(patch.as_str()) {
+                return LoadedFileDiffRows {
+                    core_rows: Vec::new(),
+                    stats: LineStats::default(),
+                    load_error: Some(format!(
+                        "Preview unavailable for {}: binary diff.",
+                        file.path
+                    )),
+                };
+            }
+
             let core_rows = parse_patch_side_by_side(&patch);
+            if patch_has_unrenderable_text_diff(patch.as_str(), &core_rows) {
+                return LoadedFileDiffRows {
+                    core_rows: Vec::new(),
+                    stats: LineStats::default(),
+                    load_error: Some(format!(
+                        "Preview unavailable for {}: unsupported diff format.",
+                        file.path
+                    )),
+                };
+            }
+
             let stats = line_stats_from_rows(&core_rows);
             LoadedFileDiffRows {
                 core_rows,
@@ -244,6 +277,78 @@ fn load_file_diff_rows(repo_root: &Path, file: &ChangedFile) -> LoadedFileDiffRo
             load_error: Some(format!("Failed to load patch for {}: {err:#}", file.path)),
         },
     }
+}
+
+fn is_probably_binary_extension(path: &str) -> bool {
+    let Some(extension) = Path::new(path).extension().and_then(|ext| ext.to_str()) else {
+        return false;
+    };
+
+    let extension = extension.to_ascii_lowercase();
+    matches!(
+        extension.as_str(),
+        "7z" | "a"
+            | "apk"
+            | "bin"
+            | "bmp"
+            | "class"
+            | "dll"
+            | "dmg"
+            | "doc"
+            | "docx"
+            | "ear"
+            | "eot"
+            | "exe"
+            | "gif"
+            | "gz"
+            | "ico"
+            | "jar"
+            | "jpeg"
+            | "jpg"
+            | "lib"
+            | "lockb"
+            | "mov"
+            | "mp3"
+            | "mp4"
+            | "o"
+            | "obj"
+            | "otf"
+            | "pdf"
+            | "png"
+            | "pyc"
+            | "so"
+            | "tar"
+            | "tif"
+            | "tiff"
+            | "ttf"
+            | "war"
+            | "wasm"
+            | "webm"
+            | "webp"
+            | "woff"
+            | "woff2"
+            | "xls"
+            | "xlsx"
+            | "zip"
+    )
+}
+
+fn is_binary_patch(patch: &str) -> bool {
+    patch.contains('\0')
+        || patch.contains("\nGIT binary patch\n")
+        || patch
+            .lines()
+            .any(|line| line.starts_with("Binary files ") && line.ends_with(" differ"))
+}
+
+fn patch_has_unrenderable_text_diff(patch: &str, rows: &[SideBySideRow]) -> bool {
+    !patch.trim().is_empty()
+        && !rows.is_empty()
+        && rows.iter().all(|row| {
+            row.kind == DiffRowKind::Empty
+                && row.left.kind == DiffCellKind::None
+                && row.right.kind == DiffCellKind::None
+        })
 }
 
 fn stream_kind_for_core_row(row: &SideBySideRow) -> DiffStreamRowKind {
