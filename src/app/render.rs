@@ -219,11 +219,6 @@ impl DiffViewer {
         }
 
         let (old_label, new_label) = self.diff_column_labels();
-        let _pan_width_hints = (
-            self.diff_pan_content_width,
-            self.diff_left_column_width,
-            self.diff_right_column_width,
-        );
         let diff_list_state = self.diff_list_state.clone();
         let visible_row = diff_list_state.logical_scroll_top().item_ix;
         if visible_row < self.diff_rows.len() {
@@ -635,7 +630,7 @@ impl DiffViewer {
                     } else {
                         cx.theme().muted_foreground.darken(0.08)
                     },
-                    "∅",
+                    "",
                 ),
                 (DiffCellKind::None, DiffCellKind::Removed) => (
                     cx.theme()
@@ -656,7 +651,7 @@ impl DiffViewer {
                     } else {
                         cx.theme().muted_foreground.darken(0.08)
                     },
-                    "∅",
+                    "",
                 ),
                 (DiffCellKind::Context, _) => (
                     cx.theme().background,
@@ -695,11 +690,14 @@ impl DiffViewer {
             };
 
         let line_number = cell.line.map(|line| line.to_string()).unwrap_or_default();
-        let content = if cell.text.is_empty() && marker == "∅" {
-            "no line".to_string()
+        let content = cell.text.clone();
+        let line_number_width = if side == "left" {
+            self.diff_left_line_number_width
         } else {
-            cell.text.clone()
+            self.diff_right_line_number_width
         };
+
+        let should_draw_right_divider = side == "left";
 
         h_flex()
             .id(cell_id)
@@ -709,17 +707,14 @@ impl DiffViewer {
             .gap_2()
             .items_start()
             .bg(background)
-            .when(column_width.is_some(), |this| {
-                let _ = column_width.unwrap_or_default();
-                this.flex_1().min_w_0()
-            })
+            .when(column_width.is_some(), |this| this.flex_1().min_w_0())
             .when(column_width.is_none(), |this| this.flex_1().min_w_0())
-            .when(side == "left", |this| {
+            .when(should_draw_right_divider, |this| {
                 this.border_r_1().border_color(cx.theme().border)
             })
             .child(
                 div()
-                    .w_10()
+                    .w(px(line_number_width))
                     .text_xs()
                     .text_color(line_color)
                     .font_family(cx.theme().mono_font_family.clone())
@@ -728,7 +723,7 @@ impl DiffViewer {
             )
             .child(
                 div()
-                    .w_4()
+                    .w(px(DIFF_MARKER_GUTTER_WIDTH))
                     .text_sm()
                     .text_color(marker_color)
                     .font_family(cx.theme().mono_font_family.clone())
