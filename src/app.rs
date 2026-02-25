@@ -130,6 +130,7 @@ struct DiffViewer {
     repo_root: Option<PathBuf>,
     branch_name: String,
     branch_has_upstream: bool,
+    branch_ahead_count: usize,
     branches: Vec<LocalBranch>,
     files: Vec<ChangedFile>,
     branch_picker_open: bool,

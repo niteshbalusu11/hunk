@@ -461,7 +461,9 @@ impl DiffViewer {
 
     fn render_commit_footer(&self, cx: &mut Context<Self>) -> AnyElement {
         let view = cx.entity();
-        let push_label = if self.branch_has_upstream { "Push" } else { "Publish" };
+        let show_publish = !self.branch_has_upstream;
+        let show_push = self.branch_has_upstream && self.branch_ahead_count > 0;
+        let action_label = if show_publish { "Publish" } else { "Push" };
         let last_commit_text = self
             .last_commit_subject
             .as_deref()
@@ -496,18 +498,20 @@ impl DiffViewer {
                                 });
                             })
                     })
-                    .child({
-                        let view = view.clone();
-                        Button::new("publish-or-push")
-                            .outline()
-                            .compact()
-                            .label(push_label)
-                            .disabled(self.git_action_loading)
-                            .on_click(move |_, _, cx| {
-                                view.update(cx, |this, cx| {
-                                    this.push_or_publish_current_branch(cx);
-                                });
-                            })
+                    .when(show_publish || show_push, |this| {
+                        this.child({
+                            let view = view.clone();
+                            Button::new("publish-or-push")
+                                .outline()
+                                .compact()
+                                .label(action_label)
+                                .disabled(self.git_action_loading)
+                                .on_click(move |_, _, cx| {
+                                    view.update(cx, |this, cx| {
+                                        this.push_or_publish_current_branch(cx);
+                                    });
+                                })
+                        })
                     }),
             )
             .when(self.branch_picker_open, |this| {

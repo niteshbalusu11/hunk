@@ -117,8 +117,14 @@ impl DiffViewer {
     pub(super) fn push_or_publish_current_branch(&mut self, cx: &mut Context<Self>) {
         let branch_name = self.branch_name.clone();
         let has_upstream = self.branch_has_upstream;
+        let ahead_count = self.branch_ahead_count;
         if branch_name.is_empty() || branch_name == "unknown" || branch_name.starts_with("detached") {
             self.git_status_message = Some("Cannot push a detached or unknown branch.".to_string());
+            cx.notify();
+            return;
+        }
+        if has_upstream && ahead_count == 0 {
+            self.git_status_message = Some("No new commits to push.".to_string());
             cx.notify();
             return;
         }
