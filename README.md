@@ -1,6 +1,6 @@
 # hunk
 
-A macOS-first Git diff viewer built with `gpui` + `gpui-component`.
+A cross-patform Git diff viewer built with `gpui` + `gpui-component`.
 
 ## What it includes
 
@@ -89,8 +89,3 @@ Keybindings in bacon UI:
 - `c` -> check
 - `t` -> test
 - `l` -> clippy
-
-## Notes
-
-- Current scope is macOS-first.
-- Windows/Linux support can be added next by validating platform setup and appearance behavior.
