@@ -2,12 +2,12 @@ impl DiffViewer {
     fn render_commit_footer(&self, cx: &mut Context<Self>) -> AnyElement {
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
-        let branch_syncable = !self.branch_name.is_empty()
-            && self.branch_name != "unknown"
-            && !self.branch_name.starts_with("detached");
+        let branch_syncable = self.branch_syncable();
         let show_sync = branch_syncable && self.branch_has_upstream;
-        let show_publish = !self.branch_has_upstream;
-        let show_push = self.branch_has_upstream;
+        let show_publish = branch_syncable && !self.branch_has_upstream;
+        let show_push = branch_syncable && self.branch_has_upstream;
+        let sync_disabled = !self.can_sync_current_branch();
+        let push_or_publish_disabled = !self.can_push_or_publish_current_branch();
         let action_label = if show_publish { "Publish" } else { "Push" };
         let last_commit_text = self
             .last_commit_subject
@@ -17,6 +17,9 @@ impl DiffViewer {
             .unwrap_or("No commits yet");
         let included_count = self.included_commit_file_count();
         let total_count = self.files.len();
+        let commit_message_present = !self.commit_input_state.read(cx).value().trim().is_empty();
+        let commit_disabled =
+            self.git_action_loading || !commit_message_present || included_count == 0;
 
         v_flex()
             .w_full()
@@ -38,13 +41,12 @@ impl DiffViewer {
                     .gap_1()
                     .child({
                         let view = view.clone();
-                        Button::new("branch-picker-toggle")
+                        Button::new("branch-picker-label")
                             .outline()
                             .compact()
                             .rounded(px(7.0))
                             .bg(cx.theme().secondary.opacity(if is_dark { 0.50 } else { 0.70 }))
                             .border_color(cx.theme().border.opacity(if is_dark { 0.90 } else { 0.74 }))
-                            .dropdown_caret(true)
                             .label(self.branch_name.clone())
                             .disabled(self.git_action_loading)
                             .on_click(move |_, _, cx| {
@@ -52,6 +54,40 @@ impl DiffViewer {
                                     this.toggle_branch_picker(cx);
                                 });
                             })
+                    })
+                    .child({
+                        let view = view.clone();
+                        let mut button = Button::new("branch-picker-toggle")
+                            .outline()
+                            .compact()
+                            .rounded(px(7.0))
+                            .min_w(px(30.0))
+                            .h(px(28.0))
+                            .icon(
+                                Icon::new(if self.branch_picker_open {
+                                    IconName::ChevronUp
+                                } else {
+                                    IconName::ChevronDown
+                                })
+                                .size(px(14.0)),
+                            )
+                            .tooltip(if self.branch_picker_open {
+                                "Hide branch menu"
+                            } else {
+                                "Show branch menu"
+                            })
+                            .disabled(self.git_action_loading)
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.toggle_branch_picker(cx);
+                                });
+                            });
+
+                        if self.branch_picker_open {
+                            button = button.primary();
+                        }
+
+                        button.into_any_element()
                     })
                     .when(show_sync, |this| {
                         this.child({
@@ -61,7 +97,7 @@ impl DiffViewer {
                                 .compact()
                                 .rounded(px(7.0))
                                 .label("Sync")
-                                .disabled(self.git_action_loading)
+                                .disabled(sync_disabled)
                                 .on_click(move |_, _, cx| {
                                     view.update(cx, |this, cx| {
                                         this.sync_current_branch_from_remote(cx);
@@ -77,7 +113,7 @@ impl DiffViewer {
                                 .compact()
                                 .rounded(px(7.0))
                                 .label(action_label)
-                                .disabled(self.git_action_loading)
+                                .disabled(push_or_publish_disabled)
                                 .on_click(move |_, _, cx| {
                                     view.update(cx, |this, cx| {
                                         this.push_or_publish_current_branch(cx);
@@ -137,7 +173,7 @@ impl DiffViewer {
                     .primary()
                     .rounded(px(7.0))
                     .label("Commit")
-                    .disabled(self.git_action_loading)
+                    .disabled(commit_disabled)
                     .on_click(move |_, window, cx| {
                         view.update(cx, |this, cx| {
                             this.commit_from_input(window, cx);
