@@ -152,6 +152,7 @@ impl DiffViewer {
         let mut view = Self {
             config_store,
             config,
+            settings_draft: None,
             state_store,
             state,
             project_path: last_project_path,

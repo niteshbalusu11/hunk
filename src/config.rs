@@ -16,14 +16,6 @@ pub enum ThemePreference {
     Dark,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DiffViewMode {
-    #[serde(alias = "pan")]
-    #[default]
-    Fit,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct KeyboardShortcuts {
@@ -39,6 +31,7 @@ pub struct KeyboardShortcuts {
     pub previous_file: Vec<String>,
     pub open_project: Vec<String>,
     pub save_current_file: Vec<String>,
+    pub open_settings: Vec<String>,
     pub quit_app: Vec<String>,
 }
 
@@ -57,6 +50,7 @@ impl Default for KeyboardShortcuts {
             previous_file: vec!["alt-up".into()],
             open_project: vec!["cmd-shift-o".into(), "ctrl-shift-o".into()],
             save_current_file: vec!["cmd-s".into(), "ctrl-s".into()],
+            open_settings: vec!["cmd-,".into(), "ctrl-,".into()],
             quit_app: vec!["cmd-q".into()],
         }
     }
@@ -66,7 +60,6 @@ impl Default for KeyboardShortcuts {
 #[serde(default)]
 pub struct AppConfig {
     pub theme: ThemePreference,
-    pub diff_view: DiffViewMode,
     pub show_whitespace: bool,
     pub show_eol_markers: bool,
     pub keyboard_shortcuts: KeyboardShortcuts,
