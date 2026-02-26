@@ -148,6 +148,7 @@ impl DiffViewer {
                 .soft_wrap(false)
                 .placeholder("Select a file from Files tree to edit it.")
         });
+        let in_app_menu_bar = (!cfg!(target_os = "macos")).then(|| AppMenuBar::new(window, cx));
 
         let mut view = Self {
             config_store,
@@ -199,6 +200,7 @@ impl DiffViewer {
             patch_epoch: 0,
             patch_task: Task::ready(()),
             patch_loading: false,
+            in_app_menu_bar,
             focus_handle: cx.focus_handle(),
             selection_anchor_row: None,
             selection_head_row: None,

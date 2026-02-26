@@ -1,3 +1,26 @@
+impl DiffViewer {
+    fn render_in_app_menu_bar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(menu_bar) = self.in_app_menu_bar.clone() else {
+            return div().into_any_element();
+        };
+        let is_dark = cx.theme().mode.is_dark();
+        h_flex()
+            .w_full()
+            .h_8()
+            .items_center()
+            .px_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().title_bar.blend(
+                cx.theme()
+                    .muted
+                    .opacity(if is_dark { 0.16 } else { 0.24 }),
+            ))
+            .child(div().flex_1().min_w_0().h_full().child(menu_bar))
+            .into_any_element()
+    }
+}
+
 impl Render for DiffViewer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.clamp_diff_horizontal_scroll_offset();
@@ -26,6 +49,9 @@ impl Render for DiffViewer {
             .on_action(cx.listener(Self::save_current_file_action))
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
+            .when(!cfg!(target_os = "macos"), |this| {
+                this.child(self.render_in_app_menu_bar(cx))
+            })
             .child(self.render_toolbar(cx))
             .child(
                 div()

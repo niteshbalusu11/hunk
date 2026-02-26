@@ -17,6 +17,7 @@ use gpui_component::{
     ActiveTheme as _, Colorize as _, Root, StyledExt as _, Theme, ThemeMode, h_flex,
     highlighter::HighlightThemeStyle,
     input::InputState,
+    menu::AppMenuBar,
     resizable::{h_resizable, resizable_panel},
     scroll::ScrollableElement,
     tree::{TreeItem, TreeState},
@@ -198,6 +199,54 @@ fn apply_soft_dark_theme(cx: &mut App) {
     }
 }
 
+fn build_application_menus() -> Vec<Menu> {
+    if cfg!(target_os = "macos") {
+        vec![
+            Menu {
+                name: "Hunk".into(),
+                items: vec![
+                    MenuItem::os_submenu("Services", SystemMenuType::Services),
+                    MenuItem::separator(),
+                    MenuItem::action("Quit Hunk", QuitApp),
+                ],
+            },
+            Menu {
+                name: "File".into(),
+                items: vec![
+                    MenuItem::action("Open Project...", OpenProject),
+                    MenuItem::action("Save File", SaveCurrentFile),
+                ],
+            },
+            Menu {
+                name: "Edit".into(),
+                items: vec![
+                    MenuItem::os_action("Copy", CopySelection, OsAction::Copy),
+                    MenuItem::os_action("Select All", SelectAllDiffRows, OsAction::SelectAll),
+                ],
+            },
+        ]
+    } else {
+        vec![
+            Menu {
+                name: "File".into(),
+                items: vec![
+                    MenuItem::action("Open Project...", OpenProject),
+                    MenuItem::action("Save File", SaveCurrentFile),
+                    MenuItem::separator(),
+                    MenuItem::action("Quit Hunk", QuitApp),
+                ],
+            },
+            Menu {
+                name: "Edit".into(),
+                items: vec![
+                    MenuItem::action("Copy", CopySelection),
+                    MenuItem::action("Select All", SelectAllDiffRows),
+                ],
+            },
+        ]
+    }
+}
+
 pub fn run() -> Result<()> {
     let app = Application::new().with_assets(Assets);
     app.on_reopen(|cx| {
@@ -231,30 +280,7 @@ pub fn run() -> Result<()> {
             KeyBinding::new("ctrl-s", SaveCurrentFile, None),
             KeyBinding::new("cmd-q", QuitApp, None),
         ]);
-        cx.set_menus(vec![
-            Menu {
-                name: "Hunk".into(),
-                items: vec![
-                    MenuItem::os_submenu("Services", SystemMenuType::Services),
-                    MenuItem::separator(),
-                    MenuItem::action("Quit Hunk", QuitApp),
-                ],
-            },
-            Menu {
-                name: "File".into(),
-                items: vec![
-                    MenuItem::action("Open Project...", OpenProject),
-                    MenuItem::action("Save File", SaveCurrentFile),
-                ],
-            },
-            Menu {
-                name: "Edit".into(),
-                items: vec![
-                    MenuItem::os_action("Copy", CopySelection, OsAction::Copy),
-                    MenuItem::os_action("Select All", SelectAllDiffRows, OsAction::SelectAll),
-                ],
-            },
-        ]);
+        cx.set_menus(build_application_menus());
         cx.activate(true);
         open_main_window(cx);
     });
@@ -333,6 +359,7 @@ struct DiffViewer {
     patch_epoch: usize,
     patch_task: Task<()>,
     patch_loading: bool,
+    in_app_menu_bar: Option<Entity<AppMenuBar>>,
     focus_handle: FocusHandle,
     selection_anchor_row: Option<usize>,
     selection_head_row: Option<usize>,
