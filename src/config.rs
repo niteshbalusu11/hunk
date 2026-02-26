@@ -24,6 +24,44 @@ pub enum DiffViewMode {
     Fit,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KeyboardShortcuts {
+    pub select_next_line: Vec<String>,
+    pub select_previous_line: Vec<String>,
+    pub extend_selection_next_line: Vec<String>,
+    pub extend_selection_previous_line: Vec<String>,
+    pub copy_selection: Vec<String>,
+    pub select_all_diff_rows: Vec<String>,
+    pub next_hunk: Vec<String>,
+    pub previous_hunk: Vec<String>,
+    pub next_file: Vec<String>,
+    pub previous_file: Vec<String>,
+    pub open_project: Vec<String>,
+    pub save_current_file: Vec<String>,
+    pub quit_app: Vec<String>,
+}
+
+impl Default for KeyboardShortcuts {
+    fn default() -> Self {
+        Self {
+            select_next_line: vec!["down".into()],
+            select_previous_line: vec!["up".into()],
+            extend_selection_next_line: vec!["shift-down".into()],
+            extend_selection_previous_line: vec!["shift-up".into()],
+            copy_selection: vec!["cmd-c".into(), "ctrl-c".into()],
+            select_all_diff_rows: vec!["cmd-a".into(), "ctrl-a".into()],
+            next_hunk: vec!["f7".into()],
+            previous_hunk: vec!["shift-f7".into()],
+            next_file: vec!["alt-down".into()],
+            previous_file: vec!["alt-up".into()],
+            open_project: vec!["cmd-shift-o".into(), "ctrl-shift-o".into()],
+            save_current_file: vec!["cmd-s".into(), "ctrl-s".into()],
+            quit_app: vec!["cmd-q".into()],
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
@@ -31,6 +69,7 @@ pub struct AppConfig {
     pub diff_view: DiffViewMode,
     pub show_whitespace: bool,
     pub show_eol_markers: bool,
+    pub keyboard_shortcuts: KeyboardShortcuts,
 }
 
 #[derive(Debug, Clone)]

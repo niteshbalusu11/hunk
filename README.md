@@ -43,6 +43,25 @@ TARGET_DIR="${CARGO_TARGET_DIR:-target}"
 open "$TARGET_DIR/release/bundle/osx/Hunk.app"
 ```
 
+## Config
+
+Hunk reads config from `~/.hunkdiff/config.toml`.
+Keyboard shortcuts are configured in the `[keyboard_shortcuts]` table:
+
+```toml
+[keyboard_shortcuts]
+open_project = ["cmd-shift-o", "ctrl-shift-o"]
+save_current_file = ["cmd-s", "ctrl-s"]
+quit_app = ["cmd-q"]
+```
+
+Use an empty list to disable a shortcut action:
+
+```toml
+[keyboard_shortcuts]
+quit_app = []
+```
+
 ## Icons
 
 Generate git-diff icon variants and rebuild the bundle:

@@ -26,7 +26,7 @@ use gpui_component::{
 use gpui_component_assets::Assets;
 use tracing::error;
 
-use hunk::config::{AppConfig, ConfigStore, ThemePreference};
+use hunk::config::{AppConfig, ConfigStore, KeyboardShortcuts, ThemePreference};
 use hunk::diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
 use hunk::jj::{ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFingerprint};
 use hunk::state::{AppState, AppStateStore};
@@ -243,8 +243,118 @@ fn build_application_menus() -> Vec<Menu> {
     }
 }
 
+fn load_keyboard_shortcuts() -> KeyboardShortcuts {
+    let store = match ConfigStore::new() {
+        Ok(store) => store,
+        Err(err) => {
+            error!("failed to initialize config path for keyboard shortcuts: {err:#}");
+            return KeyboardShortcuts::default();
+        }
+    };
+
+    match store.load_or_create_default() {
+        Ok(config) => config.keyboard_shortcuts,
+        Err(err) => {
+            error!(
+                "failed to load keyboard shortcuts from {}: {err:#}",
+                store.path().display()
+            );
+            KeyboardShortcuts::default()
+        }
+    }
+}
+
+fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
+    let mut bindings = Vec::new();
+
+    bindings.extend(
+        shortcuts
+            .select_next_line
+            .iter()
+            .map(|shortcut| KeyBinding::new(shortcut.as_str(), SelectNextLine, Some("DiffViewer"))),
+    );
+    bindings.extend(shortcuts.select_previous_line.iter().map(|shortcut| {
+        KeyBinding::new(shortcut.as_str(), SelectPreviousLine, Some("DiffViewer"))
+    }));
+    bindings.extend(shortcuts.extend_selection_next_line.iter().map(|shortcut| {
+        KeyBinding::new(
+            shortcut.as_str(),
+            ExtendSelectionNextLine,
+            Some("DiffViewer"),
+        )
+    }));
+    bindings.extend(
+        shortcuts
+            .extend_selection_previous_line
+            .iter()
+            .map(|shortcut| {
+                KeyBinding::new(
+                    shortcut.as_str(),
+                    ExtendSelectionPreviousLine,
+                    Some("DiffViewer"),
+                )
+            }),
+    );
+    bindings.extend(
+        shortcuts
+            .copy_selection
+            .iter()
+            .map(|shortcut| KeyBinding::new(shortcut.as_str(), CopySelection, Some("DiffViewer"))),
+    );
+    bindings.extend(
+        shortcuts.select_all_diff_rows.iter().map(|shortcut| {
+            KeyBinding::new(shortcut.as_str(), SelectAllDiffRows, Some("DiffViewer"))
+        }),
+    );
+    bindings.extend(
+        shortcuts
+            .next_hunk
+            .iter()
+            .map(|shortcut| KeyBinding::new(shortcut.as_str(), NextHunk, Some("DiffViewer"))),
+    );
+    bindings.extend(
+        shortcuts
+            .previous_hunk
+            .iter()
+            .map(|shortcut| KeyBinding::new(shortcut.as_str(), PreviousHunk, Some("DiffViewer"))),
+    );
+    bindings.extend(
+        shortcuts
+            .next_file
+            .iter()
+            .map(|shortcut| KeyBinding::new(shortcut.as_str(), NextFile, Some("DiffViewer"))),
+    );
+    bindings.extend(
+        shortcuts
+            .previous_file
+            .iter()
+            .map(|shortcut| KeyBinding::new(shortcut.as_str(), PreviousFile, Some("DiffViewer"))),
+    );
+    bindings.extend(
+        shortcuts
+            .open_project
+            .iter()
+            .map(|shortcut| KeyBinding::new(shortcut.as_str(), OpenProject, None)),
+    );
+    bindings.extend(
+        shortcuts
+            .save_current_file
+            .iter()
+            .map(|shortcut| KeyBinding::new(shortcut.as_str(), SaveCurrentFile, None)),
+    );
+    bindings.extend(
+        shortcuts
+            .quit_app
+            .iter()
+            .map(|shortcut| KeyBinding::new(shortcut.as_str(), QuitApp, None)),
+    );
+
+    cx.bind_keys(bindings);
+}
+
 pub fn run() -> Result<()> {
     let app = Application::new().with_assets(Assets);
+    let keyboard_shortcuts = load_keyboard_shortcuts();
     app.on_reopen(|cx| {
         if cx.windows().is_empty() {
             open_main_window(cx);
@@ -252,30 +362,12 @@ pub fn run() -> Result<()> {
         cx.activate(true);
     });
 
-    app.run(|cx| {
+    app.run(move |cx| {
         gpui_component::init(cx);
         apply_soft_light_theme(cx);
         apply_soft_dark_theme(cx);
         cx.on_action(quit_app);
-        cx.bind_keys([
-            KeyBinding::new("down", SelectNextLine, Some("DiffViewer")),
-            KeyBinding::new("up", SelectPreviousLine, Some("DiffViewer")),
-            KeyBinding::new("shift-down", ExtendSelectionNextLine, Some("DiffViewer")),
-            KeyBinding::new("shift-up", ExtendSelectionPreviousLine, Some("DiffViewer")),
-            KeyBinding::new("cmd-c", CopySelection, Some("DiffViewer")),
-            KeyBinding::new("ctrl-c", CopySelection, Some("DiffViewer")),
-            KeyBinding::new("cmd-a", SelectAllDiffRows, Some("DiffViewer")),
-            KeyBinding::new("ctrl-a", SelectAllDiffRows, Some("DiffViewer")),
-            KeyBinding::new("f7", NextHunk, Some("DiffViewer")),
-            KeyBinding::new("shift-f7", PreviousHunk, Some("DiffViewer")),
-            KeyBinding::new("alt-down", NextFile, Some("DiffViewer")),
-            KeyBinding::new("alt-up", PreviousFile, Some("DiffViewer")),
-            KeyBinding::new("cmd-shift-o", OpenProject, None),
-            KeyBinding::new("ctrl-shift-o", OpenProject, None),
-            KeyBinding::new("cmd-s", SaveCurrentFile, None),
-            KeyBinding::new("ctrl-s", SaveCurrentFile, None),
-            KeyBinding::new("cmd-q", QuitApp, None),
-        ]);
+        bind_keyboard_shortcuts(cx, &keyboard_shortcuts);
         cx.set_menus(build_application_menus());
         cx.activate(true);
         open_main_window(cx);
