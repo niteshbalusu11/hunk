@@ -140,6 +140,20 @@ impl DiffViewer {
         });
     }
 
+    pub(super) fn sync_current_branch_from_remote(&mut self, cx: &mut Context<Self>) {
+        let branch_name = self.branch_name.clone();
+        if branch_name.is_empty() || branch_name == "unknown" || branch_name.starts_with("detached") {
+            self.git_status_message = Some("Cannot sync a detached or unknown branch.".to_string());
+            cx.notify();
+            return;
+        }
+
+        self.run_git_action(cx, move |repo_root| {
+            sync_current_branch(&repo_root, &branch_name)?;
+            Ok(format!("Synced {}", branch_name))
+        });
+    }
+
     pub(super) fn commit_from_input(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         if self.git_action_loading {
             return;

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -31,6 +31,7 @@ use jj_lib::repo::{ReadonlyRepo, Repo as _, StoreFactories};
 use jj_lib::repo_path::RepoPathBuf;
 use jj_lib::rewrite::restore_tree;
 use jj_lib::settings::UserSettings;
+use jj_lib::str_util::StringExpression;
 use jj_lib::working_copy::SnapshotOptions;
 use jj_lib::workspace::{Workspace, default_working_copy_factories};
 
@@ -870,6 +871,7 @@ pub(super) fn create_bookmark_at_working_copy(
 pub(super) fn push_bookmark(context: &mut RepoContext, branch_name: &str) -> Result<()> {
     let remote_name = resolve_push_remote_name(context, branch_name)?;
     let remote = RemoteName::new(remote_name.as_str());
+    ensure_remote_bookmark_is_tracked(context, branch_name, remote, remote_name.as_str())?;
 
     let maybe_targets = context
         .repo
@@ -897,7 +899,7 @@ pub(super) fn push_bookmark(context: &mut RepoContext, branch_name: &str) -> Res
         }
         BookmarkPushAction::RemoteUntracked => {
             return Err(anyhow!(
-                "bookmark '{branch_name}' has an untracked remote ref; track it before pushing"
+                "bookmark '{branch_name}' has an untracked remote ref after tracking attempt"
             ));
         }
     };
@@ -932,6 +934,126 @@ pub(super) fn push_bookmark(context: &mut RepoContext, branch_name: &str) -> Res
     locked_workspace
         .finish(repo.op_id().clone())
         .context("failed to persist working-copy state after push")?;
+
+    context.repo = repo;
+    Ok(())
+}
+
+pub(super) fn sync_bookmark_from_remote(
+    context: &mut RepoContext,
+    branch_name: &str,
+) -> Result<()> {
+    if !load_changed_files_from_context(context)?.is_empty() {
+        return Err(anyhow!(
+            "cannot sync while the working copy has uncommitted changes"
+        ));
+    }
+
+    let remote_name = resolve_push_remote_name(context, branch_name)?;
+    let remote = RemoteName::new(remote_name.as_str());
+    let subprocess_options = GitSubprocessOptions::from_settings(&context.settings)
+        .context("failed to resolve git subprocess settings")?;
+    let import_options = git_import_options_from_settings(&context.settings)?;
+    let fetch_refspecs = git::expand_fetch_refspecs(
+        remote,
+        git::GitFetchRefExpression {
+            bookmark: StringExpression::exact(branch_name),
+            tag: StringExpression::none(),
+        },
+    )
+    .with_context(|| format!("failed to prepare fetch refspecs for bookmark '{branch_name}'"))?;
+
+    let mut tx = context.repo.start_transaction();
+    {
+        let mut fetcher = git::GitFetch::new(tx.repo_mut(), subprocess_options, &import_options)
+            .context("failed to initialize Git fetch operation")?;
+        let mut callback = NoopGitSubprocessCallback;
+        fetcher
+            .fetch(remote, fetch_refspecs, &mut callback, None, None)
+            .with_context(|| {
+                format!("failed to fetch bookmark '{branch_name}' from remote '{remote_name}'")
+            })?;
+        fetcher
+            .import_refs()
+            .context("failed to import fetched refs into JJ view")?;
+    }
+
+    let repo = tx
+        .commit(format!("sync bookmark {branch_name} from {remote_name}"))
+        .context("failed to finalize sync operation")?;
+
+    let locked_workspace = context
+        .workspace
+        .start_working_copy_mutation()
+        .context("failed to lock working copy after sync")?;
+    locked_workspace
+        .finish(repo.op_id().clone())
+        .context("failed to persist working-copy state after sync")?;
+
+    context.repo = repo;
+
+    ensure_remote_bookmark_is_tracked(context, branch_name, remote, remote_name.as_str())?;
+    checkout_existing_bookmark(context, branch_name)
+        .with_context(|| format!("failed to refresh working copy for '{branch_name}'"))?;
+
+    Ok(())
+}
+
+fn git_import_options_from_settings(settings: &UserSettings) -> Result<git::GitImportOptions> {
+    let auto_local_bookmark = settings
+        .get_bool("git.auto-local-bookmark")
+        .context("failed to read git.auto-local-bookmark setting")?;
+    let abandon_unreachable_commits = settings
+        .get_bool("git.abandon-unreachable-commits")
+        .context("failed to read git.abandon-unreachable-commits setting")?;
+
+    Ok(git::GitImportOptions {
+        auto_local_bookmark,
+        abandon_unreachable_commits,
+        remote_auto_track_bookmarks: HashMap::new(),
+    })
+}
+
+fn ensure_remote_bookmark_is_tracked(
+    context: &mut RepoContext,
+    branch_name: &str,
+    remote: &RemoteName,
+    remote_name: &str,
+) -> Result<()> {
+    let Some((_, targets)) = context
+        .repo
+        .view()
+        .local_remote_bookmarks(remote)
+        .find(|(name, _)| name.as_str() == branch_name)
+    else {
+        return Ok(());
+    };
+    if targets.remote_ref.is_tracked() {
+        return Ok(());
+    }
+
+    let symbol = RefName::new(branch_name).to_remote_symbol(remote);
+    let mut tx = context.repo.start_transaction();
+    tx.repo_mut()
+        .track_remote_bookmark(symbol)
+        .with_context(|| {
+            format!(
+                "failed to track remote bookmark '{}@{}' before operation",
+                branch_name, remote_name
+            )
+        })?;
+
+    let repo = tx
+        .commit(format!("track remote bookmark {branch_name}@{remote_name}"))
+        .context("failed to finalize remote bookmark tracking operation")?;
+
+    let locked_workspace = context
+        .workspace
+        .start_working_copy_mutation()
+        .context("failed to lock working copy after tracking remote bookmark")?;
+    locked_workspace
+        .finish(repo.op_id().clone())
+        .context("failed to persist working-copy state after tracking remote bookmark")?;
 
     context.repo = repo;
     Ok(())

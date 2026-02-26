@@ -10,6 +10,7 @@ use super::*;
 use hunk::jj::{
     RepoSnapshot, checkout_or_create_branch, commit_selected_paths, commit_staged, load_repo_tree,
     load_snapshot, load_snapshot_fingerprint, push_current_branch, sanitize_branch_name,
+    sync_current_branch,
 };
 
 include!("core.rs");

@@ -1,6 +1,6 @@
 # hunk
 
-A cross-patform Git diff viewer built with `gpui` + `gpui-component`.
+A cross-platform Git diff viewer built with `gpui` + `gpui-component`.
 
 ## What it includes
 

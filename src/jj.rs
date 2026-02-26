@@ -17,7 +17,7 @@ use backend::{
     list_local_branches_from_context, load_changed_files_from_context, load_repo_context,
     load_repo_context_at_root, load_tracked_paths_from_context, materialized_entry_matches_path,
     move_bookmark_to_parent_of_working_copy, normalize_path, push_bookmark, render_patch_for_entry,
-    repo_line_stats_from_context, walk_repo_tree,
+    repo_line_stats_from_context, sync_bookmark_from_remote, walk_repo_tree,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -309,6 +309,16 @@ pub fn push_current_branch(repo_root: &Path, branch_name: &str, _: bool) -> Resu
 
     let mut context = load_repo_context_at_root(repo_root, false)?;
     push_bookmark(&mut context, branch_name)
+}
+
+pub fn sync_current_branch(repo_root: &Path, branch_name: &str) -> Result<()> {
+    let branch_name = branch_name.trim();
+    if branch_name.is_empty() || branch_name == "detached" {
+        return Err(anyhow!("cannot sync without a bookmark name"));
+    }
+
+    let mut context = load_repo_context_at_root(repo_root, true)?;
+    sync_bookmark_from_remote(&mut context, branch_name)
 }
 
 pub fn sanitize_branch_name(input: &str) -> String {
