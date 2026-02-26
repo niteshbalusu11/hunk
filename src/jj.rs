@@ -10,13 +10,14 @@ use tracing::warn;
 mod backend;
 
 use backend::{
-    checkout_existing_bookmark, collect_materialized_diff_entries, commit_working_copy_changes,
-    conflict_materialize_options, create_bookmark_at_working_copy, current_bookmarks_from_context,
-    current_commit_id_from_context, discover_repo_root, last_commit_subject_from_context,
-    list_local_branches_from_context, load_changed_files_from_context, load_repo_context,
-    load_repo_context_at_root, load_tracked_paths_from_context, materialized_entry_matches_path,
-    normalize_path, push_bookmark, render_patch_for_entry, repo_line_stats_from_context,
-    walk_repo_tree,
+    bookmark_remote_sync_state, checkout_existing_bookmark, collect_materialized_diff_entries,
+    commit_working_copy_changes, conflict_materialize_options, create_bookmark_at_working_copy,
+    current_bookmarks_from_context, current_commit_id_from_context, discover_repo_root,
+    last_commit_subject_from_context, list_local_branches_from_context,
+    load_changed_files_from_context, load_repo_context, load_repo_context_at_root,
+    load_tracked_paths_from_context, materialized_entry_matches_path,
+    move_bookmark_to_parent_of_working_copy, normalize_path, push_bookmark, render_patch_for_entry,
+    repo_line_stats_from_context, walk_repo_tree,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,10 +130,17 @@ pub fn load_snapshot(cwd: &Path) -> Result<RepoSnapshot> {
     let line_stats = repo_line_stats_from_context(&context)?;
     let current_bookmarks = current_bookmarks_from_context(&context)?;
     let active_bookmark = load_active_bookmark_preference(&context.root);
-    let branch_name = select_snapshot_branch_name(&current_bookmarks, active_bookmark);
-    let branches = list_local_branches_from_context(&context, &current_bookmarks)?;
-    let branch_has_upstream = false;
-    let branch_ahead_count = 0;
+    let branch_name = select_snapshot_branch_name(&context, &current_bookmarks, active_bookmark);
+    let mut branch_selection = current_bookmarks.clone();
+    if branch_selection.is_empty() && branch_name != "detached" {
+        branch_selection.insert(branch_name.clone());
+    }
+    let branches = list_local_branches_from_context(&context, &branch_selection)?;
+    let (branch_has_upstream, branch_ahead_count) = if branch_name == "detached" {
+        (false, 0)
+    } else {
+        bookmark_remote_sync_state(&context, branch_name.as_str())
+    };
     let last_commit_subject = last_commit_subject_from_context(&context)?;
 
     Ok(RepoSnapshot {
@@ -152,7 +160,7 @@ pub fn load_snapshot_fingerprint(cwd: &Path) -> Result<RepoSnapshotFingerprint> 
     let files = load_changed_files_from_context(&context)?;
     let current_bookmarks = current_bookmarks_from_context(&context)?;
     let active_bookmark = load_active_bookmark_preference(&context.root);
-    let branch_name = select_snapshot_branch_name(&current_bookmarks, active_bookmark);
+    let branch_name = select_snapshot_branch_name(&context, &current_bookmarks, active_bookmark);
     let head_target = current_commit_id_from_context(&context)?;
     Ok(snapshot_fingerprint(
         context.root,
@@ -228,7 +236,13 @@ pub fn commit_staged(repo_root: &Path, message: &str) -> Result<()> {
         return Err(anyhow!("no changes to commit"));
     }
 
-    commit_working_copy_changes(&mut context, trimmed)
+    commit_working_copy_changes(&mut context, trimmed)?;
+
+    if let Some(active_bookmark) = load_active_bookmark_preference(&context.root) {
+        move_bookmark_to_parent_of_working_copy(&mut context, active_bookmark.as_str())?;
+    }
+
+    Ok(())
 }
 
 pub fn checkout_or_create_branch(repo_root: &Path, branch_name: &str) -> Result<()> {
@@ -426,11 +440,17 @@ fn persist_active_bookmark_preference(repo_root: &Path, branch_name: &str) -> Re
 }
 
 fn select_snapshot_branch_name(
+    context: &backend::RepoContext,
     current_bookmarks: &BTreeSet<String>,
     preferred: Option<String>,
 ) -> String {
     if let Some(preferred) = preferred
-        && current_bookmarks.contains(preferred.as_str())
+        && (current_bookmarks.contains(preferred.as_str())
+            || context
+                .repo
+                .view()
+                .get_local_bookmark(RefName::new(preferred.as_str()))
+                .is_present())
     {
         return preferred;
     }

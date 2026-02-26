@@ -26,6 +26,33 @@ fn checkout_existing_bookmark_switches_without_crashing() {
 
     let snapshot = load_snapshot(fixture.path()).expect("snapshot should load after checkout");
     assert_eq!(snapshot.branch_name, "master");
+    assert!(
+        snapshot.files.is_empty(),
+        "switching to an existing bookmark should not surface committed diff as working changes"
+    );
+}
+
+#[test]
+fn committing_on_checked_out_bookmark_advances_that_bookmark() {
+    let fixture = TempRepo::new("checkout-bookmark-commit-advance");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_branch(fixture.path(), "master")
+        .expect("creating master bookmark should succeed");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\nline two\n");
+    commit_staged(fixture.path(), "master update should move bookmark")
+        .expect("commit on checked-out bookmark should succeed");
+
+    let master_log = run_jj_capture(
+        fixture.path(),
+        ["log", "-r", "master", "-n", "1", "--no-graph"],
+    );
+    assert!(
+        master_log.contains("master update should move bookmark"),
+        "master bookmark should point to latest commit after commit_staged"
+    );
 }
 
 struct TempRepo {
@@ -70,4 +97,18 @@ fn run_jj<const N: usize>(cwd: &Path, args: [&str; N]) {
         .status()
         .expect("jj command should run");
     assert!(status.success(), "jj command failed");
+}
+
+fn run_jj_capture<const N: usize>(cwd: &Path, args: [&str; N]) -> String {
+    let output = Command::new("jj")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .expect("jj command should run");
+    assert!(
+        output.status.success(),
+        "jj command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).to_string()
 }

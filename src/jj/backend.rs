@@ -306,6 +306,45 @@ pub(super) fn current_bookmarks_from_context(context: &RepoContext) -> Result<BT
         .collect())
 }
 
+pub(super) fn bookmark_remote_sync_state(
+    context: &RepoContext,
+    branch_name: &str,
+) -> (bool, usize) {
+    let mut has_upstream = false;
+    let mut needs_push = false;
+
+    for (remote, _) in context.repo.view().remote_views() {
+        if remote == REMOTE_NAME_FOR_LOCAL_GIT_REPO {
+            continue;
+        }
+
+        let Some((_, targets)) = context
+            .repo
+            .view()
+            .local_remote_bookmarks(remote)
+            .find(|(name, _)| name.as_str() == branch_name)
+        else {
+            continue;
+        };
+
+        // Treat any present remote bookmark as upstream, even if tracking metadata
+        // is temporarily conflicted.
+        if !targets.remote_ref.is_present() {
+            continue;
+        }
+
+        has_upstream = true;
+        if matches!(
+            classify_bookmark_push_action(targets),
+            BookmarkPushAction::Update(_)
+        ) {
+            needs_push = true;
+        }
+    }
+
+    (has_upstream, usize::from(needs_push))
+}
+
 pub(super) fn list_local_branches_from_context(
     context: &RepoContext,
     current: &BTreeSet<String>,
@@ -632,6 +671,44 @@ pub(super) fn commit_working_copy_changes(context: &mut RepoContext, message: &s
     Ok(())
 }
 
+pub(super) fn move_bookmark_to_parent_of_working_copy(
+    context: &mut RepoContext,
+    branch_name: &str,
+) -> Result<bool> {
+    let bookmark_target = context
+        .repo
+        .view()
+        .get_local_bookmark(RefName::new(branch_name));
+    if !bookmark_target.is_present() {
+        return Ok(false);
+    }
+
+    let wc_commit = current_wc_commit(context)?;
+    let Some(parent_id) = wc_commit.parent_ids().first().cloned() else {
+        return Ok(false);
+    };
+
+    let mut tx = context.repo.start_transaction();
+    tx.repo_mut().set_local_bookmark_target(
+        RefName::new(branch_name),
+        RefTarget::normal(parent_id),
+    );
+    let repo = tx
+        .commit(format!("move bookmark {branch_name} to committed revision"))
+        .with_context(|| format!("failed to advance bookmark '{branch_name}'"))?;
+
+    let locked_workspace = context
+        .workspace
+        .start_working_copy_mutation()
+        .context("failed to lock working copy after moving bookmark")?;
+    locked_workspace
+        .finish(repo.op_id().clone())
+        .context("failed to persist working-copy state after moving bookmark")?;
+    context.repo = repo;
+
+    Ok(true)
+}
+
 pub(super) fn checkout_existing_bookmark(
     context: &mut RepoContext,
     branch_name: &str,
@@ -657,14 +734,19 @@ pub(super) fn checkout_existing_bookmark(
         .context("failed to lock working copy for bookmark checkout")?;
 
     let mut tx = context.repo.start_transaction();
+    let new_wc = tx
+        .repo_mut()
+        .new_commit(vec![target_commit.id().clone()], target_commit.tree())
+        .write()
+        .with_context(|| format!("failed to create working-copy commit for '{branch_name}'"))?;
     tx.repo_mut()
-        .edit(workspace_name.clone(), &target_commit)
-        .with_context(|| format!("failed to edit bookmark '{branch_name}'"))?;
+        .set_wc_commit(workspace_name.clone(), new_wc.id().clone())
+        .with_context(|| format!("failed to set working-copy commit for '{branch_name}'"))?;
     tx.repo_mut()
         .rebase_descendants()
         .context("failed to rebase descendants after bookmark checkout")?;
     let repo = tx
-        .commit(format!("edit bookmark {branch_name}"))
+        .commit(format!("checkout bookmark {branch_name}"))
         .context("failed to finalize bookmark checkout")?;
 
     let new_wc_commit = current_wc_commit_with_repo(repo.as_ref(), &workspace_name)?;
