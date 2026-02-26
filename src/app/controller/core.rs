@@ -596,8 +596,21 @@ impl DiffViewer {
         let files = self.files.clone();
         let collapsed_files = self.collapsed_files.clone();
         let previous_file_line_stats = self.file_line_stats.clone();
-        let initial_files = Self::select_initial_diff_files(&files, self.selected_path.as_deref());
-        let should_run_initial_stage = !initial_files.is_empty() && initial_files.len() < files.len();
+        let expanded_files = files
+            .iter()
+            .filter(|file| !collapsed_files.contains(file.path.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        let initial_files =
+            Self::select_initial_diff_files(&expanded_files, self.selected_path.as_deref());
+        let initial_paths = initial_files
+            .iter()
+            .map(|file| file.path.clone())
+            .collect::<BTreeSet<_>>();
+        let remaining_files = expanded_files
+            .into_iter()
+            .filter(|file| !initial_paths.contains(file.path.as_str()))
+            .collect::<Vec<_>>();
         let epoch = self.next_patch_epoch();
         self.invalidate_segment_prefetch();
         self.patch_loading = true;
@@ -622,65 +635,87 @@ impl DiffViewer {
         }
 
         self.patch_task = cx.spawn(async move |this, cx| {
-            if should_run_initial_stage {
-                let initial_repo_root = repo_root.clone();
-                let initial_collapsed_files = collapsed_files.clone();
-                let initial_previous_file_line_stats = previous_file_line_stats.clone();
-                let initial_stage_started_at = Instant::now();
-                let initial_result = cx
-                    .background_executor()
-                    .spawn(async move {
-                        load_diff_stream(
-                            &initial_repo_root,
-                            &initial_files,
-                            &initial_collapsed_files,
-                            &initial_previous_file_line_stats,
-                        )
-                    })
-                    .await;
-
+            if initial_files.is_empty() {
+                let stream = build_diff_stream_from_patch_map(
+                    &files,
+                    &collapsed_files,
+                    &previous_file_line_stats,
+                    &BTreeMap::new(),
+                    &BTreeSet::new(),
+                );
                 if let Some(this) = this.upgrade() {
                     this.update(cx, |this, cx| {
                         if epoch != this.patch_epoch {
                             return;
                         }
-
-                        let elapsed = initial_stage_started_at.elapsed();
-                        match initial_result {
-                            Ok(stream) => {
-                                info!(
-                                    "initial diff stream loaded in {:?} (rows={}, files={})",
-                                    elapsed,
-                                    stream.rows.len(),
-                                    stream.file_ranges.len()
-                                );
-                                this.apply_loaded_diff_stream(stream);
-                                cx.notify();
-                            }
-                            Err(err) => {
-                                info!(
-                                    "initial diff stream load failed in {:?}, continuing with full stream: {err:#}",
-                                    elapsed
-                                );
-                            }
-                        }
+                        this.patch_loading = false;
+                        this.apply_loaded_diff_stream(stream);
+                        cx.notify();
                     })
                     .ok();
                 }
+                return;
             }
 
-            let full_stage_started_at = Instant::now();
-            let full_result = cx
+            let mut loaded_patches = BTreeMap::new();
+            let mut loading_paths = remaining_files
+                .iter()
+                .map(|file| file.path.clone())
+                .collect::<BTreeSet<_>>();
+
+            let initial_stage_started_at = Instant::now();
+            let initial_stage_result = cx
                 .background_executor()
-                .spawn(async move {
-                    load_diff_stream(
-                        &repo_root,
-                        &files,
-                        &collapsed_files,
-                        &previous_file_line_stats,
-                    )
+                .spawn({
+                    let repo_root = repo_root.clone();
+                    let files = files.clone();
+                    let collapsed_files = collapsed_files.clone();
+                    let previous_file_line_stats = previous_file_line_stats.clone();
+                    let initial_files = initial_files.clone();
+                    let stage_loaded_patches = loaded_patches;
+                    let stage_loading_paths = loading_paths;
+                    async move {
+                        let mut loaded_patches = stage_loaded_patches;
+                        let mut loading_paths = stage_loading_paths;
+                        let stage_patches = load_patches_for_files(&repo_root, &initial_files)?;
+                        loaded_patches.extend(stage_patches);
+                        for file in &initial_files {
+                            loading_paths.remove(file.path.as_str());
+                        }
+                        let stream = build_diff_stream_from_patch_map(
+                            &files,
+                            &collapsed_files,
+                            &previous_file_line_stats,
+                            &loaded_patches,
+                            &loading_paths,
+                        );
+                        Ok::<_, anyhow::Error>((loaded_patches, loading_paths, stream))
+                    }
                 })
                 .await;
+
+            let (next_loaded_patches, next_loading_paths, initial_stream) = match initial_stage_result {
+                Ok(result) => result,
+                Err(err) => {
+                    if let Some(this) = this.upgrade() {
+                        this.update(cx, |this, cx| {
+                            if epoch != this.patch_epoch {
+                                return;
+                            }
+
+                            this.patch_loading = false;
+                            let elapsed = initial_stage_started_at.elapsed();
+                            error!("initial diff stage failed after {:?}: {err:#}", elapsed);
+                            this.apply_diff_stream_error(err);
+                            cx.notify();
+                        })
+                        .ok();
+                    }
+                    return;
+                }
+            };
+            loaded_patches = next_loaded_patches;
+            loading_paths = next_loading_paths;
 
             if let Some(this) = this.upgrade() {
                 this.update(cx, |this, cx| {
@@ -688,27 +723,120 @@ impl DiffViewer {
                         return;
                     }
 
-                    this.patch_loading = false;
-                    let elapsed = full_stage_started_at.elapsed();
-                    match full_result {
-                        Ok(stream) => {
-                            info!(
-                                "full diff stream loaded in {:?} (rows={}, files={})",
-                                elapsed,
-                                stream.rows.len(),
-                                stream.file_ranges.len()
-                            );
-                            this.apply_loaded_diff_stream(stream);
-                        }
-                        Err(err) => {
-                            error!("full diff stream load failed after {:?}: {err:#}", elapsed);
-                            this.apply_diff_stream_error(err);
-                        }
-                    }
-
+                    let elapsed = initial_stage_started_at.elapsed();
+                    info!(
+                        "initial diff stream loaded in {:?} (rows={}, files={})",
+                        elapsed,
+                        initial_stream.rows.len(),
+                        initial_stream.file_ranges.len()
+                    );
+                    this.apply_loaded_diff_stream(initial_stream);
                     cx.notify();
                 })
                 .ok();
+            }
+
+            if remaining_files.is_empty() {
+                if let Some(this) = this.upgrade() {
+                    this.update(cx, |this, cx| {
+                        if epoch != this.patch_epoch {
+                            return;
+                        }
+                        this.patch_loading = false;
+                        cx.notify();
+                    })
+                    .ok();
+                }
+                return;
+            }
+
+            let total_batches = remaining_files.len().div_ceil(DIFF_PROGRESSIVE_BATCH_FILES);
+            for (batch_ix, batch) in remaining_files
+                .chunks(DIFF_PROGRESSIVE_BATCH_FILES)
+                .enumerate()
+            {
+                let stage_started_at = Instant::now();
+                let stage_files = batch.to_vec();
+                let stage_result = cx
+                    .background_executor()
+                    .spawn({
+                        let repo_root = repo_root.clone();
+                        let files = files.clone();
+                        let collapsed_files = collapsed_files.clone();
+                        let previous_file_line_stats = previous_file_line_stats.clone();
+                        let stage_loaded_patches = loaded_patches;
+                        let stage_loading_paths = loading_paths;
+                        async move {
+                            let mut loaded_patches = stage_loaded_patches;
+                            let mut loading_paths = stage_loading_paths;
+                            let stage_patches = load_patches_for_files(&repo_root, &stage_files)?;
+                            loaded_patches.extend(stage_patches);
+                            for file in &stage_files {
+                                loading_paths.remove(file.path.as_str());
+                            }
+                            let stream = build_diff_stream_from_patch_map(
+                                &files,
+                                &collapsed_files,
+                                &previous_file_line_stats,
+                                &loaded_patches,
+                                &loading_paths,
+                            );
+                            Ok::<_, anyhow::Error>((loaded_patches, loading_paths, stream))
+                        }
+                    })
+                    .await;
+
+                let (next_loaded_patches, next_loading_paths, stream) = match stage_result {
+                    Ok(result) => result,
+                    Err(err) => {
+                        if let Some(this) = this.upgrade() {
+                            this.update(cx, |this, cx| {
+                                if epoch != this.patch_epoch {
+                                    return;
+                                }
+
+                                this.patch_loading = false;
+                                let elapsed = stage_started_at.elapsed();
+                                error!(
+                                    "progressive diff batch {}/{} failed after {:?}: {err:#}",
+                                    batch_ix.saturating_add(1),
+                                    total_batches,
+                                    elapsed
+                                );
+                                this.apply_diff_stream_error(err);
+                                cx.notify();
+                            })
+                            .ok();
+                        }
+                        return;
+                    }
+                };
+                loaded_patches = next_loaded_patches;
+                loading_paths = next_loading_paths;
+
+                if let Some(this) = this.upgrade() {
+                    this.update(cx, |this, cx| {
+                        if epoch != this.patch_epoch {
+                            return;
+                        }
+
+                        let elapsed = stage_started_at.elapsed();
+                        info!(
+                            "progressive diff batch {}/{} loaded in {:?} (rows={}, pending_files={})",
+                            batch_ix.saturating_add(1),
+                            total_batches,
+                            elapsed,
+                            stream.rows.len(),
+                            loading_paths.len()
+                        );
+                        this.apply_loaded_diff_stream(stream);
+                        if batch_ix.saturating_add(1) == total_batches {
+                            this.patch_loading = false;
+                        }
+                        cx.notify();
+                    })
+                    .ok();
+                }
             }
         });
     }
@@ -759,8 +887,10 @@ impl DiffViewer {
         self.recompute_diff_visible_header_lookup();
 
         if self.scroll_selected_after_reload {
-            self.scroll_selected_after_reload = false;
             self.scroll_selected_file_to_top();
+            if !self.patch_loading {
+                self.scroll_selected_after_reload = false;
+            }
         }
     }
 

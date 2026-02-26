@@ -27,6 +27,12 @@ impl DiffViewer {
                     this.frame_sample_count = 0;
                     this.frame_sample_started_at = Instant::now();
 
+                    if !this.recently_scrolling()
+                        && let Some(visible_row) = this.last_visible_row_start
+                    {
+                        this.request_visible_row_segment_prefetch(visible_row, true, cx);
+                    }
+
                     let next_epoch = this.next_fps_epoch();
                     this.schedule_fps_sample(next_epoch, cx);
                     cx.notify();

@@ -22,6 +22,7 @@ const DEFAULT_SCROLL_STEP_ROWS: usize = 24;
 const DEFAULT_SCROLL_PREFETCH_RADIUS_ROWS: usize = 120;
 const DEFAULT_SCROLL_FRAMES: usize = 240;
 const DEFAULT_SCROLL_ROW_BUDGET: usize = 20_000;
+const DETAILED_SEGMENT_MAX_CHANGED_LINES: u64 = 8_000;
 
 #[derive(Debug, Clone, Copy)]
 struct PerfThresholds {
@@ -52,6 +53,7 @@ struct ScrollSampleRow {
     right_text: String,
     left_kind: DiffCellKind,
     right_kind: DiffCellKind,
+    use_detailed_segments: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -198,19 +200,27 @@ fn measure_selected_file_latency(
     let ttfd_ms = selected_stage_started.elapsed().as_secs_f64() * 1_000.0;
 
     let mut code_rows = Vec::new();
+    let mut selected_changed_lines = 0_u64;
     for row in rows {
         if row.kind != DiffRowKind::Code {
             continue;
         }
-        code_rows.push(ScrollSampleRow {
-            file_path: selected_file.path.clone(),
-            left_text: row.left.text,
-            right_text: row.right.text,
-            left_kind: row.left.kind,
-            right_kind: row.right.kind,
-        });
-        if code_rows.len() >= cfg.viewport_rows {
-            break;
+        if row.left.kind == DiffCellKind::Removed {
+            selected_changed_lines = selected_changed_lines.saturating_add(1);
+        }
+        if row.right.kind == DiffCellKind::Added {
+            selected_changed_lines = selected_changed_lines.saturating_add(1);
+        }
+
+        if code_rows.len() < cfg.viewport_rows {
+            code_rows.push(ScrollSampleRow {
+                file_path: selected_file.path.clone(),
+                left_text: row.left.text,
+                right_text: row.right.text,
+                left_kind: row.left.kind,
+                right_kind: row.right.kind,
+                use_detailed_segments: true,
+            });
         }
     }
     if code_rows.is_empty() {
@@ -218,6 +228,10 @@ fn measure_selected_file_latency(
             "selected file '{}' produced zero code rows",
             selected_file.path
         ));
+    }
+    let use_detailed_segments = selected_changed_lines <= DETAILED_SEGMENT_MAX_CHANGED_LINES;
+    for row in &mut code_rows {
+        row.use_detailed_segments = use_detailed_segments;
     }
 
     // Include first-viewport segment build so selected-file latency reflects first useful paint cost.
@@ -247,6 +261,8 @@ fn measure_full_stream_and_collect_scroll_rows(
             .get(file.path.as_str())
             .map(String::as_str)
             .unwrap_or_default();
+        let mut file_changed_lines = 0_u64;
+        let mut file_samples = Vec::new();
         for row in parse_patch_side_by_side(patch) {
             if matches!(
                 row.kind,
@@ -259,16 +275,30 @@ fn measure_full_stream_and_collect_scroll_rows(
             }
 
             total_code_rows = total_code_rows.saturating_add(1);
-            if scroll_rows.len() >= scroll_row_budget {
+            if row.left.kind == DiffCellKind::Removed {
+                file_changed_lines = file_changed_lines.saturating_add(1);
+            }
+            if row.right.kind == DiffCellKind::Added {
+                file_changed_lines = file_changed_lines.saturating_add(1);
+            }
+
+            if scroll_rows.len().saturating_add(file_samples.len()) >= scroll_row_budget {
                 continue;
             }
-            scroll_rows.push(ScrollSampleRow {
+            file_samples.push(ScrollSampleRow {
                 file_path: file.path.clone(),
                 left_text: row.left.text,
                 right_text: row.right.text,
                 left_kind: row.left.kind,
                 right_kind: row.right.kind,
+                use_detailed_segments: true,
             });
+        }
+
+        let use_detailed_segments = file_changed_lines <= DETAILED_SEGMENT_MAX_CHANGED_LINES;
+        for mut sample in file_samples {
+            sample.use_detailed_segments = use_detailed_segments;
+            scroll_rows.push(sample);
         }
     }
 
@@ -368,15 +398,21 @@ fn compute_cell_segment_count(
         )
     };
 
-    let segment_count = highlight::build_line_segments(
-        Some(row.file_path.as_str()),
-        line,
-        kind,
-        peer_line,
-        peer_kind,
-    )
-    .len()
-    .max(1);
+    let segment_count = if row.use_detailed_segments {
+        highlight::build_line_segments(
+            Some(row.file_path.as_str()),
+            line,
+            kind,
+            peer_line,
+            peer_kind,
+        )
+        .len()
+        .max(1)
+    } else {
+        highlight::build_syntax_only_line_segments(Some(row.file_path.as_str()), line)
+            .len()
+            .max(1)
+    };
     cache.insert((row_ix, side_tag), segment_count);
     segment_count
 }

@@ -33,7 +33,7 @@ impl DiffViewer {
             return;
         }
         self.last_visible_row_start = Some(row_ix);
-        self.request_visible_row_segment_prefetch(row_ix, cx);
+        self.request_visible_row_segment_prefetch(row_ix, false, cx);
 
         let Some((next_path, next_status)) =
             self.selected_file_from_row_metadata(row_ix).or_else(|| {
@@ -56,7 +56,12 @@ impl DiffViewer {
         cx.notify();
     }
 
-    fn request_visible_row_segment_prefetch(&mut self, visible_row: usize, cx: &mut Context<Self>) {
+    fn request_visible_row_segment_prefetch(
+        &mut self,
+        visible_row: usize,
+        force_upgrade: bool,
+        cx: &mut Context<Self>,
+    ) {
         if self.diff_rows.is_empty() {
             return;
         }
@@ -65,7 +70,8 @@ impl DiffViewer {
             self.diff_row_segment_cache.resize(self.diff_rows.len(), None);
         }
 
-        if let Some(anchor_row) = self.segment_prefetch_anchor_row
+        if !force_upgrade
+            && let Some(anchor_row) = self.segment_prefetch_anchor_row
             && anchor_row.abs_diff(visible_row) < DIFF_SEGMENT_PREFETCH_STEP_ROWS
         {
             return;
@@ -77,19 +83,16 @@ impl DiffViewer {
             .saturating_add(DIFF_SEGMENT_PREFETCH_RADIUS_ROWS.saturating_add(1))
             .min(self.diff_rows.len());
 
-        let mut pending_rows =
-            Vec::with_capacity(DIFF_SEGMENT_PREFETCH_BATCH_ROWS.min(end.saturating_sub(start)));
+        let batch_limit = if force_upgrade {
+            end.saturating_sub(start)
+        } else {
+            DIFF_SEGMENT_PREFETCH_BATCH_ROWS.min(end.saturating_sub(start))
+        };
+        let mut pending_rows = Vec::with_capacity(batch_limit);
+        let recently_scrolling = self.recently_scrolling();
         for row_ix in start..end {
-            if pending_rows.len() >= DIFF_SEGMENT_PREFETCH_BATCH_ROWS {
+            if pending_rows.len() >= batch_limit {
                 break;
-            }
-
-            if self
-                .diff_row_segment_cache
-                .get(row_ix)
-                .is_some_and(Option::is_some)
-            {
-                continue;
             }
 
             let Some(row) = self.diff_rows.get(row_ix) else {
@@ -103,13 +106,23 @@ impl DiffViewer {
                 .diff_row_metadata
                 .get(row_ix)
                 .and_then(|meta| meta.file_path.clone());
-            let use_detailed_segments = file_path
+            let base_quality = file_path
                 .as_deref()
                 .and_then(|path| self.file_line_stats.get(path).copied())
-                .map(use_detailed_segments_for_file)
-                .unwrap_or(true);
+                .map(base_segment_quality_for_file)
+                .unwrap_or(DiffSegmentQuality::Detailed);
+            let target_quality = effective_segment_quality(base_quality, recently_scrolling);
 
-            pending_rows.push((row_ix, row.clone(), file_path, use_detailed_segments));
+            if self
+                .diff_row_segment_cache
+                .get(row_ix)
+                .and_then(Option::as_ref)
+                .is_some_and(|cache| cache.quality >= target_quality)
+            {
+                continue;
+            }
+
+            pending_rows.push((row_ix, row.clone(), file_path, target_quality));
         }
 
         if pending_rows.is_empty() {
@@ -123,13 +136,13 @@ impl DiffViewer {
                 .spawn(async move {
                     pending_rows
                         .into_iter()
-                        .map(|(row_ix, row, file_path, use_detailed_segments)| {
+                        .map(|(row_ix, row, file_path, quality)| {
                             (
                                 row_ix,
                                 build_diff_row_segment_cache(
                                     file_path.as_deref(),
                                     &row,
-                                    use_detailed_segments,
+                                    quality,
                                 ),
                             )
                         })
@@ -145,11 +158,15 @@ impl DiffViewer {
 
                     let mut inserted = false;
                     for (row_ix, row_cache) in computed_rows {
-                        if let Some(slot) = this.diff_row_segment_cache.get_mut(row_ix)
-                            && slot.is_none()
-                        {
-                            *slot = Some(row_cache);
-                            inserted = true;
+                        if let Some(slot) = this.diff_row_segment_cache.get_mut(row_ix) {
+                            let should_replace = slot
+                                .as_ref()
+                                .map(|cached| row_cache.quality > cached.quality)
+                                .unwrap_or(true);
+                            if should_replace {
+                                *slot = Some(row_cache);
+                                inserted = true;
+                            }
                         }
                     }
 

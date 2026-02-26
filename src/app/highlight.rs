@@ -25,6 +25,10 @@ pub(super) struct StyledSegment {
     pub(super) changed: bool,
 }
 
+const MAX_INTRA_LINE_DIFF_CHARS: usize = 8_192;
+const MAX_INTRA_LINE_DIFF_TOKENS: usize = 768;
+const MAX_INTRA_LINE_LCS_MATRIX_CELLS: usize = 80_000;
+
 pub(super) fn build_line_segments(
     file_path: Option<&str>,
     line: &str,
@@ -44,9 +48,10 @@ pub(super) fn build_line_segments(
     merge_styled_segments(&chars, &syntax_map, &changed_map)
 }
 
-#[cfg(test)]
-#[allow(dead_code)]
-pub(super) fn build_plain_line_segments(file_path: Option<&str>, line: &str) -> Vec<StyledSegment> {
+pub(super) fn build_syntax_only_line_segments(
+    file_path: Option<&str>,
+    line: &str,
+) -> Vec<StyledSegment> {
     if line.is_empty() {
         return Vec::new();
     }
@@ -56,6 +61,12 @@ pub(super) fn build_plain_line_segments(file_path: Option<&str>, line: &str) -> 
     apply_syntect_syntax_map(file_path, line, &mut syntax_map);
     let changed_map = vec![false; chars.len()];
     merge_styled_segments(&chars, &syntax_map, &changed_map)
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+pub(super) fn build_plain_line_segments(file_path: Option<&str>, line: &str) -> Vec<StyledSegment> {
+    build_syntax_only_line_segments(file_path, line)
 }
 
 #[allow(dead_code)]
@@ -575,20 +586,33 @@ fn intra_line_change_map(
     }
 
     let peer_chars = peer_line.chars().collect::<Vec<_>>();
+    if line_chars.len() > MAX_INTRA_LINE_DIFF_CHARS || peer_chars.len() > MAX_INTRA_LINE_DIFF_CHARS
+    {
+        return coarse_changed_map(line_chars, &peer_chars);
+    }
+
+    let line_tokens = tokenize(line_chars);
+    let peer_tokens = tokenize(&peer_chars);
+    let token_matrix_size = line_tokens.len().saturating_mul(peer_tokens.len());
+    if line_tokens.len() > MAX_INTRA_LINE_DIFF_TOKENS
+        || peer_tokens.len() > MAX_INTRA_LINE_DIFF_TOKENS
+        || token_matrix_size > MAX_INTRA_LINE_LCS_MATRIX_CELLS
+    {
+        return coarse_changed_map(line_chars, &peer_chars);
+    }
+
     let left_is_current = kind == DiffCellKind::Removed;
-    let (current_tokens, peer_tokens) = if left_is_current {
-        (tokenize(line_chars), tokenize(&peer_chars))
+    let (common_current, common_peer) = if left_is_current {
+        lcs_common_token_flags(&line_tokens, &peer_tokens)
     } else {
-        (tokenize(&peer_chars), tokenize(line_chars))
+        lcs_common_token_flags(&peer_tokens, &line_tokens)
     };
-    let (common_current, common_peer) = lcs_common_token_flags(&current_tokens, &peer_tokens);
     let common_flags = if left_is_current {
         common_current
     } else {
         common_peer
     };
 
-    let line_tokens = tokenize(line_chars);
     let mut changed_map = vec![false; line_chars.len()];
     for (ix, token) in line_tokens.iter().enumerate() {
         let is_common = common_flags.get(ix).copied().unwrap_or(false);
@@ -601,6 +625,13 @@ fn intra_line_change_map(
     }
 
     changed_map
+}
+
+fn coarse_changed_map(line_chars: &[char], peer_chars: &[char]) -> Vec<bool> {
+    if line_chars == peer_chars {
+        return vec![false; line_chars.len()];
+    }
+    vec![true; line_chars.len()]
 }
 
 #[derive(Debug, Clone)]
@@ -739,6 +770,38 @@ mod tests {
 
         assert!(left.iter().any(|segment| segment.changed));
         assert!(right.iter().any(|segment| segment.changed));
+    }
+
+    #[test]
+    fn falls_back_to_coarse_change_map_for_large_line_pairs() {
+        let base = "x ".repeat(MAX_INTRA_LINE_DIFF_CHARS + 128);
+        let mut modified = base.clone();
+        modified.push('y');
+
+        let segments = build_line_segments(
+            Some("src/main.ts"),
+            &base,
+            DiffCellKind::Removed,
+            &modified,
+            DiffCellKind::Added,
+        );
+        assert!(!segments.is_empty());
+        assert!(segments.iter().any(|segment| segment.changed));
+    }
+
+    #[test]
+    fn coarse_change_map_keeps_identical_large_pairs_unchanged() {
+        let line = "token ".repeat(MAX_INTRA_LINE_DIFF_CHARS + 64);
+        let segments = build_line_segments(
+            Some("src/main.ts"),
+            &line,
+            DiffCellKind::Removed,
+            &line,
+            DiffCellKind::Added,
+        );
+
+        assert!(!segments.is_empty());
+        assert!(segments.iter().all(|segment| !segment.changed));
     }
 
     #[test]

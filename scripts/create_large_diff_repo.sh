@@ -9,6 +9,10 @@ force=0
 snapshot_max_new_file_size=33554432
 bookmark_name="main"
 language="txt"
+run_seed="$(od -An -N4 -tu4 /dev/urandom | tr -d '[:space:]')"
+if [[ -z "$run_seed" ]]; then
+    run_seed="$(date +%s)"
+fi
 
 usage() {
     cat <<'USAGE'
@@ -121,27 +125,76 @@ jj --quiet -R "$repo_dir" config set --repo snapshot.max-new-file-size "$snapsho
 create_file_contents() {
     local phase="$1"
     local output_path="$2"
-    awk -v lines="$lines_per_file" -v phase="$phase" -v lang="$language" '
+    local file_index="$3"
+    local file_seed="$4"
+    awk -v lines="$lines_per_file" -v phase="$phase" -v lang="$language" -v file_idx="$file_index" -v seed="$file_seed" '
+        function mix(line_no, salt, value) {
+            value = seed + (line_no * 48271) + (file_idx * 69621) + (salt * 17123)
+            value = value % 2147483647
+            if (value < 0) {
+                value += 2147483647
+            }
+            return value
+        }
+
         BEGIN {
             for (i = 1; i <= lines; i++) {
+                a = mix(i, 1) % 10007
+                b = mix(i, 2) % 8191
+                c = mix(i, 3) % 4099
+                variant = mix(i, 4) % 3
+
                 if (lang == "ts") {
                     if (phase == "before") {
-                        printf "export const metric_%06d: number = %d + 17;\n", i, i
+                        if (variant == 0) {
+                            printf "export const metric_%03d_%06d: number = (%d + %d);\n", file_idx, i, a, b
+                        } else if (variant == 1) {
+                            printf "export const metric_%03d_%06d: number = (%d - %d);\n", file_idx, i, a + b, c % 97
+                        } else {
+                            printf "export const metric_%03d_%06d: number = (%d * %d);\n", file_idx, i, (a % 97) + 3, (b % 13) + 2
+                        }
                     } else {
-                        printf "export const metric_%06d: number = (%d * 3) - 11;\n", i, i
+                        if (variant == 0) {
+                            printf "export const metric_%03d_%06d: number = (%d * %d) - %d;\n", file_idx, i, (a % 89) + 11, (b % 11) + 2, c % 53
+                        } else if (variant == 1) {
+                            printf "export const metric_%03d_%06d: number = (%d + %d) / %d;\n", file_idx, i, a + c, b + 7, (c % 9) + 1
+                        } else {
+                            printf "export const metric_%03d_%06d: number = (%d ^ %d) + %d;\n", file_idx, i, a % 2048, b % 1024, c % 61
+                        }
                     }
                 } else if (lang == "js") {
                     if (phase == "before") {
-                        printf "export const metric_%06d = %d + 17;\n", i, i
+                        if (variant == 0) {
+                            printf "export const metric_%03d_%06d = (%d + %d);\n", file_idx, i, a, b
+                        } else if (variant == 1) {
+                            printf "export const metric_%03d_%06d = (%d - %d);\n", file_idx, i, a + b, c % 97
+                        } else {
+                            printf "export const metric_%03d_%06d = (%d * %d);\n", file_idx, i, (a % 97) + 3, (b % 13) + 2
+                        }
                     } else {
-                        printf "export const metric_%06d = (%d * 3) - 11;\n", i, i
+                        if (variant == 0) {
+                            printf "export const metric_%03d_%06d = (%d * %d) - %d;\n", file_idx, i, (a % 89) + 11, (b % 11) + 2, c % 53
+                        } else if (variant == 1) {
+                            printf "export const metric_%03d_%06d = (%d + %d) / %d;\n", file_idx, i, a + c, b + 7, (c % 9) + 1
+                        } else {
+                            printf "export const metric_%03d_%06d = (%d ^ %d) + %d;\n", file_idx, i, a % 2048, b % 1024, c % 61
+                        }
                     }
                 } else {
-                    printf "%s line %06d: hunk diff stress payload for throughput and frame pacing\n", phase, i
+                    if (phase == "before") {
+                        printf "before file %03d line %06d payload %05d %05d %05d steady text for renderer stress\n", file_idx, i, a, b, c
+                    } else {
+                        printf "after file %03d line %06d payload %05d %05d %05d steady text for renderer stress\n", file_idx, i, (a + b) % 10007, (b + c) % 8191, (c + a) % 4099
+                    }
                 }
             }
         }
     ' >"$output_path"
+}
+
+compute_file_seed() {
+    local index="$1"
+    echo $(((run_seed + (index * 7919)) % 2147483647))
 }
 
 extension_for_language() {
@@ -156,15 +209,17 @@ file_extension="$(extension_for_language)"
 
 for i in $(seq 1 "$file_count"); do
     file_path="$repo_dir/stress/file_$(printf '%03d' "$i").$file_extension"
+    file_seed="$(compute_file_seed "$i")"
     mkdir -p "$(dirname "$file_path")"
-    create_file_contents "before" "$file_path"
+    create_file_contents "before" "$file_path" "$i" "$file_seed"
 done
 
 jj --quiet -R "$repo_dir" commit -m "Baseline for Hunk large-diff stress test" >/dev/null 2>&1
 
 for i in $(seq 1 "$file_count"); do
     file_path="$repo_dir/stress/file_$(printf '%03d' "$i").$file_extension"
-    create_file_contents "after" "$file_path"
+    file_seed="$(compute_file_seed "$i")"
+    create_file_contents "after" "$file_path" "$i" "$file_seed"
 done
 
 jj --quiet -R "$repo_dir" bookmark create "$bookmark_name" -r @ >/dev/null 2>&1
@@ -178,5 +233,6 @@ printf "Per-file paired rows in Hunk: %d\n" "$lines_per_file"
 printf "Total paired rows in Hunk: %d\n" "$total_changed_rows"
 printf "Total changed lines in patch (+/-): %d\n" "$total_changed_lines"
 printf "Language mode: %s (.%s)\n" "$language" "$file_extension"
+printf "Randomization seed: %s\n" "$run_seed"
 printf "Active bookmark: %s\n" "$bookmark_name"
 printf "\nOpen this folder in Hunk and watch the FPS badge while scrolling.\n"

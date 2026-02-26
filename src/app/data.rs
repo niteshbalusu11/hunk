@@ -8,11 +8,12 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 
 use super::highlight::{
-    StyledSegment, SyntaxTokenKind, build_line_segments, render_with_whitespace_markers,
+    StyledSegment, SyntaxTokenKind, build_line_segments, build_syntax_only_line_segments,
+    render_with_whitespace_markers,
 };
 use super::*;
 use hunk::diff::parse_patch_side_by_side;
-use hunk::jj::{RepoTreeEntry, RepoTreeEntryKind, load_patches_for_files};
+use hunk::jj::{RepoTreeEntry, RepoTreeEntryKind};
 
 #[derive(Default)]
 struct DiffTreeFolder {
@@ -81,8 +82,17 @@ pub(super) struct CachedStyledSegment {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct DiffRowSegmentCache {
+    pub(super) quality: DiffSegmentQuality,
     pub(super) left: Vec<CachedStyledSegment>,
     pub(super) right: Vec<CachedStyledSegment>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum DiffSegmentQuality {
+    #[default]
+    Plain,
+    SyntaxOnly,
+    Detailed,
 }
 
 #[derive(Debug, Clone)]
@@ -100,6 +110,7 @@ pub(super) enum DiffStreamRowKind {
     CoreHunkHeader,
     CoreMeta,
     CoreEmpty,
+    FileLoading,
     FileCollapsed,
     FileError,
     EmptyState,
@@ -128,10 +139,34 @@ struct LoadedFileDiffRows {
 }
 
 const DETAILED_SEGMENT_MAX_CHANGED_LINES: u64 = 8_000;
-const MAX_RENDER_SEGMENTS_PER_CELL: usize = 48;
+const MAX_RENDER_SEGMENTS_PER_CELL_DETAILED: usize = 48;
+const MAX_RENDER_SEGMENTS_PER_CELL_LARGE_FILE: usize = 24;
 
 pub(super) fn use_detailed_segments_for_file(line_stats: LineStats) -> bool {
     line_stats.changed() <= DETAILED_SEGMENT_MAX_CHANGED_LINES
+}
+
+pub(super) fn base_segment_quality_for_file(line_stats: LineStats) -> DiffSegmentQuality {
+    if use_detailed_segments_for_file(line_stats) {
+        DiffSegmentQuality::Detailed
+    } else {
+        DiffSegmentQuality::SyntaxOnly
+    }
+}
+
+pub(super) fn effective_segment_quality(
+    base_quality: DiffSegmentQuality,
+    recently_scrolling: bool,
+) -> DiffSegmentQuality {
+    if !recently_scrolling {
+        return base_quality;
+    }
+
+    match base_quality {
+        DiffSegmentQuality::Detailed => DiffSegmentQuality::SyntaxOnly,
+        DiffSegmentQuality::SyntaxOnly => DiffSegmentQuality::Plain,
+        DiffSegmentQuality::Plain => DiffSegmentQuality::Plain,
+    }
 }
 
 pub(super) fn build_tree_items(files: &[ChangedFile]) -> Vec<TreeItem> {
@@ -435,23 +470,18 @@ pub(super) fn message_row(kind: DiffRowKind, text: impl Into<String>) -> SideByS
     }
 }
 
-pub(super) fn load_diff_stream(
-    repo_root: &Path,
+pub(super) fn build_diff_stream_from_patch_map(
     files: &[ChangedFile],
     collapsed_files: &BTreeSet<String>,
     previous_file_line_stats: &BTreeMap<String, LineStats>,
-) -> Result<DiffStream> {
+    patches_by_path: &BTreeMap<String, String>,
+    loading_paths: &BTreeSet<String>,
+) -> DiffStream {
     let mut rows = Vec::new();
     let mut row_metadata = Vec::new();
     let mut row_segments = Vec::new();
     let mut file_ranges = Vec::with_capacity(files.len());
     let mut file_line_stats = BTreeMap::new();
-    let expanded_files = files
-        .iter()
-        .filter(|file| !collapsed_files.contains(file.path.as_str()))
-        .cloned()
-        .collect::<Vec<_>>();
-    let patches_by_path = load_patches_for_files(repo_root, &expanded_files)?;
 
     for file in files {
         let start_row = rows.len();
@@ -476,17 +506,33 @@ pub(super) fn load_diff_stream(
             file_line_stats.insert(file.path.clone(), collapsed_stats);
             let collapsed_message = if collapsed_stats.changed() > 0 {
                 format!(
-                    "File collapsed ({} changed lines hidden).",
+                    "File collapsed ({} changed lines hidden, counts may be stale). Expand to refresh.",
                     collapsed_stats.changed()
                 )
             } else {
-                "File collapsed. Expand to load its diff.".to_string()
+                "File collapsed. Expand to load and refresh its diff.".to_string()
             };
             push_stream_row(
                 &mut rows,
                 &mut row_metadata,
                 message_row(DiffRowKind::Empty, collapsed_message),
                 DiffStreamRowKind::FileCollapsed,
+                Some(file.path.as_str()),
+                Some(file.status),
+                file_row_ordinal,
+            );
+            row_segments.push(None);
+        } else if loading_paths.contains(file.path.as_str()) {
+            let loading_stats = previous_file_line_stats
+                .get(file.path.as_str())
+                .copied()
+                .unwrap_or_default();
+            file_line_stats.insert(file.path.clone(), loading_stats);
+            push_stream_row(
+                &mut rows,
+                &mut row_metadata,
+                message_row(DiffRowKind::Meta, "Loading file diff..."),
+                DiffStreamRowKind::FileLoading,
                 Some(file.path.as_str()),
                 Some(file.status),
                 file_row_ordinal,
@@ -557,13 +603,13 @@ pub(super) fn load_diff_stream(
 
     debug_assert_eq!(row_segments.len(), rows.len());
 
-    Ok(DiffStream {
+    DiffStream {
         rows,
         row_metadata,
         row_segments,
         file_ranges,
         file_line_stats,
-    })
+    }
 }
 
 fn load_file_diff_rows(file: &ChangedFile, patch: &str) -> LoadedFileDiffRows {
@@ -590,17 +636,6 @@ fn load_file_diff_rows(file: &ChangedFile, patch: &str) -> LoadedFileDiffRows {
     }
 
     let core_rows = parse_patch_side_by_side(patch);
-    if patch_has_unrenderable_text_diff(patch, &core_rows) {
-        return LoadedFileDiffRows {
-            core_rows: Vec::new(),
-            stats: LineStats::default(),
-            load_error: Some(format!(
-                "Preview unavailable for {}: unsupported diff format.",
-                file.path
-            )),
-        };
-    }
-
     let stats = line_stats_from_rows(&core_rows);
     LoadedFileDiffRows {
         core_rows,
@@ -631,37 +666,65 @@ pub(super) fn cached_segments_from_styled(
 pub(super) fn build_diff_row_segment_cache(
     file_path: Option<&str>,
     row: &SideBySideRow,
-    use_detailed_segments: bool,
+    quality: DiffSegmentQuality,
 ) -> DiffRowSegmentCache {
-    if !use_detailed_segments {
-        return DiffRowSegmentCache {
-            left: cached_coarse_segments(&row.left.text),
-            right: cached_coarse_segments(&row.right.text),
-        };
+    match quality {
+        DiffSegmentQuality::Detailed => {
+            let left = compact_cached_segments_for_render(
+                cached_segments_from_styled(build_line_segments(
+                    file_path,
+                    &row.left.text,
+                    row.left.kind,
+                    &row.right.text,
+                    row.right.kind,
+                )),
+                MAX_RENDER_SEGMENTS_PER_CELL_DETAILED,
+            );
+            let right = compact_cached_segments_for_render(
+                cached_segments_from_styled(build_line_segments(
+                    file_path,
+                    &row.right.text,
+                    row.right.kind,
+                    &row.left.text,
+                    row.left.kind,
+                )),
+                MAX_RENDER_SEGMENTS_PER_CELL_DETAILED,
+            );
+
+            DiffRowSegmentCache {
+                quality,
+                left,
+                right,
+            }
+        }
+        DiffSegmentQuality::SyntaxOnly => {
+            let left = compact_cached_segments_for_render(
+                cached_segments_from_styled(build_syntax_only_line_segments(
+                    file_path,
+                    &row.left.text,
+                )),
+                MAX_RENDER_SEGMENTS_PER_CELL_LARGE_FILE,
+            );
+            let right = compact_cached_segments_for_render(
+                cached_segments_from_styled(build_syntax_only_line_segments(
+                    file_path,
+                    &row.right.text,
+                )),
+                MAX_RENDER_SEGMENTS_PER_CELL_LARGE_FILE,
+            );
+
+            DiffRowSegmentCache {
+                quality,
+                left,
+                right,
+            }
+        }
+        DiffSegmentQuality::Plain => DiffRowSegmentCache {
+            quality,
+            left: cached_runtime_fallback_segments(&row.left.text, true),
+            right: cached_runtime_fallback_segments(&row.right.text, true),
+        },
     }
-
-    let left = compact_cached_segments_for_render(
-        cached_segments_from_styled(build_line_segments(
-            file_path,
-            &row.left.text,
-            row.left.kind,
-            &row.right.text,
-            row.right.kind,
-        )),
-        MAX_RENDER_SEGMENTS_PER_CELL,
-    );
-    let right = compact_cached_segments_for_render(
-        cached_segments_from_styled(build_line_segments(
-            file_path,
-            &row.right.text,
-            row.right.kind,
-            &row.left.text,
-            row.left.kind,
-        )),
-        MAX_RENDER_SEGMENTS_PER_CELL,
-    );
-
-    DiffRowSegmentCache { left, right }
 }
 
 fn compact_cached_segments_for_render(
@@ -717,14 +780,24 @@ fn compact_cached_segments_for_render(
     compacted
 }
 
-pub(super) fn cached_coarse_segments(text: &str) -> Vec<CachedStyledSegment> {
+pub(super) fn cached_runtime_fallback_segments(
+    text: &str,
+    include_whitespace_markers: bool,
+) -> Vec<CachedStyledSegment> {
     if text.is_empty() {
         return Vec::new();
     }
 
+    let plain_text = SharedString::from(text.to_string());
+    let whitespace_text = if include_whitespace_markers {
+        SharedString::from(render_with_whitespace_markers(text))
+    } else {
+        plain_text.clone()
+    };
+
     vec![CachedStyledSegment {
-        plain_text: SharedString::from(text.to_string()),
-        whitespace_text: SharedString::from(render_with_whitespace_markers(text)),
+        plain_text,
+        whitespace_text,
         syntax: SyntaxTokenKind::Plain,
         changed: false,
     }]
@@ -792,16 +865,6 @@ fn is_binary_patch(patch: &str) -> bool {
             .any(|line| line.starts_with("Binary files ") && line.ends_with(" differ"))
 }
 
-fn patch_has_unrenderable_text_diff(patch: &str, rows: &[SideBySideRow]) -> bool {
-    !patch.trim().is_empty()
-        && !rows.is_empty()
-        && rows.iter().all(|row| {
-            row.kind == DiffRowKind::Empty
-                && row.left.kind == DiffCellKind::None
-                && row.right.kind == DiffCellKind::None
-        })
-}
-
 fn stream_kind_for_core_row(row: &SideBySideRow) -> DiffStreamRowKind {
     match row.kind {
         DiffRowKind::Code => DiffStreamRowKind::CoreCode,
@@ -846,6 +909,7 @@ fn stable_kind_tag(kind: DiffStreamRowKind) -> &'static str {
         DiffStreamRowKind::CoreHunkHeader => "core-hunk-header",
         DiffStreamRowKind::CoreMeta => "core-meta",
         DiffStreamRowKind::CoreEmpty => "core-empty",
+        DiffStreamRowKind::FileLoading => "file-loading",
         DiffStreamRowKind::FileCollapsed => "file-collapsed",
         DiffStreamRowKind::FileError => "file-error",
         DiffStreamRowKind::EmptyState => "empty-state",
@@ -947,5 +1011,36 @@ mod tests {
             acc
         });
         assert_eq!(reconstructed, expected);
+    }
+
+    #[test]
+    fn large_file_segment_mode_keeps_syntax_without_changed_pair_lcs() {
+        let row = SideBySideRow {
+            kind: DiffRowKind::Code,
+            left: DiffCell {
+                line: Some(1),
+                text: "name = \"hunk\" # app".to_string(),
+                kind: DiffCellKind::Added,
+            },
+            right: DiffCell {
+                line: Some(1),
+                text: "name = \"hunk\" # app".to_string(),
+                kind: DiffCellKind::Added,
+            },
+            text: String::new(),
+        };
+
+        let cache =
+            build_diff_row_segment_cache(Some("Cargo.toml"), &row, DiffSegmentQuality::SyntaxOnly);
+        assert!(
+            cache
+                .left
+                .iter()
+                .any(|segment| segment.syntax != SyntaxTokenKind::Plain),
+            "expected syntax-only large-file mode to keep non-plain tokens"
+        );
+        assert_eq!(cache.quality, DiffSegmentQuality::SyntaxOnly);
+        assert!(cache.left.iter().all(|segment| !segment.changed));
+        assert!(cache.right.iter().all(|segment| !segment.changed));
     }
 }

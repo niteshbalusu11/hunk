@@ -10,8 +10,9 @@ use tracing::warn;
 mod backend;
 
 use backend::{
-    bookmark_remote_sync_state, checkout_existing_bookmark, collect_materialized_diff_entries,
-    commit_working_copy_changes, commit_working_copy_selected_paths, conflict_materialize_options,
+    bookmark_remote_sync_state, checkout_existing_bookmark,
+    collect_materialized_diff_entries_for_paths, commit_working_copy_changes,
+    commit_working_copy_selected_paths, conflict_materialize_options,
     create_bookmark_at_working_copy, current_bookmarks_from_context,
     current_commit_id_from_context, discover_repo_root, git_head_branch_name_from_context,
     last_commit_subject_from_context, list_local_branches_from_context,
@@ -197,8 +198,10 @@ pub fn load_patch_from_open_repo(repo: &JjRepo, file_path: &str, _: FileStatus) 
     let context = load_repo_context_at_root(&repo.root, true)?;
     let normalized_file = normalize_path(file_path);
     let materialize_options = conflict_materialize_options(&context);
+    let mut requested_paths = BTreeSet::new();
+    requested_paths.insert(normalized_file.clone());
 
-    for entry in collect_materialized_diff_entries(&context)? {
+    for entry in collect_materialized_diff_entries_for_paths(&context, &requested_paths)? {
         if !materialized_entry_matches_path(&entry, normalized_file.as_str()) {
             continue;
         }
@@ -226,7 +229,7 @@ pub fn load_patches_for_files(
     }
 
     let mut patch_map = std::collections::BTreeMap::new();
-    for entry in collect_materialized_diff_entries(&context)? {
+    for entry in collect_materialized_diff_entries_for_paths(&context, &requested_paths)? {
         let source_path = normalize_path(entry.path.source().as_internal_file_string());
         let target_path = normalize_path(entry.path.target().as_internal_file_string());
         let source_matches =

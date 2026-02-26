@@ -771,7 +771,8 @@ impl DiffViewer {
         let styled_segments = if let Some(cached) = segment_cache {
             cached
         } else {
-            fallback_segments = cached_coarse_segments(&cell.text);
+            fallback_segments =
+                cached_runtime_fallback_segments(&cell.text, self.diff_show_whitespace);
             &fallback_segments
         };
         let line_number_width = if side == "left" {

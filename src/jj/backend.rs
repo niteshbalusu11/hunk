@@ -22,7 +22,7 @@ use jj_lib::git::{
     self, GitProgress, GitSidebandLineTerminator, GitSubprocessCallback, GitSubprocessOptions,
     REMOTE_NAME_FOR_LOCAL_GIT_REPO,
 };
-use jj_lib::matchers::{EverythingMatcher, NothingMatcher};
+use jj_lib::matchers::{EverythingMatcher, FilesMatcher, NothingMatcher};
 use jj_lib::merge::{Diff, MergedTreeValue};
 use jj_lib::object_id::ObjectId as _;
 use jj_lib::op_store::RefTarget;
@@ -855,6 +855,40 @@ pub(super) fn collect_materialized_diff_entries(
     let stream = materialized_diff_stream(
         context.repo.store().as_ref(),
         base_tree.diff_stream_with_copies(&current_tree, &EverythingMatcher, &copy_records),
+        Diff::new(base_tree.labels(), current_tree.labels()),
+    );
+
+    let mut entries = Vec::new();
+    for entry in block_on_stream(stream) {
+        entries.push(entry);
+    }
+    Ok(entries)
+}
+
+pub(super) fn collect_materialized_diff_entries_for_paths(
+    context: &RepoContext,
+    paths: &BTreeSet<String>,
+) -> Result<Vec<MaterializedTreeDiffEntry>> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut repo_paths = Vec::with_capacity(paths.len());
+    for path in paths {
+        let repo_path = RepoPathBuf::from_relative_path(Path::new(path))
+            .with_context(|| format!("invalid repository path '{path}'"))?;
+        repo_paths.push(repo_path);
+    }
+
+    let wc_commit = current_wc_commit(context)?;
+    let base_tree = wc_commit.parent_tree(context.repo.as_ref())?;
+    let current_tree = wc_commit.tree();
+    let copy_records = CopyRecords::default();
+    let matcher = FilesMatcher::new(repo_paths.iter());
+
+    let stream = materialized_diff_stream(
+        context.repo.store().as_ref(),
+        base_tree.diff_stream_with_copies(&current_tree, &matcher, &copy_records),
         Diff::new(base_tree.labels(), current_tree.labels()),
     );
 

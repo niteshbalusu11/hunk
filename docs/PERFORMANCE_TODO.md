@@ -42,7 +42,7 @@ Repro scripts:
 
 - [x] Render immediate lightweight diff skeleton (loading placeholder row on cold load).
 - [x] Load selected file (or first file) first and display it as soon as ready.
-- [ ] Continue loading remaining files in background and progressively replace placeholders.
+- [x] Continue loading remaining files in background and progressively replace placeholders.
 - [x] Add perf logs for stage timings (selected-file stage vs full-stream stage).
 
 ### Phase 2: Remove Backend Duplication
@@ -50,7 +50,7 @@ Repro scripts:
 - [x] Avoid per-file re-materialization scans when loading patches.
 - [x] Build a single per-refresh patch map for expanded files (`path -> patch`).
 - [x] Avoid patch-string generation in snapshot line-stats computation (stats-only path).
-- [ ] Reuse one shared diff-entry cache across snapshot + diff-stream stages in the same refresh.
+- [x] Reuse one shared diff-entry cache across staged diff-stream loads in the same refresh.
 
 ### Phase 3: Syntax/Highlight Budgeting
 
@@ -91,3 +91,5 @@ Repro scripts:
 - [x] Hardened perf harness gating (`scroll_fps_p95`, strict threshold parsing, invalid input fallback).
 - [x] Made snapshot-loaded diff refresh unconditional to avoid stale diff rows.
 - [x] Made batch patch loading resilient to per-entry render failures and duplicate-path overwrites.
+- [x] Added progressive per-file loading placeholders and staged background diff replacement.
+- [x] Switched patch entry collection to path-filtered materialized diff streams for staged loads.

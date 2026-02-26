@@ -51,6 +51,7 @@ const FILE_EDITOR_MAX_BYTES: usize = 2_400_000;
 const DIFF_SEGMENT_PREFETCH_RADIUS_ROWS: usize = 120;
 const DIFF_SEGMENT_PREFETCH_STEP_ROWS: usize = 24;
 const DIFF_SEGMENT_PREFETCH_BATCH_ROWS: usize = 96;
+const DIFF_PROGRESSIVE_BATCH_FILES: usize = 8;
 
 mod controller;
 mod data;

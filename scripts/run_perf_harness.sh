@@ -31,7 +31,7 @@ Options:
   --no-gate                       Collect metrics without failing on thresholds
   --max-ttfd-ms <ms>              Threshold for TTFD metric (default: 300)
   --max-selected-ms <ms>          Threshold for selected-file latency (default: 800)
-  --min-scroll-fps <fps>          Threshold for scroll fps proxy (default: 115)
+  --min-scroll-fps <fps>          Threshold for scroll fps p95 proxy (default: 115)
   --scroll-frames <count>         Number of simulated scroll frames (default: 240)
   --viewport-rows <count>         Rows visible per simulated frame (default: 84)
   --scroll-step-rows <count>      Rows advanced per simulated frame (default: 24)
@@ -52,7 +52,8 @@ is_positive_integer() {
 }
 
 is_positive_number() {
-    [[ "$1" =~ ^([0-9]+([.][0-9]+)?|[.][0-9]+)$ ]] && [[ "$1" != "0" ]] && [[ "$1" != "0.0" ]]
+    [[ "$1" =~ ^([0-9]+([.][0-9]+)?|[.][0-9]+)$ ]] || return 1
+    awk -v value="$1" 'BEGIN { exit !(value > 0) }'
 }
 
 while [[ $# -gt 0 ]]; do
