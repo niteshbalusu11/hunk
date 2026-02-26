@@ -304,10 +304,16 @@ impl DiffViewer {
             .as_ref()
             .map(|store| store.path().display().to_string())
             .unwrap_or_else(|| "~/.hunkdiff/config.toml".to_string());
+        let save_message = format!("Saved settings to {}.", saved_path);
         self.git_status_message = Some(format!(
-            "Saved settings to {}. Restart Hunk to reload keyboard shortcuts.",
-            saved_path
+            "{} Restart Hunk to reload keyboard shortcuts.",
+            save_message
         ));
+        gpui_component::WindowExt::push_notification(
+            window,
+            gpui_component::notification::Notification::success(save_message),
+            cx,
+        );
 
         cx.notify();
     }
