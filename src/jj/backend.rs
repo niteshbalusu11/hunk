@@ -431,6 +431,9 @@ fn load_config_if_exists(
 }
 
 fn refresh_working_copy_snapshot(context: &mut RepoContext) -> Result<()> {
+    import_git_head_for_snapshot(context)?;
+    ensure_local_bookmark_for_git_head(context)?;
+
     let workspace_name = context.workspace.workspace_name().to_owned();
     let wc_commit =
         current_wc_commit_with_repo(context.repo.as_ref(), context.workspace.workspace_name())?;
@@ -475,6 +478,127 @@ fn refresh_working_copy_snapshot(context: &mut RepoContext) -> Result<()> {
     locked_workspace
         .finish(repo.op_id().clone())
         .context("failed to persist jj working-copy state")?;
+    context.repo = repo;
+
+    import_git_refs_for_snapshot(context)?;
+    Ok(())
+}
+
+fn import_git_head_for_snapshot(context: &mut RepoContext) -> Result<()> {
+    let mut tx = context.repo.start_transaction();
+    git::import_head(tx.repo_mut()).context("failed to import Git HEAD into JJ view")?;
+    if !tx.repo().has_changes() {
+        return Ok(());
+    }
+
+    if let Some(new_git_head_id) = tx.repo().view().git_head().as_normal().cloned() {
+        let workspace_name = context.workspace.workspace_name().to_owned();
+        let new_git_head_commit = tx
+            .repo()
+            .store()
+            .get_commit(&new_git_head_id)
+            .context("failed to load imported Git HEAD commit")?;
+        let wc_commit = tx
+            .repo_mut()
+            .check_out(workspace_name, &new_git_head_commit)
+            .context("failed to reset working-copy parent to Git HEAD")?;
+
+        let mut locked_workspace = context
+            .workspace
+            .start_working_copy_mutation()
+            .context("failed to lock working copy while importing Git HEAD")?;
+        block_on(locked_workspace.locked_wc().reset(&wc_commit))
+            .context("failed to reset working-copy state to imported Git HEAD")?;
+        tx.repo_mut()
+            .rebase_descendants()
+            .context("failed to rebase descendants after Git HEAD import")?;
+
+        let repo = tx
+            .commit("import git head")
+            .context("failed to finalize Git HEAD import operation")?;
+        locked_workspace
+            .finish(repo.op_id().clone())
+            .context("failed to persist working-copy state after importing Git HEAD")?;
+        context.repo = repo;
+        return Ok(());
+    }
+
+    let repo = tx
+        .commit("import git head")
+        .context("failed to record imported Git HEAD state")?;
+    let locked_workspace = context
+        .workspace
+        .start_working_copy_mutation()
+        .context("failed to lock working copy after importing Git HEAD")?;
+    locked_workspace
+        .finish(repo.op_id().clone())
+        .context("failed to persist working-copy state after importing Git HEAD")?;
+    context.repo = repo;
+    Ok(())
+}
+
+fn ensure_local_bookmark_for_git_head(context: &mut RepoContext) -> Result<()> {
+    let Some(branch_name) = git_head_branch_name_from_context(context) else {
+        return Ok(());
+    };
+
+    if context
+        .repo
+        .view()
+        .get_local_bookmark(RefName::new(branch_name.as_str()))
+        .is_present()
+    {
+        return Ok(());
+    }
+
+    let Some(git_head_id) = context.repo.view().git_head().as_normal().cloned() else {
+        return Ok(());
+    };
+
+    let mut tx = context.repo.start_transaction();
+    tx.repo_mut().set_local_bookmark_target(
+        RefName::new(branch_name.as_str()),
+        RefTarget::normal(git_head_id),
+    );
+
+    let repo = tx
+        .commit(format!("create bookmark {branch_name} from git head"))
+        .with_context(|| {
+            format!("failed to create local bookmark '{branch_name}' from Git HEAD")
+        })?;
+    let locked_workspace = context
+        .workspace
+        .start_working_copy_mutation()
+        .context("failed to lock working copy after creating Git HEAD bookmark")?;
+    locked_workspace
+        .finish(repo.op_id().clone())
+        .context("failed to persist working-copy state after creating Git HEAD bookmark")?;
+    context.repo = repo;
+    Ok(())
+}
+
+fn import_git_refs_for_snapshot(context: &mut RepoContext) -> Result<()> {
+    let import_options = git_import_options_from_settings(&context.settings)?;
+    let mut tx = context.repo.start_transaction();
+    git::import_refs(tx.repo_mut(), &import_options)
+        .context("failed to import Git refs into JJ view")?;
+    if !tx.repo().has_changes() {
+        return Ok(());
+    }
+
+    tx.repo_mut()
+        .rebase_descendants()
+        .context("failed to rebase descendants after importing Git refs")?;
+    let repo = tx
+        .commit("import git refs")
+        .context("failed to finalize Git ref import operation")?;
+    let locked_workspace = context
+        .workspace
+        .start_working_copy_mutation()
+        .context("failed to lock working copy after importing Git refs")?;
+    locked_workspace
+        .finish(repo.op_id().clone())
+        .context("failed to persist working-copy state after importing Git refs")?;
     context.repo = repo;
     Ok(())
 }
@@ -583,6 +707,17 @@ pub(super) fn current_bookmarks_from_context(context: &RepoContext) -> Result<BT
         .local_bookmarks_for_commit(wc_commit.id())
         .map(|(name, _)| name.as_str().to_string())
         .collect())
+}
+
+pub(super) fn git_head_branch_name_from_context(context: &RepoContext) -> Option<String> {
+    let git_repo = git::get_git_repo(context.repo.store()).ok()?;
+    let head_ref = git_repo.find_reference("HEAD").ok()?;
+    let target = head_ref.target();
+    let target_name = target.try_name()?;
+    let target_name = std::str::from_utf8(target_name.as_bstr()).ok()?;
+    target_name
+        .strip_prefix("refs/heads/")
+        .map(|name| name.to_string())
 }
 
 pub(super) fn bookmark_remote_sync_state(

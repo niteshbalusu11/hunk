@@ -13,9 +13,10 @@ use backend::{
     bookmark_remote_sync_state, checkout_existing_bookmark, collect_materialized_diff_entries,
     commit_working_copy_changes, commit_working_copy_selected_paths, conflict_materialize_options,
     create_bookmark_at_working_copy, current_bookmarks_from_context,
-    current_commit_id_from_context, discover_repo_root, last_commit_subject_from_context,
-    list_local_branches_from_context, load_changed_files_from_context, load_repo_context,
-    load_repo_context_at_root, load_tracked_paths_from_context, materialized_entry_matches_path,
+    current_commit_id_from_context, discover_repo_root, git_head_branch_name_from_context,
+    last_commit_subject_from_context, list_local_branches_from_context,
+    load_changed_files_from_context, load_repo_context, load_repo_context_at_root,
+    load_tracked_paths_from_context, materialized_entry_matches_path,
     move_bookmark_to_parent_of_working_copy, normalize_path, push_bookmark, render_patch_for_entry,
     repo_line_stats_from_context, sync_bookmark_from_remote, walk_repo_tree,
 };
@@ -130,7 +131,13 @@ pub fn load_snapshot(cwd: &Path) -> Result<RepoSnapshot> {
     let line_stats = repo_line_stats_from_context(&context)?;
     let current_bookmarks = current_bookmarks_from_context(&context)?;
     let active_bookmark = load_active_bookmark_preference(&context.root);
-    let branch_name = select_snapshot_branch_name(&context, &current_bookmarks, active_bookmark);
+    let git_head_branch = git_head_branch_name_from_context(&context);
+    let branch_name = select_snapshot_branch_name(
+        &context,
+        &current_bookmarks,
+        active_bookmark,
+        git_head_branch,
+    );
     let mut branch_selection = current_bookmarks.clone();
     if branch_selection.is_empty() && branch_name != "detached" {
         branch_selection.insert(branch_name.clone());
@@ -160,7 +167,13 @@ pub fn load_snapshot_fingerprint(cwd: &Path) -> Result<RepoSnapshotFingerprint> 
     let files = load_changed_files_from_context(&context)?;
     let current_bookmarks = current_bookmarks_from_context(&context)?;
     let active_bookmark = load_active_bookmark_preference(&context.root);
-    let branch_name = select_snapshot_branch_name(&context, &current_bookmarks, active_bookmark);
+    let git_head_branch = git_head_branch_name_from_context(&context);
+    let branch_name = select_snapshot_branch_name(
+        &context,
+        &current_bookmarks,
+        active_bookmark,
+        git_head_branch,
+    );
     let head_target = current_commit_id_from_context(&context)?;
     Ok(snapshot_fingerprint(
         context.root,
@@ -481,6 +494,7 @@ fn select_snapshot_branch_name(
     context: &backend::RepoContext,
     current_bookmarks: &BTreeSet<String>,
     preferred: Option<String>,
+    git_head_branch: Option<String>,
 ) -> String {
     if let Some(preferred) = preferred
         && (current_bookmarks.contains(preferred.as_str())
@@ -491,6 +505,17 @@ fn select_snapshot_branch_name(
                 .is_present())
     {
         return preferred;
+    }
+
+    if let Some(git_head_branch) = git_head_branch
+        && (current_bookmarks.contains(git_head_branch.as_str())
+            || context
+                .repo
+                .view()
+                .get_local_bookmark(RefName::new(git_head_branch.as_str()))
+                .is_present())
+    {
+        return git_head_branch;
     }
 
     current_bookmarks
