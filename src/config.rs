@@ -19,9 +19,9 @@ pub enum ThemePreference {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiffViewMode {
-    Fit,
+    #[serde(alias = "pan")]
     #[default]
-    Pan,
+    Fit,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -132,7 +132,6 @@ impl DiffViewer {
             }
         }
         let last_project_path = state.last_project_path.clone();
-        let diff_fit_to_width = matches!(config.diff_view, DiffViewMode::Fit);
         let diff_show_whitespace = config.show_whitespace;
         let diff_show_eol_markers = config.show_eol_markers;
         let tree_state = cx.new(|cx| TreeState::new(cx));
@@ -180,13 +179,8 @@ impl DiffViewer {
             file_row_ranges: Vec::new(),
             file_line_stats: BTreeMap::new(),
             diff_list_state: ListState::new(0, ListAlignment::Top, px(360.0)),
-            diff_horizontal_scroll_handle: ScrollHandle::new(),
-            diff_fit_to_width,
             diff_show_whitespace,
             diff_show_eol_markers,
-            diff_left_column_width: DIFF_MIN_COLUMN_WIDTH,
-            diff_right_column_width: DIFF_MIN_COLUMN_WIDTH,
-            diff_pan_content_width: DIFF_MIN_CONTENT_WIDTH,
             diff_left_line_number_width: line_number_column_width(DIFF_LINE_NUMBER_MIN_DIGITS),
             diff_right_line_number_width: line_number_column_width(DIFF_LINE_NUMBER_MIN_DIGITS),
             overall_line_stats: LineStats::default(),
@@ -205,8 +199,6 @@ impl DiffViewer {
             selection_anchor_row: None,
             selection_head_row: None,
             drag_selecting_rows: false,
-            horizontal_pan_dragging: false,
-            horizontal_pan_last_x: None,
             scroll_selected_after_reload: true,
             last_visible_row_start: None,
             last_diff_scroll_offset: None,
@@ -520,14 +512,12 @@ impl DiffViewer {
         self.selection_anchor_row = None;
         self.selection_head_row = None;
         self.drag_selecting_rows = false;
-        self.horizontal_pan_dragging = false;
-        self.horizontal_pan_last_x = None;
         self.diff_rows = vec![message_row(
             DiffRowKind::Empty,
             "Use File > Open Project... (Cmd/Ctrl+Shift+O) to load a JJ repository.",
         )];
         self.sync_diff_list_state();
-        self.recompute_diff_pan_layout();
+        self.recompute_diff_layout();
         self.repo_discovery_failed = missing_repository;
         self.error_message = if missing_repository {
             None
@@ -564,12 +554,10 @@ impl DiffViewer {
             self.selection_anchor_row = None;
             self.selection_head_row = None;
             self.drag_selecting_rows = false;
-            self.horizontal_pan_dragging = false;
-            self.horizontal_pan_last_x = None;
             self.sync_diff_list_state();
             self.file_row_ranges.clear();
             self.file_line_stats.clear();
-            self.recompute_diff_pan_layout();
+            self.recompute_diff_layout();
             self.patch_loading = false;
             return;
         };
@@ -581,12 +569,10 @@ impl DiffViewer {
             self.selection_anchor_row = None;
             self.selection_head_row = None;
             self.drag_selecting_rows = false;
-            self.horizontal_pan_dragging = false;
-            self.horizontal_pan_last_x = None;
             self.sync_diff_list_state();
             self.file_row_ranges.clear();
             self.file_line_stats.clear();
-            self.recompute_diff_pan_layout();
+            self.recompute_diff_layout();
             self.patch_loading = false;
             return;
         }
@@ -632,12 +618,10 @@ impl DiffViewer {
                             this.diff_row_segment_cache = stream.row_segments;
                             this.clamp_selection_to_rows();
                             this.drag_selecting_rows = false;
-                            this.horizontal_pan_dragging = false;
-                            this.horizontal_pan_last_x = None;
                             this.sync_diff_list_state();
                             this.file_row_ranges = stream.file_ranges;
                             this.file_line_stats = stream.file_line_stats;
-                            this.recompute_diff_pan_layout();
+                            this.recompute_diff_layout();
 
                             let has_selection = this.selected_path.as_ref().is_some_and(|path| {
                                 this.files.iter().any(|file| file.path == *path)
@@ -672,12 +656,10 @@ impl DiffViewer {
                             this.selection_anchor_row = None;
                             this.selection_head_row = None;
                             this.drag_selecting_rows = false;
-                            this.horizontal_pan_dragging = false;
-                            this.horizontal_pan_last_x = None;
                             this.sync_diff_list_state();
                             this.file_row_ranges.clear();
                             this.file_line_stats.clear();
-                            this.recompute_diff_pan_layout();
+                            this.recompute_diff_layout();
                             this.scroll_selected_after_reload = false;
                         }
                     }

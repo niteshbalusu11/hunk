@@ -75,16 +75,12 @@ impl DiffViewer {
             .w_full()
             .items_center()
             .gap_2()
-            .px_2()
-            .py_1()
+            .px_3()
+            .py_0p5()
             .border_1()
-            .border_color(border_color)
+            .border_color(border_color.opacity(if is_dark { 0.92 } else { 0.82 }))
             .bg(row_background)
-            .when(self.diff_fit_to_width, |this| this.w_full())
-            .when(!self.diff_fit_to_width, |this| {
-                this.w(px(self.diff_pan_content_width))
-                    .min_w(px(self.diff_pan_content_width))
-            })
+            .w_full()
             .child({
                 let view = view.clone();
                 let path = path.clone();
@@ -99,8 +95,8 @@ impl DiffViewer {
                         })
                         .size(px(14.0)),
                     )
-                    .min_w(px(24.0))
-                    .h(px(24.0))
+                    .min_w(px(22.0))
+                    .h(px(22.0))
                     .text_color(arrow_color)
                     .on_click(move |_, _, cx| {
                         cx.stop_propagation();
@@ -111,10 +107,11 @@ impl DiffViewer {
             })
             .child(
                 div()
-                    .px_2()
+                    .px_1p5()
                     .py_0p5()
                     .text_xs()
                     .font_semibold()
+                    .rounded_sm()
                     .bg(badge_background)
                     .border_1()
                     .border_color(accent.opacity(if is_dark { 0.88 } else { 0.44 }))
@@ -123,7 +120,7 @@ impl DiffViewer {
             )
             .child(
                 div()
-                    .text_sm()
+                    .text_xs()
                     .font_family(cx.theme().mono_font_family.clone())
                     .text_color(cx.theme().foreground)
                     .child(path.clone()),
@@ -135,7 +132,7 @@ impl DiffViewer {
                     .left_0()
                     .top_0()
                     .bottom_0()
-                    .w(px(3.0))
+                    .w(px(2.0))
                     .bg(accent_strip),
             )
             .into_any_element()

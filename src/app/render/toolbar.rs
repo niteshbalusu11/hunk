@@ -170,20 +170,6 @@ impl DiffViewer {
                     .child(self.render_line_stats("overall", self.overall_line_stats, cx))
                     .child({
                         let view = view.clone();
-                        Button::new("toggle-diff-fit")
-                            .outline()
-                            .compact()
-                            .rounded(px(7.0))
-                            .bg(cx.theme().secondary.opacity(if is_dark { 0.44 } else { 0.64 }))
-                            .label(if self.diff_fit_to_width { "Pan" } else { "Fit" })
-                            .on_click(move |_, _, cx| {
-                                view.update(cx, |this, cx| {
-                                    this.toggle_diff_fit_to_width(cx);
-                                });
-                            })
-                    })
-                    .child({
-                        let view = view.clone();
                         Button::new("toggle-diff-whitespace")
                             .outline()
                             .compact()

@@ -4,7 +4,6 @@ struct DiffCellRenderSpec<'a> {
     cell: &'a DiffCell,
     peer_text: &'a str,
     peer_kind: DiffCellKind,
-    column_width: Option<f32>,
 }
 
 impl DiffViewer {
@@ -82,176 +81,122 @@ impl DiffViewer {
         let scrollbar_size = px(DIFF_SCROLLBAR_SIZE);
         let edge_inset = px(DIFF_BOTTOM_SAFE_INSET);
         let right_inset = px(DIFF_SCROLLBAR_RIGHT_INSET);
-        let horizontal_bar_right = right_inset + scrollbar_size;
-        let vertical_bar_bottom = if self.diff_fit_to_width {
-            edge_inset
-        } else {
-            edge_inset + scrollbar_size
-        };
-
-        if self.diff_fit_to_width {
-            return v_flex()
-                .size_full()
-                .child(sticky_hunk_banner)
-                .child(
-                    v_flex()
-                        .flex_1()
-                        .min_h_0()
-                        .child(
-                            h_flex()
-                                .w_full()
-                                .border_b_1()
-                                .border_color(cx.theme().border)
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .px_2()
-                                        .py_1()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(old_label),
-                                )
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .px_2()
-                                        .py_1()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(new_label),
-                                ),
-                        )
-                        .child(sticky_file_banner)
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_h_0()
-                                .relative()
-                                .child(
-                                    div()
-                                        .size_full()
-                                        .on_scroll_wheel(
-                                            cx.listener(Self::on_diff_list_scroll_wheel),
-                                        )
-                                        .child(list),
-                                )
-                                .child(
-                                    div()
-                                        .absolute()
-                                        .top_0()
-                                        .right(right_inset)
-                                        .bottom(vertical_bar_bottom)
-                                        .w(scrollbar_size)
-                                        .child(
-                                            Scrollbar::vertical(&diff_list_state)
-                                                .scrollbar_show(ScrollbarShow::Always),
-                                        ),
-                                ),
-                        ),
-                )
-                .into_any_element();
-        }
-
-        let horizontal_scroll_handle = self.diff_horizontal_scroll_handle.clone();
+        let vertical_bar_bottom = edge_inset;
+        let is_dark = cx.theme().mode.is_dark();
 
         v_flex()
             .size_full()
             .child(sticky_hunk_banner)
             .child(
-                v_flex().flex_1().min_h_0().child(
-                    div()
-                        .flex_1()
-                        .min_h_0()
-                        .relative()
-                        .child(
-                            div().size_full().overflow_y_hidden().child(
+                v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .border_b_1()
+                            .border_color(cx.theme().border.opacity(if is_dark { 0.90 } else { 0.78 }))
+                            .bg(cx.theme().title_bar.blend(
+                                cx.theme()
+                                    .muted
+                                    .opacity(if is_dark { 0.18 } else { 0.30 }),
+                            ))
+                            .child(
                                 h_flex()
-                                    .id("diff-horizontal-scroll-area")
-                                    .size_full()
-                                    .overflow_x_scroll()
-                                    .overflow_y_hidden()
-                                    .map(|mut this| {
-                                        this.style().restrict_scroll_to_axis = Some(true);
-                                        this
-                                    })
-                                    .track_scroll(&horizontal_scroll_handle)
-                                    .on_scroll_wheel(
-                                        cx.listener(Self::on_diff_horizontal_scroll_wheel),
+                                    .flex_1()
+                                    .min_w_0()
+                                    .items_center()
+                                    .gap_2()
+                                    .px_3()
+                                    .py_1()
+                                    .border_r_1()
+                                    .border_color(cx.theme().border.opacity(if is_dark {
+                                        0.82
+                                    } else {
+                                        0.72
+                                    }))
+                                    .child(
+                                        div()
+                                            .px_1p5()
+                                            .py_0p5()
+                                            .rounded_sm()
+                                            .text_xs()
+                                            .font_semibold()
+                                            .font_family(cx.theme().mono_font_family.clone())
+                                            .bg(cx.theme().muted.opacity(if is_dark {
+                                                0.44
+                                            } else {
+                                                0.58
+                                            }))
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child("OLD"),
                                     )
                                     .child(
-                                        v_flex()
-                                            .h_full()
-                                            .w(px(self.diff_pan_content_width))
-                                            .min_w(px(self.diff_pan_content_width))
-                                            .child(
-                                                h_flex()
-                                                    .w(px(self.diff_pan_content_width))
-                                                    .min_w(px(self.diff_pan_content_width))
-                                                    .border_b_1()
-                                                    .border_color(cx.theme().border)
-                                                    .child(
-                                                        div()
-                                                            .w(px(self.diff_left_column_width))
-                                                            .min_w(px(self.diff_left_column_width))
-                                                            .max_w(px(self.diff_left_column_width))
-                                                            .px_2()
-                                                            .py_1()
-                                                            .text_xs()
-                                                            .text_color(cx.theme().muted_foreground)
-                                                            .child(old_label),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .w(px(self.diff_right_column_width))
-                                                            .min_w(px(self.diff_right_column_width))
-                                                            .max_w(px(self.diff_right_column_width))
-                                                            .px_2()
-                                                            .py_1()
-                                                            .text_xs()
-                                                            .text_color(cx.theme().muted_foreground)
-                                                            .child(new_label),
-                                                    ),
-                                            )
-                                            .child(sticky_file_banner)
-                                            .child(
-                                                div()
-                                                    .flex_1()
-                                                    .min_h_0()
-                                                    .on_scroll_wheel(
-                                                        cx.listener(
-                                                            Self::on_diff_list_scroll_wheel,
-                                                        ),
-                                                    )
-                                                    .child(list),
-                                            ),
+                                        div()
+                                            .text_xs()
+                                            .font_family(cx.theme().mono_font_family.clone())
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(old_label),
+                                    ),
+                            )
+                            .child(
+                                h_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .items_center()
+                                    .gap_2()
+                                    .px_3()
+                                    .py_1()
+                                    .child(
+                                        div()
+                                            .px_1p5()
+                                            .py_0p5()
+                                            .rounded_sm()
+                                            .text_xs()
+                                            .font_semibold()
+                                            .font_family(cx.theme().mono_font_family.clone())
+                                            .bg(cx.theme().muted.opacity(if is_dark {
+                                                0.44
+                                            } else {
+                                                0.58
+                                            }))
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child("NEW"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .font_family(cx.theme().mono_font_family.clone())
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(new_label),
                                     ),
                             ),
-                        )
-                        .child(
-                            div()
-                                .absolute()
-                                .top_0()
-                                .right(right_inset)
-                                .bottom(vertical_bar_bottom)
-                                .w(scrollbar_size)
-                                .child(
-                                    Scrollbar::vertical(&diff_list_state)
-                                        .scrollbar_show(ScrollbarShow::Always),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .absolute()
-                                .left_0()
-                                .right(horizontal_bar_right)
-                                .bottom(edge_inset)
-                                .h(scrollbar_size)
-                                .child(
-                                    Scrollbar::horizontal(&horizontal_scroll_handle)
-                                        .scrollbar_show(ScrollbarShow::Always),
-                                ),
-                        ),
-                ),
+                    )
+                    .child(sticky_file_banner)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .relative()
+                            .child(
+                                div()
+                                    .size_full()
+                                    .on_scroll_wheel(cx.listener(Self::on_diff_list_scroll_wheel))
+                                    .child(list),
+                            )
+                            .child(
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .right(right_inset)
+                                    .bottom(vertical_bar_bottom)
+                                    .w(scrollbar_size)
+                                    .child(
+                                        Scrollbar::vertical(&diff_list_state)
+                                            .scrollbar_show(ScrollbarShow::Always),
+                                    ),
+                            ),
+                    ),
             )
             .into_any_element()
     }
@@ -344,29 +289,30 @@ impl DiffViewer {
             .w_full()
             .items_center()
             .gap_2()
-            .px_2()
-            .py_1()
+            .px_3()
+            .py_0p5()
             .border_b_1()
-            .border_color(cx.theme().border)
+            .border_color(cx.theme().border.opacity(if is_dark { 0.88 } else { 0.72 }))
             .bg(cx
                 .theme()
-                .background
+                .title_bar
                 .blend(
                     cx.theme()
                         .primary
-                        .opacity(if is_dark { 0.24 } else { 0.10 }),
+                        .opacity(if is_dark { 0.20 } else { 0.09 }),
                 ))
             .child(
                 div()
-                    .px_2()
+                    .px_1p5()
                     .py_0p5()
                     .text_xs()
                     .font_semibold()
                     .font_family(cx.theme().mono_font_family.clone())
+                    .rounded_sm()
                     .bg(cx
                         .theme()
                         .primary
-                        .opacity(if is_dark { 0.42 } else { 0.24 }))
+                        .opacity(if is_dark { 0.38 } else { 0.22 }))
                     .text_color(cx.theme().primary_foreground)
                     .child("HUNK"),
             )
@@ -382,7 +328,7 @@ impl DiffViewer {
                     .text_xs()
                     .font_family(cx.theme().mono_font_family.clone())
                     .text_color(if is_dark {
-                        cx.theme().primary.lighten(0.48)
+                        cx.theme().primary.lighten(0.42)
                     } else {
                         cx.theme().primary.darken(0.12)
                     })
@@ -505,9 +451,9 @@ impl DiffViewer {
             let divider_bg = if is_selected {
                 cx.theme()
                     .primary
-                    .opacity(if is_dark { 0.40 } else { 0.20 })
+                    .opacity(if is_dark { 0.34 } else { 0.18 })
             } else {
-                cx.theme().muted.opacity(if is_dark { 0.38 } else { 0.52 })
+                cx.theme().muted.opacity(if is_dark { 0.26 } else { 0.40 })
             };
             return div()
                 .id(("diff-hunk-divider-row", stable_row_id))
@@ -515,11 +461,7 @@ impl DiffViewer {
                 .border_b_1()
                 .border_color(cx.theme().border.opacity(if is_dark { 0.92 } else { 0.70 }))
                 .bg(divider_bg)
-                .when(self.diff_fit_to_width, |this| this.w_full())
-                .when(!self.diff_fit_to_width, |this| {
-                    this.w(px(self.diff_pan_content_width))
-                        .min_w(px(self.diff_pan_content_width))
-                })
+                .w_full()
                 .into_any_element();
         }
 
@@ -615,29 +557,24 @@ impl DiffViewer {
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_diff_row_mouse_up))
             .on_mouse_up(MouseButton::Middle, cx.listener(Self::on_diff_row_mouse_up))
             .on_mouse_up_out(MouseButton::Middle, cx.listener(Self::on_diff_row_mouse_up))
-            .px_2()
-            .py_1()
+            .px_3()
+            .py_0p5()
             .border_b_1()
-            .border_color(cx.theme().border)
+            .border_color(cx.theme().border.opacity(if is_dark { 0.82 } else { 0.70 }))
             .bg(if is_selected {
                 background.blend(
                     cx.theme()
                         .primary
-                        .opacity(if is_dark { 0.32 } else { 0.18 }),
+                        .opacity(if is_dark { 0.24 } else { 0.14 }),
                 )
             } else {
                 background
             })
-            .text_sm()
+            .text_xs()
             .text_color(foreground)
             .font_family(cx.theme().mono_font_family.clone())
-            .when(self.diff_fit_to_width, |this| this.w_full())
-            .when(!self.diff_fit_to_width, |this| {
-                this.w(px(self.diff_pan_content_width))
-                    .min_w(px(self.diff_pan_content_width))
-            })
-            .when(self.diff_fit_to_width, |this| this.whitespace_normal())
-            .when(!self.diff_fit_to_width, |this| this.whitespace_nowrap())
+            .w_full()
+            .whitespace_normal()
             .child(row.text.clone())
             .child(
                 div()
@@ -659,7 +596,7 @@ impl DiffViewer {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let stable_row_id = self.diff_row_stable_id(ix);
-        let row = h_flex()
+        h_flex()
             .id(("diff-code-row", stable_row_id))
             .overflow_x_hidden()
             .on_mouse_down(MouseButton::Left, {
@@ -685,71 +622,37 @@ impl DiffViewer {
             .on_mouse_up(MouseButton::Middle, cx.listener(Self::on_diff_row_mouse_up))
             .on_mouse_up_out(MouseButton::Middle, cx.listener(Self::on_diff_row_mouse_up))
             .border_b_1()
-            .border_color(cx.theme().border)
-            .when(self.diff_fit_to_width, |this| this.w_full())
-            .when(!self.diff_fit_to_width, |this| {
-                this.w(px(self.diff_pan_content_width))
-                    .min_w(px(self.diff_pan_content_width))
-            });
-
-        if self.diff_fit_to_width {
-            return row
-                .child(self.render_diff_cell(
-                    stable_row_id,
-                    is_selected,
-                    DiffCellRenderSpec {
-                        row_ix: ix,
-                        side: "left",
-                        cell: &row_data.left,
-                        peer_text: &row_data.right.text,
-                        peer_kind: row_data.right.kind,
-                        column_width: None,
-                    },
-                    cx,
-                ))
-                .child(self.render_diff_cell(
-                    stable_row_id,
-                    is_selected,
-                    DiffCellRenderSpec {
-                        row_ix: ix,
-                        side: "right",
-                        cell: &row_data.right,
-                        peer_text: &row_data.left.text,
-                        peer_kind: row_data.left.kind,
-                        column_width: None,
-                    },
-                    cx,
-                ))
-                .into_any_element();
-        }
-
-        row.child(self.render_diff_cell(
-            stable_row_id,
-            is_selected,
-            DiffCellRenderSpec {
-                row_ix: ix,
-                side: "left",
-                cell: &row_data.left,
-                peer_text: &row_data.right.text,
-                peer_kind: row_data.right.kind,
-                column_width: Some(self.diff_left_column_width),
-            },
-            cx,
-        ))
-        .child(self.render_diff_cell(
-            stable_row_id,
-            is_selected,
-            DiffCellRenderSpec {
-                row_ix: ix,
-                side: "right",
-                cell: &row_data.right,
-                peer_text: &row_data.left.text,
-                peer_kind: row_data.left.kind,
-                column_width: Some(self.diff_right_column_width),
-            },
-            cx,
-        ))
-        .into_any_element()
+            .border_color(cx.theme().border.opacity(if cx.theme().mode.is_dark() {
+                0.78
+            } else {
+                0.64
+            }))
+            .w_full()
+            .child(self.render_diff_cell(
+                stable_row_id,
+                is_selected,
+                DiffCellRenderSpec {
+                    row_ix: ix,
+                    side: "left",
+                    cell: &row_data.left,
+                    peer_text: &row_data.right.text,
+                    peer_kind: row_data.right.kind,
+                },
+                cx,
+            ))
+            .child(self.render_diff_cell(
+                stable_row_id,
+                is_selected,
+                DiffCellRenderSpec {
+                    row_ix: ix,
+                    side: "right",
+                    cell: &row_data.right,
+                    peer_text: &row_data.left.text,
+                    peer_kind: row_data.left.kind,
+                },
+                cx,
+            ))
+            .into_any_element()
     }
 
     fn render_diff_cell(
@@ -763,7 +666,6 @@ impl DiffViewer {
         let cell = spec.cell;
         let peer_text = spec.peer_text;
         let peer_kind = spec.peer_kind;
-        let column_width = spec.column_width;
         let file_path = self
             .diff_row_metadata
             .get(spec.row_ix)
@@ -775,8 +677,8 @@ impl DiffViewer {
         };
 
         let is_dark = cx.theme().mode.is_dark();
-        let add_alpha = if is_dark { 0.26 } else { 0.12 };
-        let remove_alpha = if is_dark { 0.26 } else { 0.12 };
+        let add_alpha = if is_dark { 0.24 } else { 0.11 };
+        let remove_alpha = if is_dark { 0.24 } else { 0.11 };
         let dark_add_tint: gpui::Hsla = gpui::rgb(0x2e4736).into();
         let dark_remove_tint: gpui::Hsla = gpui::rgb(0x4a3038).into();
         let dark_add_accent: gpui::Hsla = gpui::rgb(0x8fcea0).into();
@@ -839,7 +741,7 @@ impl DiffViewer {
                         cx.theme().muted_foreground.darken(0.12)
                     },
                     cx.theme().foreground,
-                    " ",
+                    "·",
                 ),
                 (DiffCellKind::None, _) => (
                     cx.theme().background,
@@ -861,12 +763,17 @@ impl DiffViewer {
                     "",
                 ),
             };
+        if matches!(cell.kind, DiffCellKind::Context | DiffCellKind::None)
+            && row_stable_id.is_multiple_of(2)
+        {
+            background = background.blend(cx.theme().muted.opacity(if is_dark { 0.12 } else { 0.20 }));
+        }
         if row_is_selected {
             background =
                 background.blend(
                     cx.theme()
                         .primary
-                        .opacity(if is_dark { 0.25 } else { 0.15 }),
+                        .opacity(if is_dark { 0.22 } else { 0.13 }),
                 );
         }
 
@@ -900,19 +807,20 @@ impl DiffViewer {
         let gutter_background = cx
             .theme()
             .background
-            .blend(cx.theme().muted.opacity(if is_dark { 0.34 } else { 0.52 }));
-        let gutter_width = line_number_width + DIFF_MARKER_GUTTER_WIDTH + 12.0;
+            .blend(cx.theme().muted.opacity(if is_dark { 0.28 } else { 0.46 }));
+        let gutter_width = line_number_width + DIFF_MARKER_GUTTER_WIDTH + 10.0;
 
-        let base = h_flex()
+        h_flex()
             .id(cell_id)
             .overflow_x_hidden()
-            .px_2()
-            .py_1()
+            .px_1p5()
+            .py_0p5()
             .gap_2()
             .items_start()
             .bg(background)
             .when(should_draw_right_divider, |this| {
-                this.border_r_1().border_color(cx.theme().border)
+                this.border_r_1()
+                    .border_color(cx.theme().border.opacity(if is_dark { 0.86 } else { 0.72 }))
             })
             .child(
                 h_flex()
@@ -925,7 +833,7 @@ impl DiffViewer {
                     .rounded_sm()
                     .bg(gutter_background)
                     .border_1()
-                    .border_color(cx.theme().border.opacity(if is_dark { 0.74 } else { 0.56 }))
+                    .border_color(cx.theme().border.opacity(if is_dark { 0.68 } else { 0.54 }))
                     .child(
                         div()
                             .w(px(line_number_width))
@@ -951,15 +859,11 @@ impl DiffViewer {
                     .min_w_0()
                     .items_start()
                     .gap_0()
-                    .text_sm()
+                    .text_xs()
                     .font_family(cx.theme().mono_font_family.clone())
                     .text_color(text_color)
-                    .when(self.diff_fit_to_width, |this| {
-                        this.flex_wrap().whitespace_normal()
-                    })
-                    .when(!self.diff_fit_to_width, |this| {
-                        this.flex_nowrap().whitespace_nowrap()
-                    })
+                    .flex_wrap()
+                    .whitespace_normal()
                     .children(styled_segments.iter().map(|segment| {
                         let segment_text = if self.diff_show_whitespace {
                             segment.whitespace_text.clone()
@@ -973,7 +877,7 @@ impl DiffViewer {
                             .whitespace_nowrap()
                             .text_color(segment_color)
                             .when(segment.changed, |this| {
-                                this.bg(marker_color.opacity(if is_dark { 0.22 } else { 0.12 }))
+                                this.bg(marker_color.opacity(if is_dark { 0.20 } else { 0.11 }))
                             })
                             .child(segment_text)
                     }))
@@ -993,17 +897,10 @@ impl DiffViewer {
                             )
                         },
                     ),
-            );
-
-        if let Some(width) = column_width {
-            return base
-                .w(px(width))
-                .min_w(px(width))
-                .max_w(px(width))
-                .into_any_element();
-        }
-
-        base.flex_1().min_w_0().into_any_element()
+            )
+            .flex_1()
+            .min_w_0()
+            .into_any_element()
     }
 
     fn syntax_color_for_segment(

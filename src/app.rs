@@ -9,9 +9,9 @@ use gpui::{
     Context, Entity, FocusHandle, Hsla, InteractiveElement as _, IntoElement, IsZero as _,
     KeyBinding, ListAlignment, ListOffset, ListSizingBehavior, ListState, Menu, MenuItem,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, OsAction, ParentElement as _,
-    PathPromptOptions, Render, ScrollHandle, ScrollWheelEvent, SharedString,
-    StatefulInteractiveElement as _, Styled as _, SystemMenuType, Task, Timer, TitlebarOptions,
-    Window, WindowOptions, actions, div, list, point, prelude::FluentBuilder as _, px,
+    PathPromptOptions, Render, ScrollWheelEvent, SharedString, StatefulInteractiveElement as _,
+    Styled as _, SystemMenuType, Task, Timer, TitlebarOptions, Window, WindowOptions, actions, div,
+    list, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     ActiveTheme as _, Colorize as _, Root, StyledExt as _, Theme, ThemeMode, h_flex,
@@ -26,7 +26,7 @@ use gpui_component::{
 use gpui_component_assets::Assets;
 use tracing::error;
 
-use hunk::config::{AppConfig, ConfigStore, DiffViewMode, ThemePreference};
+use hunk::config::{AppConfig, ConfigStore, ThemePreference};
 use hunk::diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
 use hunk::jj::{ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFingerprint};
 use hunk::state::{AppState, AppStateStore};
@@ -39,14 +39,10 @@ use data::{
 const AUTO_REFRESH_INTERVAL: Duration = Duration::from_millis(900);
 const FPS_SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
 const AUTO_REFRESH_SCROLL_DEBOUNCE: Duration = Duration::from_millis(500);
-const DIFF_MIN_CONTENT_WIDTH: f32 = 960.0;
-const DIFF_MIN_COLUMN_WIDTH: f32 = DIFF_MIN_CONTENT_WIDTH / 2.0;
 const DIFF_MONO_CHAR_WIDTH: f32 = 8.0;
 const DIFF_LINE_NUMBER_MIN_DIGITS: u32 = 3;
 const DIFF_LINE_NUMBER_EXTRA_PADDING: f32 = 6.0;
 const DIFF_MARKER_GUTTER_WIDTH: f32 = 10.0;
-const DIFF_CELL_SIDE_PADDING_WIDTH: f32 = 20.0;
-const DIFF_PAN_COLUMN_PADDING: f32 = 28.0;
 const APP_BOTTOM_SAFE_INSET: f32 = 0.0;
 const DIFF_BOTTOM_SAFE_INSET: f32 = APP_BOTTOM_SAFE_INSET;
 const DIFF_SCROLLBAR_RIGHT_INSET: f32 = 0.0;
@@ -143,7 +139,7 @@ fn apply_soft_light_theme(cx: &mut App) {
     light_theme.font_family = Some(preferred_ui_font_family().into());
     light_theme.font_size = Some(14.0);
     light_theme.mono_font_family = Some(preferred_mono_font_family().into());
-    light_theme.mono_font_size = Some(13.0);
+    light_theme.mono_font_size = Some(12.0);
     light_theme.radius = Some(8);
     light_theme.radius_lg = Some(10);
     light_theme.shadow = Some(false);
@@ -182,7 +178,7 @@ fn apply_soft_dark_theme(cx: &mut App) {
     dark_theme.font_family = Some(preferred_ui_font_family().into());
     dark_theme.font_size = Some(14.0);
     dark_theme.mono_font_family = Some(preferred_mono_font_family().into());
-    dark_theme.mono_font_size = Some(13.0);
+    dark_theme.mono_font_size = Some(12.0);
     dark_theme.radius = Some(8);
     dark_theme.radius_lg = Some(10);
     dark_theme.shadow = Some(false);
@@ -339,13 +335,8 @@ struct DiffViewer {
     file_row_ranges: Vec<FileRowRange>,
     file_line_stats: BTreeMap<String, LineStats>,
     diff_list_state: ListState,
-    diff_horizontal_scroll_handle: ScrollHandle,
-    diff_fit_to_width: bool,
     diff_show_whitespace: bool,
     diff_show_eol_markers: bool,
-    diff_left_column_width: f32,
-    diff_right_column_width: f32,
-    diff_pan_content_width: f32,
     diff_left_line_number_width: f32,
     diff_right_line_number_width: f32,
     overall_line_stats: LineStats,
@@ -364,8 +355,6 @@ struct DiffViewer {
     selection_anchor_row: Option<usize>,
     selection_head_row: Option<usize>,
     drag_selecting_rows: bool,
-    horizontal_pan_dragging: bool,
-    horizontal_pan_last_x: Option<gpui::Pixels>,
     scroll_selected_after_reload: bool,
     last_visible_row_start: Option<usize>,
     last_diff_scroll_offset: Option<gpui::Point<gpui::Pixels>>,
