@@ -238,42 +238,61 @@ impl DiffViewer {
     }
 
     pub(super) fn save_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(settings) = self.settings_draft.as_mut() else {
-            return;
+        let (theme, show_whitespace, show_eol_markers, keyboard_shortcuts) = {
+            let Some(settings) = self.settings_draft.as_mut() else {
+                return;
+            };
+
+            let keyboard_shortcuts = KeyboardShortcuts {
+                select_next_line: read_shortcut_input(&settings.shortcuts.select_next_line, cx),
+                select_previous_line: read_shortcut_input(
+                    &settings.shortcuts.select_previous_line,
+                    cx,
+                ),
+                extend_selection_next_line: read_shortcut_input(
+                    &settings.shortcuts.extend_selection_next_line,
+                    cx,
+                ),
+                extend_selection_previous_line: read_shortcut_input(
+                    &settings.shortcuts.extend_selection_previous_line,
+                    cx,
+                ),
+                copy_selection: read_shortcut_input(&settings.shortcuts.copy_selection, cx),
+                select_all_diff_rows: read_shortcut_input(
+                    &settings.shortcuts.select_all_diff_rows,
+                    cx,
+                ),
+                next_hunk: read_shortcut_input(&settings.shortcuts.next_hunk, cx),
+                previous_hunk: read_shortcut_input(&settings.shortcuts.previous_hunk, cx),
+                next_file: read_shortcut_input(&settings.shortcuts.next_file, cx),
+                previous_file: read_shortcut_input(&settings.shortcuts.previous_file, cx),
+                open_project: read_shortcut_input(&settings.shortcuts.open_project, cx),
+                save_current_file: read_shortcut_input(
+                    &settings.shortcuts.save_current_file,
+                    cx,
+                ),
+                open_settings: read_shortcut_input(&settings.shortcuts.open_settings, cx),
+                quit_app: read_shortcut_input(&settings.shortcuts.quit_app, cx),
+            };
+
+            if let Err(err) = validate_keyboard_shortcuts(&keyboard_shortcuts) {
+                settings.error_message = Some(err);
+                cx.notify();
+                return;
+            }
+
+            settings.error_message = None;
+            (
+                settings.theme,
+                settings.show_whitespace,
+                settings.show_eol_markers,
+                keyboard_shortcuts,
+            )
         };
 
-        let keyboard_shortcuts = KeyboardShortcuts {
-            select_next_line: read_shortcut_input(&settings.shortcuts.select_next_line, cx),
-            select_previous_line: read_shortcut_input(&settings.shortcuts.select_previous_line, cx),
-            extend_selection_next_line: read_shortcut_input(
-                &settings.shortcuts.extend_selection_next_line,
-                cx,
-            ),
-            extend_selection_previous_line: read_shortcut_input(
-                &settings.shortcuts.extend_selection_previous_line,
-                cx,
-            ),
-            copy_selection: read_shortcut_input(&settings.shortcuts.copy_selection, cx),
-            select_all_diff_rows: read_shortcut_input(&settings.shortcuts.select_all_diff_rows, cx),
-            next_hunk: read_shortcut_input(&settings.shortcuts.next_hunk, cx),
-            previous_hunk: read_shortcut_input(&settings.shortcuts.previous_hunk, cx),
-            next_file: read_shortcut_input(&settings.shortcuts.next_file, cx),
-            previous_file: read_shortcut_input(&settings.shortcuts.previous_file, cx),
-            open_project: read_shortcut_input(&settings.shortcuts.open_project, cx),
-            save_current_file: read_shortcut_input(&settings.shortcuts.save_current_file, cx),
-            open_settings: read_shortcut_input(&settings.shortcuts.open_settings, cx),
-            quit_app: read_shortcut_input(&settings.shortcuts.quit_app, cx),
-        };
-
-        if let Err(err) = validate_keyboard_shortcuts(&keyboard_shortcuts) {
-            settings.error_message = Some(err);
-            cx.notify();
-            return;
-        }
-
-        self.config.theme = settings.theme;
-        self.config.show_whitespace = settings.show_whitespace;
-        self.config.show_eol_markers = settings.show_eol_markers;
+        self.config.theme = theme;
+        self.config.show_whitespace = show_whitespace;
+        self.config.show_eol_markers = show_eol_markers;
         self.config.keyboard_shortcuts = keyboard_shortcuts;
         self.diff_show_whitespace = self.config.show_whitespace;
         self.diff_show_eol_markers = self.config.show_eol_markers;
@@ -290,7 +309,6 @@ impl DiffViewer {
             saved_path
         ));
 
-        self.settings_draft = None;
         cx.notify();
     }
 }

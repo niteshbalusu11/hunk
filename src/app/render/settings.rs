@@ -7,6 +7,12 @@ impl DiffViewer {
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
         let backdrop_bg = cx.theme().background.opacity(if is_dark { 0.24 } else { 0.12 });
+        let selected_bg = hsla_hex("#111111").unwrap_or(cx.theme().foreground);
+        let selected_border = hsla_hex("#f5f7fb").unwrap_or(cx.theme().background);
+        let selected_text = hsla_hex("#f5f7fb").unwrap_or(cx.theme().background);
+        let unselected_bg = hsla_hex("#f5f7fb").unwrap_or(cx.theme().background);
+        let unselected_border = hsla_hex("#111111").unwrap_or(cx.theme().foreground);
+        let unselected_text = hsla_hex("#111111").unwrap_or(cx.theme().foreground);
         let panel_bg = cx.theme().popover.blend(
             cx.theme()
                 .background
@@ -41,11 +47,11 @@ impl DiffViewer {
             .child(
                 div()
                     .id("settings-popup-anchor")
-                    .absolute()
-                    .top(px(88.0))
-                    .right(px(24.0))
-                    .w(px(860.0))
-                    .h(px(620.0))
+                    .size_full()
+                    .p_4()
+                    .flex()
+                    .items_center()
+                    .justify_center()
                     .on_mouse_down(MouseButton::Left, |_, _, cx| {
                         cx.stop_propagation();
                     })
@@ -63,6 +69,8 @@ impl DiffViewer {
                             .id("settings-popup")
                             .w_full()
                             .h_full()
+                            .max_w(px(860.0))
+                            .max_h(px(620.0))
                             .rounded(px(12.0))
                             .border_1()
                             .border_color(cx.theme().border.opacity(if is_dark { 0.92 } else { 0.72 }))
@@ -151,23 +159,20 @@ impl DiffViewer {
                                                         .rounded(px(8.0))
                                                         .label(label)
                                                         .bg(if is_selected {
-                                                            cx.theme()
-                                                                .accent
-                                                                .opacity(if is_dark { 0.28 } else { 0.16 })
+                                                            selected_bg
                                                         } else {
-                                                            cx.theme()
-                                                                .secondary
-                                                                .opacity(if is_dark { 0.36 } else { 0.48 })
+                                                            unselected_bg
                                                         })
-                                                        .border_color(
-                                                            cx.theme().border.opacity(if is_selected {
-                                                                if is_dark { 0.92 } else { 0.78 }
-                                                            } else if is_dark {
-                                                                0.82
-                                                            } else {
-                                                                0.62
-                                                            }),
-                                                        )
+                                                        .border_color(if is_selected {
+                                                            selected_border
+                                                        } else {
+                                                            unselected_border
+                                                        })
+                                                        .text_color(if is_selected {
+                                                            selected_text
+                                                        } else {
+                                                            unselected_text
+                                                        })
                                                         .on_click(move |_, _, cx| {
                                                             view.update(cx, |this, cx| {
                                                                 this.select_settings_category(
@@ -272,6 +277,14 @@ impl DiffViewer {
                 .muted
                 .opacity(if is_dark { 0.24 } else { 0.12 }),
         );
+        let dropdown_bg = cx.theme().secondary.opacity(if is_dark { 0.52 } else { 0.70 });
+        let theme_label = match settings.theme {
+            ThemePreference::System => "System",
+            ThemePreference::Light => "Light",
+            ThemePreference::Dark => "Dark",
+        };
+        let whitespace_label = if settings.show_whitespace { "On" } else { "Off" };
+        let eol_label = if settings.show_eol_markers { "On" } else { "Off" };
 
         v_flex()
             .w_full()
@@ -304,9 +317,11 @@ impl DiffViewer {
                     .border_color(cx.theme().border.opacity(if is_dark { 0.90 } else { 0.72 }))
                     .bg(card_bg)
                     .child(
-                        v_flex()
+                        h_flex()
                             .w_full()
-                            .gap_1()
+                            .items_center()
+                            .justify_between()
+                            .gap_3()
                             .child(
                                 div()
                                     .text_sm()
@@ -314,73 +329,71 @@ impl DiffViewer {
                                     .text_color(cx.theme().foreground)
                                     .child("Theme"),
                             )
-                            .child(
-                                h_flex()
-                                    .w_full()
-                                    .gap_2()
-                                    .child({
-                                        let view = view.clone();
-                                        Button::new("settings-theme-system")
-                                            .outline()
-                                            .rounded(px(8.0))
-                                            .label("System")
-                                            .bg(if settings.theme == ThemePreference::System {
-                                                cx.theme().accent.opacity(if is_dark { 0.30 } else { 0.18 })
-                                            } else {
-                                                cx.theme()
-                                                    .secondary
-                                                    .opacity(if is_dark { 0.36 } else { 0.52 })
-                                            })
-                                            .on_click(move |_, _, cx| {
-                                                view.update(cx, |this, cx| {
-                                                    this.set_settings_theme(ThemePreference::System, cx);
-                                                });
-                                            })
+                            .child({
+                                let view = view.clone();
+                                let selected_theme = settings.theme;
+                                Button::new("settings-theme-dropdown")
+                                    .outline()
+                                    .compact()
+                                    .rounded(px(8.0))
+                                    .bg(dropdown_bg)
+                                    .dropdown_caret(true)
+                                    .label(theme_label)
+                                    .dropdown_menu(move |menu, _, _| {
+                                        menu.item(
+                                            PopupMenuItem::new("System")
+                                                .checked(selected_theme == ThemePreference::System)
+                                                .on_click({
+                                                    let view = view.clone();
+                                                    move |_, _, cx| {
+                                                        view.update(cx, |this, cx| {
+                                                            this.set_settings_theme(
+                                                                ThemePreference::System,
+                                                                cx,
+                                                            );
+                                                        });
+                                                    }
+                                                }),
+                                        )
+                                        .item(
+                                            PopupMenuItem::new("Light")
+                                                .checked(selected_theme == ThemePreference::Light)
+                                                .on_click({
+                                                    let view = view.clone();
+                                                    move |_, _, cx| {
+                                                        view.update(cx, |this, cx| {
+                                                            this.set_settings_theme(
+                                                                ThemePreference::Light,
+                                                                cx,
+                                                            );
+                                                        });
+                                                    }
+                                                }),
+                                        )
+                                        .item(
+                                            PopupMenuItem::new("Dark")
+                                                .checked(selected_theme == ThemePreference::Dark)
+                                                .on_click({
+                                                    let view = view.clone();
+                                                    move |_, _, cx| {
+                                                        view.update(cx, |this, cx| {
+                                                            this.set_settings_theme(
+                                                                ThemePreference::Dark,
+                                                                cx,
+                                                            );
+                                                        });
+                                                    }
+                                                }),
+                                        )
                                     })
-                                    .child({
-                                        let view = view.clone();
-                                        Button::new("settings-theme-light")
-                                            .outline()
-                                            .rounded(px(8.0))
-                                            .label("Light")
-                                            .bg(if settings.theme == ThemePreference::Light {
-                                                cx.theme().accent.opacity(if is_dark { 0.30 } else { 0.18 })
-                                            } else {
-                                                cx.theme()
-                                                    .secondary
-                                                    .opacity(if is_dark { 0.36 } else { 0.52 })
-                                            })
-                                            .on_click(move |_, _, cx| {
-                                                view.update(cx, |this, cx| {
-                                                    this.set_settings_theme(ThemePreference::Light, cx);
-                                                });
-                                            })
-                                    })
-                                    .child({
-                                        let view = view.clone();
-                                        Button::new("settings-theme-dark")
-                                            .outline()
-                                            .rounded(px(8.0))
-                                            .label("Dark")
-                                            .bg(if settings.theme == ThemePreference::Dark {
-                                                cx.theme().accent.opacity(if is_dark { 0.30 } else { 0.18 })
-                                            } else {
-                                                cx.theme()
-                                                    .secondary
-                                                    .opacity(if is_dark { 0.36 } else { 0.52 })
-                                            })
-                                            .on_click(move |_, _, cx| {
-                                                view.update(cx, |this, cx| {
-                                                    this.set_settings_theme(ThemePreference::Dark, cx);
-                                                });
-                                            })
-                                    }),
-                            ),
+                            }),
                     )
                     .child(
-                        v_flex()
+                        h_flex()
                             .w_full()
-                            .gap_1()
+                            .items_center()
+                            .justify_between()
+                            .gap_3()
                             .child(
                                 div()
                                     .text_sm()
@@ -388,54 +401,50 @@ impl DiffViewer {
                                     .text_color(cx.theme().foreground)
                                     .child("Whitespace Markers"),
                             )
-                            .child(
-                                h_flex()
-                                    .w_full()
-                                    .gap_2()
-                                    .child({
-                                        let view = view.clone();
-                                        Button::new("settings-whitespace-on")
-                                            .outline()
-                                            .rounded(px(8.0))
-                                            .label("On")
-                                            .bg(if settings.show_whitespace {
-                                                cx.theme().accent.opacity(if is_dark { 0.30 } else { 0.18 })
-                                            } else {
-                                                cx.theme()
-                                                    .secondary
-                                                    .opacity(if is_dark { 0.36 } else { 0.52 })
-                                            })
-                                            .on_click(move |_, _, cx| {
-                                                view.update(cx, |this, cx| {
-                                                    this.set_settings_show_whitespace(true, cx);
-                                                });
-                                            })
+                            .child({
+                                let view = view.clone();
+                                let show_whitespace = settings.show_whitespace;
+                                Button::new("settings-whitespace-dropdown")
+                                    .outline()
+                                    .compact()
+                                    .rounded(px(8.0))
+                                    .bg(dropdown_bg)
+                                    .dropdown_caret(true)
+                                    .label(whitespace_label)
+                                    .dropdown_menu(move |menu, _, _| {
+                                        menu.item(
+                                            PopupMenuItem::new("On")
+                                                .checked(show_whitespace)
+                                                .on_click({
+                                                    let view = view.clone();
+                                                    move |_, _, cx| {
+                                                        view.update(cx, |this, cx| {
+                                                            this.set_settings_show_whitespace(true, cx);
+                                                        });
+                                                    }
+                                                }),
+                                        )
+                                        .item(
+                                            PopupMenuItem::new("Off")
+                                                .checked(!show_whitespace)
+                                                .on_click({
+                                                    let view = view.clone();
+                                                    move |_, _, cx| {
+                                                        view.update(cx, |this, cx| {
+                                                            this.set_settings_show_whitespace(false, cx);
+                                                        });
+                                                    }
+                                                }),
+                                        )
                                     })
-                                    .child({
-                                        let view = view.clone();
-                                        Button::new("settings-whitespace-off")
-                                            .outline()
-                                            .rounded(px(8.0))
-                                            .label("Off")
-                                            .bg(if !settings.show_whitespace {
-                                                cx.theme().accent.opacity(if is_dark { 0.30 } else { 0.18 })
-                                            } else {
-                                                cx.theme()
-                                                    .secondary
-                                                    .opacity(if is_dark { 0.36 } else { 0.52 })
-                                            })
-                                            .on_click(move |_, _, cx| {
-                                                view.update(cx, |this, cx| {
-                                                    this.set_settings_show_whitespace(false, cx);
-                                                });
-                                            })
-                                    }),
-                            ),
+                            }),
                     )
                     .child(
-                        v_flex()
+                        h_flex()
                             .w_full()
-                            .gap_1()
+                            .items_center()
+                            .justify_between()
+                            .gap_3()
                             .child(
                                 div()
                                     .text_sm()
@@ -443,49 +452,43 @@ impl DiffViewer {
                                     .text_color(cx.theme().foreground)
                                     .child("End-Of-Line Markers"),
                             )
-                            .child(
-                                h_flex()
-                                    .w_full()
-                                    .gap_2()
-                                    .child({
-                                        let view = view.clone();
-                                        Button::new("settings-eol-on")
-                                            .outline()
-                                            .rounded(px(8.0))
-                                            .label("On")
-                                            .bg(if settings.show_eol_markers {
-                                                cx.theme().accent.opacity(if is_dark { 0.30 } else { 0.18 })
-                                            } else {
-                                                cx.theme()
-                                                    .secondary
-                                                    .opacity(if is_dark { 0.36 } else { 0.52 })
-                                            })
-                                            .on_click(move |_, _, cx| {
-                                                view.update(cx, |this, cx| {
-                                                    this.set_settings_show_eol_markers(true, cx);
-                                                });
-                                            })
+                            .child({
+                                let view = view.clone();
+                                let show_eol_markers = settings.show_eol_markers;
+                                Button::new("settings-eol-dropdown")
+                                    .outline()
+                                    .compact()
+                                    .rounded(px(8.0))
+                                    .bg(dropdown_bg)
+                                    .dropdown_caret(true)
+                                    .label(eol_label)
+                                    .dropdown_menu(move |menu, _, _| {
+                                        menu.item(
+                                            PopupMenuItem::new("On")
+                                                .checked(show_eol_markers)
+                                                .on_click({
+                                                    let view = view.clone();
+                                                    move |_, _, cx| {
+                                                        view.update(cx, |this, cx| {
+                                                            this.set_settings_show_eol_markers(true, cx);
+                                                        });
+                                                    }
+                                                }),
+                                        )
+                                        .item(
+                                            PopupMenuItem::new("Off")
+                                                .checked(!show_eol_markers)
+                                                .on_click({
+                                                    let view = view.clone();
+                                                    move |_, _, cx| {
+                                                        view.update(cx, |this, cx| {
+                                                            this.set_settings_show_eol_markers(false, cx);
+                                                        });
+                                                    }
+                                                }),
+                                        )
                                     })
-                                    .child({
-                                        let view = view.clone();
-                                        Button::new("settings-eol-off")
-                                            .outline()
-                                            .rounded(px(8.0))
-                                            .label("Off")
-                                            .bg(if !settings.show_eol_markers {
-                                                cx.theme().accent.opacity(if is_dark { 0.30 } else { 0.18 })
-                                            } else {
-                                                cx.theme()
-                                                    .secondary
-                                                    .opacity(if is_dark { 0.36 } else { 0.52 })
-                                            })
-                                            .on_click(move |_, _, cx| {
-                                                view.update(cx, |this, cx| {
-                                                    this.set_settings_show_eol_markers(false, cx);
-                                                });
-                                            })
-                                    }),
-                            ),
+                            }),
                     ),
             )
             .into_any_element()
