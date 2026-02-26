@@ -22,13 +22,7 @@ Nobody writes code anymore, people just review code. So we need the best diff vi
 - Xcode + command line tools
 - Metal toolchain for GPUI shader compilation
 
-If you see a build error about missing `metal`, run:
-
-```bash
-xcodebuild -downloadComponent MetalToolchain
-```
-
-## Run
+### Run Locally
 
 ```bash
 cargo run
@@ -42,8 +36,7 @@ For a proper Dock app identity (name/icon) and normal app launching behavior, bu
 ```bash
 cargo install cargo-bundle
 cargo bundle --release
-TARGET_DIR="${CARGO_TARGET_DIR:-target}"
-open "$TARGET_DIR/release/bundle/osx/Hunk.app"
+open target/release/bundle/osx/Hunk.app
 ```
 
 ## Large Diff Stress Fixture
