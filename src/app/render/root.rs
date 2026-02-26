@@ -64,7 +64,7 @@ impl Render for DiffViewer {
                             .child(
                                 resizable_panel()
                                     .size(px(280.0))
-                                    .size_range(px(160.0)..px(520.0))
+                                    .size_range(px(220.0)..px(520.0))
                                     .child(self.render_tree(cx)),
                             )
                             .child(resizable_panel().child(self.render_diff(cx))),

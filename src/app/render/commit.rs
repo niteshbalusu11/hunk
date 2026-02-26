@@ -44,6 +44,7 @@ impl DiffViewer {
                         Button::new("branch-picker-label")
                             .outline()
                             .compact()
+                            .with_size(gpui_component::Size::Small)
                             .rounded(px(7.0))
                             .bg(cx.theme().secondary.opacity(if is_dark { 0.50 } else { 0.70 }))
                             .border_color(cx.theme().border.opacity(if is_dark { 0.90 } else { 0.74 }))
@@ -60,16 +61,17 @@ impl DiffViewer {
                         let mut button = Button::new("branch-picker-toggle")
                             .outline()
                             .compact()
+                            .with_size(gpui_component::Size::Small)
                             .rounded(px(7.0))
-                            .min_w(px(30.0))
-                            .h(px(28.0))
+                            .min_w(px(24.0))
+                            .h(px(24.0))
                             .icon(
                                 Icon::new(if self.branch_picker_open {
                                     IconName::ChevronUp
                                 } else {
                                     IconName::ChevronDown
                                 })
-                                .size(px(14.0)),
+                                .size(px(12.0)),
                             )
                             .tooltip(if self.branch_picker_open {
                                 "Hide branch menu"
@@ -95,6 +97,7 @@ impl DiffViewer {
                             Button::new("sync-branch")
                                 .outline()
                                 .compact()
+                                .with_size(gpui_component::Size::Small)
                                 .rounded(px(7.0))
                                 .label("Sync")
                                 .disabled(sync_disabled)
@@ -111,6 +114,7 @@ impl DiffViewer {
                             Button::new("publish-or-push")
                                 .primary()
                                 .compact()
+                                .with_size(gpui_component::Size::Small)
                                 .rounded(px(7.0))
                                 .label(action_label)
                                 .disabled(push_or_publish_disabled)
