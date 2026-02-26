@@ -434,7 +434,6 @@ impl DiffViewer {
         let root_changed = self.repo_root.as_ref() != Some(&root);
 
         let files_changed = self.files != files;
-        let overall_changed = self.overall_line_stats != line_stats;
         let previous_selected_path = self.selected_path.clone();
         let previous_selected_status = self.selected_status;
 
@@ -489,10 +488,11 @@ impl DiffViewer {
             self.request_repo_tree_reload(cx);
         }
 
-        if files_changed || overall_changed || selected_changed || self.diff_rows.is_empty() {
-            self.scroll_selected_after_reload = selected_changed || self.diff_rows.is_empty();
-            self.request_selected_diff_reload(cx);
-        }
+        // Always reload visible diff rows after any loaded snapshot.
+        // Fingerprints include more than file lists/counts, and diff text can change while
+        // aggregate line stats and selected path stay the same.
+        self.scroll_selected_after_reload = selected_changed || self.diff_rows.is_empty();
+        self.request_selected_diff_reload(cx);
 
         cx.notify();
     }

@@ -237,12 +237,23 @@ pub fn load_patches_for_files(
             continue;
         }
 
-        let rendered = render_patch_for_entry(entry, &materialize_options)?;
+        let rendered = match render_patch_for_entry(entry, &materialize_options) {
+            Ok(rendered) => rendered,
+            Err(err) => {
+                warn!(
+                    "failed to render patch for paths source='{}' target='{}': {err:#}",
+                    source_path, target_path
+                );
+                continue;
+            }
+        };
         if target_matches {
-            patch_map.insert(target_path.clone(), rendered.patch.clone());
+            patch_map
+                .entry(target_path.clone())
+                .or_insert_with(|| rendered.patch.clone());
         }
         if source_matches && source_path != target_path {
-            patch_map.insert(source_path, rendered.patch);
+            patch_map.entry(source_path).or_insert(rendered.patch);
         }
     }
 

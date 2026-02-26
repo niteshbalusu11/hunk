@@ -66,9 +66,9 @@ Repro scripts:
 
 ### Phase 5: Perf Regression Safety Net
 
-- [ ] Add repeatable perf harness for large-diff fixtures.
-- [ ] Track and gate metrics for `TTFD`, selected-file latency, and scroll FPS.
-- [ ] Document benchmark protocol and acceptable thresholds.
+- [x] Add repeatable perf harness for large-diff fixtures.
+- [x] Track and gate metrics for `TTFD`, selected-file latency, and scroll FPS.
+- [x] Document benchmark protocol and acceptable thresholds.
 
 ## Work Log
 
@@ -86,3 +86,8 @@ Repro scripts:
 - [x] Switched diff row segment cache from stable-id map lookup to row-indexed lookup.
 - [x] Added visible-row lazy segment prefetch with coarse render fallback on cache miss.
 - [x] Added segment compaction budget to cap per-cell render element count.
+- [x] Added release-mode large-diff perf harness test + script with threshold gating.
+- [x] Documented benchmark protocol, metric definitions, and default thresholds.
+- [x] Hardened perf harness gating (`scroll_fps_p95`, strict threshold parsing, invalid input fallback).
+- [x] Made snapshot-loaded diff refresh unconditional to avoid stale diff rows.
+- [x] Made batch patch loading resilient to per-entry render failures and duplicate-path overwrites.

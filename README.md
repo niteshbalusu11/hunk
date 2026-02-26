@@ -66,6 +66,23 @@ To spread the same total load across multiple files:
 ./scripts/create_large_diff_repo.sh --lines 6000 --files 4 --force
 ```
 
+### Automated Perf Harness
+
+Run the repeatable large-diff perf harness with threshold gating:
+
+```bash
+./scripts/run_perf_harness.sh
+```
+
+Run without threshold gating (metrics only):
+
+```bash
+./scripts/run_perf_harness.sh --no-gate
+```
+
+Protocol and metric definitions are documented in [PERFORMANCE_BENCHMARK.md](./docs/PERFORMANCE_BENCHMARK.md).
+The harness script currently targets Unix-like shells (`bash`).
+
 ## Config
 
 Hunk reads config from `~/.hunkdiff/config.toml`.

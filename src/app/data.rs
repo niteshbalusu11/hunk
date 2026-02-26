@@ -99,6 +99,7 @@ pub(super) enum DiffStreamRowKind {
     CoreCode,
     CoreHunkHeader,
     CoreMeta,
+    CoreEmpty,
     FileCollapsed,
     FileError,
     EmptyState,
@@ -806,7 +807,7 @@ fn stream_kind_for_core_row(row: &SideBySideRow) -> DiffStreamRowKind {
         DiffRowKind::Code => DiffStreamRowKind::CoreCode,
         DiffRowKind::HunkHeader => DiffStreamRowKind::CoreHunkHeader,
         DiffRowKind::Meta => DiffStreamRowKind::CoreMeta,
-        DiffRowKind::Empty => DiffStreamRowKind::EmptyState,
+        DiffRowKind::Empty => DiffStreamRowKind::CoreEmpty,
     }
 }
 
@@ -844,6 +845,7 @@ fn stable_kind_tag(kind: DiffStreamRowKind) -> &'static str {
         DiffStreamRowKind::CoreCode => "core-code",
         DiffStreamRowKind::CoreHunkHeader => "core-hunk-header",
         DiffStreamRowKind::CoreMeta => "core-meta",
+        DiffStreamRowKind::CoreEmpty => "core-empty",
         DiffStreamRowKind::FileCollapsed => "file-collapsed",
         DiffStreamRowKind::FileError => "file-error",
         DiffStreamRowKind::EmptyState => "empty-state",
