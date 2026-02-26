@@ -3,7 +3,7 @@ impl DiffViewer {
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
         let show_publish = !self.branch_has_upstream;
-        let show_push = self.branch_has_upstream && self.branch_ahead_count > 0;
+        let show_push = self.branch_has_upstream;
         let action_label = if show_publish { "Publish" } else { "Push" };
         let last_commit_text = self
             .last_commit_subject
