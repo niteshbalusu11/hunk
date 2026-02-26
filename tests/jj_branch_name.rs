@@ -1,4 +1,4 @@
-use hunk::git::{is_valid_branch_name, sanitize_branch_name};
+use hunk::jj::{is_valid_branch_name, sanitize_branch_name};
 
 #[test]
 fn sanitizes_space_separated_branch_name() {

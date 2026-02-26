@@ -7,10 +7,9 @@ use super::data::{
     load_file_editor_document, message_row, save_file_editor_document,
 };
 use super::*;
-use hunk::git::{
+use hunk::jj::{
     RepoSnapshot, checkout_or_create_branch, commit_staged, load_repo_tree, load_snapshot,
-    load_snapshot_fingerprint, push_current_branch, sanitize_branch_name, stage_all, stage_file,
-    unstage_all, unstage_file,
+    load_snapshot_fingerprint, push_current_branch, sanitize_branch_name,
 };
 
 include!("core.rs");

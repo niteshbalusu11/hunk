@@ -12,7 +12,9 @@ use super::highlight::{
 };
 use super::*;
 use hunk::diff::parse_patch_side_by_side;
-use hunk::git::{RepoTreeEntry, RepoTreeEntryKind, load_patch_from_open_repo, open_repo_for_patch};
+use hunk::jj::{
+    JjRepo, RepoTreeEntry, RepoTreeEntryKind, load_patch_from_open_repo, open_repo_for_patch,
+};
 
 #[derive(Default)]
 struct DiffTreeFolder {
@@ -548,7 +550,7 @@ pub(super) fn load_diff_stream(
     })
 }
 
-fn load_file_diff_rows(repo: &git2::Repository, file: &ChangedFile) -> LoadedFileDiffRows {
+fn load_file_diff_rows(repo: &JjRepo, file: &ChangedFile) -> LoadedFileDiffRows {
     if is_probably_binary_extension(file.path.as_str()) {
         return LoadedFileDiffRows {
             core_rows: Vec::new(),

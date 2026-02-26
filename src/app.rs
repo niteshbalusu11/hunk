@@ -27,7 +27,7 @@ use tracing::error;
 
 use hunk::config::{AppConfig, ConfigStore, DiffViewMode, ThemePreference};
 use hunk::diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
-use hunk::git::{ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFingerprint};
+use hunk::jj::{ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFingerprint};
 use hunk::state::{AppState, AppStateStore};
 
 use data::{

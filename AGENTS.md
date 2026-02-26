@@ -3,6 +3,7 @@
 A GPUI based desktop app for fast git diff viewing. In the age of vibe coding, nobody looks write anymore, but just review code.
 Hunk is a fast diff viewer that is extremely simple written in Rust.
 
+- ONLY USE JJ AS THE UNDERLYING GIT IMPLEMENTATION WHEN RUNNING GIT RELATED COMMANDS. JJ CLI IS AVAILABLE VIA `jj` ON THE PATH.
 - Make sure code is scalable.
 - Don't make files over 1000 lines long.
 - Tests always in the tests directory

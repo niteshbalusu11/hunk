@@ -13,11 +13,9 @@ impl DiffViewer {
             .cloned()
             .collect::<Vec<_>>();
         let is_dark = cx.theme().mode.is_dark();
-        let staged_count = self.files.iter().filter(|file| file.staged).count();
-        let view = cx.entity();
 
         let tree_summary = match self.sidebar_tree_mode {
-            SidebarTreeMode::Diff => format!("{} changes • {} staged", self.files.len(), staged_count),
+            SidebarTreeMode::Diff => format!("{} changes", self.files.len()),
             SidebarTreeMode::Files => {
                 format!(
                     "{} files • {} folders",
@@ -50,47 +48,7 @@ impl DiffViewer {
                             .font_medium()
                             .text_color(cx.theme().muted_foreground)
                             .child(tree_summary),
-                    )
-                    .when(self.sidebar_tree_mode == SidebarTreeMode::Diff, |this| {
-                        this.child(
-                            h_flex()
-                                .items_center()
-                                .gap_1()
-                                .child(if staged_count == 0 {
-                                    let view = view.clone();
-                                    Button::new("stage-all")
-                                        .outline()
-                                        .compact()
-                                        .rounded(px(7.0))
-                                        .bg(cx.theme().secondary.opacity(if is_dark { 0.46 } else { 0.68 }))
-                                        .border_color(cx.theme().border.opacity(if is_dark { 0.86 } else { 0.70 }))
-                                        .disabled(self.git_action_loading || self.files.is_empty())
-                                        .label("Stage All")
-                                        .on_click(move |_, _, cx| {
-                                            view.update(cx, |this, cx| {
-                                                this.stage_all_files(cx);
-                                            });
-                                        })
-                                        .into_any_element()
-                                } else {
-                                    let view = view.clone();
-                                    Button::new("unstage-all")
-                                        .outline()
-                                        .compact()
-                                        .rounded(px(7.0))
-                                        .bg(cx.theme().secondary.opacity(if is_dark { 0.46 } else { 0.68 }))
-                                        .border_color(cx.theme().border.opacity(if is_dark { 0.86 } else { 0.70 }))
-                                        .disabled(self.git_action_loading || self.files.is_empty())
-                                        .label("Unstage All")
-                                        .on_click(move |_, _, cx| {
-                                            view.update(cx, |this, cx| {
-                                                this.unstage_all_files(cx);
-                                            });
-                                        })
-                                        .into_any_element()
-                                }),
-                        )
-                    }),
+                    ),
             )
             .when(self.sidebar_tree_mode == SidebarTreeMode::Diff, |this| {
                 this.when_some(self.git_status_message.as_ref(), |this, message| {
@@ -317,9 +275,7 @@ impl DiffViewer {
         let is_selected = self.selected_path.as_deref() == Some(file.path.as_str());
         let is_dark = cx.theme().mode.is_dark();
         let is_collapsed = self.collapsed_files.contains(file.path.as_str());
-        let git_action_loading = self.git_action_loading;
-        let currently_staged = file.staged;
-        let stage_checkbox_id = {
+        let row_id = {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             std::hash::Hash::hash(&file.path, &mut hasher);
             std::hash::Hasher::finish(&hasher)
@@ -354,7 +310,7 @@ impl DiffViewer {
             .map_or(("", file.path.as_str()), |parts| parts);
 
         h_flex()
-            .id(("change-row", stage_checkbox_id))
+            .id(("change-row", row_id))
             .w_full()
             .items_center()
             .gap_0p5()
@@ -362,46 +318,6 @@ impl DiffViewer {
             .py_0p5()
             .rounded_sm()
             .bg(row_bg)
-            .child({
-                let path = file.path.clone();
-                let view = view.clone();
-                let check_color = if currently_staged {
-                    if is_dark {
-                        cx.theme().success.lighten(0.52)
-                    } else {
-                        cx.theme().success.darken(0.12)
-                    }
-                } else {
-                    cx.theme().muted_foreground.opacity(0.58)
-                };
-                Button::new(("stage-file", stage_checkbox_id))
-                    .compact()
-                    .outline()
-                    .rounded(px(5.0))
-                    .icon(
-                        Icon::new(if currently_staged {
-                            IconName::Check
-                        } else {
-                            IconName::Dash
-                        })
-                        .size(px(10.0)),
-                    )
-                    .min_w(px(16.0))
-                    .h(px(16.0))
-                    .bg(if currently_staged {
-                        cx.theme().success.opacity(if is_dark { 0.18 } else { 0.10 })
-                    } else {
-                        cx.theme().background.opacity(0.0)
-                    })
-                    .text_color(check_color)
-                    .disabled(git_action_loading)
-                    .on_click(move |_, _, cx| {
-                        cx.stop_propagation();
-                        view.update(cx, |this, cx| {
-                            this.toggle_stage_for_file(path.clone(), !currently_staged, cx);
-                        });
-                    })
-            })
             .child(
                 div()
                     .w_3()
@@ -467,25 +383,12 @@ impl DiffViewer {
         } else {
             cx.theme().background.opacity(0.0)
         };
-        let file_token = if row.kind == RepoTreeNodeKind::File {
-            file_tree_token_for_path(row.path.as_str())
-        } else {
-            SyntaxTokenKind::Plain
-        };
         let text_color = if row.ignored {
             cx.theme().muted_foreground.opacity(if is_dark { 0.88 } else { 0.95 })
-        } else if row.kind == RepoTreeNodeKind::File {
-            self.syntax_color_for_segment(cx.theme().foreground, file_token, cx)
         } else {
             cx.theme().foreground
         };
-        let icon_color = if row.ignored {
-            cx.theme().muted_foreground
-        } else if row.kind == RepoTreeNodeKind::File {
-            self.syntax_color_for_segment(cx.theme().muted_foreground, file_token, cx)
-        } else {
-            cx.theme().muted_foreground
-        };
+        let icon_color = cx.theme().muted_foreground;
         let chevron_icon = if row.kind == RepoTreeNodeKind::Directory {
             Some(if row.expanded {
                 IconName::ChevronDown
@@ -579,13 +482,6 @@ fn path_extension(path: &str) -> Option<String> {
         .extension()
         .and_then(|value| value.to_str())
         .map(|value| value.to_ascii_lowercase())
-}
-
-fn file_tree_token_for_path(path: &str) -> SyntaxTokenKind {
-    match path_extension(path).as_deref() {
-        Some("toml") => SyntaxTokenKind::TypeName,
-        _ => SyntaxTokenKind::Plain,
-    }
 }
 
 fn file_icon_for_path(path: &str) -> IconName {

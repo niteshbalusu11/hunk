@@ -13,7 +13,7 @@ impl DiffViewer {
         }
 
         let Some(repo_root) = self.repo_root.clone() else {
-            self.git_status_message = Some("No git repository available.".to_string());
+            self.git_status_message = Some("No JJ repository available.".to_string());
             cx.notify();
             return;
         };
@@ -43,7 +43,7 @@ impl DiffViewer {
                             this.request_snapshot_refresh_internal(true, cx);
                         }
                         Err(err) => {
-                            this.git_status_message = Some(format!("Git error: {err:#}"));
+                            this.git_status_message = Some(format!("JJ error: {err:#}"));
                         }
                     }
 
@@ -51,37 +51,6 @@ impl DiffViewer {
                 })
                 .ok();
             }
-        });
-    }
-
-    pub(super) fn toggle_stage_for_file(
-        &mut self,
-        file_path: String,
-        should_stage: bool,
-        cx: &mut Context<Self>,
-    ) {
-        self.run_git_action(cx, move |repo_root| {
-            if should_stage {
-                stage_file(&repo_root, &file_path)?;
-                Ok(format!("Staged {}", file_path))
-            } else {
-                unstage_file(&repo_root, &file_path)?;
-                Ok(format!("Unstaged {}", file_path))
-            }
-        });
-    }
-
-    pub(super) fn stage_all_files(&mut self, cx: &mut Context<Self>) {
-        self.run_git_action(cx, move |repo_root| {
-            stage_all(&repo_root)?;
-            Ok("Staged all changes".to_string())
-        });
-    }
-
-    pub(super) fn unstage_all_files(&mut self, cx: &mut Context<Self>) {
-        self.run_git_action(cx, move |repo_root| {
-            unstage_all(&repo_root)?;
-            Ok("Unstaged all changes".to_string())
         });
     }
 
@@ -153,7 +122,7 @@ impl DiffViewer {
         }
 
         let Some(repo_root) = self.repo_root.clone() else {
-            self.git_status_message = Some("No git repository available.".to_string());
+            self.git_status_message = Some("No JJ repository available.".to_string());
             cx.notify();
             return;
         };
@@ -196,7 +165,7 @@ impl DiffViewer {
                             this.request_snapshot_refresh(cx);
                         }
                         Err(err) => {
-                            this.git_status_message = Some(format!("Git error: {err:#}"));
+                            this.git_status_message = Some(format!("JJ error: {err:#}"));
                         }
                     }
 

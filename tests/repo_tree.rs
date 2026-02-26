@@ -3,15 +3,16 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use hunk::git::{RepoTreeEntryKind, load_repo_tree};
+use hunk::jj::{RepoTreeEntryKind, load_repo_tree};
 
 #[test]
-fn load_repo_tree_marks_gitignored_entries() {
+fn load_repo_tree_marks_jj_ignored_entries() {
     let fixture = TempRepo::new("repo-tree-ignored");
     write_file(fixture.path().join(".gitignore"), "target/\n*.log\n");
     write_file(fixture.path().join("src/main.rs"), "fn main() {}\n");
     write_file(fixture.path().join("target/cache.bin"), "cache\n");
     write_file(fixture.path().join("logs/app.log"), "hello\n");
+    run_jj(fixture.path(), ["status"]);
 
     let entries = load_repo_tree(fixture.path()).expect("repo tree should load");
 
@@ -33,12 +34,14 @@ fn load_repo_tree_marks_gitignored_entries() {
 }
 
 #[test]
-fn load_repo_tree_excludes_git_internal_directory() {
-    let fixture = TempRepo::new("repo-tree-no-dot-git");
+fn load_repo_tree_excludes_internal_vcs_directories() {
+    let fixture = TempRepo::new("repo-tree-no-vcs-internals");
     write_file(fixture.path().join("README.md"), "# hunk\n");
+    run_jj(fixture.path(), ["status"]);
 
     let entries = load_repo_tree(fixture.path()).expect("repo tree should load");
     assert!(entries.iter().all(|entry| !entry.path.starts_with(".git")));
+    assert!(entries.iter().all(|entry| !entry.path.starts_with(".jj")));
 }
 
 struct TempRepo {
@@ -54,7 +57,7 @@ impl TempRepo {
         let path = std::env::temp_dir().join(format!("hunk-{prefix}-{unique}"));
         fs::create_dir_all(&path).expect("temp repo directory should be created");
 
-        run_git(&path, ["init"]);
+        run_jj(&path, ["git", "init", "--colocate"]);
         Self { path }
     }
 
@@ -76,11 +79,11 @@ fn write_file(path: PathBuf, contents: &str) {
     fs::write(path, contents).expect("file should be written");
 }
 
-fn run_git<const N: usize>(cwd: &Path, args: [&str; N]) {
-    let status = Command::new("git")
+fn run_jj<const N: usize>(cwd: &Path, args: [&str; N]) {
+    let status = Command::new("jj")
         .args(args)
         .current_dir(cwd)
         .status()
-        .expect("git command should run");
-    assert!(status.success(), "git command failed");
+        .expect("jj command should run");
+    assert!(status.success(), "jj command failed");
 }

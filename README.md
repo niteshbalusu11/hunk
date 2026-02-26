@@ -4,7 +4,7 @@ A macOS-first Git diff viewer built with `gpui` + `gpui-component`.
 
 ## What it includes
 
-- Fast repo snapshot loading from `git2`
+- Uses `jj` as the underlying Git implementation
 - File tree for changed files
 - Side-by-side diff viewer with per-line styling and line numbers
 - Resizable split panes (tree + diff)
@@ -54,6 +54,7 @@ cargo bundle --release
 ```
 
 Generated assets:
+
 - `assets/icons/hunk-icon-default.png` (default/full color)
 - `assets/icons/hunk-icon-dark.png` (dark appearance variant)
 - `assets/icons/hunk-icon-mono.png` (monochrome/tint-friendly variant)

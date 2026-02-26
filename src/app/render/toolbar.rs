@@ -6,7 +6,7 @@ impl DiffViewer {
             .repo_root
             .as_ref()
             .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "No git repository found".to_string());
+            .unwrap_or_else(|| "No JJ repository found".to_string());
         let selected_theme = self.config.theme;
         let theme_label = match self.config.theme {
             ThemePreference::System => "System",

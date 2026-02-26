@@ -517,7 +517,7 @@ impl DiffViewer {
         self.horizontal_pan_last_x = None;
         self.diff_rows = vec![message_row(
             DiffRowKind::Empty,
-            "Use File > Open Project... (Cmd/Ctrl+Shift+O) to load a Git repository.",
+            "Use File > Open Project... (Cmd/Ctrl+Shift+O) to load a JJ repository.",
         )];
         self.sync_diff_list_state();
         self.recompute_diff_pan_layout();
@@ -542,7 +542,9 @@ impl DiffViewer {
     fn is_missing_repository_error(err: &anyhow::Error) -> bool {
         err.chain().any(|cause| {
             let message = cause.to_string();
-            message.contains("failed to discover git repository")
+            message.contains("failed to discover jj repository")
+                || message.contains("there is no jj repo")
+                || message.contains("failed to discover git repository")
                 || message.contains("could not find repository")
         })
     }
