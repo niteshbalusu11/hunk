@@ -53,10 +53,145 @@ fn sync_current_branch_fetches_and_updates_from_remote() {
     );
 }
 
+#[test]
+fn sync_prefers_present_untracked_remote_over_origin_fallback() {
+    let fixture = DualRemoteSyncFixture::new("sync-prefers-untracked-remote");
+
+    checkout_or_create_branch(fixture.peer_path(), "master")
+        .expect("peer should create master bookmark");
+    write_file(fixture.peer_path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.peer_path(), "initial peer commit")
+        .expect("initial peer commit should succeed");
+    push_current_branch(fixture.peer_path(), "master", false)
+        .expect("peer should publish master to upstream");
+
+    run_jj(
+        fixture.local_path(),
+        &["git", "fetch", "--remote", "upstream"],
+    );
+    run_jj(
+        fixture.local_path(),
+        &["bookmark", "track", "master@upstream"],
+    );
+    checkout_or_create_branch(fixture.local_path(), "master")
+        .expect("local should checkout fetched upstream master bookmark");
+    run_jj(
+        fixture.local_path(),
+        &["bookmark", "untrack", "master@upstream"],
+    );
+
+    write_file(
+        fixture.peer_path().join("tracked.txt"),
+        "line one\nline two\n",
+    );
+    commit_staged(fixture.peer_path(), "peer upstream update")
+        .expect("peer update commit should succeed");
+    push_current_branch(fixture.peer_path(), "master", true)
+        .expect("peer should push update to upstream");
+
+    sync_current_branch(fixture.local_path(), "master").expect("sync should succeed");
+
+    let snapshot =
+        load_snapshot(fixture.local_path()).expect("snapshot should load after successful sync");
+    assert_eq!(snapshot.branch_name, "master");
+    assert!(
+        snapshot.branch_has_upstream,
+        "master should have upstream after sync"
+    );
+    assert_eq!(
+        snapshot.last_commit_subject.as_deref(),
+        Some("peer upstream update"),
+        "sync should update master from upstream remote, not origin fallback"
+    );
+}
+
 struct SyncFixture {
     root: PathBuf,
     local: PathBuf,
     peer: PathBuf,
+}
+
+struct DualRemoteSyncFixture {
+    root: PathBuf,
+    local: PathBuf,
+    peer: PathBuf,
+}
+
+impl DualRemoteSyncFixture {
+    fn new(prefix: &str) -> Self {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("hunk-{prefix}-{unique}"));
+        let local = root.join("local");
+        let peer = root.join("peer");
+        let origin_remote = root.join("origin-remote");
+        let upstream_remote = root.join("upstream-remote");
+        fs::create_dir_all(&local).expect("local repo directory should be created");
+        fs::create_dir_all(&peer).expect("peer repo directory should be created");
+        fs::create_dir_all(&origin_remote).expect("origin remote directory should be created");
+        fs::create_dir_all(&upstream_remote).expect("upstream remote directory should be created");
+
+        run_jj(&origin_remote, &["git", "init", "--colocate"]);
+        run_jj(&upstream_remote, &["git", "init", "--colocate"]);
+        run_jj(&local, &["git", "init", "--colocate"]);
+        run_jj(&peer, &["git", "init", "--colocate"]);
+
+        run_jj(
+            &local,
+            &["config", "set", "--repo", "user.name", "Hunk Test User"],
+        );
+        run_jj(
+            &local,
+            &[
+                "config",
+                "set",
+                "--repo",
+                "user.email",
+                "hunk-tests@example.com",
+            ],
+        );
+        run_jj(
+            &peer,
+            &["config", "set", "--repo", "user.name", "Hunk Test User"],
+        );
+        run_jj(
+            &peer,
+            &[
+                "config",
+                "set",
+                "--repo",
+                "user.email",
+                "hunk-tests@example.com",
+            ],
+        );
+
+        let origin_path = origin_remote.to_string_lossy().to_string();
+        let upstream_path = upstream_remote.to_string_lossy().to_string();
+        run_jj(
+            &local,
+            &["git", "remote", "add", "origin", origin_path.as_str()],
+        );
+        run_jj(
+            &local,
+            &["git", "remote", "add", "upstream", upstream_path.as_str()],
+        );
+        run_jj(
+            &peer,
+            &["git", "remote", "add", "upstream", upstream_path.as_str()],
+        );
+
+        Self { root, local, peer }
+    }
+
+    fn local_path(&self) -> &Path {
+        &self.local
+    }
+
+    fn peer_path(&self) -> &Path {
+        &self.peer
+    }
 }
 
 impl SyncFixture {
@@ -129,6 +264,12 @@ impl SyncFixture {
 }
 
 impl Drop for SyncFixture {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+impl Drop for DualRemoteSyncFixture {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.root);
     }
