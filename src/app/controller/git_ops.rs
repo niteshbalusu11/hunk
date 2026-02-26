@@ -90,6 +90,35 @@ impl DiffViewer {
             .count()
     }
 
+    pub(super) fn branch_syncable(&self) -> bool {
+        !self.branch_name.is_empty()
+            && self.branch_name != "unknown"
+            && !self.branch_name.starts_with("detached")
+    }
+
+    fn tracking_area_clean(&self) -> bool {
+        self.files.is_empty()
+    }
+
+    pub(super) fn can_sync_current_branch(&self) -> bool {
+        self.branch_syncable()
+            && self.branch_has_upstream
+            && self.tracking_area_clean()
+            && !self.git_action_loading
+    }
+
+    pub(super) fn can_push_or_publish_current_branch(&self) -> bool {
+        if !self.branch_syncable() || !self.tracking_area_clean() || self.git_action_loading {
+            return false;
+        }
+
+        if self.branch_has_upstream {
+            self.branch_ahead_count > 0
+        } else {
+            true
+        }
+    }
+
     fn selected_commit_paths(&self) -> Vec<String> {
         self.files
             .iter()
@@ -122,13 +151,28 @@ impl DiffViewer {
     }
 
     pub(super) fn push_or_publish_current_branch(&mut self, cx: &mut Context<Self>) {
-        let branch_name = self.branch_name.clone();
-        let has_upstream = self.branch_has_upstream;
-        if branch_name.is_empty() || branch_name == "unknown" || branch_name.starts_with("detached") {
+        if !self.branch_syncable() {
             self.git_status_message = Some("Cannot push a detached or unknown branch.".to_string());
             cx.notify();
             return;
         }
+        if !self.tracking_area_clean() {
+            self.git_status_message =
+                Some("Commit or discard tracked changes before pushing.".to_string());
+            cx.notify();
+            return;
+        }
+        if self.branch_has_upstream && self.branch_ahead_count == 0 {
+            self.git_status_message = Some("Nothing to push.".to_string());
+            cx.notify();
+            return;
+        }
+        if self.git_action_loading {
+            return;
+        }
+
+        let branch_name = self.branch_name.clone();
+        let has_upstream = self.branch_has_upstream;
 
         self.run_git_action(cx, move |repo_root| {
             push_current_branch(&repo_root, &branch_name, has_upstream)?;
@@ -141,12 +185,27 @@ impl DiffViewer {
     }
 
     pub(super) fn sync_current_branch_from_remote(&mut self, cx: &mut Context<Self>) {
-        let branch_name = self.branch_name.clone();
-        if branch_name.is_empty() || branch_name == "unknown" || branch_name.starts_with("detached") {
+        if !self.branch_syncable() {
             self.git_status_message = Some("Cannot sync a detached or unknown branch.".to_string());
             cx.notify();
             return;
         }
+        if !self.branch_has_upstream {
+            self.git_status_message = Some("No upstream bookmark to sync from.".to_string());
+            cx.notify();
+            return;
+        }
+        if !self.tracking_area_clean() {
+            self.git_status_message =
+                Some("Commit or discard tracked changes before syncing.".to_string());
+            cx.notify();
+            return;
+        }
+        if self.git_action_loading {
+            return;
+        }
+
+        let branch_name = self.branch_name.clone();
 
         self.run_git_action(cx, move |repo_root| {
             sync_current_branch(&repo_root, &branch_name)?;
