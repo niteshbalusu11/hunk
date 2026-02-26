@@ -33,6 +33,7 @@ impl DiffViewer {
             return;
         }
         self.last_visible_row_start = Some(row_ix);
+        self.request_visible_row_segment_prefetch(row_ix, cx);
 
         let Some((next_path, next_status)) =
             self.selected_file_from_row_metadata(row_ix).or_else(|| {
@@ -55,13 +56,118 @@ impl DiffViewer {
         cx.notify();
     }
 
+    fn request_visible_row_segment_prefetch(&mut self, visible_row: usize, cx: &mut Context<Self>) {
+        if self.diff_rows.is_empty() {
+            return;
+        }
+
+        if self.diff_row_segment_cache.len() != self.diff_rows.len() {
+            self.diff_row_segment_cache.resize(self.diff_rows.len(), None);
+        }
+
+        if let Some(anchor_row) = self.segment_prefetch_anchor_row
+            && anchor_row.abs_diff(visible_row) < DIFF_SEGMENT_PREFETCH_STEP_ROWS
+        {
+            return;
+        }
+
+        self.segment_prefetch_anchor_row = Some(visible_row);
+        let start = visible_row.saturating_sub(DIFF_SEGMENT_PREFETCH_RADIUS_ROWS);
+        let end = visible_row
+            .saturating_add(DIFF_SEGMENT_PREFETCH_RADIUS_ROWS.saturating_add(1))
+            .min(self.diff_rows.len());
+
+        let mut pending_rows =
+            Vec::with_capacity(DIFF_SEGMENT_PREFETCH_BATCH_ROWS.min(end.saturating_sub(start)));
+        for row_ix in start..end {
+            if pending_rows.len() >= DIFF_SEGMENT_PREFETCH_BATCH_ROWS {
+                break;
+            }
+
+            if self
+                .diff_row_segment_cache
+                .get(row_ix)
+                .is_some_and(Option::is_some)
+            {
+                continue;
+            }
+
+            let Some(row) = self.diff_rows.get(row_ix) else {
+                continue;
+            };
+            if row.kind != DiffRowKind::Code {
+                continue;
+            }
+
+            let file_path = self
+                .diff_row_metadata
+                .get(row_ix)
+                .and_then(|meta| meta.file_path.clone());
+            let use_detailed_segments = file_path
+                .as_deref()
+                .and_then(|path| self.file_line_stats.get(path).copied())
+                .map(use_detailed_segments_for_file)
+                .unwrap_or(true);
+
+            pending_rows.push((row_ix, row.clone(), file_path, use_detailed_segments));
+        }
+
+        if pending_rows.is_empty() {
+            return;
+        }
+
+        let epoch = self.next_segment_prefetch_epoch();
+        self.segment_prefetch_task = cx.spawn(async move |this, cx| {
+            let computed_rows = cx
+                .background_executor()
+                .spawn(async move {
+                    pending_rows
+                        .into_iter()
+                        .map(|(row_ix, row, file_path, use_detailed_segments)| {
+                            (
+                                row_ix,
+                                build_diff_row_segment_cache(
+                                    file_path.as_deref(),
+                                    &row,
+                                    use_detailed_segments,
+                                ),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .await;
+
+            if let Some(this) = this.upgrade() {
+                this.update(cx, |this, cx| {
+                    if epoch != this.segment_prefetch_epoch {
+                        return;
+                    }
+
+                    let mut inserted = false;
+                    for (row_ix, row_cache) in computed_rows {
+                        if let Some(slot) = this.diff_row_segment_cache.get_mut(row_ix)
+                            && slot.is_none()
+                        {
+                            *slot = Some(row_cache);
+                            inserted = true;
+                        }
+                    }
+
+                    if inserted {
+                        cx.notify();
+                    }
+                })
+                .ok();
+            }
+        });
+    }
+
     fn selected_file_from_row_metadata(&self, row_ix: usize) -> Option<(String, FileStatus)> {
         let row = self.diff_row_metadata.get(row_ix)?;
         if row.kind == DiffStreamRowKind::EmptyState {
             return None;
         }
 
-        let _stable_row_id = row.stable_id;
         let path = row.file_path.clone()?;
         let status = row.file_status.or_else(|| {
             self.files

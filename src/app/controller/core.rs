@@ -176,7 +176,9 @@ impl DiffViewer {
             selected_status: None,
             diff_rows: Vec::new(),
             diff_row_metadata: Vec::new(),
-            diff_row_segment_cache: BTreeMap::new(),
+            diff_row_segment_cache: Vec::new(),
+            diff_visible_file_header_lookup: Vec::new(),
+            diff_visible_hunk_header_lookup: Vec::new(),
             file_row_ranges: Vec::new(),
             file_line_stats: BTreeMap::new(),
             diff_list_state: ListState::new(0, ListAlignment::Top, px(360.0)),
@@ -204,6 +206,9 @@ impl DiffViewer {
             last_visible_row_start: None,
             last_diff_scroll_offset: None,
             last_scroll_activity_at: Instant::now(),
+            segment_prefetch_anchor_row: None,
+            segment_prefetch_epoch: 0,
+            segment_prefetch_task: Task::ready(()),
             fps: 0.0,
             frame_sample_count: 0,
             frame_sample_started_at: Instant::now(),
@@ -511,6 +516,9 @@ impl DiffViewer {
         self.file_line_stats.clear();
         self.diff_row_metadata.clear();
         self.diff_row_segment_cache.clear();
+        self.invalidate_segment_prefetch();
+        self.diff_visible_file_header_lookup.clear();
+        self.diff_visible_hunk_header_lookup.clear();
         self.selection_anchor_row = None;
         self.selection_head_row = None;
         self.drag_selecting_rows = false;
@@ -553,6 +561,9 @@ impl DiffViewer {
             self.diff_rows.clear();
             self.diff_row_metadata.clear();
             self.diff_row_segment_cache.clear();
+            self.invalidate_segment_prefetch();
+            self.diff_visible_file_header_lookup.clear();
+            self.diff_visible_hunk_header_lookup.clear();
             self.selection_anchor_row = None;
             self.selection_head_row = None;
             self.drag_selecting_rows = false;
@@ -568,6 +579,9 @@ impl DiffViewer {
             self.diff_rows = vec![message_row(DiffRowKind::Empty, "No changed files.")];
             self.diff_row_metadata.clear();
             self.diff_row_segment_cache.clear();
+            self.invalidate_segment_prefetch();
+            self.diff_visible_file_header_lookup.clear();
+            self.diff_visible_hunk_header_lookup.clear();
             self.selection_anchor_row = None;
             self.selection_head_row = None;
             self.drag_selecting_rows = false;
@@ -582,12 +596,81 @@ impl DiffViewer {
         let files = self.files.clone();
         let collapsed_files = self.collapsed_files.clone();
         let previous_file_line_stats = self.file_line_stats.clone();
+        let initial_files = Self::select_initial_diff_files(&files, self.selected_path.as_deref());
+        let should_run_initial_stage = !initial_files.is_empty() && initial_files.len() < files.len();
         let epoch = self.next_patch_epoch();
+        self.invalidate_segment_prefetch();
         self.patch_loading = true;
+        if self.diff_rows.is_empty() {
+            self.diff_rows = vec![message_row(
+                DiffRowKind::Meta,
+                format!("Loading diffs for {} files...", files.len()),
+            )];
+            self.diff_row_metadata.clear();
+            self.diff_row_segment_cache.clear();
+            self.invalidate_segment_prefetch();
+            self.diff_visible_file_header_lookup.clear();
+            self.diff_visible_hunk_header_lookup.clear();
+            self.file_row_ranges.clear();
+            self.file_line_stats.clear();
+            self.selection_anchor_row = None;
+            self.selection_head_row = None;
+            self.drag_selecting_rows = false;
+            self.sync_diff_list_state();
+            self.recompute_diff_layout();
+            cx.notify();
+        }
 
         self.patch_task = cx.spawn(async move |this, cx| {
-            let started_at = Instant::now();
-            let result = cx
+            if should_run_initial_stage {
+                let initial_repo_root = repo_root.clone();
+                let initial_collapsed_files = collapsed_files.clone();
+                let initial_previous_file_line_stats = previous_file_line_stats.clone();
+                let initial_stage_started_at = Instant::now();
+                let initial_result = cx
+                    .background_executor()
+                    .spawn(async move {
+                        load_diff_stream(
+                            &initial_repo_root,
+                            &initial_files,
+                            &initial_collapsed_files,
+                            &initial_previous_file_line_stats,
+                        )
+                    })
+                    .await;
+
+                if let Some(this) = this.upgrade() {
+                    this.update(cx, |this, cx| {
+                        if epoch != this.patch_epoch {
+                            return;
+                        }
+
+                        let elapsed = initial_stage_started_at.elapsed();
+                        match initial_result {
+                            Ok(stream) => {
+                                info!(
+                                    "initial diff stream loaded in {:?} (rows={}, files={})",
+                                    elapsed,
+                                    stream.rows.len(),
+                                    stream.file_ranges.len()
+                                );
+                                this.apply_loaded_diff_stream(stream);
+                                cx.notify();
+                            }
+                            Err(err) => {
+                                info!(
+                                    "initial diff stream load failed in {:?}, continuing with full stream: {err:#}",
+                                    elapsed
+                                );
+                            }
+                        }
+                    })
+                    .ok();
+                }
+            }
+
+            let full_stage_started_at = Instant::now();
+            let full_result = cx
                 .background_executor()
                 .spawn(async move {
                     load_diff_stream(
@@ -606,63 +689,20 @@ impl DiffViewer {
                     }
 
                     this.patch_loading = false;
-                    let elapsed = started_at.elapsed();
-                    match result {
+                    let elapsed = full_stage_started_at.elapsed();
+                    match full_result {
                         Ok(stream) => {
                             info!(
-                                "diff stream loaded in {:?} (rows={}, files={})",
+                                "full diff stream loaded in {:?} (rows={}, files={})",
                                 elapsed,
                                 stream.rows.len(),
                                 stream.file_ranges.len()
                             );
-                            this.diff_rows = stream.rows;
-                            this.diff_row_metadata = stream.row_metadata;
-                            this.diff_row_segment_cache = stream.row_segments;
-                            this.clamp_selection_to_rows();
-                            this.drag_selecting_rows = false;
-                            this.sync_diff_list_state();
-                            this.file_row_ranges = stream.file_ranges;
-                            this.file_line_stats = stream.file_line_stats;
-                            this.recompute_diff_layout();
-
-                            let has_selection = this.selected_path.as_ref().is_some_and(|path| {
-                                this.files.iter().any(|file| file.path == *path)
-                            });
-                            if !has_selection {
-                                this.selected_path =
-                                    this.files.first().map(|file| file.path.clone());
-                            }
-
-                            this.selected_status =
-                                this.selected_path.as_ref().and_then(|selected| {
-                                    this.files
-                                        .iter()
-                                        .find(|file| &file.path == selected)
-                                        .map(|file| file.status)
-                                });
-                            this.last_visible_row_start = None;
-
-                            if this.scroll_selected_after_reload {
-                                this.scroll_selected_after_reload = false;
-                                this.scroll_selected_file_to_top();
-                            }
+                            this.apply_loaded_diff_stream(stream);
                         }
                         Err(err) => {
-                            error!("diff stream load failed after {:?}: {err:#}", elapsed);
-                            this.diff_rows = vec![message_row(
-                                DiffRowKind::Meta,
-                                format!("Failed to load diff stream: {err:#}"),
-                            )];
-                            this.diff_row_metadata.clear();
-                            this.diff_row_segment_cache.clear();
-                            this.selection_anchor_row = None;
-                            this.selection_head_row = None;
-                            this.drag_selecting_rows = false;
-                            this.sync_diff_list_state();
-                            this.file_row_ranges.clear();
-                            this.file_line_stats.clear();
-                            this.recompute_diff_layout();
-                            this.scroll_selected_after_reload = false;
+                            error!("full diff stream load failed after {:?}: {err:#}", elapsed);
+                            this.apply_diff_stream_error(err);
                         }
                     }
 
@@ -673,6 +713,142 @@ impl DiffViewer {
         });
     }
 
+    fn select_initial_diff_files(
+        files: &[ChangedFile],
+        selected_path: Option<&str>,
+    ) -> Vec<ChangedFile> {
+        if files.is_empty() {
+            return Vec::new();
+        }
+
+        if let Some(selected_path) = selected_path
+            && let Some(file) = files.iter().find(|file| file.path == selected_path)
+        {
+            return vec![file.clone()];
+        }
+
+        vec![files[0].clone()]
+    }
+
+    fn apply_loaded_diff_stream(&mut self, stream: DiffStream) {
+        self.invalidate_segment_prefetch();
+        self.diff_rows = stream.rows;
+        self.diff_row_metadata = stream.row_metadata;
+        self.diff_row_segment_cache = stream.row_segments;
+        self.clamp_selection_to_rows();
+        self.drag_selecting_rows = false;
+        self.sync_diff_list_state();
+        self.file_row_ranges = stream.file_ranges;
+        self.file_line_stats = stream.file_line_stats;
+        self.recompute_diff_layout();
+
+        let has_selection = self.selected_path.as_ref().is_some_and(|path| {
+            self.files.iter().any(|file| file.path == *path)
+        });
+        if !has_selection {
+            self.selected_path = self.files.first().map(|file| file.path.clone());
+        }
+
+        self.selected_status = self.selected_path.as_ref().and_then(|selected| {
+            self.files
+                .iter()
+                .find(|file| &file.path == selected)
+                .map(|file| file.status)
+        });
+        self.last_visible_row_start = None;
+        self.recompute_diff_visible_header_lookup();
+
+        if self.scroll_selected_after_reload {
+            self.scroll_selected_after_reload = false;
+            self.scroll_selected_file_to_top();
+        }
+    }
+
+    fn apply_diff_stream_error(&mut self, err: anyhow::Error) {
+        self.diff_rows = vec![message_row(
+            DiffRowKind::Meta,
+            format!("Failed to load diff stream: {err:#}"),
+        )];
+        self.diff_row_metadata.clear();
+        self.diff_row_segment_cache.clear();
+        self.invalidate_segment_prefetch();
+        self.selection_anchor_row = None;
+        self.selection_head_row = None;
+        self.drag_selecting_rows = false;
+        self.sync_diff_list_state();
+        self.file_row_ranges.clear();
+        self.file_line_stats.clear();
+        self.recompute_diff_layout();
+        self.diff_visible_file_header_lookup.clear();
+        self.diff_visible_hunk_header_lookup.clear();
+        self.scroll_selected_after_reload = false;
+    }
+
+    fn recompute_diff_visible_header_lookup(&mut self) {
+        let row_count = self.diff_rows.len();
+        self.diff_visible_file_header_lookup = vec![None; row_count];
+        self.diff_visible_hunk_header_lookup = vec![None; row_count];
+        if row_count == 0 {
+            return;
+        }
+
+        if self.diff_row_metadata.len() == row_count {
+            let mut current_file_header = None::<usize>;
+            let mut current_hunk_header = None::<usize>;
+            for row_ix in 0..row_count {
+                let meta = &self.diff_row_metadata[row_ix];
+                match meta.kind {
+                    DiffStreamRowKind::EmptyState => {
+                        current_file_header = None;
+                        current_hunk_header = None;
+                    }
+                    DiffStreamRowKind::FileHeader => {
+                        current_file_header = Some(row_ix);
+                        current_hunk_header = None;
+                    }
+                    DiffStreamRowKind::CoreHunkHeader => {
+                        if current_file_header.is_none() {
+                            current_file_header = self.file_row_ranges.iter().find_map(|range| {
+                                if row_ix >= range.start_row && row_ix < range.end_row {
+                                    Some(range.start_row)
+                                } else {
+                                    None
+                                }
+                            });
+                        }
+                        current_hunk_header = Some(row_ix);
+                    }
+                    _ => {}
+                }
+
+                self.diff_visible_file_header_lookup[row_ix] = current_file_header;
+                self.diff_visible_hunk_header_lookup[row_ix] = current_hunk_header;
+            }
+            return;
+        }
+
+        let mut current_hunk_header = None::<usize>;
+        for row_ix in 0..row_count {
+            if self
+                .diff_rows
+                .get(row_ix)
+                .is_some_and(|row| row.kind == DiffRowKind::HunkHeader)
+            {
+                current_hunk_header = Some(row_ix);
+            }
+
+            let file_header_ix = self.file_row_ranges.iter().find_map(|range| {
+                if row_ix >= range.start_row && row_ix < range.end_row {
+                    Some(range.start_row)
+                } else {
+                    None
+                }
+            });
+            self.diff_visible_file_header_lookup[row_ix] = file_header_ix;
+            self.diff_visible_hunk_header_lookup[row_ix] = current_hunk_header;
+        }
+    }
+
     fn next_snapshot_epoch(&mut self) -> usize {
         self.snapshot_epoch = self.snapshot_epoch.saturating_add(1);
         self.snapshot_epoch
@@ -681,6 +857,17 @@ impl DiffViewer {
     fn next_patch_epoch(&mut self) -> usize {
         self.patch_epoch = self.patch_epoch.saturating_add(1);
         self.patch_epoch
+    }
+
+    fn next_segment_prefetch_epoch(&mut self) -> usize {
+        self.segment_prefetch_epoch = self.segment_prefetch_epoch.saturating_add(1);
+        self.segment_prefetch_epoch
+    }
+
+    fn invalidate_segment_prefetch(&mut self) {
+        self.next_segment_prefetch_epoch();
+        self.segment_prefetch_task = Task::ready(());
+        self.segment_prefetch_anchor_row = None;
     }
 
     fn rebuild_tree(&mut self, cx: &mut Context<Self>) {

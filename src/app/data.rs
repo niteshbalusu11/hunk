@@ -12,9 +12,7 @@ use super::highlight::{
 };
 use super::*;
 use hunk::diff::parse_patch_side_by_side;
-use hunk::jj::{
-    JjRepo, RepoTreeEntry, RepoTreeEntryKind, load_patch_from_open_repo, open_repo_for_patch,
-};
+use hunk::jj::{RepoTreeEntry, RepoTreeEntryKind, load_patches_for_files};
 
 #[derive(Default)]
 struct DiffTreeFolder {
@@ -75,8 +73,8 @@ pub(super) struct FileEditorDocument {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct CachedStyledSegment {
-    pub(super) plain_text: String,
-    pub(super) whitespace_text: String,
+    pub(super) plain_text: SharedString,
+    pub(super) whitespace_text: SharedString,
     pub(super) syntax: SyntaxTokenKind,
     pub(super) changed: bool,
 }
@@ -117,7 +115,7 @@ pub(super) struct DiffStreamRowMeta {
 pub(super) struct DiffStream {
     pub(super) rows: Vec<SideBySideRow>,
     pub(super) row_metadata: Vec<DiffStreamRowMeta>,
-    pub(super) row_segments: BTreeMap<u64, DiffRowSegmentCache>,
+    pub(super) row_segments: Vec<Option<DiffRowSegmentCache>>,
     pub(super) file_ranges: Vec<FileRowRange>,
     pub(super) file_line_stats: BTreeMap<String, LineStats>,
 }
@@ -126,6 +124,13 @@ struct LoadedFileDiffRows {
     core_rows: Vec<SideBySideRow>,
     stats: LineStats,
     load_error: Option<String>,
+}
+
+const DETAILED_SEGMENT_MAX_CHANGED_LINES: u64 = 8_000;
+const MAX_RENDER_SEGMENTS_PER_CELL: usize = 48;
+
+pub(super) fn use_detailed_segments_for_file(line_stats: LineStats) -> bool {
+    line_stats.changed() <= DETAILED_SEGMENT_MAX_CHANGED_LINES
 }
 
 pub(super) fn build_tree_items(files: &[ChangedFile]) -> Vec<TreeItem> {
@@ -437,10 +442,15 @@ pub(super) fn load_diff_stream(
 ) -> Result<DiffStream> {
     let mut rows = Vec::new();
     let mut row_metadata = Vec::new();
-    let mut row_segments = BTreeMap::new();
+    let mut row_segments = Vec::new();
     let mut file_ranges = Vec::with_capacity(files.len());
     let mut file_line_stats = BTreeMap::new();
-    let repo = open_repo_for_patch(repo_root)?;
+    let expanded_files = files
+        .iter()
+        .filter(|file| !collapsed_files.contains(file.path.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    let patches_by_path = load_patches_for_files(repo_root, &expanded_files)?;
 
     for file in files {
         let start_row = rows.len();
@@ -454,6 +464,7 @@ pub(super) fn load_diff_stream(
             Some(file.status),
             file_row_ordinal,
         );
+        row_segments.push(None);
         file_row_ordinal = file_row_ordinal.saturating_add(1);
 
         if collapsed_files.contains(file.path.as_str()) {
@@ -479,8 +490,13 @@ pub(super) fn load_diff_stream(
                 Some(file.status),
                 file_row_ordinal,
             );
+            row_segments.push(None);
         } else {
-            let loaded_file = load_file_diff_rows(&repo, file);
+            let patch = patches_by_path
+                .get(file.path.as_str())
+                .map(String::as_str)
+                .unwrap_or_default();
+            let loaded_file = load_file_diff_rows(file, patch);
             file_line_stats.insert(file.path.clone(), loaded_file.stats);
             if let Some(load_error) = loaded_file.load_error {
                 push_stream_row(
@@ -492,6 +508,7 @@ pub(super) fn load_diff_stream(
                     Some(file.status),
                     file_row_ordinal,
                 );
+                row_segments.push(None);
             } else {
                 for row in loaded_file.core_rows.into_iter().filter(|row| {
                     matches!(
@@ -500,21 +517,16 @@ pub(super) fn load_diff_stream(
                     )
                 }) {
                     let row_kind = stream_kind_for_core_row(&row);
-                    let stable_id = push_stream_row(
+                    push_stream_row(
                         &mut rows,
                         &mut row_metadata,
-                        row.clone(),
+                        row,
                         row_kind,
                         Some(file.path.as_str()),
                         Some(file.status),
                         file_row_ordinal,
                     );
-                    if row.kind == DiffRowKind::Code {
-                        row_segments.insert(
-                            stable_id,
-                            build_diff_row_segment_cache(Some(file.path.as_str()), &row),
-                        );
-                    }
+                    row_segments.push(None);
                     file_row_ordinal = file_row_ordinal.saturating_add(1);
                 }
             }
@@ -539,7 +551,10 @@ pub(super) fn load_diff_stream(
             None,
             0,
         );
+        row_segments.push(None);
     }
+
+    debug_assert_eq!(row_segments.len(), rows.len());
 
     Ok(DiffStream {
         rows,
@@ -550,7 +565,7 @@ pub(super) fn load_diff_stream(
     })
 }
 
-fn load_file_diff_rows(repo: &JjRepo, file: &ChangedFile) -> LoadedFileDiffRows {
+fn load_file_diff_rows(file: &ChangedFile, patch: &str) -> LoadedFileDiffRows {
     if is_probably_binary_extension(file.path.as_str()) {
         return LoadedFileDiffRows {
             core_rows: Vec::new(),
@@ -562,43 +577,34 @@ fn load_file_diff_rows(repo: &JjRepo, file: &ChangedFile) -> LoadedFileDiffRows 
         };
     }
 
-    match load_patch_from_open_repo(repo, &file.path, file.status) {
-        Ok(patch) => {
-            if is_binary_patch(patch.as_str()) {
-                return LoadedFileDiffRows {
-                    core_rows: Vec::new(),
-                    stats: LineStats::default(),
-                    load_error: Some(format!(
-                        "Preview unavailable for {}: binary diff.",
-                        file.path
-                    )),
-                };
-            }
-
-            let core_rows = parse_patch_side_by_side(&patch);
-            if patch_has_unrenderable_text_diff(patch.as_str(), &core_rows) {
-                return LoadedFileDiffRows {
-                    core_rows: Vec::new(),
-                    stats: LineStats::default(),
-                    load_error: Some(format!(
-                        "Preview unavailable for {}: unsupported diff format.",
-                        file.path
-                    )),
-                };
-            }
-
-            let stats = line_stats_from_rows(&core_rows);
-            LoadedFileDiffRows {
-                core_rows,
-                stats,
-                load_error: None,
-            }
-        }
-        Err(err) => LoadedFileDiffRows {
+    if is_binary_patch(patch) {
+        return LoadedFileDiffRows {
             core_rows: Vec::new(),
             stats: LineStats::default(),
-            load_error: Some(format!("Failed to load patch for {}: {err:#}", file.path)),
-        },
+            load_error: Some(format!(
+                "Preview unavailable for {}: binary diff.",
+                file.path
+            )),
+        };
+    }
+
+    let core_rows = parse_patch_side_by_side(patch);
+    if patch_has_unrenderable_text_diff(patch, &core_rows) {
+        return LoadedFileDiffRows {
+            core_rows: Vec::new(),
+            stats: LineStats::default(),
+            load_error: Some(format!(
+                "Preview unavailable for {}: unsupported diff format.",
+                file.path
+            )),
+        };
+    }
+
+    let stats = line_stats_from_rows(&core_rows);
+    LoadedFileDiffRows {
+        core_rows,
+        stats,
+        load_error: None,
     }
 }
 
@@ -608,8 +614,9 @@ pub(super) fn cached_segments_from_styled(
     segments
         .into_iter()
         .map(|segment| {
-            let plain_text = segment.text;
-            let whitespace_text = render_with_whitespace_markers(plain_text.as_str());
+            let plain_text = SharedString::from(segment.text);
+            let whitespace_text =
+                SharedString::from(render_with_whitespace_markers(plain_text.as_ref()));
             CachedStyledSegment {
                 plain_text,
                 whitespace_text,
@@ -620,26 +627,106 @@ pub(super) fn cached_segments_from_styled(
         .collect::<Vec<_>>()
 }
 
-fn build_diff_row_segment_cache(
+pub(super) fn build_diff_row_segment_cache(
     file_path: Option<&str>,
     row: &SideBySideRow,
+    use_detailed_segments: bool,
 ) -> DiffRowSegmentCache {
-    let left = cached_segments_from_styled(build_line_segments(
-        file_path,
-        &row.left.text,
-        row.left.kind,
-        &row.right.text,
-        row.right.kind,
-    ));
-    let right = cached_segments_from_styled(build_line_segments(
-        file_path,
-        &row.right.text,
-        row.right.kind,
-        &row.left.text,
-        row.left.kind,
-    ));
+    if !use_detailed_segments {
+        return DiffRowSegmentCache {
+            left: cached_coarse_segments(&row.left.text),
+            right: cached_coarse_segments(&row.right.text),
+        };
+    }
+
+    let left = compact_cached_segments_for_render(
+        cached_segments_from_styled(build_line_segments(
+            file_path,
+            &row.left.text,
+            row.left.kind,
+            &row.right.text,
+            row.right.kind,
+        )),
+        MAX_RENDER_SEGMENTS_PER_CELL,
+    );
+    let right = compact_cached_segments_for_render(
+        cached_segments_from_styled(build_line_segments(
+            file_path,
+            &row.right.text,
+            row.right.kind,
+            &row.left.text,
+            row.left.kind,
+        )),
+        MAX_RENDER_SEGMENTS_PER_CELL,
+    );
 
     DiffRowSegmentCache { left, right }
+}
+
+fn compact_cached_segments_for_render(
+    segments: Vec<CachedStyledSegment>,
+    max_segments: usize,
+) -> Vec<CachedStyledSegment> {
+    if max_segments == 0 || segments.len() <= max_segments {
+        return segments;
+    }
+
+    let chunk_size = segments.len().div_ceil(max_segments);
+    let mut compacted = Vec::with_capacity(max_segments);
+    for chunk in segments.chunks(chunk_size) {
+        if chunk.is_empty() {
+            continue;
+        }
+
+        let plain_capacity = chunk
+            .iter()
+            .map(|segment| segment.plain_text.as_ref().len())
+            .sum::<usize>();
+        let whitespace_capacity = chunk
+            .iter()
+            .map(|segment| segment.whitespace_text.as_ref().len())
+            .sum::<usize>();
+        let mut plain_text = String::with_capacity(plain_capacity);
+        let mut whitespace_text = String::with_capacity(whitespace_capacity);
+
+        let first_syntax = chunk[0].syntax;
+        let mut mixed_syntax = false;
+        let mut changed = false;
+        for segment in chunk {
+            plain_text.push_str(segment.plain_text.as_ref());
+            whitespace_text.push_str(segment.whitespace_text.as_ref());
+            changed |= segment.changed;
+            if segment.syntax != first_syntax {
+                mixed_syntax = true;
+            }
+        }
+
+        compacted.push(CachedStyledSegment {
+            plain_text: SharedString::from(plain_text),
+            whitespace_text: SharedString::from(whitespace_text),
+            syntax: if mixed_syntax {
+                SyntaxTokenKind::Plain
+            } else {
+                first_syntax
+            },
+            changed,
+        });
+    }
+
+    compacted
+}
+
+pub(super) fn cached_coarse_segments(text: &str) -> Vec<CachedStyledSegment> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+
+    vec![CachedStyledSegment {
+        plain_text: SharedString::from(text.to_string()),
+        whitespace_text: SharedString::from(render_with_whitespace_markers(text)),
+        syntax: SyntaxTokenKind::Plain,
+        changed: false,
+    }]
 }
 
 fn is_probably_binary_extension(path: &str) -> bool {
@@ -732,7 +819,7 @@ fn push_stream_row(
     file_status: Option<FileStatus>,
     ordinal: usize,
 ) -> u64 {
-    let stable_id = compute_stable_row_id(file_path, kind, ordinal, &row);
+    let stable_id = compute_stable_row_id(file_path, kind, ordinal);
     rows.push(row);
     row_metadata.push(DiffStreamRowMeta {
         stable_id,
@@ -743,31 +830,12 @@ fn push_stream_row(
     stable_id
 }
 
-fn compute_stable_row_id(
-    file_path: Option<&str>,
-    kind: DiffStreamRowKind,
-    ordinal: usize,
-    row: &SideBySideRow,
-) -> u64 {
+fn compute_stable_row_id(file_path: Option<&str>, kind: DiffStreamRowKind, ordinal: usize) -> u64 {
     let mut hasher = DefaultHasher::new();
     file_path.unwrap_or("__stream__").hash(&mut hasher);
     stable_kind_tag(kind).hash(&mut hasher);
     ordinal.hash(&mut hasher);
-    hash_row(row, &mut hasher);
     hasher.finish()
-}
-
-fn hash_row(row: &SideBySideRow, hasher: &mut impl Hasher) {
-    diff_row_kind_tag(row.kind).hash(hasher);
-    row.text.hash(hasher);
-    hash_cell(&row.left, hasher);
-    hash_cell(&row.right, hasher);
-}
-
-fn hash_cell(cell: &DiffCell, hasher: &mut impl Hasher) {
-    cell.line.hash(hasher);
-    diff_cell_kind_tag(cell.kind).hash(hasher);
-    cell.text.hash(hasher);
 }
 
 fn stable_kind_tag(kind: DiffStreamRowKind) -> &'static str {
@@ -779,24 +847,6 @@ fn stable_kind_tag(kind: DiffStreamRowKind) -> &'static str {
         DiffStreamRowKind::FileCollapsed => "file-collapsed",
         DiffStreamRowKind::FileError => "file-error",
         DiffStreamRowKind::EmptyState => "empty-state",
-    }
-}
-
-fn diff_row_kind_tag(kind: DiffRowKind) -> &'static str {
-    match kind {
-        DiffRowKind::Code => "code",
-        DiffRowKind::HunkHeader => "hunk-header",
-        DiffRowKind::Meta => "meta",
-        DiffRowKind::Empty => "empty",
-    }
-}
-
-fn diff_cell_kind_tag(kind: DiffCellKind) -> &'static str {
-    match kind {
-        DiffCellKind::None => "none",
-        DiffCellKind::Context => "context",
-        DiffCellKind::Added => "added",
-        DiffCellKind::Removed => "removed",
     }
 }
 
@@ -833,34 +883,16 @@ mod tests {
 
     #[test]
     fn stable_row_id_is_deterministic_for_same_row() {
-        let row = SideBySideRow {
-            kind: DiffRowKind::Code,
-            left: DiffCell {
-                line: Some(10),
-                text: "old".to_string(),
-                kind: DiffCellKind::Removed,
-            },
-            right: DiffCell {
-                line: Some(10),
-                text: "new".to_string(),
-                kind: DiffCellKind::Added,
-            },
-            text: String::new(),
-        };
-
-        let first = compute_stable_row_id(Some("src/lib.rs"), DiffStreamRowKind::CoreCode, 2, &row);
-        let second =
-            compute_stable_row_id(Some("src/lib.rs"), DiffStreamRowKind::CoreCode, 2, &row);
+        let first = compute_stable_row_id(Some("src/lib.rs"), DiffStreamRowKind::CoreCode, 2);
+        let second = compute_stable_row_id(Some("src/lib.rs"), DiffStreamRowKind::CoreCode, 2);
 
         assert_eq!(first, second);
     }
 
     #[test]
     fn stable_row_id_changes_when_ordinal_changes() {
-        let row = message_row(DiffRowKind::Meta, "header");
-        let first = compute_stable_row_id(Some("src/lib.rs"), DiffStreamRowKind::CoreMeta, 0, &row);
-        let second =
-            compute_stable_row_id(Some("src/lib.rs"), DiffStreamRowKind::CoreMeta, 1, &row);
+        let first = compute_stable_row_id(Some("src/lib.rs"), DiffStreamRowKind::CoreMeta, 0);
+        let second = compute_stable_row_id(Some("src/lib.rs"), DiffStreamRowKind::CoreMeta, 1);
 
         assert_ne!(first, second);
     }
@@ -883,5 +915,35 @@ mod tests {
     #[test]
     fn editor_language_hint_falls_back_to_text_for_unknown_extensions() {
         assert_eq!(editor_language_hint("docs/schema.xml"), "text");
+    }
+
+    #[test]
+    fn compact_cached_segments_caps_count_and_preserves_text() {
+        let mut expected = String::new();
+        let styled = (0..20)
+            .map(|ix| {
+                let text = format!("part-{ix}|");
+                expected.push_str(&text);
+                StyledSegment {
+                    text,
+                    syntax: if ix % 2 == 0 {
+                        SyntaxTokenKind::Keyword
+                    } else {
+                        SyntaxTokenKind::String
+                    },
+                    changed: ix % 3 == 0,
+                }
+            })
+            .collect::<Vec<_>>();
+        let cached = cached_segments_from_styled(styled);
+
+        let compacted = compact_cached_segments_for_render(cached, 6);
+        assert!(compacted.len() <= 6);
+
+        let reconstructed = compacted.iter().fold(String::new(), |mut acc, segment| {
+            acc.push_str(segment.plain_text.as_ref());
+            acc
+        });
+        assert_eq!(reconstructed, expected);
     }
 }

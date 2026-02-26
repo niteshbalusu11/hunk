@@ -48,6 +48,9 @@ const DIFF_BOTTOM_SAFE_INSET: f32 = APP_BOTTOM_SAFE_INSET;
 const DIFF_SCROLLBAR_RIGHT_INSET: f32 = 0.0;
 const DIFF_SCROLLBAR_SIZE: f32 = 16.0;
 const FILE_EDITOR_MAX_BYTES: usize = 2_400_000;
+const DIFF_SEGMENT_PREFETCH_RADIUS_ROWS: usize = 120;
+const DIFF_SEGMENT_PREFETCH_STEP_ROWS: usize = 24;
+const DIFF_SEGMENT_PREFETCH_BATCH_ROWS: usize = 96;
 
 mod controller;
 mod data;
@@ -629,7 +632,9 @@ struct DiffViewer {
     selected_status: Option<FileStatus>,
     diff_rows: Vec<SideBySideRow>,
     diff_row_metadata: Vec<DiffStreamRowMeta>,
-    diff_row_segment_cache: BTreeMap<u64, DiffRowSegmentCache>,
+    diff_row_segment_cache: Vec<Option<DiffRowSegmentCache>>,
+    diff_visible_file_header_lookup: Vec<Option<usize>>,
+    diff_visible_hunk_header_lookup: Vec<Option<usize>>,
     file_row_ranges: Vec<FileRowRange>,
     file_line_stats: BTreeMap<String, LineStats>,
     diff_list_state: ListState,
@@ -657,6 +662,9 @@ struct DiffViewer {
     last_visible_row_start: Option<usize>,
     last_diff_scroll_offset: Option<gpui::Point<gpui::Pixels>>,
     last_scroll_activity_at: Instant,
+    segment_prefetch_anchor_row: Option<usize>,
+    segment_prefetch_epoch: usize,
+    segment_prefetch_task: Task<()>,
     fps: f32,
     frame_sample_count: u32,
     frame_sample_started_at: Instant,

@@ -47,7 +47,6 @@ pub(super) struct RepoContext {
 
 pub(super) struct RenderedPatch {
     pub(super) patch: String,
-    pub(super) line_stats: LineStats,
 }
 
 struct NoopGitSubprocessCallback;
@@ -829,9 +828,9 @@ pub(super) fn repo_line_stats_from_context(context: &RepoContext) -> Result<Line
     let mut stats = LineStats::default();
 
     for entry in collect_materialized_diff_entries(context)? {
-        let rendered = render_patch_for_entry(entry, &materialize_options)?;
-        stats.added += rendered.line_stats.added;
-        stats.removed += rendered.line_stats.removed;
+        let entry_stats = line_stats_for_entry(entry, &materialize_options)?;
+        stats.added += entry_stats.added;
+        stats.removed += entry_stats.removed;
     }
 
     Ok(stats)
@@ -944,10 +943,7 @@ pub(super) fn render_patch_for_entry(
                 "Binary files {before_label} and {after_label} differ\n"
             ));
         }
-        return Ok(RenderedPatch {
-            patch,
-            line_stats: LineStats::default(),
-        });
+        return Ok(RenderedPatch { patch });
     }
 
     let hunks = unified_diff_hunks(
@@ -959,9 +955,8 @@ pub(super) fn render_patch_for_entry(
         LineCompareMode::Exact,
     );
 
-    let line_stats = line_stats_from_hunks(&hunks);
     if hunks.is_empty() {
-        return Ok(RenderedPatch { patch, line_stats });
+        return Ok(RenderedPatch { patch });
     }
 
     patch.push_str(&format!("--- {before_label}\n"));
@@ -979,7 +974,31 @@ pub(super) fn render_patch_for_entry(
         }
     }
 
-    Ok(RenderedPatch { patch, line_stats })
+    Ok(RenderedPatch { patch })
+}
+
+fn line_stats_for_entry(
+    entry: MaterializedTreeDiffEntry,
+    materialize_options: &ConflictMaterializeOptions,
+) -> Result<LineStats> {
+    let values = entry.values?;
+    let before_part = git_diff_part(entry.path.source(), values.before, materialize_options)?;
+    let after_part = git_diff_part(entry.path.target(), values.after, materialize_options)?;
+
+    if before_part.content.is_binary || after_part.content.is_binary {
+        return Ok(LineStats::default());
+    }
+
+    let hunks = unified_diff_hunks(
+        Diff::new(
+            before_part.content.contents.as_ref(),
+            after_part.content.contents.as_ref(),
+        ),
+        3,
+        LineCompareMode::Exact,
+    );
+
+    Ok(line_stats_from_hunks(&hunks))
 }
 
 fn format_unified_hunk_header(hunk: &UnifiedDiffHunk<'_>) -> String {

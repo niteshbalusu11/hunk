@@ -2,7 +2,6 @@ struct DiffCellRenderSpec<'a> {
     row_ix: usize,
     side: &'static str,
     cell: &'a DiffCell,
-    peer_text: &'a str,
     peer_kind: DiffCellKind,
 }
 
@@ -345,46 +344,31 @@ impl DiffViewer {
         let capped = visible_row.min(self.diff_rows.len().saturating_sub(1));
 
         if self.diff_row_metadata.len() == self.diff_rows.len() {
-            let current_file = self
-                .diff_row_metadata
+            let hunk_ix = self
+                .diff_visible_hunk_header_lookup
                 .get(capped)
-                .and_then(|row| row.file_path.clone());
-
-            for ix in (0..=capped).rev() {
-                let meta = self.diff_row_metadata.get(ix)?;
-                if current_file.is_some() && meta.file_path != current_file {
-                    break;
-                }
-
-                if meta.kind == DiffStreamRowKind::CoreHunkHeader {
-                    let path = meta
-                        .file_path
-                        .clone()
-                        .or_else(|| self.selected_path.clone())
-                        .unwrap_or_else(|| "file".to_string());
-                    let header = self.diff_rows.get(ix)?.text.clone();
-                    return Some((path, header));
-                }
-
-                if matches!(meta.kind, DiffStreamRowKind::FileHeader) {
-                    break;
-                }
-
-            }
+                .copied()
+                .flatten()?;
+            let meta = self.diff_row_metadata.get(hunk_ix)?;
+            let path = meta
+                .file_path
+                .clone()
+                .or_else(|| self.selected_path.clone())
+                .unwrap_or_else(|| "file".to_string());
+            let header = self.diff_rows.get(hunk_ix)?.text.clone();
+            return Some((path, header));
         }
 
-        for ix in (0..=capped).rev() {
-            let row = self.diff_rows.get(ix)?;
-            if row.kind == DiffRowKind::HunkHeader {
-                let path = self
-                    .selected_path
-                    .clone()
-                    .unwrap_or_else(|| "file".to_string());
-                return Some((path, row.text.clone()));
-            }
-        }
-
-        None
+        let hunk_ix = self
+            .diff_visible_hunk_header_lookup
+            .get(capped)
+            .copied()
+            .flatten()?;
+        let path = self
+            .selected_path
+            .clone()
+            .unwrap_or_else(|| "file".to_string());
+        Some((path, self.diff_rows.get(hunk_ix)?.text.clone()))
     }
 
     fn visible_file_header(&self, visible_row: usize) -> Option<(usize, String, FileStatus)> {
@@ -395,31 +379,34 @@ impl DiffViewer {
         let capped = visible_row.min(self.diff_rows.len().saturating_sub(1));
 
         if self.diff_row_metadata.len() == self.diff_rows.len() {
-            for ix in (0..=capped).rev() {
-                let meta = self.diff_row_metadata.get(ix)?;
-                if meta.kind == DiffStreamRowKind::EmptyState {
-                    return None;
-                }
-                if meta.kind != DiffStreamRowKind::FileHeader {
-                    continue;
-                }
-
-                let path = meta.file_path.clone()?;
-                let status = meta.file_status.unwrap_or_else(|| {
-                    self.files
-                        .iter()
-                        .find(|file| file.path == path)
-                        .map(|file| file.status)
-                        .unwrap_or(FileStatus::Unknown)
-                });
-                return Some((ix, path, status));
+            let header_ix = self
+                .diff_visible_file_header_lookup
+                .get(capped)
+                .copied()
+                .flatten()?;
+            let meta = self.diff_row_metadata.get(header_ix)?;
+            if meta.kind == DiffStreamRowKind::EmptyState {
+                return None;
             }
+            let path = meta.file_path.clone()?;
+            let status = meta.file_status.unwrap_or_else(|| {
+                self.files
+                    .iter()
+                    .find(|file| file.path == path)
+                    .map(|file| file.status)
+                    .unwrap_or(FileStatus::Unknown)
+            });
+            return Some((header_ix, path, status));
         }
 
+        let header_ix = self
+            .diff_visible_file_header_lookup
+            .get(capped)
+            .copied()
+            .flatten()?;
         self.file_row_ranges
             .iter()
-            .find(|range| capped >= range.start_row && capped < range.end_row)
-            .or_else(|| self.file_row_ranges.last())
+            .find(|range| range.start_row == header_ix)
             .map(|range| (range.start_row, range.path.clone(), range.status))
     }
 
@@ -635,7 +622,6 @@ impl DiffViewer {
                     row_ix: ix,
                     side: "left",
                     cell: &row_data.left,
-                    peer_text: &row_data.right.text,
                     peer_kind: row_data.right.kind,
                 },
                 cx,
@@ -647,7 +633,6 @@ impl DiffViewer {
                     row_ix: ix,
                     side: "right",
                     cell: &row_data.right,
-                    peer_text: &row_data.left.text,
                     peer_kind: row_data.left.kind,
                 },
                 cx,
@@ -664,12 +649,7 @@ impl DiffViewer {
     ) -> AnyElement {
         let side = spec.side;
         let cell = spec.cell;
-        let peer_text = spec.peer_text;
         let peer_kind = spec.peer_kind;
-        let file_path = self
-            .diff_row_metadata
-            .get(spec.row_ix)
-            .and_then(|meta| meta.file_path.as_deref());
         let cell_id = if side == "left" {
             ("diff-cell-left", row_stable_id)
         } else {
@@ -778,7 +758,10 @@ impl DiffViewer {
         }
 
         let line_number = cell.line.map(|line| line.to_string()).unwrap_or_default();
-        let cached_row_segments = self.diff_row_segment_cache.get(&row_stable_id);
+        let cached_row_segments = self
+            .diff_row_segment_cache
+            .get(spec.row_ix)
+            .and_then(Option::as_ref);
         let segment_cache = if side == "left" {
             cached_row_segments.map(|segments| &segments.left)
         } else {
@@ -788,13 +771,7 @@ impl DiffViewer {
         let styled_segments = if let Some(cached) = segment_cache {
             cached
         } else {
-            fallback_segments = cached_segments_from_styled(build_line_segments(
-                file_path,
-                &cell.text,
-                cell.kind,
-                peer_text,
-                peer_kind,
-            ));
+            fallback_segments = cached_coarse_segments(&cell.text);
             &fallback_segments
         };
         let line_number_width = if side == "left" {

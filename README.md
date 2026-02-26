@@ -43,6 +43,29 @@ TARGET_DIR="${CARGO_TARGET_DIR:-target}"
 open "$TARGET_DIR/release/bundle/osx/Hunk.app"
 ```
 
+## Large Diff Stress Fixture
+
+Generate a synthetic JJ repository with a very large working-copy diff:
+
+```bash
+./scripts/create_large_diff_repo.sh --lines 25000 --files 1 --force
+```
+
+The script prints the generated repo path and total diff size. Open that folder in Hunk to stress scrolling/render performance and watch the FPS badge in the toolbar.
+
+Generate code-like diffs instead of plain text (`txt`, `js`, or `ts`):
+
+```bash
+./scripts/create_large_diff_repo.sh --lines 25000 --files 20 --lang ts --force
+./scripts/create_large_diff_repo.sh --lines 25000 --files 20 --lang js --force
+```
+
+To spread the same total load across multiple files:
+
+```bash
+./scripts/create_large_diff_repo.sh --lines 6000 --files 4 --force
+```
+
 ## Config
 
 Hunk reads config from `~/.hunkdiff/config.toml`.

@@ -209,6 +209,50 @@ pub fn load_patch_from_open_repo(repo: &JjRepo, file_path: &str, _: FileStatus) 
     Ok(String::new())
 }
 
+pub fn load_patches_for_files(
+    repo_root: &Path,
+    files: &[ChangedFile],
+) -> Result<std::collections::BTreeMap<String, String>> {
+    let context = load_repo_context_at_root(repo_root, true)?;
+    let materialize_options = conflict_materialize_options(&context);
+    let requested_paths = files
+        .iter()
+        .map(|file| normalize_path(file.path.as_str()))
+        .filter(|path| !path.is_empty())
+        .collect::<BTreeSet<_>>();
+
+    if requested_paths.is_empty() {
+        return Ok(std::collections::BTreeMap::new());
+    }
+
+    let mut patch_map = std::collections::BTreeMap::new();
+    for entry in collect_materialized_diff_entries(&context)? {
+        let source_path = normalize_path(entry.path.source().as_internal_file_string());
+        let target_path = normalize_path(entry.path.target().as_internal_file_string());
+        let source_matches =
+            !source_path.is_empty() && requested_paths.contains(source_path.as_str());
+        let target_matches =
+            !target_path.is_empty() && requested_paths.contains(target_path.as_str());
+        if !source_matches && !target_matches {
+            continue;
+        }
+
+        let rendered = render_patch_for_entry(entry, &materialize_options)?;
+        if target_matches {
+            patch_map.insert(target_path.clone(), rendered.patch.clone());
+        }
+        if source_matches && source_path != target_path {
+            patch_map.insert(source_path, rendered.patch);
+        }
+    }
+
+    for path in requested_paths {
+        patch_map.entry(path).or_default();
+    }
+
+    Ok(patch_map)
+}
+
 pub fn load_repo_tree(repo_root: &Path) -> Result<Vec<RepoTreeEntry>> {
     let context = load_repo_context_at_root(repo_root, true)?;
     let tracked_paths = load_tracked_paths_from_context(&context)?;
