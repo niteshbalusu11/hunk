@@ -50,6 +50,10 @@ fn app_config_defaults_include_existing_keyboard_shortcuts() {
         config.keyboard_shortcuts.save_current_file,
         strings(&["cmd-s", "ctrl-s"])
     );
+    assert_eq!(
+        config.keyboard_shortcuts.open_settings,
+        strings(&["cmd-,", "ctrl-,"])
+    );
     assert_eq!(config.keyboard_shortcuts.quit_app, strings(&["cmd-q"]));
 }
 
@@ -83,6 +87,10 @@ next_hunk = ["f8"]
         config.keyboard_shortcuts.save_current_file,
         strings(&["cmd-s", "ctrl-s"])
     );
+    assert_eq!(
+        config.keyboard_shortcuts.open_settings,
+        strings(&["cmd-,", "ctrl-,"])
+    );
 }
 
 #[test]
@@ -97,5 +105,9 @@ quit_app = []
     assert_eq!(
         config.keyboard_shortcuts.open_project,
         strings(&["cmd-shift-o", "ctrl-shift-o"])
+    );
+    assert_eq!(
+        config.keyboard_shortcuts.open_settings,
+        strings(&["cmd-,", "ctrl-,"])
     );
 }

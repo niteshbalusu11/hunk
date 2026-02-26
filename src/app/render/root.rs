@@ -32,6 +32,7 @@ impl Render for DiffViewer {
 
         v_flex()
             .size_full()
+            .relative()
             .key_context("DiffViewer")
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::select_next_line_action))
@@ -46,6 +47,7 @@ impl Render for DiffViewer {
             .on_action(cx.listener(Self::previous_file_action))
             .on_action(cx.listener(Self::open_project_action))
             .on_action(cx.listener(Self::save_current_file_action))
+            .on_action(cx.listener(Self::open_settings_action))
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .when(!cfg!(target_os = "macos"), |this| {
@@ -68,6 +70,9 @@ impl Render for DiffViewer {
                             .child(resizable_panel().child(self.render_diff(cx))),
                     ),
             )
+            .when(self.settings_draft.is_some(), |this| {
+                this.child(self.render_settings_popup(cx))
+            })
             .children(Root::render_dialog_layer(window, cx))
             .children(Root::render_notification_layer(window, cx))
     }

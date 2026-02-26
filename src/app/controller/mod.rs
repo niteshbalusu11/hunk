@@ -20,3 +20,4 @@ include!("editor.rs");
 include!("selection.rs");
 include!("scroll.rs");
 include!("fps.rs");
+include!("settings.rs");

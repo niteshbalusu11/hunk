@@ -19,4 +19,5 @@ include!("file_banner.rs");
 include!("file_status.rs");
 include!("diff.rs");
 include!("file_editor.rs");
+include!("settings.rs");
 include!("root.rs");
