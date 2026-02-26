@@ -2,6 +2,10 @@ impl DiffViewer {
     fn render_commit_footer(&self, cx: &mut Context<Self>) -> AnyElement {
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
+        let branch_syncable = !self.branch_name.is_empty()
+            && self.branch_name != "unknown"
+            && !self.branch_name.starts_with("detached");
+        let show_sync = branch_syncable && self.branch_has_upstream;
         let show_publish = !self.branch_has_upstream;
         let show_push = self.branch_has_upstream;
         let action_label = if show_publish { "Publish" } else { "Push" };
@@ -48,6 +52,22 @@ impl DiffViewer {
                                     this.toggle_branch_picker(cx);
                                 });
                             })
+                    })
+                    .when(show_sync, |this| {
+                        this.child({
+                            let view = view.clone();
+                            Button::new("sync-branch")
+                                .outline()
+                                .compact()
+                                .rounded(px(7.0))
+                                .label("Sync")
+                                .disabled(self.git_action_loading)
+                                .on_click(move |_, _, cx| {
+                                    view.update(cx, |this, cx| {
+                                        this.sync_current_branch_from_remote(cx);
+                                    });
+                                })
+                        })
                     })
                     .when(show_publish || show_push, |this| {
                         this.child({
