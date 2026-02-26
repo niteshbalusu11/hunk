@@ -1061,19 +1061,33 @@ fn ensure_remote_bookmark_is_tracked(
 
 fn resolve_push_remote_name(context: &RepoContext, branch_name: &str) -> Result<String> {
     let view = context.repo.view();
+    let mut first_present_remote = None;
 
     for (remote, _) in view.remote_views() {
         if remote == REMOTE_NAME_FOR_LOCAL_GIT_REPO {
             continue;
         }
-        let tracked_match = view.local_remote_bookmarks(remote).any(|(name, targets)| {
-            name.as_str() == branch_name
-                && targets.remote_ref.is_present()
-                && targets.remote_ref.is_tracked()
-        });
-        if tracked_match {
+
+        let Some((_, targets)) = view
+            .local_remote_bookmarks(remote)
+            .find(|(name, _)| name.as_str() == branch_name)
+        else {
+            continue;
+        };
+        if !targets.remote_ref.is_present() {
+            continue;
+        }
+
+        if targets.remote_ref.is_tracked() {
             return Ok(remote.as_str().to_string());
         }
+        if first_present_remote.is_none() {
+            first_present_remote = Some(remote.as_str().to_string());
+        }
+    }
+
+    if let Some(remote_name) = first_present_remote {
+        return Ok(remote_name);
     }
 
     if view
