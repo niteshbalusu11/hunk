@@ -275,6 +275,7 @@ impl DiffViewer {
         let is_selected = self.selected_path.as_deref() == Some(file.path.as_str());
         let is_dark = cx.theme().mode.is_dark();
         let is_collapsed = self.collapsed_files.contains(file.path.as_str());
+        let included_in_commit = !self.commit_excluded_files.contains(file.path.as_str());
         let row_id = {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             std::hash::Hash::hash(&file.path, &mut hasher);
@@ -318,6 +319,29 @@ impl DiffViewer {
             .py_0p5()
             .rounded_sm()
             .bg(row_bg)
+            .child({
+                let view = view.clone();
+                let path = file.path.clone();
+                let include = included_in_commit;
+                Button::new(("commit-include-toggle", row_id))
+                    .outline()
+                    .compact()
+                    .rounded(px(5.0))
+                    .min_w(px(22.0))
+                    .h(px(20.0))
+                    .label(if include { "x" } else { "" })
+                    .tooltip(if include {
+                        "Included in next commit"
+                    } else {
+                        "Excluded from next commit"
+                    })
+                    .on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        view.update(cx, |this, cx| {
+                            this.toggle_commit_file_included(path.clone(), !include, cx);
+                        });
+                    })
+            })
             .child(
                 div()
                     .w_3()

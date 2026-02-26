@@ -11,11 +11,11 @@ mod backend;
 
 use backend::{
     bookmark_remote_sync_state, checkout_existing_bookmark, collect_materialized_diff_entries,
-    commit_working_copy_changes, conflict_materialize_options, create_bookmark_at_working_copy,
-    current_bookmarks_from_context, current_commit_id_from_context, discover_repo_root,
-    last_commit_subject_from_context, list_local_branches_from_context,
-    load_changed_files_from_context, load_repo_context, load_repo_context_at_root,
-    load_tracked_paths_from_context, materialized_entry_matches_path,
+    commit_working_copy_changes, commit_working_copy_selected_paths, conflict_materialize_options,
+    create_bookmark_at_working_copy, current_bookmarks_from_context,
+    current_commit_id_from_context, discover_repo_root, last_commit_subject_from_context,
+    list_local_branches_from_context, load_changed_files_from_context, load_repo_context,
+    load_repo_context_at_root, load_tracked_paths_from_context, materialized_entry_matches_path,
     move_bookmark_to_parent_of_working_copy, normalize_path, push_bookmark, render_patch_for_entry,
     repo_line_stats_from_context, walk_repo_tree,
 };
@@ -243,6 +243,34 @@ pub fn commit_staged(repo_root: &Path, message: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+pub fn commit_selected_paths(
+    repo_root: &Path,
+    message: &str,
+    selected_paths: &[String],
+) -> Result<usize> {
+    let trimmed = message.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow!("commit message cannot be empty"));
+    }
+    if selected_paths.is_empty() {
+        return Err(anyhow!("no files selected for commit"));
+    }
+
+    let mut context = load_repo_context_at_root(repo_root, true)?;
+    if load_changed_files_from_context(&context)?.is_empty() {
+        return Err(anyhow!("no changes to commit"));
+    }
+
+    let committed_count =
+        commit_working_copy_selected_paths(&mut context, trimmed, selected_paths)?;
+
+    if let Some(active_bookmark) = load_active_bookmark_preference(&context.root) {
+        move_bookmark_to_parent_of_working_copy(&mut context, active_bookmark.as_str())?;
+    }
+
+    Ok(committed_count)
 }
 
 pub fn checkout_or_create_branch(repo_root: &Path, branch_name: &str) -> Result<()> {

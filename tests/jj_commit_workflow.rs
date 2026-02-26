@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use hunk::jj::{commit_staged, load_snapshot, stage_all, unstage_all};
+use hunk::jj::{commit_selected_paths, commit_staged, load_snapshot, stage_all, unstage_all};
 
 #[test]
 fn stage_actions_are_rejected_with_jj_backend() {
@@ -40,6 +40,42 @@ fn commit_staged_commits_working_copy_changes_with_jj() {
     assert!(
         snapshot.last_commit_subject.as_deref() == Some("update tracked"),
         "last commit subject should match the latest commit"
+    );
+}
+
+#[test]
+fn commit_selected_paths_only_commits_requested_files() {
+    let fixture = TempRepo::new("commit-selected-paths");
+    let alpha = fixture.path().join("alpha.txt");
+    let beta = fixture.path().join("beta.txt");
+
+    write_file(alpha.clone(), "alpha one\n");
+    write_file(beta.clone(), "beta one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+
+    write_file(alpha, "alpha one\nalpha two\n");
+    write_file(beta, "beta one\nbeta two\n");
+    commit_selected_paths(
+        fixture.path(),
+        "commit alpha only",
+        &["alpha.txt".to_string()],
+    )
+    .expect("partial commit should succeed");
+
+    let snapshot =
+        load_snapshot(fixture.path()).expect("snapshot should load after partial commit");
+    assert!(
+        snapshot.files.iter().any(|file| file.path == "beta.txt"),
+        "unselected file should remain in working copy"
+    );
+    assert!(
+        snapshot.files.iter().all(|file| file.path != "alpha.txt"),
+        "selected file should be committed"
+    );
+    assert_eq!(
+        snapshot.last_commit_subject.as_deref(),
+        Some("commit alpha only"),
+        "last commit subject should match partial commit message"
     );
 }
 

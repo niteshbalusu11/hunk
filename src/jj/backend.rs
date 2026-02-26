@@ -28,6 +28,8 @@ use jj_lib::op_store::RefTarget;
 use jj_lib::ref_name::{RefName, RefNameBuf, RemoteName, WorkspaceName};
 use jj_lib::refs::{BookmarkPushAction, classify_bookmark_push_action};
 use jj_lib::repo::{ReadonlyRepo, Repo as _, StoreFactories};
+use jj_lib::repo_path::RepoPathBuf;
+use jj_lib::rewrite::restore_tree;
 use jj_lib::settings::UserSettings;
 use jj_lib::working_copy::SnapshotOptions;
 use jj_lib::workspace::{Workspace, default_working_copy_factories};
@@ -671,6 +673,84 @@ pub(super) fn commit_working_copy_changes(context: &mut RepoContext, message: &s
     Ok(())
 }
 
+pub(super) fn commit_working_copy_selected_paths(
+    context: &mut RepoContext,
+    message: &str,
+    selected_paths: &[String],
+) -> Result<usize> {
+    if selected_paths.is_empty() {
+        return Err(anyhow!("no files selected for commit"));
+    }
+
+    let workspace_name = context.workspace.workspace_name().to_owned();
+    let wc_commit = current_wc_commit(context)?;
+    let base_tree = wc_commit.parent_tree(context.repo.as_ref())?;
+    let wc_tree = wc_commit.tree();
+
+    let mut repo_paths = Vec::with_capacity(selected_paths.len());
+    for path in selected_paths {
+        let normalized = normalize_path(path);
+        if normalized.is_empty() {
+            continue;
+        }
+        let repo_path = RepoPathBuf::from_relative_path(Path::new(normalized.as_str()))
+            .with_context(|| format!("invalid repository path '{path}'"))?;
+        repo_paths.push(repo_path);
+    }
+    if repo_paths.is_empty() {
+        return Err(anyhow!("no valid files selected for commit"));
+    }
+
+    let matcher = jj_lib::matchers::FilesMatcher::new(repo_paths.iter());
+    let selected_tree = block_on(restore_tree(
+        &wc_tree,
+        &base_tree,
+        "working copy".to_string(),
+        "parent".to_string(),
+        &matcher,
+    ))
+    .context("failed to select files for commit")?;
+
+    if selected_tree.tree_ids_and_labels() == base_tree.tree_ids_and_labels() {
+        return Err(anyhow!("selected files have no changes to commit"));
+    }
+
+    let mut tx = context.repo.start_transaction();
+    let committed = tx
+        .repo_mut()
+        .rewrite_commit(&wc_commit)
+        .set_description(message)
+        .set_tree(selected_tree)
+        .write()
+        .context("failed to create commit for selected files")?;
+    let new_wc = tx
+        .repo_mut()
+        .new_commit(vec![committed.id().clone()], wc_tree)
+        .write()
+        .context("failed to create next working-copy revision after partial commit")?;
+    tx.repo_mut()
+        .set_wc_commit(workspace_name.clone(), new_wc.id().clone())
+        .context("failed to update working-copy commit after partial commit")?;
+    tx.repo_mut()
+        .rebase_descendants()
+        .context("failed to rebase descendants after partial commit")?;
+
+    let repo = tx
+        .commit(format!("commit selected paths: {message}"))
+        .context("failed to finalize partial commit")?;
+
+    let locked_workspace = context
+        .workspace
+        .start_working_copy_mutation()
+        .context("failed to lock working copy after partial commit")?;
+    locked_workspace
+        .finish(repo.op_id().clone())
+        .context("failed to persist working-copy operation after partial commit")?;
+    context.repo = repo;
+
+    Ok(repo_paths.len())
+}
+
 pub(super) fn move_bookmark_to_parent_of_working_copy(
     context: &mut RepoContext,
     branch_name: &str,
@@ -689,10 +769,8 @@ pub(super) fn move_bookmark_to_parent_of_working_copy(
     };
 
     let mut tx = context.repo.start_transaction();
-    tx.repo_mut().set_local_bookmark_target(
-        RefName::new(branch_name),
-        RefTarget::normal(parent_id),
-    );
+    tx.repo_mut()
+        .set_local_bookmark_target(RefName::new(branch_name), RefTarget::normal(parent_id));
     let repo = tx
         .commit(format!("move bookmark {branch_name} to committed revision"))
         .with_context(|| format!("failed to advance bookmark '{branch_name}'"))?;

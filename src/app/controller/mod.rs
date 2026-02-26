@@ -8,8 +8,8 @@ use super::data::{
 };
 use super::*;
 use hunk::jj::{
-    RepoSnapshot, checkout_or_create_branch, commit_staged, load_repo_tree, load_snapshot,
-    load_snapshot_fingerprint, push_current_branch, sanitize_branch_name,
+    RepoSnapshot, checkout_or_create_branch, commit_selected_paths, commit_staged, load_repo_tree,
+    load_snapshot, load_snapshot_fingerprint, push_current_branch, sanitize_branch_name,
 };
 
 include!("core.rs");

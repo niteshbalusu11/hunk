@@ -164,6 +164,7 @@ impl DiffViewer {
             branch_picker_open: false,
             branch_input_state,
             commit_input_state,
+            commit_excluded_files: BTreeSet::new(),
             last_commit_subject: None,
             git_action_epoch: 0,
             git_action_task: Task::ready(()),
@@ -444,11 +445,14 @@ impl DiffViewer {
         self.branch_ahead_count = branch_ahead_count;
         self.branches = branches;
         self.files = files;
+        self.commit_excluded_files
+            .retain(|path| self.files.iter().any(|file| file.path == *path));
         self.overall_line_stats = line_stats;
         self.last_commit_subject = last_commit_subject;
         self.repo_discovery_failed = false;
         self.error_message = None;
         if root_changed {
+            self.commit_excluded_files.clear();
             self.repo_tree_nodes.clear();
             self.repo_tree_file_count = 0;
             self.repo_tree_folder_count = 0;
@@ -503,6 +507,7 @@ impl DiffViewer {
         self.branches.clear();
         self.files.clear();
         self.last_commit_subject = None;
+        self.commit_excluded_files.clear();
         self.selected_path = None;
         self.selected_status = None;
         self.overall_line_stats = LineStats::default();

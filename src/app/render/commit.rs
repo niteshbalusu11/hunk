@@ -11,6 +11,8 @@ impl DiffViewer {
             .map(str::trim_end)
             .filter(|text| !text.is_empty())
             .unwrap_or("No commits yet");
+        let included_count = self.included_commit_file_count();
+        let total_count = self.files.len();
 
         v_flex()
             .w_full()
@@ -59,6 +61,35 @@ impl DiffViewer {
                                 .on_click(move |_, _, cx| {
                                     view.update(cx, |this, cx| {
                                         this.push_or_publish_current_branch(cx);
+                                    });
+                                })
+                            })
+                    }),
+            )
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("Commit includes {included_count}/{total_count} files")),
+                    )
+                    .when(included_count < total_count, |this| {
+                        this.child({
+                            let view = view.clone();
+                            Button::new("commit-include-all")
+                                .outline()
+                                .compact()
+                                .rounded(px(7.0))
+                                .label("Include All")
+                                .disabled(self.git_action_loading)
+                                .on_click(move |_, _, cx| {
+                                    view.update(cx, |this, cx| {
+                                        this.include_all_files_for_commit(cx);
                                     });
                                 })
                         })

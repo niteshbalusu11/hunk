@@ -298,6 +298,7 @@ struct DiffViewer {
     branch_picker_open: bool,
     branch_input_state: Entity<InputState>,
     commit_input_state: Entity<InputState>,
+    commit_excluded_files: BTreeSet<String>,
     last_commit_subject: Option<String>,
     git_action_epoch: usize,
     git_action_task: Task<()>,
