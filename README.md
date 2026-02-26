@@ -22,7 +22,7 @@ Nobody writes code anymore, people just review code. So we need the best diff vi
 - Xcode + command line tools
 - Metal toolchain for GPUI shader compilation
 
-### Run Locally
+### Run Dev Locally
 
 ```bash
 cargo run
@@ -31,7 +31,8 @@ cargo run
 Launch from anywhere, then use `File > Open Project...` (or `Cmd/Ctrl+Shift+O`) to choose a Git repository.
 
 `cargo run` starts from Terminal, so macOS may still present it like a terminal-launched app.
-For a proper Dock app identity (name/icon) and normal app launching behavior, build and open the macOS bundle:
+
+### For Production builds
 
 ```bash
 cargo install cargo-bundle
