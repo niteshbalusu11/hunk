@@ -819,16 +819,6 @@ fn line_stats_from_rows(rows: &[SideBySideRow]) -> LineStats {
     stats
 }
 
-pub(super) fn display_width(text: &str) -> usize {
-    text.chars().fold(0, |acc, ch| {
-        acc + match ch {
-            '\t' => 4,
-            ch if ch.is_control() => 0,
-            _ => 1,
-        }
-    })
-}
-
 pub(super) fn decimal_digits(value: u32) -> u32 {
     if value == 0 { 1 } else { value.ilog10() + 1 }
 }

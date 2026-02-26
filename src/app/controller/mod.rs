@@ -3,7 +3,7 @@ use tracing::{error, info};
 
 use super::data::{
     DiffStreamRowKind, RepoTreeNodeKind, RightPaneMode, SidebarTreeMode, build_repo_tree,
-    build_tree_items, decimal_digits, display_width, line_number_column_width, load_diff_stream,
+    build_tree_items, decimal_digits, line_number_column_width, load_diff_stream,
     load_file_editor_document, message_row, save_file_editor_document,
 };
 use super::*;
