@@ -168,22 +168,6 @@ impl DiffViewer {
                         ),
                     )
                     .child(self.render_line_stats("overall", self.overall_line_stats, cx))
-                    .child(
-                        div()
-                            .px_2()
-                            .py_0p5()
-                            .rounded_md()
-                            .border_1()
-                            .border_color(chip_border)
-                            .bg(chip_bg)
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_family(cx.theme().mono_font_family.clone())
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("View: Fit"),
-                            ),
-                    )
                     .child({
                         let view = view.clone();
                         Button::new("toggle-diff-whitespace")
