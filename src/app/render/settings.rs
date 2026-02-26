@@ -6,6 +6,7 @@ impl DiffViewer {
 
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
+        let backdrop_bg = cx.theme().background.opacity(if is_dark { 0.24 } else { 0.12 });
         let panel_bg = cx.theme().popover.blend(
             cx.theme()
                 .background
@@ -18,198 +19,244 @@ impl DiffViewer {
         );
 
         div()
-            .id("settings-popup-anchor")
+            .id("settings-popup-overlay")
             .absolute()
-            .top(px(88.0))
-            .right(px(24.0))
-            .w(px(860.0))
-            .h(px(620.0))
+            .top_0()
+            .right_0()
+            .bottom_0()
+            .left_0()
+            .bg(backdrop_bg)
+            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                cx.stop_propagation();
+            })
+            .on_mouse_down(MouseButton::Middle, |_, _, cx| {
+                cx.stop_propagation();
+            })
+            .on_mouse_down(MouseButton::Right, |_, _, cx| {
+                cx.stop_propagation();
+            })
+            .on_scroll_wheel(|_, _, cx| {
+                cx.stop_propagation();
+            })
             .child(
-                v_flex()
-                    .id("settings-popup")
-                    .w_full()
-                    .h_full()
-                    .rounded(px(12.0))
-                    .border_1()
-                    .border_color(cx.theme().border.opacity(if is_dark { 0.92 } else { 0.72 }))
-                    .bg(panel_bg)
+                div()
+                    .id("settings-popup-anchor")
+                    .absolute()
+                    .top(px(88.0))
+                    .right(px(24.0))
+                    .w(px(860.0))
+                    .h(px(620.0))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                        cx.stop_propagation();
+                    })
+                    .on_mouse_down(MouseButton::Middle, |_, _, cx| {
+                        cx.stop_propagation();
+                    })
+                    .on_mouse_down(MouseButton::Right, |_, _, cx| {
+                        cx.stop_propagation();
+                    })
+                    .on_scroll_wheel(|_, _, cx| {
+                        cx.stop_propagation();
+                    })
                     .child(
-                        h_flex()
-                            .items_center()
-                            .justify_between()
-                            .px_4()
-                            .py_3()
-                            .border_b_1()
-                            .border_color(cx.theme().border.opacity(if is_dark { 0.92 } else { 0.74 }))
-                            .child(
-                                v_flex()
-                                    .gap_0p5()
-                                    .child(
-                                        div()
-                                            .text_lg()
-                                            .font_semibold()
-                                            .text_color(cx.theme().foreground)
-                                            .child("Settings"),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child("Changes are saved to ~/.hunkdiff/config.toml"),
-                                    ),
-                            )
-                            .child({
-                                let view = view.clone();
-                                Button::new("settings-close")
-                                    .ghost()
-                                    .compact()
-                                    .rounded(px(8.0))
-                                    .label("Close")
-                                    .on_click(move |_, _, cx| {
-                                        view.update(cx, |this, cx| {
-                                            this.close_settings(cx);
-                                        });
-                                    })
-                            }),
-                    )
-                    .child(
-                        h_flex()
-                            .flex_1()
-                            .min_h_0()
-                            .child(
-                                v_flex()
-                                    .w(px(220.0))
-                                    .min_h_0()
-                                    .justify_start()
-                                    .p_3()
-                                    .gap_2()
-                                    .border_r_1()
-                                    .border_color(cx.theme().border.opacity(if is_dark {
-                                        0.90
-                                    } else {
-                                        0.70
-                                    }))
-                                    .bg(nav_bg)
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .font_semibold()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child("Categories"),
-                                    )
-                                    .children(SettingsCategory::ALL.into_iter().map(
-                                        |category| {
-                                            let is_selected = settings.category == category;
-                                            let view = view.clone();
-                                            let label = category.title();
-                                            let id = match category {
-                                                SettingsCategory::Ui => "settings-nav-ui",
-                                                SettingsCategory::KeyboardShortcuts => {
-                                                    "settings-nav-keyboard-shortcuts"
-                                                }
-                                            };
-
-                                            Button::new(id)
-                                                .outline()
-                                                .rounded(px(8.0))
-                                                .label(label)
-                                                .bg(if is_selected {
-                                                    cx.theme()
-                                                        .accent
-                                                        .opacity(if is_dark { 0.28 } else { 0.16 })
-                                                } else {
-                                                    cx.theme()
-                                                        .secondary
-                                                        .opacity(if is_dark { 0.36 } else { 0.48 })
-                                                })
-                                                .border_color(cx.theme().border.opacity(if is_selected {
-                                                    if is_dark { 0.92 } else { 0.78 }
-                                                } else if is_dark {
-                                                    0.82
-                                                } else {
-                                                    0.62
-                                                }))
-                                                .on_click(move |_, _, cx| {
-                                                    view.update(cx, |this, cx| {
-                                                        this.select_settings_category(category, cx);
-                                                    });
-                                                })
-                                                .into_any_element()
-                                        },
-                                    )),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .min_h_0()
-                                    .p_4()
-                                    .overflow_y_scrollbar()
-                                    .child(match settings.category {
-                                        SettingsCategory::Ui => {
-                                            self.render_settings_ui_category(settings, cx)
-                                        }
-                                        SettingsCategory::KeyboardShortcuts => {
-                                            self.render_settings_shortcuts_category(settings, cx)
-                                        }
-                                    }),
-                            ),
-                    )
-                    .child(
-                        h_flex()
-                            .items_center()
-                            .justify_between()
-                            .gap_3()
-                            .px_4()
-                            .py_3()
-                            .border_t_1()
-                            .border_color(cx.theme().border.opacity(if is_dark { 0.92 } else { 0.74 }))
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(if settings.error_message.is_some() {
-                                        cx.theme().danger
-                                    } else {
-                                        cx.theme().muted_foreground
-                                    })
-                                    .child(
-                                        settings.error_message.clone().unwrap_or_else(|| {
-                                            "Shortcut updates are saved to config.toml."
-                                                .to_string()
-                                        }),
-                                    ),
-                            )
+                        v_flex()
+                            .id("settings-popup")
+                            .w_full()
+                            .h_full()
+                            .rounded(px(12.0))
+                            .border_1()
+                            .border_color(cx.theme().border.opacity(if is_dark { 0.92 } else { 0.72 }))
+                            .bg(panel_bg)
                             .child(
                                 h_flex()
                                     .items_center()
-                                    .gap_2()
+                                    .justify_between()
+                                    .px_4()
+                                    .py_3()
+                                    .border_b_1()
+                                    .border_color(
+                                        cx.theme().border.opacity(if is_dark { 0.92 } else { 0.74 }),
+                                    )
+                                    .child(
+                                        v_flex()
+                                            .gap_0p5()
+                                            .child(
+                                                div()
+                                                    .text_lg()
+                                                    .font_semibold()
+                                                    .text_color(cx.theme().foreground)
+                                                    .child("Settings"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child("Changes are saved to ~/.hunkdiff/config.toml"),
+                                            ),
+                                    )
                                     .child({
                                         let view = view.clone();
-                                        Button::new("settings-cancel")
-                                            .outline()
+                                        Button::new("settings-close")
+                                            .ghost()
+                                            .compact()
                                             .rounded(px(8.0))
-                                            .label("Cancel")
+                                            .label("Close")
                                             .on_click(move |_, _, cx| {
                                                 view.update(cx, |this, cx| {
                                                     this.close_settings(cx);
                                                 });
                                             })
-                                    })
-                                    .child({
-                                        let view = view.clone();
-                                        Button::new("settings-save")
-                                            .primary()
-                                            .rounded(px(8.0))
-                                            .label("Save")
-                                            .on_click(move |_, window, cx| {
-                                                view.update(cx, |this, cx| {
-                                                    this.save_settings(window, cx);
-                                                });
-                                            })
                                     }),
+                            )
+                            .child(
+                                h_flex()
+                                    .flex_1()
+                                    .min_h_0()
+                                    .items_start()
+                                    .child(
+                                        v_flex()
+                                            .w(px(220.0))
+                                            .h_full()
+                                            .justify_start()
+                                            .p_3()
+                                            .gap_2()
+                                            .border_r_1()
+                                            .border_color(cx.theme().border.opacity(if is_dark {
+                                                0.90
+                                            } else {
+                                                0.70
+                                            }))
+                                            .bg(nav_bg)
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .font_semibold()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child("Categories"),
+                                            )
+                                            .children(SettingsCategory::ALL.into_iter().map(
+                                                |category| {
+                                                    let is_selected = settings.category == category;
+                                                    let view = view.clone();
+                                                    let label = category.title();
+                                                    let id = match category {
+                                                        SettingsCategory::Ui => "settings-nav-ui",
+                                                        SettingsCategory::KeyboardShortcuts => {
+                                                            "settings-nav-keyboard-shortcuts"
+                                                        }
+                                                    };
+
+                                                    Button::new(id)
+                                                        .outline()
+                                                        .rounded(px(8.0))
+                                                        .label(label)
+                                                        .bg(if is_selected {
+                                                            cx.theme()
+                                                                .accent
+                                                                .opacity(if is_dark { 0.28 } else { 0.16 })
+                                                        } else {
+                                                            cx.theme()
+                                                                .secondary
+                                                                .opacity(if is_dark { 0.36 } else { 0.48 })
+                                                        })
+                                                        .border_color(
+                                                            cx.theme().border.opacity(if is_selected {
+                                                                if is_dark { 0.92 } else { 0.78 }
+                                                            } else if is_dark {
+                                                                0.82
+                                                            } else {
+                                                                0.62
+                                                            }),
+                                                        )
+                                                        .on_click(move |_, _, cx| {
+                                                            view.update(cx, |this, cx| {
+                                                                this.select_settings_category(
+                                                                    category, cx,
+                                                                );
+                                                            });
+                                                        })
+                                                        .into_any_element()
+                                                },
+                                            )),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .h_full()
+                                            .min_w_0()
+                                            .min_h_0()
+                                            .p_4()
+                                            .overflow_y_scrollbar()
+                                            .child(match settings.category {
+                                                SettingsCategory::Ui => {
+                                                    self.render_settings_ui_category(settings, cx)
+                                                }
+                                                SettingsCategory::KeyboardShortcuts => {
+                                                    self.render_settings_shortcuts_category(
+                                                        settings, cx,
+                                                    )
+                                                }
+                                            }),
+                                    ),
+                            )
+                            .child(
+                                h_flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .gap_3()
+                                    .px_4()
+                                    .py_3()
+                                    .border_t_1()
+                                    .border_color(
+                                        cx.theme().border.opacity(if is_dark { 0.92 } else { 0.74 }),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .text_color(if settings.error_message.is_some() {
+                                                cx.theme().danger
+                                            } else {
+                                                cx.theme().muted_foreground
+                                            })
+                                            .child(
+                                                settings.error_message.clone().unwrap_or_else(|| {
+                                                    "Shortcut updates are saved to config.toml."
+                                                        .to_string()
+                                                }),
+                                            ),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .items_center()
+                                            .gap_2()
+                                            .child({
+                                                let view = view.clone();
+                                                Button::new("settings-cancel")
+                                                    .outline()
+                                                    .rounded(px(8.0))
+                                                    .label("Cancel")
+                                                    .on_click(move |_, _, cx| {
+                                                        view.update(cx, |this, cx| {
+                                                            this.close_settings(cx);
+                                                        });
+                                                    })
+                                            })
+                                            .child({
+                                                let view = view.clone();
+                                                Button::new("settings-save")
+                                                    .primary()
+                                                    .rounded(px(8.0))
+                                                    .label("Save")
+                                                    .on_click(move |_, window, cx| {
+                                                        view.update(cx, |this, cx| {
+                                                            this.save_settings(window, cx);
+                                                        });
+                                                    })
+                                            }),
+                                    ),
                             ),
                     ),
-                )
+            )
             .into_any_element()
     }
 
