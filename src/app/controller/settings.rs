@@ -41,6 +41,7 @@ fn validate_keyboard_shortcuts(shortcuts: &KeyboardShortcuts) -> Result<(), Stri
     validate_shortcut_list("Previous Hunk", &shortcuts.previous_hunk)?;
     validate_shortcut_list("Next File", &shortcuts.next_file)?;
     validate_shortcut_list("Previous File", &shortcuts.previous_file)?;
+    validate_shortcut_list("Toggle File Tree", &shortcuts.toggle_sidebar_tree)?;
     validate_shortcut_list("Open Project", &shortcuts.open_project)?;
     validate_shortcut_list("Save Current File", &shortcuts.save_current_file)?;
     validate_shortcut_list("Open Settings", &shortcuts.open_settings)?;
@@ -125,6 +126,12 @@ impl DiffViewer {
             previous_file: settings_shortcut_input(
                 &self.config.keyboard_shortcuts.previous_file,
                 "Comma-separated shortcuts, e.g. alt-up",
+                window,
+                cx,
+            ),
+            toggle_sidebar_tree: settings_shortcut_input(
+                &self.config.keyboard_shortcuts.toggle_sidebar_tree,
+                "Comma-separated shortcuts, e.g. cmd-b, ctrl-b",
                 window,
                 cx,
             ),
@@ -266,6 +273,10 @@ impl DiffViewer {
                 previous_hunk: read_shortcut_input(&settings.shortcuts.previous_hunk, cx),
                 next_file: read_shortcut_input(&settings.shortcuts.next_file, cx),
                 previous_file: read_shortcut_input(&settings.shortcuts.previous_file, cx),
+                toggle_sidebar_tree: read_shortcut_input(
+                    &settings.shortcuts.toggle_sidebar_tree,
+                    cx,
+                ),
                 open_project: read_shortcut_input(&settings.shortcuts.open_project, cx),
                 save_current_file: read_shortcut_input(
                     &settings.shortcuts.save_current_file,

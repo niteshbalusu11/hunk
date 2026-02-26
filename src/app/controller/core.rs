@@ -212,6 +212,7 @@ impl DiffViewer {
             repo_discovery_failed: false,
             error_message: None,
             tree_state,
+            sidebar_collapsed: false,
             sidebar_tree_mode: SidebarTreeMode::Diff,
             repo_tree_nodes: Vec::new(),
             repo_tree_file_count: 0,

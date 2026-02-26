@@ -43,6 +43,10 @@ fn app_config_defaults_include_existing_keyboard_shortcuts() {
         strings(&["alt-up"])
     );
     assert_eq!(
+        config.keyboard_shortcuts.toggle_sidebar_tree,
+        strings(&["cmd-b", "ctrl-b"])
+    );
+    assert_eq!(
         config.keyboard_shortcuts.open_project,
         strings(&["cmd-shift-o", "ctrl-shift-o"])
     );
@@ -88,6 +92,10 @@ next_hunk = ["f8"]
         strings(&["cmd-s", "ctrl-s"])
     );
     assert_eq!(
+        config.keyboard_shortcuts.toggle_sidebar_tree,
+        strings(&["cmd-b", "ctrl-b"])
+    );
+    assert_eq!(
         config.keyboard_shortcuts.open_settings,
         strings(&["cmd-,", "ctrl-,"])
     );
@@ -105,6 +113,10 @@ quit_app = []
     assert_eq!(
         config.keyboard_shortcuts.open_project,
         strings(&["cmd-shift-o", "ctrl-shift-o"])
+    );
+    assert_eq!(
+        config.keyboard_shortcuts.toggle_sidebar_tree,
+        strings(&["cmd-b", "ctrl-b"])
     );
     assert_eq!(
         config.keyboard_shortcuts.open_settings,

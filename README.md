@@ -50,6 +50,7 @@ Keyboard shortcuts are configured in the `[keyboard_shortcuts]` table:
 
 ```toml
 [keyboard_shortcuts]
+toggle_sidebar_tree = ["cmd-b", "ctrl-b"]
 open_project = ["cmd-shift-o", "ctrl-shift-o"]
 save_current_file = ["cmd-s", "ctrl-s"]
 open_settings = ["cmd-,", "ctrl-,"]

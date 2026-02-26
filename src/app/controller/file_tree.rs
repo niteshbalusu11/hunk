@@ -1,4 +1,25 @@
 impl DiffViewer {
+    pub(super) fn toggle_sidebar_tree_action(
+        &mut self,
+        _: &ToggleSidebarTree,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.toggle_sidebar_tree(cx);
+    }
+
+    pub(super) fn toggle_sidebar_tree(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_collapsed = !self.sidebar_collapsed;
+        if !self.sidebar_collapsed
+            && self.sidebar_tree_mode == SidebarTreeMode::Files
+            && self.repo_tree_nodes.is_empty()
+            && !self.repo_tree_loading
+        {
+            self.request_repo_tree_reload(cx);
+        }
+        cx.notify();
+    }
+
     pub(super) fn set_sidebar_tree_mode(&mut self, mode: SidebarTreeMode, cx: &mut Context<Self>) {
         if self.sidebar_tree_mode == mode {
             if mode == SidebarTreeMode::Files

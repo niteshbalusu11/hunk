@@ -67,6 +67,7 @@ actions!(
         PreviousHunk,
         NextFile,
         PreviousFile,
+        ToggleSidebarTree,
         OpenProject,
         SaveCurrentFile,
         OpenSettings,
@@ -337,6 +338,11 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
             .map(|shortcut| KeyBinding::new(shortcut.as_str(), PreviousFile, Some("DiffViewer"))),
     );
     bindings.extend(
+        shortcuts.toggle_sidebar_tree.iter().map(|shortcut| {
+            KeyBinding::new(shortcut.as_str(), ToggleSidebarTree, Some("DiffViewer"))
+        }),
+    );
+    bindings.extend(
         shortcuts
             .open_project
             .iter()
@@ -446,6 +452,7 @@ struct SettingsShortcutInputs {
     previous_hunk: Entity<InputState>,
     next_file: Entity<InputState>,
     previous_file: Entity<InputState>,
+    toggle_sidebar_tree: Entity<InputState>,
     open_project: Entity<InputState>,
     save_current_file: Entity<InputState>,
     open_settings: Entity<InputState>,
@@ -514,6 +521,12 @@ impl SettingsShortcutInputs {
                 label: "Previous File",
                 hint: "Moves to the previous changed file.",
                 input_state: self.previous_file.clone(),
+            },
+            SettingsShortcutRow {
+                id: "toggle-sidebar-tree",
+                label: "Toggle File Tree",
+                hint: "Collapses or expands the left file tree pane.",
+                input_state: self.toggle_sidebar_tree.clone(),
             },
             SettingsShortcutRow {
                 id: "open-project",
@@ -652,6 +665,7 @@ struct DiffViewer {
     repo_discovery_failed: bool,
     error_message: Option<String>,
     tree_state: Entity<TreeState>,
+    sidebar_collapsed: bool,
     sidebar_tree_mode: SidebarTreeMode,
     repo_tree_nodes: Vec<RepoTreeNode>,
     repo_tree_file_count: usize,

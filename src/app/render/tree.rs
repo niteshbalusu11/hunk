@@ -76,14 +76,9 @@ impl DiffViewer {
                         SidebarTreeMode::Files => self.render_repo_tree_content(cx),
                     }),
             )
-            .child(
-                v_flex()
-                    .w_full()
-                    .when(self.sidebar_tree_mode == SidebarTreeMode::Diff, |this| {
-                        this.child(self.render_commit_footer(cx))
-                    })
-                    .child(self.render_tree_mode_switcher(cx)),
-            )
+            .when(self.sidebar_tree_mode == SidebarTreeMode::Diff, |this| {
+                this.child(v_flex().w_full().child(self.render_commit_footer(cx)))
+            })
     }
 
     fn render_diff_tree_content(
@@ -153,70 +148,6 @@ impl DiffViewer {
             .px_1()
             .py_1()
             .children(rows.iter().map(|row| self.render_repo_tree_row(row, cx)))
-            .into_any_element()
-    }
-
-    fn render_tree_mode_switcher(&self, cx: &mut Context<Self>) -> AnyElement {
-        let view = cx.entity();
-        let is_dark = cx.theme().mode.is_dark();
-        let diff_selected = self.sidebar_tree_mode == SidebarTreeMode::Diff;
-        let files_selected = self.sidebar_tree_mode == SidebarTreeMode::Files;
-
-        h_flex()
-            .w_full()
-            .gap_1()
-            .px_2()
-            .pb_2()
-            .pt_1()
-            .border_t_1()
-            .border_color(cx.theme().border.opacity(if is_dark { 0.88 } else { 0.68 }))
-            .bg(cx.theme().sidebar.blend(cx.theme().muted.opacity(if is_dark {
-                0.18
-            } else {
-                0.22
-            })))
-            .child({
-                let view = view.clone();
-                let mut button = Button::new("sidebar-mode-diff")
-                    .compact()
-                    .rounded(px(7.0))
-                    .icon(Icon::new(IconName::ChevronsUpDown).size(px(14.0)))
-                    .min_w(px(30.0))
-                    .h(px(28.0))
-                    .tooltip("Diff tree")
-                    .on_click(move |_, _, cx| {
-                        view.update(cx, |this, cx| {
-                            this.set_sidebar_tree_mode(SidebarTreeMode::Diff, cx);
-                        });
-                    });
-                if diff_selected {
-                    button = button.primary();
-                } else {
-                    button = button.outline();
-                }
-                button.into_any_element()
-            })
-            .child({
-                let view = view.clone();
-                let mut button = Button::new("sidebar-mode-files")
-                    .compact()
-                    .rounded(px(7.0))
-                    .icon(Icon::new(IconName::FolderOpen).size(px(14.0)))
-                    .min_w(px(30.0))
-                    .h(px(28.0))
-                    .tooltip("Files tree")
-                    .on_click(move |_, _, cx| {
-                        view.update(cx, |this, cx| {
-                            this.set_sidebar_tree_mode(SidebarTreeMode::Files, cx);
-                        });
-                    });
-                if files_selected {
-                    button = button.primary();
-                } else {
-                    button = button.outline();
-                }
-                button.into_any_element()
-            })
             .into_any_element()
     }
 
