@@ -27,7 +27,9 @@ use tracing::error;
 
 use hunk::config::{AppConfig, ConfigStore, KeyboardShortcuts, ThemePreference};
 use hunk::diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
-use hunk::jj::{BookmarkRevision, ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFingerprint};
+use hunk::jj::{
+    BookmarkRevision, ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFingerprint,
+};
 use hunk::state::{AppState, AppStateStore};
 
 use data::{

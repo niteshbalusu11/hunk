@@ -4,9 +4,10 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use hunk::jj::{
-    abandon_bookmark_head, checkout_or_create_bookmark, checkout_or_create_bookmark_with_change_transfer,
-    commit_staged, describe_bookmark_head, load_snapshot, rename_bookmark, reorder_bookmark_tip_older,
-    review_url_for_bookmark, squash_bookmark_head_into_parent,
+    abandon_bookmark_head, checkout_or_create_bookmark,
+    checkout_or_create_bookmark_with_change_transfer, commit_staged, describe_bookmark_head,
+    load_snapshot, rename_bookmark, reorder_bookmark_tip_older, review_url_for_bookmark,
+    squash_bookmark_head_into_parent,
 };
 
 #[test]
@@ -193,15 +194,13 @@ fn snapshot_includes_revision_stack_for_active_bookmark() {
         .expect("creating stack bookmark should succeed");
 
     write_file(fixture.path().join("tracked.txt"), "line one\nline two\n");
-    commit_staged(fixture.path(), "stack second commit")
-        .expect("second commit should succeed");
+    commit_staged(fixture.path(), "stack second commit").expect("second commit should succeed");
 
     write_file(
         fixture.path().join("tracked.txt"),
         "line one\nline two\nline three\n",
     );
-    commit_staged(fixture.path(), "stack third commit")
-        .expect("third commit should succeed");
+    commit_staged(fixture.path(), "stack third commit").expect("third commit should succeed");
 
     let snapshot = load_snapshot(fixture.path()).expect("snapshot should load");
     assert_eq!(snapshot.branch_name, "stack");
@@ -241,8 +240,7 @@ fn describing_bookmark_head_updates_latest_revision_subject() {
     let snapshot = load_snapshot(fixture.path()).expect("snapshot should load");
     assert_eq!(snapshot.branch_name, "describe-me");
     assert_eq!(
-        snapshot.bookmark_revisions[0].subject,
-        "updated revision description",
+        snapshot.bookmark_revisions[0].subject, "updated revision description",
         "latest revision subject should reflect updated description"
     );
 }
@@ -257,15 +255,13 @@ fn abandoning_bookmark_head_moves_stack_to_previous_revision() {
         .expect("creating stack bookmark should succeed");
 
     write_file(fixture.path().join("tracked.txt"), "line one\nline two\n");
-    commit_staged(fixture.path(), "stack second commit")
-        .expect("second commit should succeed");
+    commit_staged(fixture.path(), "stack second commit").expect("second commit should succeed");
 
     write_file(
         fixture.path().join("tracked.txt"),
         "line one\nline two\nline three\n",
     );
-    commit_staged(fixture.path(), "stack third commit")
-        .expect("third commit should succeed");
+    commit_staged(fixture.path(), "stack third commit").expect("third commit should succeed");
 
     let before = load_snapshot(fixture.path()).expect("snapshot should load before abandon");
     assert_eq!(before.branch_name, "stack");
@@ -292,15 +288,13 @@ fn squashing_bookmark_head_into_parent_keeps_combined_changes() {
         .expect("creating stack bookmark should succeed");
 
     write_file(fixture.path().join("tracked.txt"), "line one\nline two\n");
-    commit_staged(fixture.path(), "stack second commit")
-        .expect("second commit should succeed");
+    commit_staged(fixture.path(), "stack second commit").expect("second commit should succeed");
 
     write_file(
         fixture.path().join("tracked.txt"),
         "line one\nline two\nline three\n",
     );
-    commit_staged(fixture.path(), "stack third commit")
-        .expect("third commit should succeed");
+    commit_staged(fixture.path(), "stack third commit").expect("third commit should succeed");
 
     squash_bookmark_head_into_parent(fixture.path(), "stack")
         .expect("squashing bookmark head should succeed");
@@ -344,8 +338,7 @@ fn review_url_for_github_remote_uses_compare_link() {
         .expect("github remote should produce review URL");
 
     assert_eq!(
-        review_url,
-        "https://github.com/example-org/hunk/compare/feature%2Freview-url?expand=1",
+        review_url, "https://github.com/example-org/hunk/compare/feature%2Freview-url?expand=1",
         "github remotes should use compare links for review URL quick action"
     );
 }
@@ -451,12 +444,10 @@ fn reordering_bookmark_tip_swaps_top_two_revisions() {
         .expect("creating stack bookmark should succeed");
 
     write_file(fixture.path().join("tracked-2.txt"), "line two\n");
-    commit_staged(fixture.path(), "stack second commit")
-        .expect("second commit should succeed");
+    commit_staged(fixture.path(), "stack second commit").expect("second commit should succeed");
 
     write_file(fixture.path().join("tracked-3.txt"), "line three\n");
-    commit_staged(fixture.path(), "stack third commit")
-        .expect("third commit should succeed");
+    commit_staged(fixture.path(), "stack third commit").expect("third commit should succeed");
 
     reorder_bookmark_tip_older(fixture.path(), "stack")
         .expect("reordering top revisions should succeed");
@@ -487,8 +478,7 @@ fn reordering_two_revision_stack_swaps_tip_and_parent() {
         .expect("creating stack bookmark should succeed");
 
     write_file(fixture.path().join("tracked-2.txt"), "line two\n");
-    commit_staged(fixture.path(), "stack second commit")
-        .expect("second commit should succeed");
+    commit_staged(fixture.path(), "stack second commit").expect("second commit should succeed");
 
     let before = load_snapshot(fixture.path()).expect("snapshot should load before reorder");
     assert!(before.bookmark_revisions.len() >= 2);
@@ -577,7 +567,10 @@ fn commit_staged_ignores_stale_active_bookmark_preference() {
     checkout_or_create_bookmark(fixture.path(), "feature")
         .expect("creating feature bookmark should succeed");
 
-    write_file(fixture.path().join("tracked.txt"), "line one\nfeature diverged\n");
+    write_file(
+        fixture.path().join("tracked.txt"),
+        "line one\nfeature diverged\n",
+    );
     commit_staged(fixture.path(), "feature diverge").expect("feature commit should succeed");
     checkout_or_create_bookmark(fixture.path(), "main")
         .expect("switching back to main should succeed");
@@ -588,7 +581,10 @@ fn commit_staged_ignores_stale_active_bookmark_preference() {
     )
     .expect("stale active bookmark preference should be written");
 
-    write_file(fixture.path().join("tracked.txt"), "line one\nmain followup\n");
+    write_file(
+        fixture.path().join("tracked.txt"),
+        "line one\nmain followup\n",
+    );
     commit_staged(fixture.path(), "main followup").expect("main commit should succeed");
 
     let main_log = run_jj_capture(

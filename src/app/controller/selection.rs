@@ -1,3 +1,27 @@
+fn find_wrapped_hunk_target(
+    row_count: usize,
+    start_ix: usize,
+    direction: isize,
+    mut is_hunk_header: impl FnMut(usize) -> bool,
+) -> Option<usize> {
+    if row_count == 0 {
+        return None;
+    }
+
+    let start_ix = start_ix.min(row_count.saturating_sub(1));
+
+    if direction >= 0 {
+        ((start_ix + 1)..row_count)
+            .find(|ix| is_hunk_header(*ix))
+            .or_else(|| (0..row_count).find(|ix| is_hunk_header(*ix)))
+    } else {
+        (0..start_ix)
+            .rev()
+            .find(|ix| is_hunk_header(*ix))
+            .or_else(|| (0..row_count).rev().find(|ix| is_hunk_header(*ix)))
+    }
+}
+
 impl DiffViewer {
     pub(super) fn toggle_file_collapsed(&mut self, path: String, cx: &mut Context<Self>) {
         if self.collapsed_files.contains(path.as_str()) {
@@ -151,14 +175,9 @@ impl DiffViewer {
             .unwrap_or(self.diff_list_state.logical_scroll_top().item_ix)
             .min(self.diff_rows.len().saturating_sub(1));
 
-        let target = if direction >= 0 {
-            ((start_ix + 1)..self.diff_rows.len())
-                .find(|ix| self.diff_rows[*ix].kind == DiffRowKind::HunkHeader)
-        } else {
-            (0..start_ix)
-                .rev()
-                .find(|ix| self.diff_rows[*ix].kind == DiffRowKind::HunkHeader)
-        };
+        let target = find_wrapped_hunk_target(self.diff_rows.len(), start_ix, direction, |ix| {
+            self.diff_rows[ix].kind == DiffRowKind::HunkHeader
+        });
 
         if let Some(target_ix) = target {
             self.select_row_and_scroll(target_ix, false, cx);

@@ -10,7 +10,10 @@ fn parent_snapshot_ignores_changes_under_nested_git_repo() {
     let fixture = TempRepo::new("nested-repo-ignore");
 
     write_file(fixture.path().join("app.txt"), "app base\n");
-    write_file(fixture.path().join("nested").join("module.txt"), "module base\n");
+    write_file(
+        fixture.path().join("nested").join("module.txt"),
+        "module base\n",
+    );
     commit_staged(fixture.path(), "initial parent commit").expect("initial commit should succeed");
 
     run_jj(
@@ -28,7 +31,10 @@ fn parent_snapshot_ignores_changes_under_nested_git_repo() {
         "parent snapshot should ignore nested-repo subtree entries"
     );
 
-    write_file(fixture.path().join("nested").join("module.txt"), "module changed\n");
+    write_file(
+        fixture.path().join("nested").join("module.txt"),
+        "module changed\n",
+    );
     write_file(fixture.path().join("app.txt"), "app changed\n");
 
     let snapshot_after_changes =

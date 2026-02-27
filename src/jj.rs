@@ -10,20 +10,19 @@ use tracing::warn;
 mod backend;
 
 use backend::{
-    abandon_bookmark_head as abandon_local_bookmark_head,
-    bookmark_remote_sync_state, checkout_existing_bookmark,
+    abandon_bookmark_head as abandon_local_bookmark_head, bookmark_remote_sync_state,
+    bookmark_review_url, checkout_existing_bookmark,
     checkout_existing_bookmark_with_change_transfer, collect_materialized_diff_entries_for_paths,
     commit_working_copy_changes, commit_working_copy_selected_paths, conflict_materialize_options,
     create_bookmark_at_working_copy, current_bookmarks_from_context,
-    current_commit_id_from_context, discover_repo_root, git_head_branch_name_from_context,
-    describe_bookmark_head as describe_local_bookmark_head,
-    last_commit_subject_from_context, list_bookmark_revisions_from_context,
-    list_local_branches_from_context,
+    current_commit_id_from_context, describe_bookmark_head as describe_local_bookmark_head,
+    discover_repo_root, git_head_branch_name_from_context, last_commit_subject_from_context,
+    list_bookmark_revisions_from_context, list_local_branches_from_context,
     load_changed_files_from_context, load_repo_context, load_repo_context_at_root,
     load_tracked_paths_from_context, materialized_entry_matches_path,
-    move_bookmark_to_parent_of_working_copy, normalize_path, push_bookmark, render_patch_for_entry,
-    rename_bookmark as rename_local_bookmark, repo_line_stats_from_context, bookmark_review_url,
-    reorder_bookmark_tip_older as reorder_local_bookmark_tip_older,
+    move_bookmark_to_parent_of_working_copy, normalize_path, push_bookmark,
+    rename_bookmark as rename_local_bookmark, render_patch_for_entry,
+    reorder_bookmark_tip_older as reorder_local_bookmark_tip_older, repo_line_stats_from_context,
     squash_bookmark_head_into_parent as squash_local_bookmark_head_into_parent,
     sync_bookmark_from_remote, walk_repo_tree,
 };
@@ -147,7 +146,8 @@ pub fn load_snapshot(cwd: &Path) -> Result<RepoSnapshot> {
     let current_bookmarks = current_bookmarks_from_context(&context)?;
     let active_bookmark = load_active_bookmark_preference(&context.root);
     let git_head_branch = git_head_branch_name_from_context(&context);
-    let branch_name = select_snapshot_branch_name(&current_bookmarks, active_bookmark, git_head_branch);
+    let branch_name =
+        select_snapshot_branch_name(&current_bookmarks, active_bookmark, git_head_branch);
     let mut branch_selection = current_bookmarks.clone();
     if branch_selection.is_empty() && branch_name != "detached" {
         branch_selection.insert(branch_name.clone());
@@ -180,7 +180,8 @@ pub fn load_snapshot_fingerprint(cwd: &Path) -> Result<RepoSnapshotFingerprint> 
     let current_bookmarks = current_bookmarks_from_context(&context)?;
     let active_bookmark = load_active_bookmark_preference(&context.root);
     let git_head_branch = git_head_branch_name_from_context(&context);
-    let branch_name = select_snapshot_branch_name(&current_bookmarks, active_bookmark, git_head_branch);
+    let branch_name =
+        select_snapshot_branch_name(&current_bookmarks, active_bookmark, git_head_branch);
     let head_target = current_commit_id_from_context(&context)?;
     Ok(snapshot_fingerprint(
         context.root,
@@ -371,7 +372,9 @@ pub fn rename_bookmark(
         return Err(anyhow!("new bookmark name cannot be empty"));
     }
     if old_bookmark_name == new_bookmark_name {
-        return Err(anyhow!("new bookmark name must differ from current bookmark"));
+        return Err(anyhow!(
+            "new bookmark name must differ from current bookmark"
+        ));
     }
     if !is_valid_bookmark_name(new_bookmark_name) {
         return Err(anyhow!("invalid bookmark name: {new_bookmark_name}"));
@@ -399,7 +402,9 @@ pub fn describe_bookmark_head(
 ) -> Result<()> {
     let bookmark_name = bookmark_name.trim();
     if bookmark_name.is_empty() || bookmark_name == "detached" {
-        return Err(anyhow!("cannot edit revision description without a bookmark name"));
+        return Err(anyhow!(
+            "cannot edit revision description without a bookmark name"
+        ));
     }
 
     let description = description.trim();
@@ -680,7 +685,9 @@ fn select_snapshot_branch_name(
     preferred: Option<String>,
     git_head_branch: Option<String>,
 ) -> String {
-    if let Some(preferred) = preferred && current_bookmarks.contains(preferred.as_str()) {
+    if let Some(preferred) = preferred
+        && current_bookmarks.contains(preferred.as_str())
+    {
         return preferred;
     }
 
@@ -708,7 +715,9 @@ fn select_commit_branch_name(
         return git_head_branch;
     }
 
-    if let Some(preferred) = preferred && current_bookmarks.contains(preferred.as_str()) {
+    if let Some(preferred) = preferred
+        && current_bookmarks.contains(preferred.as_str())
+    {
         return preferred;
     }
 
