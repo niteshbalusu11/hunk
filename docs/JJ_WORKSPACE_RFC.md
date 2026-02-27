@@ -162,7 +162,8 @@ Create JJ-focused view models for UI binding:
   - [x] read-only revision stack list for active bookmark
   - [~] revision actions
   - [x] describe/edit message for tip revision
-  - [ ] abandon and reorder/squash
+  - [x] abandon tip revision
+  - [ ] reorder/squash
 - [ ] Phase 5: PR/MR quick actions and remote collaboration refinements.
 - [ ] Phase 6: Full legacy flow removal and internal naming cleanup.
 

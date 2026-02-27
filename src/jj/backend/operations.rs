@@ -330,6 +330,39 @@ pub(super) fn describe_bookmark_head(
     persist_working_copy_state(context, repo, "after bookmark describe")
 }
 
+pub(super) fn abandon_bookmark_head(context: &mut RepoContext, branch_name: &str) -> Result<()> {
+    let bookmark = RefName::new(branch_name);
+    let Some(commit_id) = context
+        .repo
+        .view()
+        .get_local_bookmark(bookmark)
+        .as_normal()
+        .cloned()
+    else {
+        return Err(anyhow!("bookmark '{branch_name}' does not exist"));
+    };
+
+    let commit = context
+        .repo
+        .store()
+        .get_commit(&commit_id)
+        .with_context(|| format!("failed to load bookmark head for '{branch_name}'"))?;
+    if commit.id() == context.repo.store().root_commit_id() {
+        return Err(anyhow!("cannot abandon the root revision"));
+    }
+
+    let mut tx = context.repo.start_transaction();
+    tx.repo_mut().record_abandoned_commit(&commit);
+    tx.repo_mut()
+        .rebase_descendants()
+        .context("failed to rebase descendants after abandoning bookmark head")?;
+
+    let repo = tx
+        .commit(format!("abandon bookmark {branch_name} head"))
+        .context("failed to finalize bookmark head abandon")?;
+    persist_working_copy_state(context, repo, "after bookmark head abandon")
+}
+
 pub(super) fn push_bookmark(context: &mut RepoContext, branch_name: &str) -> Result<()> {
     ensure_bookmark_tip_identity(context, branch_name)?;
     let remote_name = resolve_push_remote_name(context, branch_name)?;

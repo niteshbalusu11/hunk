@@ -4,8 +4,8 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use hunk::jj::{
-    checkout_or_create_branch, checkout_or_create_branch_with_change_transfer, commit_staged,
-    describe_branch_head, load_snapshot, rename_branch,
+    abandon_branch_head, checkout_or_create_branch, checkout_or_create_branch_with_change_transfer,
+    commit_staged, describe_branch_head, load_snapshot, rename_branch,
 };
 
 #[test]
@@ -243,6 +243,41 @@ fn describing_bookmark_head_updates_latest_revision_subject() {
         snapshot.bookmark_revisions[0].subject,
         "updated revision description",
         "latest revision subject should reflect updated description"
+    );
+}
+
+#[test]
+fn abandoning_bookmark_head_moves_stack_to_previous_revision() {
+    let fixture = TempRepo::new("abandon-bookmark-head");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_branch(fixture.path(), "stack")
+        .expect("creating stack bookmark should succeed");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\nline two\n");
+    commit_staged(fixture.path(), "stack second commit")
+        .expect("second commit should succeed");
+
+    write_file(
+        fixture.path().join("tracked.txt"),
+        "line one\nline two\nline three\n",
+    );
+    commit_staged(fixture.path(), "stack third commit")
+        .expect("third commit should succeed");
+
+    let before = load_snapshot(fixture.path()).expect("snapshot should load before abandon");
+    assert_eq!(before.branch_name, "stack");
+    assert_eq!(before.bookmark_revisions[0].subject, "stack third commit");
+
+    abandon_branch_head(fixture.path(), "stack")
+        .expect("abandoning bookmark head should succeed");
+
+    let after = load_snapshot(fixture.path()).expect("snapshot should load after abandon");
+    assert_eq!(after.branch_name, "stack");
+    assert_eq!(
+        after.bookmark_revisions[0].subject, "stack second commit",
+        "bookmark should move to previous revision after abandoning tip"
     );
 }
 

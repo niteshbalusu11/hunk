@@ -308,6 +308,26 @@ impl DiffViewer {
         });
     }
 
+    pub(super) fn abandon_current_branch_tip(&mut self, cx: &mut Context<Self>) {
+        if !self.branch_syncable() {
+            self.git_status_message =
+                Some("Cannot abandon a revision without an active bookmark.".to_string());
+            cx.notify();
+            return;
+        }
+        if self.bookmark_revisions.is_empty() {
+            self.git_status_message = Some("No revision available to abandon.".to_string());
+            cx.notify();
+            return;
+        }
+
+        let branch_name = self.branch_name.clone();
+        self.run_git_action("Abandon tip revision", cx, move |repo_root| {
+            abandon_branch_head(&repo_root, &branch_name)?;
+            Ok(format!("Abandoned tip revision on {}", branch_name))
+        });
+    }
+
     pub(super) fn push_or_publish_current_branch(&mut self, cx: &mut Context<Self>) {
         if !self.branch_syncable() {
             let message = "Cannot push a detached or unknown bookmark.".to_string();

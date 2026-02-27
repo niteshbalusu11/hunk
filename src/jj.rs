@@ -10,6 +10,7 @@ use tracing::warn;
 mod backend;
 
 use backend::{
+    abandon_bookmark_head as abandon_local_bookmark_head,
     bookmark_remote_sync_state, checkout_existing_bookmark,
     checkout_existing_bookmark_with_change_transfer, collect_materialized_diff_entries_for_paths,
     commit_working_copy_changes, commit_working_copy_selected_paths, conflict_materialize_options,
@@ -406,6 +407,16 @@ pub fn describe_branch_head(repo_root: &Path, branch_name: &str, description: &s
 
     let mut context = load_repo_context_at_root(repo_root, true)?;
     describe_local_bookmark_head(&mut context, branch_name, description)
+}
+
+pub fn abandon_branch_head(repo_root: &Path, branch_name: &str) -> Result<()> {
+    let branch_name = branch_name.trim();
+    if branch_name.is_empty() || branch_name == "detached" {
+        return Err(anyhow!("cannot abandon a revision without a bookmark name"));
+    }
+
+    let mut context = load_repo_context_at_root(repo_root, true)?;
+    abandon_local_bookmark_head(&mut context, branch_name)
 }
 
 pub fn checkout_or_create_branch_with_change_transfer(

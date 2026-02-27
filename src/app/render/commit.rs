@@ -304,8 +304,11 @@ impl DiffViewer {
     }
 
     fn render_revision_stack_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
         let revisions = &self.bookmark_revisions;
+        let can_abandon_tip =
+            !self.git_action_loading && self.branch_syncable() && !revisions.is_empty();
 
         v_flex()
             .w_full()
@@ -332,10 +335,30 @@ impl DiffViewer {
                             .child("Revision Stack"),
                     )
                     .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(format!("{}", revisions.len())),
+                        h_flex()
+                            .items_center()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(format!("{}", revisions.len())),
+                            )
+                            .child({
+                                let view = view.clone();
+                                Button::new("abandon-tip-revision")
+                                    .outline()
+                                    .compact()
+                                    .with_size(gpui_component::Size::Small)
+                                    .rounded(px(7.0))
+                                    .label("Abandon Tip")
+                                    .disabled(!can_abandon_tip)
+                                    .on_click(move |_, _, cx| {
+                                        view.update(cx, |this, cx| {
+                                            this.abandon_current_branch_tip(cx);
+                                        });
+                                    })
+                            }),
                     ),
             )
             .child({
