@@ -328,6 +328,28 @@ impl DiffViewer {
         });
     }
 
+    pub(super) fn squash_current_branch_tip_into_parent(&mut self, cx: &mut Context<Self>) {
+        if !self.branch_syncable() {
+            self.git_status_message =
+                Some("Cannot squash a revision without an active bookmark.".to_string());
+            cx.notify();
+            return;
+        }
+        if self.bookmark_revisions.len() < 2 {
+            self.git_status_message = Some(
+                "Need at least two revisions in the stack to squash the tip.".to_string(),
+            );
+            cx.notify();
+            return;
+        }
+
+        let branch_name = self.branch_name.clone();
+        self.run_git_action("Squash tip revision", cx, move |repo_root| {
+            squash_branch_head_into_parent(&repo_root, &branch_name)?;
+            Ok(format!("Squashed tip revision on {}", branch_name))
+        });
+    }
+
     pub(super) fn push_or_publish_current_branch(&mut self, cx: &mut Context<Self>) {
         if !self.branch_syncable() {
             let message = "Cannot push a detached or unknown bookmark.".to_string();
@@ -403,6 +425,76 @@ impl DiffViewer {
         self.run_git_action("Sync bookmark", cx, move |repo_root| {
             sync_current_branch(&repo_root, &branch_name)?;
             Ok(format!("Synced bookmark {}", branch_name))
+        });
+    }
+
+    pub(super) fn copy_current_branch_review_url(&mut self, cx: &mut Context<Self>) {
+        if !self.branch_syncable() {
+            let message = "Cannot build a review URL for a detached or unknown bookmark.".to_string();
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
+            cx.notify();
+            return;
+        }
+        if self.git_action_loading {
+            return;
+        }
+
+        let Some(repo_root) = self.repo_root.clone() else {
+            self.git_status_message = Some("No JJ repository available.".to_string());
+            cx.notify();
+            return;
+        };
+        let branch_name = self.branch_name.clone();
+
+        let epoch = self.next_git_action_epoch();
+        self.git_action_loading = true;
+        self.git_status_message = None;
+        cx.notify();
+
+        self.git_action_task = cx.spawn(async move |this, cx| {
+            let branch_for_task = branch_name.clone();
+            let result = cx.background_executor().spawn(async move {
+                review_url_for_branch(&repo_root, &branch_for_task)
+            });
+            let result = result.await;
+
+            if let Some(this) = this.upgrade() {
+                this.update(cx, |this, cx| {
+                    if epoch != this.git_action_epoch {
+                        return;
+                    }
+
+                    this.git_action_loading = false;
+                    match result {
+                        Ok(Some(url)) => {
+                            cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
+                            this.git_status_message =
+                                Some(format!("Copied review URL for {}", branch_name));
+                        }
+                        Ok(None) => {
+                            let message = format!(
+                                "No supported remote URL found for bookmark {}.",
+                                branch_name
+                            );
+                            this.git_status_message = Some(message.clone());
+                            Self::push_warning_notification(message, cx);
+                        }
+                        Err(err) => {
+                            error!("Build review URL failed: {err:#}");
+                            let summary = err.to_string();
+                            this.git_status_message = Some(format!("JJ error: {err:#}"));
+                            Self::push_error_notification(
+                                format!("Build review URL failed: {summary}"),
+                                cx,
+                            );
+                        }
+                    }
+
+                    cx.notify();
+                })
+                .ok();
+            }
         });
     }
 

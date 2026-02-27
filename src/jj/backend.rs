@@ -3,6 +3,7 @@ use std::env;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
@@ -30,7 +31,7 @@ use jj_lib::ref_name::{RefName, RefNameBuf, RemoteName, WorkspaceName};
 use jj_lib::refs::{BookmarkPushAction, classify_bookmark_push_action};
 use jj_lib::repo::{ReadonlyRepo, Repo as _, StoreFactories};
 use jj_lib::repo_path::RepoPathBuf;
-use jj_lib::rewrite::restore_tree;
+use jj_lib::rewrite::{CommitWithSelection, restore_tree, squash_commits};
 use jj_lib::settings::UserSettings;
 use jj_lib::str_util::StringExpression;
 use jj_lib::working_copy::SnapshotOptions;

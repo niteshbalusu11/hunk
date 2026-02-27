@@ -8,6 +8,7 @@ impl DiffViewer {
         let show_push = branch_syncable && self.branch_has_upstream;
         let sync_disabled = !self.can_sync_current_branch();
         let push_or_publish_disabled = !self.can_push_or_publish_current_branch();
+        let review_url_disabled = self.git_action_loading || !branch_syncable;
         let action_label = if show_publish {
             "Publish Bookmark"
         } else {
@@ -203,6 +204,21 @@ impl DiffViewer {
                                     });
                                 })
                             })
+                    })
+                    .child({
+                        let view = view.clone();
+                        Button::new("copy-review-url")
+                            .outline()
+                            .compact()
+                            .with_size(gpui_component::Size::Small)
+                            .rounded(px(7.0))
+                            .label("Copy Review URL")
+                            .disabled(review_url_disabled)
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.copy_current_branch_review_url(cx);
+                                });
+                            })
                     }),
             )
             .child(self.render_workspace_changes_panel(cx))
@@ -309,6 +325,8 @@ impl DiffViewer {
         let revisions = &self.bookmark_revisions;
         let can_abandon_tip =
             !self.git_action_loading && self.branch_syncable() && !revisions.is_empty();
+        let can_squash_tip =
+            !self.git_action_loading && self.branch_syncable() && revisions.len() >= 2;
 
         v_flex()
             .w_full()
@@ -344,6 +362,21 @@ impl DiffViewer {
                                     .text_color(cx.theme().muted_foreground)
                                     .child(format!("{}", revisions.len())),
                             )
+                            .child({
+                                let view = view.clone();
+                                Button::new("squash-tip-revision")
+                                    .outline()
+                                    .compact()
+                                    .with_size(gpui_component::Size::Small)
+                                    .rounded(px(7.0))
+                                    .label("Squash Tip")
+                                    .disabled(!can_squash_tip)
+                                    .on_click(move |_, _, cx| {
+                                        view.update(cx, |this, cx| {
+                                            this.squash_current_branch_tip_into_parent(cx);
+                                        });
+                                    })
+                            })
                             .child({
                                 let view = view.clone();
                                 Button::new("abandon-tip-revision")

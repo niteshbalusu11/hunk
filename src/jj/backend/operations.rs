@@ -363,6 +363,71 @@ pub(super) fn abandon_bookmark_head(context: &mut RepoContext, branch_name: &str
     persist_working_copy_state(context, repo, "after bookmark head abandon")
 }
 
+pub(super) fn squash_bookmark_head_into_parent(
+    context: &mut RepoContext,
+    branch_name: &str,
+) -> Result<()> {
+    let bookmark = RefName::new(branch_name);
+    let Some(commit_id) = context
+        .repo
+        .view()
+        .get_local_bookmark(bookmark)
+        .as_normal()
+        .cloned()
+    else {
+        return Err(anyhow!("bookmark '{branch_name}' does not exist"));
+    };
+
+    let source_commit = context
+        .repo
+        .store()
+        .get_commit(&commit_id)
+        .with_context(|| format!("failed to load bookmark head for '{branch_name}'"))?;
+
+    let Some(parent_id) = source_commit.parent_ids().first().cloned() else {
+        return Err(anyhow!("cannot squash a root revision"));
+    };
+    if parent_id == *context.repo.store().root_commit_id() {
+        return Err(anyhow!(
+            "cannot squash bookmark '{branch_name}' tip into the root revision"
+        ));
+    }
+
+    let destination_commit = context
+        .repo
+        .store()
+        .get_commit(&parent_id)
+        .with_context(|| format!("failed to load parent revision for '{branch_name}'"))?;
+    let source_selection = CommitWithSelection {
+        parent_tree: source_commit.parent_tree(context.repo.as_ref())?,
+        selected_tree: source_commit.tree(),
+        commit: source_commit,
+    };
+
+    let mut tx = context.repo.start_transaction();
+    let squashed = squash_commits(
+        tx.repo_mut(),
+        &[source_selection],
+        &destination_commit,
+        false,
+    )
+    .with_context(|| format!("failed to squash bookmark '{branch_name}' head into parent"))?
+    .ok_or_else(|| anyhow!("no revision changes available to squash"))?;
+
+    squashed
+        .commit_builder
+        .write()
+        .with_context(|| format!("failed to write squashed parent for '{branch_name}'"))?;
+    tx.repo_mut()
+        .rebase_descendants()
+        .context("failed to rebase descendants after squash")?;
+
+    let repo = tx
+        .commit(format!("squash bookmark {branch_name} head into parent"))
+        .context("failed to finalize bookmark squash")?;
+    persist_working_copy_state(context, repo, "after bookmark head squash")
+}
+
 pub(super) fn push_bookmark(context: &mut RepoContext, branch_name: &str) -> Result<()> {
     ensure_bookmark_tip_identity(context, branch_name)?;
     let remote_name = resolve_push_remote_name(context, branch_name)?;
@@ -630,4 +695,118 @@ fn resolve_push_remote_name(context: &RepoContext, branch_name: &str) -> Result<
     }
 
     Err(anyhow!("no Git remote configured for push"))
+}
+
+pub(super) fn bookmark_review_url(context: &RepoContext, branch_name: &str) -> Result<Option<String>> {
+    let remote_name = resolve_push_remote_name(context, branch_name)?;
+    let Some(remote_url) = resolve_remote_url_from_cli(context.root.as_path(), remote_name.as_str())?
+    else {
+        return Ok(None);
+    };
+
+    Ok(review_url_for_remote(remote_url.as_str(), branch_name))
+}
+
+fn resolve_remote_url_from_cli(repo_root: &Path, remote_name: &str) -> Result<Option<String>> {
+    let output = Command::new("jj")
+        .args(["git", "remote", "list"])
+        .current_dir(repo_root)
+        .output()
+        .context("failed to query jj remotes for review URL")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!(
+            "failed to query jj remotes for review URL: {}",
+            stderr.trim()
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let mut parts = trimmed.split_whitespace();
+        let Some(name) = parts.next() else {
+            continue;
+        };
+        let Some(url) = parts.next() else {
+            continue;
+        };
+        if name == remote_name {
+            return Ok(Some(url.to_string()));
+        }
+    }
+
+    Ok(None)
+}
+
+fn review_url_for_remote(remote_url: &str, branch_name: &str) -> Option<String> {
+    let (host, base_url) = normalized_remote_base_url(remote_url)?;
+    let encoded_branch = percent_encode(branch_name);
+    if host.contains("gitlab") {
+        Some(format!(
+            "{base_url}/-/merge_requests/new?merge_request[source_branch]={encoded_branch}"
+        ))
+    } else {
+        Some(format!("{base_url}/compare/{encoded_branch}?expand=1"))
+    }
+}
+
+fn normalized_remote_base_url(remote_url: &str) -> Option<(String, String)> {
+    if let Some(stripped) = remote_url.strip_prefix("git@") {
+        let (host, path) = stripped.split_once(':')?;
+        let clean_path = trim_remote_path(path);
+        return Some((
+            host.to_string(),
+            format!("https://{host}/{}", clean_path),
+        ));
+    }
+
+    if let Some(stripped) = remote_url.strip_prefix("ssh://") {
+        let after_user = stripped
+            .split_once('@')
+            .map_or(stripped, |(_, remainder)| remainder);
+        let (host, path) = after_user.split_once('/')?;
+        let clean_path = trim_remote_path(path);
+        return Some((
+            host.to_string(),
+            format!("https://{host}/{}", clean_path),
+        ));
+    }
+
+    if let Some(stripped) = remote_url
+        .strip_prefix("https://")
+        .or_else(|| remote_url.strip_prefix("http://"))
+    {
+        let (host, path) = stripped.split_once('/')?;
+        let clean_path = trim_remote_path(path);
+        return Some((
+            host.to_string(),
+            format!("https://{host}/{}", clean_path),
+        ));
+    }
+
+    None
+}
+
+fn trim_remote_path(path: &str) -> String {
+    path.trim_start_matches('/')
+        .trim_end_matches('/')
+        .trim_end_matches(".git")
+        .to_string()
+}
+
+fn percent_encode(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        let is_unreserved = byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~');
+        if is_unreserved {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(format!("%{byte:02X}").as_str());
+        }
+    }
+    encoded
 }

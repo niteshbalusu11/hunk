@@ -163,8 +163,11 @@ Create JJ-focused view models for UI binding:
   - [~] revision actions
   - [x] describe/edit message for tip revision
   - [x] abandon tip revision
-  - [ ] reorder/squash
-- [ ] Phase 5: PR/MR quick actions and remote collaboration refinements.
+  - [x] squash tip revision into parent
+  - [ ] reorder
+- [~] Phase 5: PR/MR quick actions and remote collaboration refinements.
+  - [x] copy review URL quick action from JJ workspace (GitHub/GitLab URL support)
+  - [ ] additional remote collaboration refinements
 - [ ] Phase 6: Full legacy flow removal and internal naming cleanup.
 
 ## Testing Strategy

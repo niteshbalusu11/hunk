@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use hunk::jj::{
     abandon_branch_head, checkout_or_create_branch, checkout_or_create_branch_with_change_transfer,
     commit_staged, describe_branch_head, load_snapshot, rename_branch,
+    review_url_for_branch, squash_branch_head_into_parent,
 };
 
 #[test]
@@ -278,6 +279,74 @@ fn abandoning_bookmark_head_moves_stack_to_previous_revision() {
     assert_eq!(
         after.bookmark_revisions[0].subject, "stack second commit",
         "bookmark should move to previous revision after abandoning tip"
+    );
+}
+
+#[test]
+fn squashing_bookmark_head_into_parent_keeps_combined_changes() {
+    let fixture = TempRepo::new("squash-bookmark-head");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_branch(fixture.path(), "stack")
+        .expect("creating stack bookmark should succeed");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\nline two\n");
+    commit_staged(fixture.path(), "stack second commit")
+        .expect("second commit should succeed");
+
+    write_file(
+        fixture.path().join("tracked.txt"),
+        "line one\nline two\nline three\n",
+    );
+    commit_staged(fixture.path(), "stack third commit")
+        .expect("third commit should succeed");
+
+    squash_branch_head_into_parent(fixture.path(), "stack")
+        .expect("squashing bookmark head should succeed");
+
+    let snapshot = load_snapshot(fixture.path()).expect("snapshot should load after squash");
+    assert_eq!(snapshot.branch_name, "stack");
+    assert_eq!(
+        snapshot.bookmark_revisions[0].subject, "stack second commit",
+        "parent revision should become the bookmark head after squash"
+    );
+
+    let stack_show = run_jj_capture(fixture.path(), ["show", "-r", "stack", "--git"]);
+    assert!(
+        stack_show.contains("+line three"),
+        "squashed bookmark head should preserve tip changes in parent revision"
+    );
+}
+
+#[test]
+fn review_url_for_github_remote_uses_compare_link() {
+    let fixture = TempRepo::new("review-url-github");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_branch(fixture.path(), "feature/review-url")
+        .expect("creating bookmark should succeed");
+
+    run_jj(
+        fixture.path(),
+        [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/example-org/hunk.git",
+        ],
+    );
+
+    let review_url = review_url_for_branch(fixture.path(), "feature/review-url")
+        .expect("review URL should be computed")
+        .expect("github remote should produce review URL");
+
+    assert_eq!(
+        review_url,
+        "https://github.com/example-org/hunk/compare/feature%2Freview-url?expand=1",
+        "github remotes should use compare links for review URL quick action"
     );
 }
 

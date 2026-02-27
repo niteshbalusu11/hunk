@@ -22,7 +22,8 @@ use backend::{
     load_changed_files_from_context, load_repo_context, load_repo_context_at_root,
     load_tracked_paths_from_context, materialized_entry_matches_path,
     move_bookmark_to_parent_of_working_copy, normalize_path, push_bookmark, render_patch_for_entry,
-    rename_bookmark as rename_local_bookmark, repo_line_stats_from_context,
+    rename_bookmark as rename_local_bookmark, repo_line_stats_from_context, bookmark_review_url,
+    squash_bookmark_head_into_parent as squash_local_bookmark_head_into_parent,
     sync_bookmark_from_remote, walk_repo_tree,
 };
 
@@ -417,6 +418,26 @@ pub fn abandon_branch_head(repo_root: &Path, branch_name: &str) -> Result<()> {
 
     let mut context = load_repo_context_at_root(repo_root, true)?;
     abandon_local_bookmark_head(&mut context, branch_name)
+}
+
+pub fn squash_branch_head_into_parent(repo_root: &Path, branch_name: &str) -> Result<()> {
+    let branch_name = branch_name.trim();
+    if branch_name.is_empty() || branch_name == "detached" {
+        return Err(anyhow!("cannot squash a revision without a bookmark name"));
+    }
+
+    let mut context = load_repo_context_at_root(repo_root, true)?;
+    squash_local_bookmark_head_into_parent(&mut context, branch_name)
+}
+
+pub fn review_url_for_branch(repo_root: &Path, branch_name: &str) -> Result<Option<String>> {
+    let branch_name = branch_name.trim();
+    if branch_name.is_empty() || branch_name == "detached" {
+        return Err(anyhow!("cannot build review URL without a bookmark name"));
+    }
+
+    let context = load_repo_context_at_root(repo_root, false)?;
+    bookmark_review_url(&context, branch_name)
 }
 
 pub fn checkout_or_create_branch_with_change_transfer(
