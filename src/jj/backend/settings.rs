@@ -29,6 +29,7 @@ fn load_user_settings(workspace_root: Option<&Path>) -> Result<UserSettings> {
             root.join(".jj").join("config.toml"),
         )?;
         add_git_signing_fallback_config(&mut config, root)?;
+        add_git_identity_fallback_config(&mut config, root)?;
     }
 
     UserSettings::from_config(config).context("failed to load jj settings")
@@ -87,10 +88,64 @@ fn add_git_signing_fallback_config(
     Ok(())
 }
 
+fn add_git_identity_fallback_config(config: &mut StackedConfig, workspace_root: &Path) -> Result<()> {
+    let has_user_name = has_explicit_user_name(config);
+    let has_user_email = has_explicit_user_email(config);
+    if has_user_name && has_user_email {
+        return Ok(());
+    }
+
+    let Some(identity) = read_git_identity_config(workspace_root) else {
+        return Ok(());
+    };
+
+    let mut fallback_layer = ConfigLayer::empty(ConfigSource::EnvBase);
+    let mut has_updates = false;
+
+    if !has_user_name
+        && let Some(name) = identity.name
+        && !name.trim().is_empty()
+    {
+        fallback_layer
+            .set_value("user.name", name)
+            .context("failed to apply Git user.name fallback")?;
+        has_updates = true;
+    }
+
+    if !has_user_email
+        && let Some(email) = identity.email
+        && !email.trim().is_empty()
+    {
+        fallback_layer
+            .set_value("user.email", email)
+            .context("failed to apply Git user.email fallback")?;
+        has_updates = true;
+    }
+
+    if has_updates {
+        config.add_layer(fallback_layer);
+    }
+    Ok(())
+}
+
 fn has_explicit_signing_backend(config: &StackedConfig) -> bool {
     config.layers().iter().any(|layer| {
         layer.source != ConfigSource::Default
             && matches!(layer.look_up_item("signing.backend"), Ok(Some(_)))
+    })
+}
+
+fn has_explicit_user_name(config: &StackedConfig) -> bool {
+    config.layers().iter().any(|layer| {
+        layer.source != ConfigSource::Default
+            && matches!(layer.look_up_item("user.name"), Ok(Some(_)))
+    })
+}
+
+fn has_explicit_user_email(config: &StackedConfig) -> bool {
+    config.layers().iter().any(|layer| {
+        layer.source != ConfigSource::Default
+            && matches!(layer.look_up_item("user.email"), Ok(Some(_)))
     })
 }
 
@@ -114,12 +169,31 @@ impl GitSigningConfig {
     }
 }
 
+#[derive(Default, Clone)]
+struct GitIdentityConfig {
+    name: Option<String>,
+    email: Option<String>,
+}
+
 fn read_git_signing_config(workspace_root: &Path) -> Option<GitSigningConfig> {
     let mut merged = GitSigningConfig::default();
     let mut saw_any = false;
 
     for path in git_signing_config_paths(workspace_root) {
         if merge_git_signing_config_file(&mut merged, path.as_path()) {
+            saw_any = true;
+        }
+    }
+
+    if saw_any { Some(merged) } else { None }
+}
+
+fn read_git_identity_config(workspace_root: &Path) -> Option<GitIdentityConfig> {
+    let mut merged = GitIdentityConfig::default();
+    let mut saw_any = false;
+
+    for path in git_signing_config_paths(workspace_root) {
+        if merge_git_identity_config_file(&mut merged, path.as_path()) {
             saw_any = true;
         }
     }
@@ -269,6 +343,61 @@ fn merge_git_signing_config_file(config: &mut GitSigningConfig, path: &Path) -> 
             ("gpg", Some("x509"), "program") => {
                 if !value.is_empty() {
                     config.gpg_x509_program = Some(value);
+                    saw_any = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    saw_any
+}
+
+fn merge_git_identity_config_file(config: &mut GitIdentityConfig, path: &Path) -> bool {
+    let Ok(contents) = fs::read_to_string(path) else {
+        return false;
+    };
+
+    let mut saw_any = false;
+    let mut section = String::new();
+    let mut subsection = None::<String>;
+
+    for raw_line in contents.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+
+        if line.starts_with('[') && line.ends_with(']') {
+            let header = &line[1..line.len() - 1];
+            let (name, sub) = parse_git_config_section_header(header);
+            section = name;
+            subsection = sub;
+            continue;
+        }
+
+        let (key, value) = if let Some((key, value)) = line.split_once('=') {
+            (
+                key.trim().to_ascii_lowercase(),
+                normalize_git_config_value(value),
+            )
+        } else {
+            (line.to_ascii_lowercase(), "true".to_string())
+        };
+        if key.is_empty() {
+            continue;
+        }
+
+        match (section.as_str(), subsection.as_deref(), key.as_str()) {
+            ("user", None, "name") => {
+                if !value.is_empty() {
+                    config.name = Some(value);
+                    saw_any = true;
+                }
+            }
+            ("user", None, "email") => {
+                if !value.is_empty() {
+                    config.email = Some(value);
                     saw_any = true;
                 }
             }

@@ -197,6 +197,7 @@ pub(super) fn create_bookmark_at_working_copy(
 }
 
 pub(super) fn push_bookmark(context: &mut RepoContext, branch_name: &str) -> Result<()> {
+    ensure_bookmark_tip_identity(context, branch_name)?;
     let remote_name = resolve_push_remote_name(context, branch_name)?;
     let remote = RemoteName::new(remote_name.as_str());
     ensure_remote_bookmark_is_tracked(context, branch_name, remote, remote_name.as_str())?;
@@ -255,6 +256,64 @@ pub(super) fn push_bookmark(context: &mut RepoContext, branch_name: &str) -> Res
         .commit(format!("push bookmark {branch_name}"))
         .context("failed to finalize push operation")?;
     persist_working_copy_state(context, repo, "after push")
+}
+
+fn ensure_bookmark_tip_identity(context: &mut RepoContext, branch_name: &str) -> Result<()> {
+    let target = context
+        .repo
+        .view()
+        .get_local_bookmark(RefName::new(branch_name))
+        .as_normal()
+        .cloned();
+    let Some(commit_id) = target else {
+        return Ok(());
+    };
+
+    let commit = context
+        .repo
+        .store()
+        .get_commit(&commit_id)
+        .with_context(|| format!("failed to load bookmark target for '{branch_name}'"))?;
+    if !commit_has_missing_identity(&commit) {
+        return Ok(());
+    }
+
+    let signature = context.settings.signature();
+    if signature.name.trim().is_empty() || signature.email.trim().is_empty() {
+        return Err(anyhow!(
+            "bookmark '{branch_name}' has a commit with missing author/committer metadata. \
+Set user.name/user.email (JJ or Git config) and try again."
+        ));
+    }
+
+    let mut tx = context.repo.start_transaction();
+    let rewritten = tx
+        .repo_mut()
+        .rewrite_commit(&commit)
+        .set_author(signature.clone())
+        .set_committer(signature)
+        .write()
+        .with_context(|| format!("failed to rewrite bookmark commit metadata for '{branch_name}'"))?;
+    tx.repo_mut().set_local_bookmark_target(
+        RefName::new(branch_name),
+        RefTarget::normal(rewritten.id().clone()),
+    );
+    tx.repo_mut()
+        .rebase_descendants()
+        .context("failed to rebase descendants after rewriting bookmark metadata")?;
+
+    let repo = tx
+        .commit(format!("update metadata for bookmark {branch_name}"))
+        .context("failed to finalize bookmark metadata update")?;
+    persist_working_copy_state(context, repo, "after rewriting bookmark metadata")
+}
+
+fn commit_has_missing_identity(commit: &Commit) -> bool {
+    signature_has_missing_identity(commit.author()) || signature_has_missing_identity(commit.committer())
+}
+
+fn signature_has_missing_identity(signature: &jj_lib::backend::Signature) -> bool {
+    signature.name.trim().is_empty() || signature.email.trim().is_empty()
 }
 
 pub(super) fn sync_bookmark_from_remote(
@@ -405,4 +464,3 @@ fn resolve_push_remote_name(context: &RepoContext, branch_name: &str) -> Result<
 
     Err(anyhow!("no Git remote configured for push"))
 }
-

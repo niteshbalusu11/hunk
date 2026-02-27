@@ -66,21 +66,19 @@ impl DiffViewer {
                             .child(tree_summary),
                     ),
             )
-            .when(self.sidebar_tree_mode == SidebarTreeMode::Diff, |this| {
-                this.when_some(self.git_status_message.as_ref(), |this, message| {
-                    this.child(
-                        div()
-                            .w_full()
-                            .px_2()
-                            .py_1()
-                            .border_b_1()
-                            .border_color(cx.theme().border)
-                            .text_xs()
-                            .font_medium()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(message.clone()),
-                    )
-                })
+            .when_some(self.git_status_message.as_ref(), |this, message| {
+                this.child(
+                    div()
+                        .w_full()
+                        .px_2()
+                        .py_1()
+                        .border_b_1()
+                        .border_color(cx.theme().border)
+                        .text_xs()
+                        .font_medium()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(message.clone()),
+                )
             })
             .child(
                 div()

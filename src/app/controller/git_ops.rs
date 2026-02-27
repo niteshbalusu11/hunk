@@ -1,10 +1,50 @@
 impl DiffViewer {
+    fn push_error_notification(message: String, cx: &mut Context<Self>) {
+        let window_handles = cx.windows().into_iter().collect::<Vec<_>>();
+        if window_handles.is_empty() {
+            error!("cannot show git action error notification: no windows available");
+            return;
+        }
+
+        for window_handle in window_handles {
+            if let Err(err) = cx.update_window(window_handle, |_, window, cx| {
+                gpui_component::WindowExt::push_notification(
+                    window,
+                    gpui_component::notification::Notification::error(message.clone()),
+                    cx,
+                );
+            }) {
+                error!("failed to show git action error notification: {err:#}");
+            }
+        }
+    }
+
+    fn push_warning_notification(message: String, cx: &mut Context<Self>) {
+        let window_handles = cx.windows().into_iter().collect::<Vec<_>>();
+        if window_handles.is_empty() {
+            error!("cannot show git action warning notification: no windows available");
+            return;
+        }
+
+        for window_handle in window_handles {
+            if let Err(err) = cx.update_window(window_handle, |_, window, cx| {
+                gpui_component::WindowExt::push_notification(
+                    window,
+                    gpui_component::notification::Notification::warning(message.clone()),
+                    cx,
+                );
+            }) {
+                error!("failed to show git action warning notification: {err:#}");
+            }
+        }
+    }
+
     fn next_git_action_epoch(&mut self) -> usize {
         self.git_action_epoch = self.git_action_epoch.saturating_add(1);
         self.git_action_epoch
     }
 
-    fn run_git_action<F>(&mut self, cx: &mut Context<Self>, action: F)
+    fn run_git_action<F>(&mut self, action_name: &'static str, cx: &mut Context<Self>, action: F)
     where
         F: FnOnce(std::path::PathBuf) -> anyhow::Result<String> + Send + 'static,
     {
@@ -43,7 +83,13 @@ impl DiffViewer {
                             this.request_snapshot_refresh_internal(true, cx);
                         }
                         Err(err) => {
+                            error!("{action_name} failed: {err:#}");
+                            let summary = err.to_string();
                             this.git_status_message = Some(format!("JJ error: {err:#}"));
+                            Self::push_error_notification(
+                                format!("{action_name} failed: {summary}"),
+                                cx,
+                            );
                         }
                     }
 
@@ -55,7 +101,7 @@ impl DiffViewer {
     }
 
     pub(super) fn checkout_branch(&mut self, branch_name: String, cx: &mut Context<Self>) {
-        self.run_git_action(cx, move |repo_root| {
+        self.run_git_action("Switch branch", cx, move |repo_root| {
             checkout_or_create_branch(&repo_root, &branch_name)?;
             Ok(format!("Switched to {}", branch_name))
         });
@@ -144,7 +190,7 @@ impl DiffViewer {
             state.set_value(sanitized.clone(), window, cx);
         });
 
-        self.run_git_action(cx, move |repo_root| {
+        self.run_git_action("Switch branch", cx, move |repo_root| {
             checkout_or_create_branch(&repo_root, &sanitized)?;
             Ok(format!("Switched to {}", sanitized))
         });
@@ -152,18 +198,23 @@ impl DiffViewer {
 
     pub(super) fn push_or_publish_current_branch(&mut self, cx: &mut Context<Self>) {
         if !self.branch_syncable() {
-            self.git_status_message = Some("Cannot push a detached or unknown branch.".to_string());
+            let message = "Cannot push a detached or unknown branch.".to_string();
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
             cx.notify();
             return;
         }
         if !self.tracking_area_clean() {
-            self.git_status_message =
-                Some("Commit or discard tracked changes before pushing.".to_string());
+            let message = "Commit or discard tracked changes before pushing.".to_string();
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
             cx.notify();
             return;
         }
         if self.branch_has_upstream && self.branch_ahead_count == 0 {
-            self.git_status_message = Some("Nothing to push.".to_string());
+            let message = "Nothing to push.".to_string();
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
             cx.notify();
             return;
         }
@@ -174,7 +225,12 @@ impl DiffViewer {
         let branch_name = self.branch_name.clone();
         let has_upstream = self.branch_has_upstream;
 
-        self.run_git_action(cx, move |repo_root| {
+        let action_name = if has_upstream {
+            "Push branch"
+        } else {
+            "Publish branch"
+        };
+        self.run_git_action(action_name, cx, move |repo_root| {
             push_current_branch(&repo_root, &branch_name, has_upstream)?;
             if has_upstream {
                 Ok(format!("Pushed {}", branch_name))
@@ -186,18 +242,23 @@ impl DiffViewer {
 
     pub(super) fn sync_current_branch_from_remote(&mut self, cx: &mut Context<Self>) {
         if !self.branch_syncable() {
-            self.git_status_message = Some("Cannot sync a detached or unknown branch.".to_string());
+            let message = "Cannot sync a detached or unknown branch.".to_string();
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
             cx.notify();
             return;
         }
         if !self.branch_has_upstream {
-            self.git_status_message = Some("No upstream bookmark to sync from.".to_string());
+            let message = "No upstream bookmark to sync from.".to_string();
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
             cx.notify();
             return;
         }
         if !self.tracking_area_clean() {
-            self.git_status_message =
-                Some("Commit or discard tracked changes before syncing.".to_string());
+            let message = "Commit or discard tracked changes before syncing.".to_string();
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
             cx.notify();
             return;
         }
@@ -207,7 +268,7 @@ impl DiffViewer {
 
         let branch_name = self.branch_name.clone();
 
-        self.run_git_action(cx, move |repo_root| {
+        self.run_git_action("Sync branch", cx, move |repo_root| {
             sync_current_branch(&repo_root, &branch_name)?;
             Ok(format!("Synced {}", branch_name))
         });
@@ -282,7 +343,12 @@ impl DiffViewer {
                             this.request_snapshot_refresh(cx);
                         }
                         Err(err) => {
+                            error!("Commit failed: {err:#}");
                             this.git_status_message = Some(format!("JJ error: {err:#}"));
+                            Self::push_error_notification(
+                                format!("Commit failed: {}", err),
+                                cx,
+                            );
                         }
                     }
 
