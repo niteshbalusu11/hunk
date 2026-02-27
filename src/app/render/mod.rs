@@ -1,6 +1,6 @@
 use super::data::{
     DiffStreamRowKind, RepoTreeNodeKind, RightPaneMode, SidebarTreeMode,
-    cached_runtime_fallback_segments, flatten_repo_tree_rows,
+    cached_runtime_fallback_segments,
 };
 use super::highlight::SyntaxTokenKind;
 use super::*;

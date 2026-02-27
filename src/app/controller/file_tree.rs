@@ -50,6 +50,7 @@ impl DiffViewer {
         } else {
             self.repo_tree_expanded_dirs.insert(path);
         }
+        self.rebuild_repo_tree_rows();
         cx.notify();
     }
 
@@ -68,9 +69,12 @@ impl DiffViewer {
     pub(super) fn request_repo_tree_reload(&mut self, cx: &mut Context<Self>) {
         let Some(repo_root) = self.repo_root.clone() else {
             self.repo_tree_nodes.clear();
+            self.repo_tree_rows.clear();
             self.repo_tree_file_count = 0;
             self.repo_tree_folder_count = 0;
             self.repo_tree_expanded_dirs.clear();
+            self.sidebar_repo_row_count = 0;
+            self.sidebar_repo_list_state.reset(0);
             self.repo_tree_loading = false;
             self.repo_tree_error = None;
             cx.notify();
@@ -104,6 +108,10 @@ impl DiffViewer {
         self.repo_tree_epoch = self.repo_tree_epoch.saturating_add(1);
         self.repo_tree_epoch
     }
+
+    fn rebuild_repo_tree_rows(&mut self) {
+        self.repo_tree_rows = flatten_repo_tree_rows(&self.repo_tree_nodes, &self.repo_tree_expanded_dirs);
+    }
 }
 
 fn apply_repo_tree_reload(
@@ -122,6 +130,7 @@ fn apply_repo_tree_reload(
             this.repo_tree_error = None;
             this.repo_tree_expanded_dirs
                 .retain(|path| repo_tree_has_directory(&this.repo_tree_nodes, path.as_str()));
+            this.rebuild_repo_tree_rows();
             if let Some(path) = this.selected_path.clone()
                 && this.sidebar_tree_mode == SidebarTreeMode::Files
                 && this.right_pane_mode == RightPaneMode::FileEditor
@@ -134,9 +143,12 @@ fn apply_repo_tree_reload(
         Err(err) => {
             this.repo_tree_error = Some(format!("Failed to load repository tree: {err:#}"));
             this.repo_tree_nodes.clear();
+            this.repo_tree_rows.clear();
             this.repo_tree_file_count = 0;
             this.repo_tree_folder_count = 0;
             this.repo_tree_expanded_dirs.clear();
+            this.sidebar_repo_row_count = 0;
+            this.sidebar_repo_list_state.reset(0);
         }
     }
 

@@ -219,7 +219,20 @@ impl DiffViewer {
             tree_state,
             sidebar_collapsed: false,
             sidebar_tree_mode: SidebarTreeMode::Diff,
+            sidebar_diff_list_state: ListState::new(
+                0,
+                ListAlignment::Top,
+                px(SIDEBAR_DIFF_LIST_ESTIMATED_ROW_HEIGHT),
+            ),
+            sidebar_diff_row_count: 0,
+            sidebar_repo_list_state: ListState::new(
+                0,
+                ListAlignment::Top,
+                px(SIDEBAR_REPO_LIST_ESTIMATED_ROW_HEIGHT),
+            ),
+            sidebar_repo_row_count: 0,
             repo_tree_nodes: Vec::new(),
+            repo_tree_rows: Vec::new(),
             repo_tree_file_count: 0,
             repo_tree_folder_count: 0,
             repo_tree_expanded_dirs: BTreeSet::new(),
@@ -454,9 +467,12 @@ impl DiffViewer {
         if root_changed {
             self.commit_excluded_files.clear();
             self.repo_tree_nodes.clear();
+            self.repo_tree_rows.clear();
             self.repo_tree_file_count = 0;
             self.repo_tree_folder_count = 0;
             self.repo_tree_expanded_dirs.clear();
+            self.sidebar_repo_row_count = 0;
+            self.sidebar_repo_list_state.reset(0);
             self.repo_tree_error = None;
             self.right_pane_mode = RightPaneMode::Diff;
             self.clear_editor_state(cx);
@@ -535,9 +551,12 @@ impl DiffViewer {
             Some(err.to_string())
         };
         self.repo_tree_nodes.clear();
+        self.repo_tree_rows.clear();
         self.repo_tree_file_count = 0;
         self.repo_tree_folder_count = 0;
         self.repo_tree_expanded_dirs.clear();
+        self.sidebar_repo_row_count = 0;
+        self.sidebar_repo_list_state.reset(0);
         self.repo_tree_loading = false;
         self.repo_tree_error = None;
         self.right_pane_mode = RightPaneMode::Diff;

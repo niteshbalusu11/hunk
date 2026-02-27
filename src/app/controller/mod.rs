@@ -5,8 +5,8 @@ use super::data::{
     DiffSegmentQuality, DiffStream, DiffStreamRowKind, RepoTreeNodeKind, RightPaneMode,
     SidebarTreeMode, base_segment_quality_for_file, build_diff_row_segment_cache,
     build_diff_stream_from_patch_map, build_repo_tree, build_tree_items, decimal_digits,
-    effective_segment_quality, line_number_column_width, load_file_editor_document, message_row,
-    save_file_editor_document,
+    effective_segment_quality, flatten_repo_tree_rows, line_number_column_width,
+    load_file_editor_document, message_row, save_file_editor_document,
 };
 use super::*;
 use hunk::jj::{
