@@ -3479,6 +3479,7 @@ dependencies = [
  "gpui-component",
  "gpui-component-assets",
  "jj-lib",
+ "markdown",
  "notify 8.2.0",
  "serde",
  "syntect",

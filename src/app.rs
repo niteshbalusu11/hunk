@@ -30,6 +30,7 @@ use hunk::diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
 use hunk::jj::{
     BookmarkRevision, ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFingerprint,
 };
+use hunk::markdown_preview::MarkdownPreviewBlock;
 use hunk::state::{AppState, AppStateStore};
 
 use data::{
@@ -48,6 +49,7 @@ const DIFF_BOTTOM_SAFE_INSET: f32 = APP_BOTTOM_SAFE_INSET;
 const DIFF_SCROLLBAR_RIGHT_INSET: f32 = 0.0;
 const DIFF_SCROLLBAR_SIZE: f32 = 16.0;
 const FILE_EDITOR_MAX_BYTES: usize = 2_400_000;
+const MARKDOWN_PREVIEW_DEBOUNCE: Duration = Duration::from_millis(200);
 const DIFF_SEGMENT_PREFETCH_RADIUS_ROWS: usize = 120;
 const DIFF_SEGMENT_PREFETCH_STEP_ROWS: usize = 24;
 const DIFF_SEGMENT_PREFETCH_BATCH_ROWS: usize = 96;
@@ -703,4 +705,9 @@ struct DiffViewer {
     editor_save_loading: bool,
     editor_save_epoch: usize,
     editor_save_task: Task<()>,
+    editor_markdown_preview_task: Task<()>,
+    editor_markdown_preview_blocks: Vec<MarkdownPreviewBlock>,
+    editor_markdown_preview_loading: bool,
+    editor_markdown_preview_revision: usize,
+    editor_markdown_preview: bool,
 }

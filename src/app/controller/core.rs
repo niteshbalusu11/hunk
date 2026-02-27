@@ -252,11 +252,17 @@ impl DiffViewer {
             editor_save_loading: false,
             editor_save_epoch: 0,
             editor_save_task: Task::ready(()),
+            editor_markdown_preview_task: Task::ready(()),
+            editor_markdown_preview_blocks: Vec::new(),
+            editor_markdown_preview_loading: false,
+            editor_markdown_preview_revision: 0,
+            editor_markdown_preview: false,
         };
 
         let editor_state = view.editor_input_state.clone();
         cx.observe(&editor_state, |this, _, cx| {
             this.sync_editor_dirty_from_input(cx);
+            this.schedule_editor_markdown_preview_parse(cx);
         })
         .detach();
 
