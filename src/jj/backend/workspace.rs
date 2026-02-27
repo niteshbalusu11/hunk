@@ -85,6 +85,54 @@ pub(super) fn normalize_path(path: &str) -> String {
     path.trim().trim_end_matches('/').to_string()
 }
 
+pub(super) fn nested_repo_roots_from_fs(root: &Path) -> Result<BTreeSet<String>> {
+    let mut nested_roots = BTreeSet::new();
+    collect_nested_repo_roots(root, root, &mut nested_roots)?;
+    Ok(nested_roots)
+}
+
+fn collect_nested_repo_roots(
+    root: &Path,
+    current: &Path,
+    nested_roots: &mut BTreeSet<String>,
+) -> Result<()> {
+    for child in read_dir_sorted(current)? {
+        let Ok(file_type) = child.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+
+        let name = child.file_name();
+        let name = name.to_string_lossy();
+        if name == ".git" || name == ".jj" {
+            continue;
+        }
+
+        let child_path = child.path();
+        if directory_is_repo_root(child_path.as_path()) {
+            if let Ok(relative) = child_path.strip_prefix(root) {
+                let relative_path = normalize_path(&relative.to_string_lossy());
+                if !relative_path.is_empty() {
+                    nested_roots.insert(relative_path);
+                }
+            }
+            continue;
+        }
+
+        collect_nested_repo_roots(root, child_path.as_path(), nested_roots)?;
+    }
+
+    Ok(())
+}
+
+fn directory_is_repo_root(path: &Path) -> bool {
+    let git_marker = path.join(".git");
+    let jj_marker = path.join(".jj");
+    git_marker.is_dir() || git_marker.is_file() || jj_marker.is_dir()
+}
+
 pub(super) fn discover_repo_root(cwd: &Path) -> Result<PathBuf> {
     if let Some(root) = find_jj_repo_ancestor(cwd) {
         return Ok(root);
@@ -117,6 +165,15 @@ fn initialize_jj_for_git_repo(git_root: &Path) -> Result<()> {
             git_root.display()
         )
     })?;
+
+    let jj_root = git_root.join(".jj");
+
+    let jj_ignore = jj_root.join(".gitignore");
+    if !jj_ignore.is_file() {
+        fs::write(&jj_ignore, "/*\n")
+            .with_context(|| format!("failed to write {}", jj_ignore.display()))?;
+    }
+
     Ok(())
 }
 

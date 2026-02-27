@@ -19,6 +19,16 @@ fn load_snapshot_auto_initializes_jj_for_git_repo() {
         fixture.path().join(".jj").exists(),
         "JJ metadata should be auto-initialized in git repo"
     );
+    let jj_gitignore = fixture.path().join(".jj").join(".gitignore");
+    assert!(
+        jj_gitignore.exists(),
+        ".jj/.gitignore should be created so git clients ignore JJ metadata"
+    );
+    let contents = fs::read_to_string(jj_gitignore).expect("should read .jj/.gitignore");
+    assert!(
+        contents.contains("/*"),
+        ".jj/.gitignore should ignore JJ internals"
+    );
     assert!(
         snapshot.files.iter().any(|file| file.path == "hello.txt"),
         "snapshot should include working copy change after JJ auto-init"

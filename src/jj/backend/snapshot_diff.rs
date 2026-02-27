@@ -189,11 +189,15 @@ pub(super) fn load_changed_files_from_context(context: &RepoContext) -> Result<V
     let wc_commit = current_wc_commit(context)?;
     let base_tree = wc_commit.parent_tree(context.repo.as_ref())?;
     let current_tree = wc_commit.tree();
+    let nested_repo_roots = nested_repo_roots_from_fs(&context.root)?;
 
     let mut file_map = BTreeMap::<String, ChangedFile>::new();
     for entry in block_on_stream(base_tree.diff_stream(&current_tree, &EverythingMatcher)) {
         let path = normalize_path(entry.path.as_internal_file_string());
         if path.is_empty() {
+            continue;
+        }
+        if path_is_within_nested_repo(path.as_str(), &nested_repo_roots) {
             continue;
         }
 
@@ -456,9 +460,13 @@ pub(super) fn last_commit_subject_from_context(context: &RepoContext) -> Result<
 
 pub(super) fn repo_line_stats_from_context(context: &RepoContext) -> Result<LineStats> {
     let materialize_options = conflict_materialize_options(context);
+    let nested_repo_roots = nested_repo_roots_from_fs(&context.root)?;
     let mut stats = LineStats::default();
 
     for entry in collect_materialized_diff_entries(context)? {
+        if materialized_entry_within_nested_repo(&entry, &nested_repo_roots) {
+            continue;
+        }
         let entry_stats = line_stats_for_entry(entry, &materialize_options)?;
         stats.added += entry_stats.added;
         stats.removed += entry_stats.removed;
@@ -697,6 +705,27 @@ fn append_hunk_line(
     if !bytes.ends_with(b"\n") {
         patch.push('\n');
     }
+}
+
+fn materialized_entry_within_nested_repo(
+    entry: &MaterializedTreeDiffEntry,
+    nested_repo_roots: &BTreeSet<String>,
+) -> bool {
+    let source = normalize_path(entry.path.source().as_internal_file_string());
+    let target = normalize_path(entry.path.target().as_internal_file_string());
+    path_is_within_nested_repo(source.as_str(), nested_repo_roots)
+        || path_is_within_nested_repo(target.as_str(), nested_repo_roots)
+}
+
+fn path_is_within_nested_repo(path: &str, nested_repo_roots: &BTreeSet<String>) -> bool {
+    if path.is_empty() {
+        return false;
+    }
+
+    nested_repo_roots.iter().any(|nested_root| {
+        path.strip_prefix(nested_root.as_str())
+            .is_some_and(|suffix| suffix.starts_with('/'))
+    })
 }
 
 fn line_stats_from_hunks(hunks: &[UnifiedDiffHunk<'_>]) -> LineStats {
