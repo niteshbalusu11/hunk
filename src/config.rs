@@ -6,6 +6,11 @@ use serde::{Deserialize, Serialize};
 
 const CONFIG_DIR_NAME: &str = ".hunkdiff";
 const CONFIG_FILE_NAME: &str = "config.toml";
+const DEFAULT_AUTO_REFRESH_INTERVAL_MS: u64 = 60_000;
+
+pub const fn default_auto_refresh_interval_ms() -> u64 {
+    DEFAULT_AUTO_REFRESH_INTERVAL_MS
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -58,13 +63,27 @@ impl Default for KeyboardShortcuts {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
     pub theme: ThemePreference,
     pub show_whitespace: bool,
     pub show_eol_markers: bool,
     pub keyboard_shortcuts: KeyboardShortcuts,
+    #[serde(default = "default_auto_refresh_interval_ms")]
+    pub auto_refresh_interval_ms: u64,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            theme: ThemePreference::System,
+            show_whitespace: false,
+            show_eol_markers: false,
+            keyboard_shortcuts: KeyboardShortcuts::default(),
+            auto_refresh_interval_ms: default_auto_refresh_interval_ms(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

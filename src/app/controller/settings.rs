@@ -308,6 +308,7 @@ impl DiffViewer {
         self.diff_show_whitespace = self.config.show_whitespace;
         self.diff_show_eol_markers = self.config.show_eol_markers;
         self.apply_theme_preference(window, cx);
+        self.restart_auto_refresh(cx);
         self.persist_config();
 
         let saved_path = self

@@ -1,4 +1,8 @@
 impl DiffViewer {
+    const AUTO_REFRESH_MAX_INTERVAL_MS: u64 = 60_000;
+    const AUTO_REFRESH_BACKOFF_STEPS: u32 = 6;
+    const REPO_WATCH_DEBOUNCE: Duration = Duration::from_millis(150);
+
     fn load_app_config() -> (Option<ConfigStore>, AppConfig) {
         let store = match ConfigStore::new() {
             Ok(store) => store,
@@ -188,7 +192,9 @@ impl DiffViewer {
             diff_right_line_number_width: line_number_column_width(DIFF_LINE_NUMBER_MIN_DIGITS),
             overall_line_stats: LineStats::default(),
             refresh_epoch: 0,
+            auto_refresh_unmodified_streak: 0,
             auto_refresh_task: Task::ready(()),
+            repo_watch_task: Task::ready(()),
             snapshot_epoch: 0,
             snapshot_task: Task::ready(()),
             snapshot_loading: false,
@@ -233,6 +239,7 @@ impl DiffViewer {
             repo_tree_task: Task::ready(()),
             repo_tree_loading: false,
             repo_tree_error: None,
+            repo_tree_last_reload: Instant::now(),
             right_pane_mode: RightPaneMode::Diff,
             editor_input_state,
             editor_path: None,
@@ -261,6 +268,7 @@ impl DiffViewer {
 
         view.request_snapshot_refresh(cx);
         view.start_auto_refresh(cx);
+        view.start_repo_watch(cx);
         view.start_fps_monitor(cx);
         view
     }
@@ -296,6 +304,9 @@ impl DiffViewer {
     pub(super) fn request_snapshot_refresh_internal(&mut self, force: bool, cx: &mut Context<Self>) {
         if self.snapshot_loading && !force {
             return;
+        }
+        if force {
+            self.auto_refresh_unmodified_streak = 0;
         }
 
         enum SnapshotRefreshResult {
@@ -355,11 +366,14 @@ impl DiffViewer {
                             snapshot,
                         }) => {
                             info!("snapshot refresh completed in {:?}", elapsed);
+                            this.auto_refresh_unmodified_streak = 0;
                             this.last_snapshot_fingerprint = Some(fingerprint);
                             this.apply_snapshot(snapshot, cx)
                         }
                         Ok(SnapshotRefreshResult::Unchanged(fingerprint)) => {
                             info!("snapshot refresh skipped in {:?} (no repo changes)", elapsed);
+                            this.auto_refresh_unmodified_streak =
+                                this.auto_refresh_unmodified_streak.saturating_add(1);
                             this.last_snapshot_fingerprint = Some(fingerprint);
                             cx.notify();
                         }
@@ -416,6 +430,7 @@ impl DiffViewer {
                     this.project_path = Some(selected_path.clone());
                     this.set_last_project_path(Some(selected_path));
                     this.git_status_message = None;
+                    this.start_repo_watch(cx);
                     this.request_snapshot_refresh_internal(true, cx);
                     cx.notify();
                 })
@@ -458,6 +473,9 @@ impl DiffViewer {
         self.last_commit_subject = last_commit_subject;
         self.repo_discovery_failed = false;
         self.error_message = None;
+        if root_changed {
+            self.start_repo_watch(cx);
+        }
         if root_changed {
             self.commit_excluded_files.clear();
             self.repo_tree_nodes.clear();
@@ -995,6 +1013,93 @@ impl DiffViewer {
         self.snapshot_epoch
     }
 
+    fn auto_refresh_interval(&self) -> Duration {
+        if self.config.auto_refresh_interval_ms == 0 {
+            return Duration::ZERO;
+        }
+
+        let base_ms = self.config.auto_refresh_interval_ms.max(250);
+        let backoff_factor =
+            1_u64 << self.auto_refresh_unmodified_streak.min(Self::AUTO_REFRESH_BACKOFF_STEPS);
+        let interval_ms = (base_ms.saturating_mul(backoff_factor))
+            .min(Self::AUTO_REFRESH_MAX_INTERVAL_MS);
+        Duration::from_millis(interval_ms)
+    }
+
+    fn should_ignore_repo_watch_path(
+        path: &std::path::Path,
+        repo_root: &std::path::Path,
+    ) -> bool {
+        let Ok(relative_path) = path.strip_prefix(repo_root) else {
+            return false;
+        };
+
+        relative_path
+            .components()
+            .any(|component| component.as_os_str() == ".jj" || component.as_os_str() == ".git")
+    }
+
+    fn start_repo_watch(&mut self, cx: &mut Context<Self>) {
+        self.repo_watch_task = Task::ready(());
+
+        let Some(repo_root) = self.repo_root.clone().or_else(|| self.project_path.clone()) else {
+            return;
+        };
+        let (event_tx, mut event_rx) = mpsc::unbounded::<notify::Result<notify::Event>>();
+        let repo_root_path = repo_root.clone();
+        let repo_root_for_cb = repo_root.to_string_lossy().to_string();
+        let watcher = notify::recommended_watcher(move |result| {
+            event_tx.unbounded_send(result).ok();
+        });
+
+        let mut watcher = match watcher {
+            Ok(watcher) => watcher,
+            Err(err) => {
+                error!("failed to start file watch for {}: {err}", repo_root_for_cb);
+                return;
+            }
+        };
+
+        if let Err(err) = watcher.watch(&repo_root, notify::RecursiveMode::Recursive) {
+            error!("failed to watch repository at {}: {err}", repo_root_for_cb);
+            return;
+        }
+
+        self.repo_watch_task = cx.spawn(async move |this, cx| {
+            let mut last_event_at = Instant::now() - Self::REPO_WATCH_DEBOUNCE;
+            while let Some(event) = event_rx.next().await {
+                let Ok(event) = event else {
+                    continue;
+                };
+
+                if event
+                    .paths
+                    .iter()
+                    .all(|path| Self::should_ignore_repo_watch_path(path, &repo_root_path))
+                {
+                    continue;
+                }
+
+                let now = Instant::now();
+                if now.duration_since(last_event_at) < Self::REPO_WATCH_DEBOUNCE {
+                    continue;
+                }
+                last_event_at = now;
+
+                if let Some(this) = this.upgrade() {
+                    this.update(cx, |this, cx| {
+                        this.request_snapshot_refresh_internal(true, cx);
+                        if this.workspace_view_mode == WorkspaceViewMode::Files {
+                            this.request_repo_tree_reload(cx);
+                        }
+                    })
+                    .ok();
+                }
+            }
+            drop(watcher);
+        });
+    }
+
     fn next_patch_epoch(&mut self) -> usize {
         self.patch_epoch = self.patch_epoch.saturating_add(1);
         self.patch_epoch
@@ -1019,7 +1124,24 @@ impl DiffViewer {
 
     fn start_auto_refresh(&mut self, cx: &mut Context<Self>) {
         let epoch = self.next_refresh_epoch();
-        self.schedule_auto_refresh(epoch, cx);
+        if self.config.auto_refresh_interval_ms == 0 {
+            return;
+        }
+
+        let interval = self.auto_refresh_interval();
+        self.schedule_auto_refresh(epoch, interval, cx);
+    }
+
+    pub(super) fn restart_auto_refresh(&mut self, cx: &mut Context<Self>) {
+        self.auto_refresh_task = Task::ready(());
+        self.auto_refresh_unmodified_streak = 0;
+        if self.config.auto_refresh_interval_ms == 0 {
+            return;
+        }
+
+        let epoch = self.next_refresh_epoch();
+        let interval = self.auto_refresh_interval();
+        self.schedule_auto_refresh(epoch, interval, cx);
     }
 
     fn next_refresh_epoch(&mut self) -> usize {
@@ -1027,24 +1149,41 @@ impl DiffViewer {
         self.refresh_epoch
     }
 
-    fn schedule_auto_refresh(&mut self, epoch: usize, cx: &mut Context<Self>) {
+    fn schedule_auto_refresh(
+        &mut self,
+        epoch: usize,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) {
         if epoch != self.refresh_epoch {
+            return;
+        }
+        if delay == Duration::ZERO || self.config.auto_refresh_interval_ms == 0 {
             return;
         }
 
         self.auto_refresh_task = cx.spawn(async move |this, cx| {
-            Timer::after(AUTO_REFRESH_INTERVAL).await;
+            Timer::after(delay).await;
             if let Some(this) = this.upgrade() {
                 this.update(cx, |this, cx| {
-                    if this.recently_scrolling() {
-                        let next_epoch = this.next_refresh_epoch();
-                        this.schedule_auto_refresh(next_epoch, cx);
+                    if this.config.auto_refresh_interval_ms == 0 {
                         return;
                     }
 
-                    this.request_snapshot_refresh(cx);
+                    if this.recently_scrolling() {
+                        let next_epoch = this.next_refresh_epoch();
+                        let next_delay = this.auto_refresh_interval();
+                        this.schedule_auto_refresh(next_epoch, next_delay, cx);
+                        return;
+                    }
+
+                    if this.project_path.is_some() {
+                        this.request_snapshot_refresh(cx);
+                    }
+
+                    let next_delay = this.auto_refresh_interval();
                     let next_epoch = this.next_refresh_epoch();
-                    this.schedule_auto_refresh(next_epoch, cx);
+                    this.schedule_auto_refresh(next_epoch, next_delay, cx);
                 })
                 .ok();
             }

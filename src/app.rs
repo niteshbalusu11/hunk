@@ -37,7 +37,6 @@ use data::{
     WorkspaceViewMode,
 };
 
-const AUTO_REFRESH_INTERVAL: Duration = Duration::from_millis(900);
 const FPS_SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
 const AUTO_REFRESH_SCROLL_DEBOUNCE: Duration = Duration::from_millis(500);
 const DIFF_MONO_CHAR_WIDTH: f32 = 8.0;
@@ -648,7 +647,9 @@ struct DiffViewer {
     diff_right_line_number_width: f32,
     overall_line_stats: LineStats,
     refresh_epoch: usize,
+    auto_refresh_unmodified_streak: u32,
     auto_refresh_task: Task<()>,
+    repo_watch_task: Task<()>,
     snapshot_epoch: usize,
     snapshot_task: Task<()>,
     snapshot_loading: bool,
@@ -689,6 +690,7 @@ struct DiffViewer {
     repo_tree_task: Task<()>,
     repo_tree_loading: bool,
     repo_tree_error: Option<String>,
+    repo_tree_last_reload: Instant,
     right_pane_mode: RightPaneMode,
     editor_input_state: Entity<InputState>,
     editor_path: Option<String>,

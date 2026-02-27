@@ -285,7 +285,6 @@ impl DiffViewer {
         };
         let whitespace_label = if settings.show_whitespace { "On" } else { "Off" };
         let eol_label = if settings.show_eol_markers { "On" } else { "Off" };
-
         v_flex()
             .w_full()
             .gap_3()
@@ -489,6 +488,27 @@ impl DiffViewer {
                                         )
                                     })
                             }),
+                    )
+                    .child(
+                        v_flex()
+                            .w_full()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_semibold()
+                                    .text_color(cx.theme().foreground)
+                                    .child("Update behavior"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(
+                                        "Diffs refresh immediately on file events. The app also performs \
+                            a background periodic check as a fallback if file events are missed.",
+                                    ),
+                            ),
                     ),
             )
             .into_any_element()
