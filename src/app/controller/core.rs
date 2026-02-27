@@ -516,6 +516,7 @@ impl DiffViewer {
     fn apply_snapshot_error(&mut self, err: anyhow::Error, cx: &mut Context<Self>) {
         let missing_repository = Self::is_missing_repository_error(&err);
 
+        self.cancel_patch_reload();
         self.last_snapshot_fingerprint = None;
         self.repo_root = None;
         self.branch_name = "unknown".to_string();
@@ -577,6 +578,7 @@ impl DiffViewer {
 
     fn request_selected_diff_reload(&mut self, cx: &mut Context<Self>) {
         let Some(repo_root) = self.repo_root.clone() else {
+            self.cancel_patch_reload();
             self.diff_rows.clear();
             self.diff_row_metadata.clear();
             self.diff_row_segment_cache.clear();
@@ -590,11 +592,11 @@ impl DiffViewer {
             self.file_row_ranges.clear();
             self.file_line_stats.clear();
             self.recompute_diff_layout();
-            self.patch_loading = false;
             return;
         };
 
         if self.files.is_empty() {
+            self.cancel_patch_reload();
             self.diff_rows = vec![message_row(DiffRowKind::Empty, "No changed files.")];
             self.diff_row_metadata.clear();
             self.diff_row_segment_cache.clear();
@@ -608,7 +610,6 @@ impl DiffViewer {
             self.file_row_ranges.clear();
             self.file_line_stats.clear();
             self.recompute_diff_layout();
-            self.patch_loading = false;
             return;
         }
 
@@ -1006,6 +1007,12 @@ impl DiffViewer {
     fn next_patch_epoch(&mut self) -> usize {
         self.patch_epoch = self.patch_epoch.saturating_add(1);
         self.patch_epoch
+    }
+
+    fn cancel_patch_reload(&mut self) {
+        self.next_patch_epoch();
+        self.patch_task = Task::ready(());
+        self.patch_loading = false;
     }
 
     fn next_segment_prefetch_epoch(&mut self) -> usize {

@@ -79,6 +79,43 @@ fn commit_selected_paths_only_commits_requested_files() {
     );
 }
 
+#[test]
+fn commit_selected_paths_deduplicates_file_list() {
+    let fixture = TempRepo::new("commit-selected-dedup");
+    let alpha = fixture.path().join("alpha.txt");
+    let beta = fixture.path().join("beta.txt");
+
+    write_file(alpha.clone(), "alpha one\n");
+    write_file(beta.clone(), "beta one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+
+    write_file(alpha, "alpha one\nalpha two\n");
+    write_file(beta, "beta one\nbeta two\n");
+
+    let committed = commit_selected_paths(
+        fixture.path(),
+        "commit alpha once",
+        &[
+            "alpha.txt".to_string(),
+            "alpha.txt".to_string(),
+            "alpha.txt/".to_string(),
+        ],
+    )
+    .expect("partial commit should succeed");
+    assert_eq!(committed, 1, "duplicate paths should be committed once");
+
+    let snapshot =
+        load_snapshot(fixture.path()).expect("snapshot should load after partial commit");
+    assert!(
+        snapshot.files.iter().any(|file| file.path == "beta.txt"),
+        "unselected file should remain in working copy"
+    );
+    assert!(
+        snapshot.files.iter().all(|file| file.path != "alpha.txt"),
+        "selected file should be committed"
+    );
+}
+
 struct TempRepo {
     path: PathBuf,
 }
