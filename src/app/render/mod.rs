@@ -1,6 +1,5 @@
 use super::data::{
-    DiffStreamRowKind, RepoTreeNodeKind, RightPaneMode, SidebarTreeMode,
-    cached_runtime_fallback_segments,
+    DiffStreamRowKind, RepoTreeNodeKind, WorkspaceViewMode, cached_runtime_fallback_segments,
 };
 use super::highlight::SyntaxTokenKind;
 use super::*;

@@ -134,9 +134,8 @@ impl DiffViewer {
         let last_project_path = state.last_project_path.clone();
         let diff_show_whitespace = config.show_whitespace;
         let diff_show_eol_markers = config.show_eol_markers;
-        let tree_state = cx.new(|cx| TreeState::new(cx));
         let branch_input_state = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Select or create branch")
+            InputState::new(window, cx).placeholder("Select or create bookmark")
         });
         let commit_input_state = cx
             .new(|cx| InputState::new(window, cx).multi_line(true).rows(4).placeholder("Commit message"));
@@ -216,15 +215,8 @@ impl DiffViewer {
             fps_task: Task::ready(()),
             repo_discovery_failed: false,
             error_message: None,
-            tree_state,
             sidebar_collapsed: false,
-            sidebar_tree_mode: SidebarTreeMode::Diff,
-            sidebar_diff_list_state: ListState::new(
-                0,
-                ListAlignment::Top,
-                px(SIDEBAR_DIFF_LIST_ESTIMATED_ROW_HEIGHT),
-            ),
-            sidebar_diff_row_count: 0,
+            workspace_view_mode: WorkspaceViewMode::JjWorkspace,
             sidebar_repo_list_state: ListState::new(
                 0,
                 ListAlignment::Top,
@@ -446,7 +438,6 @@ impl DiffViewer {
         info!("loaded repository snapshot from {}", root.display());
         let root_changed = self.repo_root.as_ref() != Some(&root);
 
-        let files_changed = self.files != files;
         let previous_selected_path = self.selected_path.clone();
         let previous_selected_status = self.selected_status;
 
@@ -497,9 +488,6 @@ impl DiffViewer {
         let selected_changed = self.selected_path != previous_selected_path
             || self.selected_status != previous_selected_status;
 
-        if files_changed {
-            self.rebuild_tree(cx);
-        }
         if root_changed {
             self.request_repo_tree_reload(cx);
         }
@@ -562,7 +550,6 @@ impl DiffViewer {
         self.repo_tree_error = None;
         self.right_pane_mode = RightPaneMode::Diff;
         self.clear_editor_state(cx);
-        self.rebuild_tree(cx);
         cx.notify();
     }
 
@@ -1024,12 +1011,6 @@ impl DiffViewer {
         self.next_segment_prefetch_epoch();
         self.segment_prefetch_task = Task::ready(());
         self.segment_prefetch_anchor_row = None;
-    }
-
-    fn rebuild_tree(&mut self, cx: &mut Context<Self>) {
-        let items = build_tree_items(&self.files);
-        self.tree_state
-            .update(cx, |state, cx| state.set_items(items, cx));
     }
 
     fn start_auto_refresh(&mut self, cx: &mut Context<Self>) {

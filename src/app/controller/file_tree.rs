@@ -10,19 +10,16 @@ impl DiffViewer {
 
     pub(super) fn toggle_sidebar_tree(&mut self, cx: &mut Context<Self>) {
         self.sidebar_collapsed = !self.sidebar_collapsed;
-        if !self.sidebar_collapsed
-            && self.sidebar_tree_mode == SidebarTreeMode::Files
-            && self.repo_tree_nodes.is_empty()
-            && !self.repo_tree_loading
-        {
+        if !self.sidebar_collapsed && self.repo_tree_nodes.is_empty() && !self.repo_tree_loading {
             self.request_repo_tree_reload(cx);
         }
         cx.notify();
     }
 
-    pub(super) fn set_sidebar_tree_mode(&mut self, mode: SidebarTreeMode, cx: &mut Context<Self>) {
-        if self.sidebar_tree_mode == mode {
-            if mode == SidebarTreeMode::Files
+    pub(super) fn set_workspace_view_mode(&mut self, mode: WorkspaceViewMode, cx: &mut Context<Self>) {
+        if self.workspace_view_mode == mode {
+            if !self.sidebar_collapsed
+                && mode != WorkspaceViewMode::JjWorkspace
                 && self.repo_tree_nodes.is_empty()
                 && !self.repo_tree_loading
             {
@@ -31,14 +28,34 @@ impl DiffViewer {
             return;
         }
 
-        self.sidebar_tree_mode = mode;
-        if mode == SidebarTreeMode::Diff {
+        self.workspace_view_mode = mode;
+
+        if mode == WorkspaceViewMode::Files {
+            self.right_pane_mode = RightPaneMode::FileEditor;
+            let target_path = self
+                .selected_path
+                .clone()
+                .or_else(|| self.files.first().map(|file| file.path.clone()));
+            if let Some(path) = target_path {
+                self.selected_path = Some(path.clone());
+                self.selected_status = self
+                    .files
+                    .iter()
+                    .find(|file| file.path == path)
+                    .map(|file| file.status);
+                self.request_file_editor_reload(path, cx);
+            } else {
+                self.clear_editor_state(cx);
+            }
+        } else if mode == WorkspaceViewMode::Diff {
             self.right_pane_mode = RightPaneMode::Diff;
-            cx.notify();
-            return;
         }
 
-        if self.repo_tree_nodes.is_empty() && !self.repo_tree_loading {
+        if !self.sidebar_collapsed
+            && mode != WorkspaceViewMode::JjWorkspace
+            && self.repo_tree_nodes.is_empty()
+            && !self.repo_tree_loading
+        {
             self.request_repo_tree_reload(cx);
         }
         cx.notify();
@@ -61,8 +78,16 @@ impl DiffViewer {
             .iter()
             .find(|file| file.path == path)
             .map(|file| file.status);
-        self.right_pane_mode = RightPaneMode::FileEditor;
-        self.request_file_editor_reload(path, cx);
+        if self.workspace_view_mode == WorkspaceViewMode::Files {
+            self.right_pane_mode = RightPaneMode::FileEditor;
+            self.request_file_editor_reload(path, cx);
+        } else {
+            self.right_pane_mode = RightPaneMode::Diff;
+            self.scroll_to_file_start(&path);
+            self.last_visible_row_start = None;
+            self.last_diff_scroll_offset = None;
+            self.last_scroll_activity_at = Instant::now();
+        }
         cx.notify();
     }
 
@@ -132,11 +157,9 @@ fn apply_repo_tree_reload(
                 .retain(|path| repo_tree_has_directory(&this.repo_tree_nodes, path.as_str()));
             this.rebuild_repo_tree_rows();
             if let Some(path) = this.selected_path.clone()
-                && this.sidebar_tree_mode == SidebarTreeMode::Files
-                && this.right_pane_mode == RightPaneMode::FileEditor
+                && this.workspace_view_mode == WorkspaceViewMode::Files
                 && !repo_tree_contains_path(&this.repo_tree_nodes, path.as_str())
             {
-                this.right_pane_mode = RightPaneMode::Diff;
                 this.clear_editor_state(cx);
             }
         }

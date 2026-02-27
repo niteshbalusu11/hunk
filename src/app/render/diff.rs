@@ -7,10 +7,6 @@ struct DiffCellRenderSpec<'a> {
 
 impl DiffViewer {
     fn render_diff(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        if self.right_pane_mode == RightPaneMode::FileEditor {
-            return self.render_file_editor(cx);
-        }
-
         if self.repo_discovery_failed {
             return self.render_open_project_empty_state(cx);
         }

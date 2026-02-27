@@ -16,12 +16,6 @@ use hunk::diff::parse_patch_side_by_side;
 use hunk::jj::{RepoTreeEntry, RepoTreeEntryKind};
 
 #[derive(Default)]
-struct DiffTreeFolder {
-    folders: BTreeMap<String, DiffTreeFolder>,
-    files: BTreeMap<String, FileStatus>,
-}
-
-#[derive(Default)]
 struct RepoTreeFolder {
     ignored: bool,
     folders: BTreeMap<String, RepoTreeFolder>,
@@ -29,9 +23,10 @@ struct RepoTreeFolder {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SidebarTreeMode {
-    Diff,
+pub(super) enum WorkspaceViewMode {
     Files,
+    Diff,
+    JjWorkspace,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,51 +162,6 @@ pub(super) fn effective_segment_quality(
         DiffSegmentQuality::SyntaxOnly => DiffSegmentQuality::Plain,
         DiffSegmentQuality::Plain => DiffSegmentQuality::Plain,
     }
-}
-
-pub(super) fn build_tree_items(files: &[ChangedFile]) -> Vec<TreeItem> {
-    let mut root = DiffTreeFolder::default();
-
-    for file in files {
-        let mut cursor = &mut root;
-        let mut parts = file.path.split('/').peekable();
-        while let Some(part) = parts.next() {
-            if parts.peek().is_some() {
-                cursor = cursor.folders.entry(part.to_string()).or_default();
-            } else {
-                cursor.files.insert(part.to_string(), file.status);
-            }
-        }
-    }
-
-    build_folder_items(&root, "")
-}
-
-fn build_folder_items(folder: &DiffTreeFolder, prefix: &str) -> Vec<TreeItem> {
-    let mut items = Vec::new();
-
-    for (name, child_folder) in &folder.folders {
-        let id = join_path(prefix, name);
-        let children = build_folder_items(child_folder, &id);
-        items.push(
-            TreeItem::new(
-                SharedString::from(id.clone()),
-                SharedString::from(name.clone()),
-            )
-            .expanded(true)
-            .children(children),
-        );
-    }
-
-    for name in folder.files.keys() {
-        let id = join_path(prefix, name);
-        items.push(TreeItem::new(
-            SharedString::from(id),
-            SharedString::from(name.clone()),
-        ));
-    }
-
-    items
 }
 
 pub(super) fn build_repo_tree(entries: &[RepoTreeEntry]) -> Vec<RepoTreeNode> {

@@ -19,7 +19,8 @@ use backend::{
     load_changed_files_from_context, load_repo_context, load_repo_context_at_root,
     load_tracked_paths_from_context, materialized_entry_matches_path,
     move_bookmark_to_parent_of_working_copy, normalize_path, push_bookmark, render_patch_for_entry,
-    repo_line_stats_from_context, sync_bookmark_from_remote, walk_repo_tree,
+    rename_bookmark as rename_local_bookmark, repo_line_stats_from_context,
+    sync_bookmark_from_remote, walk_repo_tree,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -348,6 +349,38 @@ pub fn checkout_or_create_branch(repo_root: &Path, branch_name: &str) -> Result<
     checkout_or_create_branch_with_change_transfer(repo_root, branch_name, false)
 }
 
+pub fn rename_branch(repo_root: &Path, old_branch_name: &str, new_branch_name: &str) -> Result<()> {
+    let old_branch_name = old_branch_name.trim();
+    if old_branch_name.is_empty() {
+        return Err(anyhow!("current bookmark name cannot be empty"));
+    }
+
+    let new_branch_name = new_branch_name.trim();
+    if new_branch_name.is_empty() {
+        return Err(anyhow!("new bookmark name cannot be empty"));
+    }
+    if old_branch_name == new_branch_name {
+        return Err(anyhow!("new bookmark name must differ from current bookmark"));
+    }
+    if !is_valid_branch_name(new_branch_name) {
+        return Err(anyhow!("invalid bookmark name: {new_branch_name}"));
+    }
+
+    let mut context = load_repo_context_at_root(repo_root, true)?;
+    rename_local_bookmark(&mut context, old_branch_name, new_branch_name)?;
+
+    if load_active_bookmark_preference(&context.root).as_deref() == Some(old_branch_name)
+        && let Err(err) = persist_active_bookmark_preference(&context.root, new_branch_name)
+    {
+        warn!(
+            "failed to persist active bookmark preference for '{}': {err:#}",
+            new_branch_name
+        );
+    }
+
+    Ok(())
+}
+
 pub fn checkout_or_create_branch_with_change_transfer(
     repo_root: &Path,
     branch_name: &str,
@@ -355,10 +388,10 @@ pub fn checkout_or_create_branch_with_change_transfer(
 ) -> Result<()> {
     let branch_name = branch_name.trim();
     if branch_name.is_empty() {
-        return Err(anyhow!("branch name cannot be empty"));
+        return Err(anyhow!("bookmark name cannot be empty"));
     }
     if !is_valid_branch_name(branch_name) {
-        return Err(anyhow!("invalid branch name: {branch_name}"));
+        return Err(anyhow!("invalid bookmark name: {branch_name}"));
     }
 
     let mut context = load_repo_context_at_root(repo_root, true)?;

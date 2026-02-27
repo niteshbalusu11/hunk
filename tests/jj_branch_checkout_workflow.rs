@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use hunk::jj::{
     checkout_or_create_branch, checkout_or_create_branch_with_change_transfer, commit_staged,
-    load_snapshot,
+    load_snapshot, rename_branch,
 };
 
 #[test]
@@ -128,6 +128,57 @@ fn switching_to_existing_bookmark_can_move_uncommitted_changes() {
     assert!(
         snapshot.files.iter().any(|file| file.path == "tracked.txt"),
         "uncommitted changes should remain in working copy after switching with move enabled"
+    );
+}
+
+#[test]
+fn renaming_bookmark_updates_active_bookmark_and_listing() {
+    let fixture = TempRepo::new("rename-bookmark-active");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_branch(fixture.path(), "feature-old")
+        .expect("creating source bookmark should succeed");
+
+    rename_branch(fixture.path(), "feature-old", "feature-new")
+        .expect("renaming bookmark should succeed");
+
+    let snapshot = load_snapshot(fixture.path()).expect("snapshot should load after rename");
+    assert_eq!(
+        snapshot.branch_name, "feature-new",
+        "active bookmark should update to the renamed bookmark"
+    );
+
+    let bookmark_listing = run_jj_capture(
+        fixture.path(),
+        ["bookmark", "list", "feature-old", "feature-new"],
+    );
+    assert!(
+        bookmark_listing.contains("feature-new:"),
+        "renamed bookmark should be listed"
+    );
+    assert!(
+        !bookmark_listing.contains("feature-old:"),
+        "old bookmark name should no longer exist"
+    );
+}
+
+#[test]
+fn renaming_bookmark_rejects_existing_target() {
+    let fixture = TempRepo::new("rename-bookmark-existing-target");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_branch(fixture.path(), "feature-old")
+        .expect("creating source bookmark should succeed");
+    checkout_or_create_branch(fixture.path(), "feature-existing")
+        .expect("creating target bookmark should succeed");
+
+    let err = rename_branch(fixture.path(), "feature-old", "feature-existing")
+        .expect_err("renaming should fail when destination bookmark already exists");
+    assert!(
+        err.to_string().contains("already exists"),
+        "error should explain destination bookmark conflict"
     );
 }
 

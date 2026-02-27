@@ -20,7 +20,6 @@ use gpui_component::{
     menu::AppMenuBar,
     resizable::{h_resizable, resizable_panel},
     scroll::ScrollableElement,
-    tree::{TreeItem, TreeState},
     v_flex,
 };
 use gpui_component_assets::Assets;
@@ -33,7 +32,7 @@ use hunk::state::{AppState, AppStateStore};
 
 use data::{
     DiffRowSegmentCache, DiffStreamRowMeta, FileRowRange, RepoTreeNode, RepoTreeRow, RightPaneMode,
-    SidebarTreeMode,
+    WorkspaceViewMode,
 };
 
 const AUTO_REFRESH_INTERVAL: Duration = Duration::from_millis(900);
@@ -52,7 +51,6 @@ const DIFF_SEGMENT_PREFETCH_RADIUS_ROWS: usize = 120;
 const DIFF_SEGMENT_PREFETCH_STEP_ROWS: usize = 24;
 const DIFF_SEGMENT_PREFETCH_BATCH_ROWS: usize = 96;
 const DIFF_PROGRESSIVE_BATCH_FILES: usize = 8;
-const SIDEBAR_DIFF_LIST_ESTIMATED_ROW_HEIGHT: f32 = 28.0;
 const SIDEBAR_REPO_LIST_ESTIMATED_ROW_HEIGHT: f32 = 24.0;
 
 mod controller;
@@ -675,11 +673,8 @@ struct DiffViewer {
     fps_task: Task<()>,
     repo_discovery_failed: bool,
     error_message: Option<String>,
-    tree_state: Entity<TreeState>,
     sidebar_collapsed: bool,
-    sidebar_tree_mode: SidebarTreeMode,
-    sidebar_diff_list_state: ListState,
-    sidebar_diff_row_count: usize,
+    workspace_view_mode: WorkspaceViewMode,
     sidebar_repo_list_state: ListState,
     sidebar_repo_row_count: usize,
     repo_tree_nodes: Vec<RepoTreeNode>,

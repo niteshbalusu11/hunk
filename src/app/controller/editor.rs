@@ -77,7 +77,7 @@ impl DiffViewer {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.right_pane_mode != RightPaneMode::FileEditor
+        if self.workspace_view_mode != WorkspaceViewMode::Files
             || self.editor_loading
             || self.editor_save_loading
         {

@@ -253,6 +253,40 @@ pub(super) fn create_bookmark_at_working_copy(
     persist_working_copy_state(context, repo, "after bookmark creation")
 }
 
+pub(super) fn rename_bookmark(
+    context: &mut RepoContext,
+    old_branch_name: &str,
+    new_branch_name: &str,
+) -> Result<()> {
+    let old_bookmark = RefName::new(old_branch_name);
+    let new_bookmark = RefName::new(new_branch_name);
+    let view = context.repo.view();
+
+    let old_target = view.get_local_bookmark(old_bookmark).clone();
+    if old_target.is_absent() {
+        return Err(anyhow!("bookmark '{old_branch_name}' does not exist"));
+    }
+    if view.get_local_bookmark(new_bookmark).is_present() {
+        return Err(anyhow!("bookmark '{new_branch_name}' already exists"));
+    }
+
+    let mut tx = context.repo.start_transaction();
+    tx.repo_mut()
+        .set_local_bookmark_target(new_bookmark, old_target);
+    tx.repo_mut()
+        .set_local_bookmark_target(old_bookmark, RefTarget::absent());
+    tx.repo_mut()
+        .rebase_descendants()
+        .context("failed to rebase descendants after bookmark rename")?;
+
+    let repo = tx
+        .commit(format!(
+            "rename bookmark {old_branch_name} to {new_branch_name}"
+        ))
+        .context("failed to finalize bookmark rename")?;
+    persist_working_copy_state(context, repo, "after bookmark rename")
+}
+
 pub(super) fn push_bookmark(context: &mut RepoContext, branch_name: &str) -> Result<()> {
     ensure_bookmark_tip_identity(context, branch_name)?;
     let remote_name = resolve_push_remote_name(context, branch_name)?;
