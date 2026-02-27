@@ -32,7 +32,7 @@ use hunk::jj::{ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFing
 use hunk::state::{AppState, AppStateStore};
 
 use data::{
-    DiffRowSegmentCache, DiffStreamRowMeta, FileRowRange, RepoTreeNode, RightPaneMode,
+    DiffRowSegmentCache, DiffStreamRowMeta, FileRowRange, RepoTreeNode, RepoTreeRow, RightPaneMode,
     SidebarTreeMode,
 };
 
@@ -52,6 +52,8 @@ const DIFF_SEGMENT_PREFETCH_RADIUS_ROWS: usize = 120;
 const DIFF_SEGMENT_PREFETCH_STEP_ROWS: usize = 24;
 const DIFF_SEGMENT_PREFETCH_BATCH_ROWS: usize = 96;
 const DIFF_PROGRESSIVE_BATCH_FILES: usize = 8;
+const SIDEBAR_DIFF_LIST_ESTIMATED_ROW_HEIGHT: f32 = 28.0;
+const SIDEBAR_REPO_LIST_ESTIMATED_ROW_HEIGHT: f32 = 24.0;
 
 mod controller;
 mod data;
@@ -676,7 +678,12 @@ struct DiffViewer {
     tree_state: Entity<TreeState>,
     sidebar_collapsed: bool,
     sidebar_tree_mode: SidebarTreeMode,
+    sidebar_diff_list_state: ListState,
+    sidebar_diff_row_count: usize,
+    sidebar_repo_list_state: ListState,
+    sidebar_repo_row_count: usize,
     repo_tree_nodes: Vec<RepoTreeNode>,
+    repo_tree_rows: Vec<RepoTreeRow>,
     repo_tree_file_count: usize,
     repo_tree_folder_count: usize,
     repo_tree_expanded_dirs: BTreeSet<String>,

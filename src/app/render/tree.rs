@@ -1,17 +1,34 @@
+use std::sync::Arc;
+
+#[derive(Clone, Copy)]
+enum DiffTreeSection {
+    Tracked,
+    Untracked,
+}
+
+impl DiffTreeSection {
+    fn title(self) -> &'static str {
+        match self {
+            Self::Tracked => "Tracked",
+            Self::Untracked => "Untracked",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum DiffTreeListRow {
+    SectionHeader {
+        section: DiffTreeSection,
+        count: usize,
+    },
+    SectionEmpty,
+    File {
+        file_ix: usize,
+    },
+}
+
 impl DiffViewer {
-    fn render_tree(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let tracked_files = self
-            .files
-            .iter()
-            .filter(|file| file.is_tracked())
-            .cloned()
-            .collect::<Vec<_>>();
-        let untracked_files = self
-            .files
-            .iter()
-            .filter(|file| !file.is_tracked())
-            .cloned()
-            .collect::<Vec<_>>();
+    fn render_tree(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let is_dark = cx.theme().mode.is_dark();
 
         let tree_summary = match self.sidebar_tree_mode {
@@ -19,8 +36,7 @@ impl DiffViewer {
             SidebarTreeMode::Files => {
                 format!(
                     "{} files • {} folders",
-                    self.repo_tree_file_count,
-                    self.repo_tree_folder_count
+                    self.repo_tree_file_count, self.repo_tree_folder_count
                 )
             }
         };
@@ -70,9 +86,8 @@ impl DiffViewer {
                 div()
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scrollbar()
                     .child(match self.sidebar_tree_mode {
-                        SidebarTreeMode::Diff => self.render_diff_tree_content(&tracked_files, &untracked_files, cx),
+                        SidebarTreeMode::Diff => self.render_diff_tree_content(cx),
                         SidebarTreeMode::Files => self.render_repo_tree_content(cx),
                     }),
             )
@@ -81,23 +96,48 @@ impl DiffViewer {
             })
     }
 
-    fn render_diff_tree_content(
-        &self,
-        tracked_files: &[ChangedFile],
-        untracked_files: &[ChangedFile],
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        v_flex()
-            .w_full()
-            .gap_1()
+    fn render_diff_tree_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let rows = Arc::new(self.build_diff_tree_rows());
+        self.sync_sidebar_diff_list_state(rows.len());
+        let list_state = self.sidebar_diff_list_state.clone();
+
+        let list = list(list_state.clone(), {
+            let rows = rows.clone();
+            cx.processor(move |this, ix: usize, _window, cx| {
+                let Some(row) = rows.get(ix).copied() else {
+                    return div().into_any_element();
+                };
+
+                match row {
+                    DiffTreeListRow::SectionHeader { section, count } => {
+                        this.render_changes_section_header(section.title(), count, cx)
+                    }
+                    DiffTreeListRow::SectionEmpty => this.render_changes_section_empty(cx),
+                    DiffTreeListRow::File { file_ix } => this
+                        .files
+                        .get(file_ix)
+                        .map(|file| this.render_change_row(file, cx))
+                        .unwrap_or_else(|| div().into_any_element()),
+                }
+            })
+        })
+        .size_full()
+        .map(|mut list| {
+            list.style().restrict_scroll_to_axis = Some(true);
+            list
+        })
+        .with_sizing_behavior(ListSizingBehavior::Auto);
+
+        div()
+            .size_full()
+            .overflow_y_scrollbar()
             .px_1()
             .py_1()
-            .child(self.render_changes_section("Tracked", tracked_files, cx))
-            .child(self.render_changes_section("Untracked", untracked_files, cx))
+            .child(list)
             .into_any_element()
     }
 
-    fn render_repo_tree_content(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_repo_tree_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
         if self.repo_tree_loading {
             return v_flex()
                 .w_full()
@@ -127,7 +167,7 @@ impl DiffViewer {
                 .into_any_element();
         }
 
-        if self.repo_tree_nodes.is_empty() {
+        if self.repo_tree_rows.is_empty() {
             return v_flex()
                 .w_full()
                 .px_2()
@@ -141,64 +181,143 @@ impl DiffViewer {
                 .into_any_element();
         }
 
-        let rows = flatten_repo_tree_rows(&self.repo_tree_nodes, &self.repo_tree_expanded_dirs);
-        v_flex()
-            .w_full()
-            .gap_0p5()
+        self.sync_sidebar_repo_list_state(self.repo_tree_rows.len());
+        let list_state = self.sidebar_repo_list_state.clone();
+
+        let list = list(list_state.clone(), {
+            cx.processor(move |this, ix: usize, _window, cx| {
+                this.repo_tree_rows
+                    .get(ix)
+                    .map(|row| this.render_repo_tree_row(row, cx))
+                    .unwrap_or_else(|| div().into_any_element())
+            })
+        })
+        .size_full()
+        .map(|mut list| {
+            list.style().restrict_scroll_to_axis = Some(true);
+            list
+        })
+        .with_sizing_behavior(ListSizingBehavior::Auto);
+
+        div()
+            .size_full()
+            .overflow_y_scrollbar()
             .px_1()
             .py_1()
-            .children(rows.iter().map(|row| self.render_repo_tree_row(row, cx)))
+            .child(list)
             .into_any_element()
     }
 
-    fn render_changes_section(
+    fn build_diff_tree_rows(&self) -> Vec<DiffTreeListRow> {
+        let mut tracked = Vec::new();
+        let mut untracked = Vec::new();
+        for (file_ix, file) in self.files.iter().enumerate() {
+            if file.is_tracked() {
+                tracked.push(file_ix);
+            } else {
+                untracked.push(file_ix);
+            }
+        }
+
+        let mut rows = Vec::with_capacity(self.files.len().saturating_add(4));
+        Self::append_diff_section_rows(DiffTreeSection::Tracked, &tracked, &mut rows);
+        Self::append_diff_section_rows(DiffTreeSection::Untracked, &untracked, &mut rows);
+        rows
+    }
+
+    fn append_diff_section_rows(
+        section: DiffTreeSection,
+        file_indices: &[usize],
+        rows: &mut Vec<DiffTreeListRow>,
+    ) {
+        rows.push(DiffTreeListRow::SectionHeader {
+            section,
+            count: file_indices.len(),
+        });
+        if file_indices.is_empty() {
+            rows.push(DiffTreeListRow::SectionEmpty);
+            return;
+        }
+        rows.extend(
+            file_indices
+                .iter()
+                .copied()
+                .map(|file_ix| DiffTreeListRow::File { file_ix }),
+        );
+    }
+
+    fn render_changes_section_header(
         &self,
         title: &'static str,
-        files: &[ChangedFile],
+        count: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let is_dark = cx.theme().mode.is_dark();
-
-        v_flex()
+        h_flex()
             .w_full()
-            .gap_1()
+            .items_center()
+            .justify_between()
+            .px_1()
+            .py_0p5()
             .child(
-                h_flex()
-                    .w_full()
-                    .items_center()
-                    .justify_between()
-                    .px_1()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_semibold()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(title),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_semibold()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(format!("{}", files.len())),
-                    ),
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(title),
             )
-            .when(files.is_empty(), |this| {
-                this.child(
-                    div()
-                        .w_full()
-                        .px_1()
-                        .py_1()
-                        .rounded_md()
-                        .bg(cx.theme().muted.opacity(if is_dark { 0.24 } else { 0.36 }))
-                        .text_xs()
-                        .font_medium()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("No files"),
-                )
-            })
-            .children(files.iter().map(|file| self.render_change_row(file, cx)))
+            .child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!("{count}")),
+            )
             .into_any_element()
+    }
+
+    fn render_changes_section_empty(&self, cx: &mut Context<Self>) -> AnyElement {
+        let is_dark = cx.theme().mode.is_dark();
+        div()
+            .w_full()
+            .px_1()
+            .py_1()
+            .rounded_md()
+            .bg(cx.theme().muted.opacity(if is_dark { 0.24 } else { 0.36 }))
+            .text_xs()
+            .font_medium()
+            .text_color(cx.theme().muted_foreground)
+            .child("No files")
+            .into_any_element()
+    }
+
+    fn sync_sidebar_diff_list_state(&mut self, row_count: usize) {
+        if self.sidebar_diff_row_count == row_count {
+            return;
+        }
+        self.sidebar_diff_row_count = row_count;
+        Self::sync_sidebar_list_state(&self.sidebar_diff_list_state, row_count);
+    }
+
+    fn sync_sidebar_repo_list_state(&mut self, row_count: usize) {
+        if self.sidebar_repo_row_count == row_count {
+            return;
+        }
+        self.sidebar_repo_row_count = row_count;
+        Self::sync_sidebar_list_state(&self.sidebar_repo_list_state, row_count);
+    }
+
+    fn sync_sidebar_list_state(list_state: &ListState, row_count: usize) {
+        let previous_top = list_state.logical_scroll_top();
+        list_state.reset(row_count);
+        let clamped_item_ix = if row_count == 0 {
+            0
+        } else {
+            previous_top.item_ix.min(row_count.saturating_sub(1))
+        };
+        list_state.scroll_to(ListOffset {
+            item_ix: clamped_item_ix,
+            offset_in_item: px(0.),
+        });
     }
 
     fn render_change_row(&self, file: &ChangedFile, cx: &mut Context<Self>) -> AnyElement {
@@ -274,17 +393,15 @@ impl DiffViewer {
                     })
             })
             .child(
-                div()
-                    .w_3()
-                    .child(
-                        Icon::new(if is_collapsed {
-                            IconName::ChevronRight
-                        } else {
-                            IconName::ChevronDown
-                        })
-                        .size(px(12.0))
-                        .text_color(cx.theme().muted_foreground),
-                    ),
+                div().w_3().child(
+                    Icon::new(if is_collapsed {
+                        IconName::ChevronRight
+                    } else {
+                        IconName::ChevronDown
+                    })
+                    .size(px(12.0))
+                    .text_color(cx.theme().muted_foreground),
+                ),
             )
             .child(
                 div()
@@ -326,7 +443,11 @@ impl DiffViewer {
             .into_any_element()
     }
 
-    fn render_repo_tree_row(&self, row: &super::data::RepoTreeRow, cx: &mut Context<Self>) -> AnyElement {
+    fn render_repo_tree_row(
+        &self,
+        row: &super::data::RepoTreeRow,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
         let is_selected =
@@ -375,25 +496,19 @@ impl DiffViewer {
             .rounded_sm()
             .bg(row_bg)
             .child(div().w(px(row.depth as f32 * 14.0)))
+            .child(div().w(px(14.0)).when_some(chevron_icon, |this, icon_name| {
+                this.child(
+                    Icon::new(icon_name)
+                        .size(px(12.0))
+                        .text_color(cx.theme().muted_foreground),
+                )
+            }))
             .child(
-                div()
-                    .w(px(14.0))
-                    .when_some(chevron_icon, |this, icon_name| {
-                        this.child(
-                            Icon::new(icon_name)
-                                .size(px(12.0))
-                                .text_color(cx.theme().muted_foreground),
-                        )
-                    }),
-            )
-            .child(
-                div()
-                    .w(px(18.0))
-                    .child(
-                        Icon::new(icon)
-                            .size(px(14.0))
-                            .text_color(icon_color),
-                    ),
+                div().w(px(18.0)).child(
+                    Icon::new(icon)
+                        .size(px(14.0))
+                        .text_color(icon_color),
+                ),
             )
             .child(
                 div()
@@ -421,7 +536,6 @@ impl DiffViewer {
             })
             .into_any_element()
     }
-
 }
 
 fn stable_row_id_for_path(path: &str) -> u64 {
