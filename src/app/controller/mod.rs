@@ -11,8 +11,9 @@ use super::data::{
 use super::*;
 use hunk::jj::{
     RepoSnapshot, checkout_or_create_branch_with_change_transfer, commit_selected_paths,
-    commit_staged, load_patches_for_files, load_repo_tree, load_snapshot, load_snapshot_fingerprint,
-    push_current_branch, rename_branch, sanitize_branch_name, sync_current_branch,
+    commit_staged, describe_branch_head, load_patches_for_files, load_repo_tree, load_snapshot,
+    load_snapshot_fingerprint, push_current_branch, rename_branch, sanitize_branch_name,
+    sync_current_branch,
 };
 
 include!("core.rs");

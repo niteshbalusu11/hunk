@@ -354,6 +354,64 @@ pub(super) fn list_local_branches_from_context(
     Ok(branches)
 }
 
+pub(super) fn list_bookmark_revisions_from_context(
+    context: &RepoContext,
+    branch_name: &str,
+    limit: usize,
+) -> Result<Vec<BookmarkRevision>> {
+    if limit == 0 || branch_name.trim().is_empty() || branch_name == "detached" {
+        return Ok(Vec::new());
+    }
+
+    let Some(mut current_id) = context
+        .repo
+        .view()
+        .get_local_bookmark(RefName::new(branch_name))
+        .as_normal()
+        .cloned()
+    else {
+        return Ok(Vec::new());
+    };
+
+    let mut revisions = Vec::with_capacity(limit);
+    let mut seen_ids = BTreeSet::new();
+
+    while revisions.len() < limit {
+        let current_hex = current_id.hex();
+        if !seen_ids.insert(current_hex.clone()) {
+            break;
+        }
+
+        let commit = context
+            .repo
+            .store()
+            .get_commit(&current_id)
+            .with_context(|| format!("failed to load bookmark revision {current_hex}"))?;
+        let subject = commit
+            .description()
+            .lines()
+            .next()
+            .map(str::trim)
+            .filter(|subject| !subject.is_empty())
+            .unwrap_or("(no description)")
+            .to_string();
+        let unix_time = commit.committer().timestamp.timestamp.0 / 1000;
+
+        revisions.push(BookmarkRevision {
+            id: current_hex,
+            subject,
+            unix_time,
+        });
+
+        let Some(parent_id) = commit.parent_ids().first().cloned() else {
+            break;
+        };
+        current_id = parent_id;
+    }
+
+    Ok(revisions)
+}
+
 pub(super) fn current_commit_id_from_context(context: &RepoContext) -> Result<Option<String>> {
     Ok(Some(current_wc_commit(context)?.id().hex()))
 }

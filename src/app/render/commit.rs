@@ -40,6 +40,10 @@ impl DiffViewer {
         let commit_message_present = !self.commit_input_state.read(cx).value().trim().is_empty();
         let commit_disabled =
             self.git_action_loading || !commit_message_present || included_count == 0;
+        let describe_tip_disabled = self.git_action_loading
+            || !commit_message_present
+            || !branch_syncable
+            || self.bookmark_revisions.is_empty();
 
         v_flex()
             .size_full()
@@ -234,6 +238,7 @@ impl DiffViewer {
             .when(self.branch_picker_open, |this| {
                 this.child(self.render_branch_picker_panel(cx))
             })
+            .child(self.render_revision_stack_panel(cx))
             .child(
                 Input::new(&self.commit_input_state)
                     .h(px(82.0))
@@ -247,19 +252,38 @@ impl DiffViewer {
                     })))
                     .disabled(self.git_action_loading),
             )
-            .child({
-                let view = view.clone();
-                Button::new("commit-staged")
-                    .primary()
-                    .rounded(px(7.0))
-                    .label("Create Revision")
-                    .disabled(commit_disabled)
-                    .on_click(move |_, window, cx| {
-                        view.update(cx, |this, cx| {
-                            this.commit_from_input(window, cx);
-                        });
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .gap_1()
+                    .child({
+                        let view = view.clone();
+                        Button::new("commit-staged")
+                            .primary()
+                            .rounded(px(7.0))
+                            .label("Create Revision")
+                            .disabled(commit_disabled)
+                            .on_click(move |_, window, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.commit_from_input(window, cx);
+                                });
+                            })
                     })
-            })
+                    .child({
+                        let view = view.clone();
+                        Button::new("describe-tip-revision")
+                            .outline()
+                            .rounded(px(7.0))
+                            .label("Edit Tip Revision")
+                            .disabled(describe_tip_disabled)
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.describe_current_branch_from_input(cx);
+                                });
+                            })
+                    }),
+            )
             .child(
                 div()
                     .w_full()
@@ -276,6 +300,110 @@ impl DiffViewer {
                     .whitespace_normal()
                     .child(last_commit_text.to_string()),
             )
+            .into_any_element()
+    }
+
+    fn render_revision_stack_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let is_dark = cx.theme().mode.is_dark();
+        let revisions = &self.bookmark_revisions;
+
+        v_flex()
+            .w_full()
+            .gap_1()
+            .p_2()
+            .rounded(px(8.0))
+            .border_1()
+            .border_color(cx.theme().border.opacity(if is_dark { 0.90 } else { 0.74 }))
+            .bg(cx.theme().background.blend(cx.theme().muted.opacity(if is_dark {
+                0.20
+            } else {
+                0.26
+            })))
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Revision Stack"),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("{}", revisions.len())),
+                    ),
+            )
+            .child({
+                if revisions.is_empty() {
+                    return div()
+                        .w_full()
+                        .px_1()
+                        .py_0p5()
+                        .rounded(px(6.0))
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("No revisions for this bookmark.")
+                        .into_any_element();
+                }
+
+                v_flex()
+                    .w_full()
+                    .max_h(px(180.0))
+                    .overflow_y_scrollbar()
+                    .gap_0p5()
+                    .children(revisions.iter().enumerate().map(|(ix, revision)| {
+                        let short_id = revision.id.chars().take(12).collect::<String>();
+                        let row_bg = if ix == 0 {
+                            cx.theme().accent.opacity(if is_dark { 0.18 } else { 0.10 })
+                        } else {
+                            cx.theme().background.opacity(0.0)
+                        };
+
+                        h_flex()
+                            .w_full()
+                            .items_center()
+                            .gap_1()
+                            .px_1()
+                            .py_0p5()
+                            .rounded(px(6.0))
+                            .bg(row_bg)
+                            .child(
+                                div()
+                                    .px_1()
+                                    .py_0p5()
+                                    .rounded(px(4.0))
+                                    .text_xs()
+                                    .font_family(cx.theme().mono_font_family.clone())
+                                    .text_color(cx.theme().muted_foreground)
+                                    .bg(cx.theme().muted.opacity(if is_dark { 0.32 } else { 0.42 }))
+                                    .child(short_id),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(cx.theme().foreground)
+                                    .child(revision.subject.clone()),
+                            )
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .whitespace_nowrap()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(relative_time_label(Some(revision.unix_time))),
+                            )
+                            .into_any_element()
+                    }))
+                    .into_any_element()
+            })
             .into_any_element()
     }
 

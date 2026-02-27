@@ -287,6 +287,49 @@ pub(super) fn rename_bookmark(
     persist_working_copy_state(context, repo, "after bookmark rename")
 }
 
+pub(super) fn describe_bookmark_head(
+    context: &mut RepoContext,
+    branch_name: &str,
+    description: &str,
+) -> Result<()> {
+    let bookmark = RefName::new(branch_name);
+    let Some(commit_id) = context
+        .repo
+        .view()
+        .get_local_bookmark(bookmark)
+        .as_normal()
+        .cloned()
+    else {
+        return Err(anyhow!("bookmark '{branch_name}' does not exist"));
+    };
+
+    let commit = context
+        .repo
+        .store()
+        .get_commit(&commit_id)
+        .with_context(|| format!("failed to load bookmark head for '{branch_name}'"))?;
+
+    let mut tx = context.repo.start_transaction();
+    let rewritten = tx
+        .repo_mut()
+        .rewrite_commit(&commit)
+        .set_description(description)
+        .write()
+        .with_context(|| format!("failed to rewrite bookmark head for '{branch_name}'"))?;
+    tx.repo_mut().set_local_bookmark_target(
+        bookmark,
+        RefTarget::normal(rewritten.id().clone()),
+    );
+    tx.repo_mut()
+        .rebase_descendants()
+        .context("failed to rebase descendants after rewriting bookmark head")?;
+
+    let repo = tx
+        .commit(format!("describe bookmark {branch_name}"))
+        .context("failed to finalize bookmark description update")?;
+    persist_working_copy_state(context, repo, "after bookmark describe")
+}
+
 pub(super) fn push_bookmark(context: &mut RepoContext, branch_name: &str) -> Result<()> {
     ensure_bookmark_tip_identity(context, branch_name)?;
     let remote_name = resolve_push_remote_name(context, branch_name)?;

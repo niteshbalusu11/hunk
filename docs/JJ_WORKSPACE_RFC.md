@@ -158,7 +158,11 @@ Create JJ-focused view models for UI binding:
   - [x] publish/push/sync bookmark
   - [x] rename bookmark flow
   - [x] explicit move-changes action when activating bookmark
-- [ ] Phase 4: Revision stack view and revision actions.
+- [~] Phase 4: Revision stack view and revision actions.
+  - [x] read-only revision stack list for active bookmark
+  - [~] revision actions
+  - [x] describe/edit message for tip revision
+  - [ ] abandon and reorder/squash
 - [ ] Phase 5: PR/MR quick actions and remote collaboration refinements.
 - [ ] Phase 6: Full legacy flow removal and internal naming cleanup.
 

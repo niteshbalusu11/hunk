@@ -160,6 +160,7 @@ impl DiffViewer {
             branch_has_upstream: false,
             branch_ahead_count: 0,
             branches: Vec::new(),
+            bookmark_revisions: Vec::new(),
             files: Vec::new(),
             branch_picker_open: false,
             branch_input_state,
@@ -430,6 +431,7 @@ impl DiffViewer {
             branch_has_upstream,
             branch_ahead_count,
             branches,
+            bookmark_revisions,
             files,
             line_stats,
             last_commit_subject,
@@ -448,6 +450,7 @@ impl DiffViewer {
         self.branch_has_upstream = branch_has_upstream;
         self.branch_ahead_count = branch_ahead_count;
         self.branches = branches;
+        self.bookmark_revisions = bookmark_revisions;
         self.files = files;
         self.commit_excluded_files
             .retain(|path| self.files.iter().any(|file| file.path == *path));
@@ -511,6 +514,7 @@ impl DiffViewer {
         self.branch_has_upstream = false;
         self.branch_ahead_count = 0;
         self.branches.clear();
+        self.bookmark_revisions.clear();
         self.files.clear();
         self.last_commit_subject = None;
         self.commit_excluded_files.clear();

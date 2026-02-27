@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use hunk::jj::{
     checkout_or_create_branch, checkout_or_create_branch_with_change_transfer, commit_staged,
-    load_snapshot, rename_branch,
+    describe_branch_head, load_snapshot, rename_branch,
 };
 
 #[test]
@@ -179,6 +179,70 @@ fn renaming_bookmark_rejects_existing_target() {
     assert!(
         err.to_string().contains("already exists"),
         "error should explain destination bookmark conflict"
+    );
+}
+
+#[test]
+fn snapshot_includes_revision_stack_for_active_bookmark() {
+    let fixture = TempRepo::new("bookmark-revision-stack");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_branch(fixture.path(), "stack")
+        .expect("creating stack bookmark should succeed");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\nline two\n");
+    commit_staged(fixture.path(), "stack second commit")
+        .expect("second commit should succeed");
+
+    write_file(
+        fixture.path().join("tracked.txt"),
+        "line one\nline two\nline three\n",
+    );
+    commit_staged(fixture.path(), "stack third commit")
+        .expect("third commit should succeed");
+
+    let snapshot = load_snapshot(fixture.path()).expect("snapshot should load");
+    assert_eq!(snapshot.branch_name, "stack");
+    assert!(
+        snapshot.bookmark_revisions.len() >= 2,
+        "revision stack should include at least latest commits"
+    );
+    assert_eq!(
+        snapshot.bookmark_revisions[0].subject, "stack third commit",
+        "latest revision should be first in stack"
+    );
+    assert_eq!(
+        snapshot.bookmark_revisions[1].subject, "stack second commit",
+        "stack should be ordered from newest to oldest"
+    );
+}
+
+#[test]
+fn describing_bookmark_head_updates_latest_revision_subject() {
+    let fixture = TempRepo::new("describe-bookmark-head");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_branch(fixture.path(), "describe-me")
+        .expect("creating bookmark should succeed");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\nline two\n");
+    commit_staged(fixture.path(), "original subject").expect("commit should succeed");
+
+    describe_branch_head(
+        fixture.path(),
+        "describe-me",
+        "updated revision description",
+    )
+    .expect("describing bookmark head should succeed");
+
+    let snapshot = load_snapshot(fixture.path()).expect("snapshot should load");
+    assert_eq!(snapshot.branch_name, "describe-me");
+    assert_eq!(
+        snapshot.bookmark_revisions[0].subject,
+        "updated revision description",
+        "latest revision subject should reflect updated description"
     );
 }
 

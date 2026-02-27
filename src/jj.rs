@@ -15,7 +15,9 @@ use backend::{
     commit_working_copy_changes, commit_working_copy_selected_paths, conflict_materialize_options,
     create_bookmark_at_working_copy, current_bookmarks_from_context,
     current_commit_id_from_context, discover_repo_root, git_head_branch_name_from_context,
-    last_commit_subject_from_context, list_local_branches_from_context,
+    describe_bookmark_head as describe_local_bookmark_head,
+    last_commit_subject_from_context, list_bookmark_revisions_from_context,
+    list_local_branches_from_context,
     load_changed_files_from_context, load_repo_context, load_repo_context_at_root,
     load_tracked_paths_from_context, materialized_entry_matches_path,
     move_bookmark_to_parent_of_working_copy, normalize_path, push_bookmark, render_patch_for_entry,
@@ -71,6 +73,13 @@ pub struct LocalBranch {
     pub tip_unix_time: Option<i64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BookmarkRevision {
+    pub id: String,
+    pub subject: String,
+    pub unix_time: i64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RepoTreeEntryKind {
     Directory,
@@ -91,6 +100,7 @@ pub struct RepoSnapshot {
     pub branch_has_upstream: bool,
     pub branch_ahead_count: usize,
     pub branches: Vec<LocalBranch>,
+    pub bookmark_revisions: Vec<BookmarkRevision>,
     pub files: Vec<ChangedFile>,
     pub line_stats: LineStats,
     pub last_commit_subject: Option<String>,
@@ -145,6 +155,7 @@ pub fn load_snapshot(cwd: &Path) -> Result<RepoSnapshot> {
         branch_selection.insert(branch_name.clone());
     }
     let branches = list_local_branches_from_context(&context, &branch_selection)?;
+    let bookmark_revisions = list_bookmark_revisions_from_context(&context, &branch_name, 32)?;
     let (branch_has_upstream, branch_ahead_count) = if branch_name == "detached" {
         (false, 0)
     } else {
@@ -158,6 +169,7 @@ pub fn load_snapshot(cwd: &Path) -> Result<RepoSnapshot> {
         branch_has_upstream,
         branch_ahead_count,
         branches,
+        bookmark_revisions,
         files,
         line_stats,
         last_commit_subject,
@@ -379,6 +391,21 @@ pub fn rename_branch(repo_root: &Path, old_branch_name: &str, new_branch_name: &
     }
 
     Ok(())
+}
+
+pub fn describe_branch_head(repo_root: &Path, branch_name: &str, description: &str) -> Result<()> {
+    let branch_name = branch_name.trim();
+    if branch_name.is_empty() || branch_name == "detached" {
+        return Err(anyhow!("cannot edit revision description without a bookmark name"));
+    }
+
+    let description = description.trim();
+    if description.is_empty() {
+        return Err(anyhow!("revision description cannot be empty"));
+    }
+
+    let mut context = load_repo_context_at_root(repo_root, true)?;
+    describe_local_bookmark_head(&mut context, branch_name, description)
 }
 
 pub fn checkout_or_create_branch_with_change_transfer(

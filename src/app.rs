@@ -27,7 +27,7 @@ use tracing::error;
 
 use hunk::config::{AppConfig, ConfigStore, KeyboardShortcuts, ThemePreference};
 use hunk::diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
-use hunk::jj::{ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFingerprint};
+use hunk::jj::{BookmarkRevision, ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFingerprint};
 use hunk::state::{AppState, AppStateStore};
 
 use data::{
@@ -618,6 +618,7 @@ struct DiffViewer {
     branch_has_upstream: bool,
     branch_ahead_count: usize,
     branches: Vec<LocalBranch>,
+    bookmark_revisions: Vec<BookmarkRevision>,
     files: Vec<ChangedFile>,
     branch_picker_open: bool,
     branch_input_state: Entity<InputState>,
