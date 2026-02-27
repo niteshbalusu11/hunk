@@ -179,6 +179,63 @@ pub(super) fn checkout_existing_bookmark(
     Ok(())
 }
 
+pub(super) fn checkout_existing_bookmark_with_change_transfer(
+    context: &mut RepoContext,
+    branch_name: &str,
+) -> Result<()> {
+    let workspace_name = context.workspace.workspace_name().to_owned();
+    let source_wc_commit = current_wc_commit(context)?;
+    let source_wc_tree = source_wc_commit.tree();
+    let bookmark_target = context
+        .repo
+        .view()
+        .get_local_bookmark(RefName::new(branch_name));
+    let commit_id = bookmark_target
+        .as_normal()
+        .cloned()
+        .ok_or_else(|| anyhow!("bookmark '{branch_name}' is conflicted or has no target"))?;
+    let target_commit = context
+        .repo
+        .store()
+        .get_commit(&commit_id)
+        .with_context(|| format!("failed to load bookmark target for '{branch_name}'"))?;
+
+    let mut locked_workspace = context
+        .workspace
+        .start_working_copy_mutation()
+        .context("failed to lock working copy for bookmark checkout")?;
+
+    let mut tx = context.repo.start_transaction();
+    let new_wc = tx
+        .repo_mut()
+        .new_commit(vec![target_commit.id().clone()], source_wc_tree)
+        .write()
+        .with_context(|| {
+            format!("failed to create working-copy commit for '{branch_name}' with moved changes")
+        })?;
+    tx.repo_mut()
+        .set_wc_commit(workspace_name.clone(), new_wc.id().clone())
+        .with_context(|| format!("failed to set working-copy commit for '{branch_name}'"))?;
+    tx.repo_mut()
+        .rebase_descendants()
+        .context("failed to rebase descendants after bookmark checkout")?;
+    let repo = tx
+        .commit(format!(
+            "checkout bookmark {branch_name} and move working-copy changes"
+        ))
+        .context("failed to finalize bookmark checkout")?;
+
+    let new_wc_commit = current_wc_commit_with_repo(repo.as_ref(), &workspace_name)?;
+    block_on(locked_workspace.locked_wc().check_out(&new_wc_commit))
+        .context("failed to update working-copy files for bookmark checkout")?;
+    locked_workspace
+        .finish(repo.op_id().clone())
+        .context("failed to persist working-copy state after bookmark checkout")?;
+
+    context.repo = repo;
+    Ok(())
+}
+
 pub(super) fn create_bookmark_at_working_copy(
     context: &mut RepoContext,
     branch_name: &str,

@@ -11,8 +11,8 @@ mod backend;
 
 use backend::{
     bookmark_remote_sync_state, checkout_existing_bookmark,
-    collect_materialized_diff_entries_for_paths, commit_working_copy_changes,
-    commit_working_copy_selected_paths, conflict_materialize_options,
+    checkout_existing_bookmark_with_change_transfer, collect_materialized_diff_entries_for_paths,
+    commit_working_copy_changes, commit_working_copy_selected_paths, conflict_materialize_options,
     create_bookmark_at_working_copy, current_bookmarks_from_context,
     current_commit_id_from_context, discover_repo_root, git_head_branch_name_from_context,
     last_commit_subject_from_context, list_local_branches_from_context,
@@ -365,7 +365,11 @@ pub fn checkout_or_create_branch_with_change_transfer(
     let ref_name = RefName::new(branch_name);
     let bookmark_target = context.repo.view().get_local_bookmark(ref_name);
     if bookmark_target.is_present() {
-        checkout_existing_bookmark(&mut context, branch_name)?;
+        if move_changes_to_new_bookmark {
+            checkout_existing_bookmark_with_change_transfer(&mut context, branch_name)?;
+        } else {
+            checkout_existing_bookmark(&mut context, branch_name)?;
+        }
     } else {
         let previous_bookmarks = if move_changes_to_new_bookmark {
             current_bookmarks_from_context(&context)?

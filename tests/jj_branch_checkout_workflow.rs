@@ -106,6 +106,31 @@ fn creating_bookmark_can_move_uncommitted_changes_off_current_bookmark() {
     );
 }
 
+#[test]
+fn switching_to_existing_bookmark_can_move_uncommitted_changes() {
+    let fixture = TempRepo::new("switch-bookmark-move-uncommitted");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_branch(fixture.path(), "main")
+        .expect("creating main bookmark should succeed");
+    checkout_or_create_branch(fixture.path(), "feature")
+        .expect("creating feature bookmark should succeed");
+    checkout_or_create_branch(fixture.path(), "main")
+        .expect("switching back to main should succeed");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\nline two\n");
+    checkout_or_create_branch_with_change_transfer(fixture.path(), "feature", true)
+        .expect("switching to feature with moved changes should succeed");
+
+    let snapshot = load_snapshot(fixture.path()).expect("snapshot should load after branch switch");
+    assert_eq!(snapshot.branch_name, "feature");
+    assert!(
+        snapshot.files.iter().any(|file| file.path == "tracked.txt"),
+        "uncommitted changes should remain in working copy after switching with move enabled"
+    );
+}
+
 struct TempRepo {
     path: PathBuf,
 }

@@ -253,9 +253,13 @@ impl DiffViewer {
                                         } else {
                                             cx.theme().background.opacity(0.0)
                                         })
-                                        .on_click(move |_, _, cx| {
+                                        .on_click(move |_, window, cx| {
                                             view.update(cx, |this, cx| {
-                                                this.checkout_branch(branch_name.clone(), cx);
+                                                this.checkout_branch(
+                                                    branch_name.clone(),
+                                                    window,
+                                                    cx,
+                                                );
                                             });
                                         })
                                         .child(
