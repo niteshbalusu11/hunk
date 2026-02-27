@@ -4,9 +4,9 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use hunk::jj::{
-    abandon_branch_head, checkout_or_create_branch, checkout_or_create_branch_with_change_transfer,
-    commit_staged, describe_branch_head, load_snapshot, rename_branch,
-    review_url_for_branch, squash_branch_head_into_parent,
+    abandon_bookmark_head, checkout_or_create_bookmark, checkout_or_create_bookmark_with_change_transfer,
+    commit_staged, describe_bookmark_head, load_snapshot, rename_bookmark, reorder_bookmark_tip_older,
+    review_url_for_bookmark, squash_bookmark_head_into_parent,
 };
 
 #[test]
@@ -16,16 +16,16 @@ fn checkout_existing_bookmark_switches_without_crashing() {
     write_file(fixture.path().join("tracked.txt"), "line one\n");
     commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
 
-    checkout_or_create_branch(fixture.path(), "master")
+    checkout_or_create_bookmark(fixture.path(), "master")
         .expect("creating master bookmark should succeed");
 
-    checkout_or_create_branch(fixture.path(), "feature")
+    checkout_or_create_bookmark(fixture.path(), "feature")
         .expect("creating feature bookmark should succeed");
 
     write_file(fixture.path().join("tracked.txt"), "line one\nline two\n");
     commit_staged(fixture.path(), "feature commit").expect("feature commit should succeed");
 
-    checkout_or_create_branch(fixture.path(), "master")
+    checkout_or_create_bookmark(fixture.path(), "master")
         .expect("switching to existing master bookmark should succeed");
 
     let snapshot = load_snapshot(fixture.path()).expect("snapshot should load after checkout");
@@ -42,7 +42,7 @@ fn committing_on_checked_out_bookmark_advances_that_bookmark() {
 
     write_file(fixture.path().join("tracked.txt"), "line one\n");
     commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
-    checkout_or_create_branch(fixture.path(), "master")
+    checkout_or_create_bookmark(fixture.path(), "master")
         .expect("creating master bookmark should succeed");
 
     write_file(fixture.path().join("tracked.txt"), "line one\nline two\n");
@@ -65,11 +65,11 @@ fn creating_bookmark_can_move_uncommitted_changes_off_current_bookmark() {
 
     write_file(fixture.path().join("tracked.txt"), "line one\n");
     commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
-    checkout_or_create_branch(fixture.path(), "main")
+    checkout_or_create_bookmark(fixture.path(), "main")
         .expect("creating main bookmark should succeed");
 
     write_file(fixture.path().join("tracked.txt"), "line one\nline two\n");
-    checkout_or_create_branch_with_change_transfer(fixture.path(), "feature", true)
+    checkout_or_create_bookmark_with_change_transfer(fixture.path(), "feature", true)
         .expect("creating feature bookmark should succeed");
 
     let snapshot = load_snapshot(fixture.path()).expect("snapshot should load after branch create");
@@ -113,15 +113,15 @@ fn switching_to_existing_bookmark_can_move_uncommitted_changes() {
 
     write_file(fixture.path().join("tracked.txt"), "line one\n");
     commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
-    checkout_or_create_branch(fixture.path(), "main")
+    checkout_or_create_bookmark(fixture.path(), "main")
         .expect("creating main bookmark should succeed");
-    checkout_or_create_branch(fixture.path(), "feature")
+    checkout_or_create_bookmark(fixture.path(), "feature")
         .expect("creating feature bookmark should succeed");
-    checkout_or_create_branch(fixture.path(), "main")
+    checkout_or_create_bookmark(fixture.path(), "main")
         .expect("switching back to main should succeed");
 
     write_file(fixture.path().join("tracked.txt"), "line one\nline two\n");
-    checkout_or_create_branch_with_change_transfer(fixture.path(), "feature", true)
+    checkout_or_create_bookmark_with_change_transfer(fixture.path(), "feature", true)
         .expect("switching to feature with moved changes should succeed");
 
     let snapshot = load_snapshot(fixture.path()).expect("snapshot should load after branch switch");
@@ -138,10 +138,10 @@ fn renaming_bookmark_updates_active_bookmark_and_listing() {
 
     write_file(fixture.path().join("tracked.txt"), "line one\n");
     commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
-    checkout_or_create_branch(fixture.path(), "feature-old")
+    checkout_or_create_bookmark(fixture.path(), "feature-old")
         .expect("creating source bookmark should succeed");
 
-    rename_branch(fixture.path(), "feature-old", "feature-new")
+    rename_bookmark(fixture.path(), "feature-old", "feature-new")
         .expect("renaming bookmark should succeed");
 
     let snapshot = load_snapshot(fixture.path()).expect("snapshot should load after rename");
@@ -170,12 +170,12 @@ fn renaming_bookmark_rejects_existing_target() {
 
     write_file(fixture.path().join("tracked.txt"), "line one\n");
     commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
-    checkout_or_create_branch(fixture.path(), "feature-old")
+    checkout_or_create_bookmark(fixture.path(), "feature-old")
         .expect("creating source bookmark should succeed");
-    checkout_or_create_branch(fixture.path(), "feature-existing")
+    checkout_or_create_bookmark(fixture.path(), "feature-existing")
         .expect("creating target bookmark should succeed");
 
-    let err = rename_branch(fixture.path(), "feature-old", "feature-existing")
+    let err = rename_bookmark(fixture.path(), "feature-old", "feature-existing")
         .expect_err("renaming should fail when destination bookmark already exists");
     assert!(
         err.to_string().contains("already exists"),
@@ -189,7 +189,7 @@ fn snapshot_includes_revision_stack_for_active_bookmark() {
 
     write_file(fixture.path().join("tracked.txt"), "line one\n");
     commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
-    checkout_or_create_branch(fixture.path(), "stack")
+    checkout_or_create_bookmark(fixture.path(), "stack")
         .expect("creating stack bookmark should succeed");
 
     write_file(fixture.path().join("tracked.txt"), "line one\nline two\n");
@@ -225,13 +225,13 @@ fn describing_bookmark_head_updates_latest_revision_subject() {
 
     write_file(fixture.path().join("tracked.txt"), "line one\n");
     commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
-    checkout_or_create_branch(fixture.path(), "describe-me")
+    checkout_or_create_bookmark(fixture.path(), "describe-me")
         .expect("creating bookmark should succeed");
 
     write_file(fixture.path().join("tracked.txt"), "line one\nline two\n");
     commit_staged(fixture.path(), "original subject").expect("commit should succeed");
 
-    describe_branch_head(
+    describe_bookmark_head(
         fixture.path(),
         "describe-me",
         "updated revision description",
@@ -253,7 +253,7 @@ fn abandoning_bookmark_head_moves_stack_to_previous_revision() {
 
     write_file(fixture.path().join("tracked.txt"), "line one\n");
     commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
-    checkout_or_create_branch(fixture.path(), "stack")
+    checkout_or_create_bookmark(fixture.path(), "stack")
         .expect("creating stack bookmark should succeed");
 
     write_file(fixture.path().join("tracked.txt"), "line one\nline two\n");
@@ -271,7 +271,7 @@ fn abandoning_bookmark_head_moves_stack_to_previous_revision() {
     assert_eq!(before.branch_name, "stack");
     assert_eq!(before.bookmark_revisions[0].subject, "stack third commit");
 
-    abandon_branch_head(fixture.path(), "stack")
+    abandon_bookmark_head(fixture.path(), "stack")
         .expect("abandoning bookmark head should succeed");
 
     let after = load_snapshot(fixture.path()).expect("snapshot should load after abandon");
@@ -288,7 +288,7 @@ fn squashing_bookmark_head_into_parent_keeps_combined_changes() {
 
     write_file(fixture.path().join("tracked.txt"), "line one\n");
     commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
-    checkout_or_create_branch(fixture.path(), "stack")
+    checkout_or_create_bookmark(fixture.path(), "stack")
         .expect("creating stack bookmark should succeed");
 
     write_file(fixture.path().join("tracked.txt"), "line one\nline two\n");
@@ -302,7 +302,7 @@ fn squashing_bookmark_head_into_parent_keeps_combined_changes() {
     commit_staged(fixture.path(), "stack third commit")
         .expect("third commit should succeed");
 
-    squash_branch_head_into_parent(fixture.path(), "stack")
+    squash_bookmark_head_into_parent(fixture.path(), "stack")
         .expect("squashing bookmark head should succeed");
 
     let snapshot = load_snapshot(fixture.path()).expect("snapshot should load after squash");
@@ -325,7 +325,7 @@ fn review_url_for_github_remote_uses_compare_link() {
 
     write_file(fixture.path().join("tracked.txt"), "line one\n");
     commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
-    checkout_or_create_branch(fixture.path(), "feature/review-url")
+    checkout_or_create_bookmark(fixture.path(), "feature/review-url")
         .expect("creating bookmark should succeed");
 
     run_jj(
@@ -339,7 +339,7 @@ fn review_url_for_github_remote_uses_compare_link() {
         ],
     );
 
-    let review_url = review_url_for_branch(fixture.path(), "feature/review-url")
+    let review_url = review_url_for_bookmark(fixture.path(), "feature/review-url")
         .expect("review URL should be computed")
         .expect("github remote should produce review URL");
 
@@ -347,6 +347,350 @@ fn review_url_for_github_remote_uses_compare_link() {
         review_url,
         "https://github.com/example-org/hunk/compare/feature%2Freview-url?expand=1",
         "github remotes should use compare links for review URL quick action"
+    );
+}
+
+#[test]
+fn review_url_for_gitlab_remote_uses_merge_request_link() {
+    let fixture = TempRepo::new("review-url-gitlab");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_bookmark(fixture.path(), "feature/mr")
+        .expect("creating bookmark should succeed");
+
+    run_jj(
+        fixture.path(),
+        [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "https://gitlab.com/example-org/hunk.git",
+        ],
+    );
+
+    let review_url = review_url_for_bookmark(fixture.path(), "feature/mr")
+        .expect("review URL should be computed")
+        .expect("gitlab remote should produce review URL");
+
+    assert_eq!(
+        review_url,
+        "https://gitlab.com/example-org/hunk/-/merge_requests/new?merge_request[source_branch]=feature%2Fmr",
+        "gitlab remotes should use merge-request creation links"
+    );
+}
+
+#[test]
+fn review_url_for_scp_style_remote_is_normalized() {
+    let fixture = TempRepo::new("review-url-scp");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_bookmark(fixture.path(), "feature/scp")
+        .expect("creating bookmark should succeed");
+
+    run_jj(
+        fixture.path(),
+        [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "git@github.com:example-org/hunk.git",
+        ],
+    );
+
+    let review_url = review_url_for_bookmark(fixture.path(), "feature/scp")
+        .expect("review URL should be computed")
+        .expect("scp-style remote should produce review URL");
+
+    assert_eq!(
+        review_url,
+        "https://github.com/example-org/hunk/compare/feature%2Fscp?expand=1"
+    );
+}
+
+#[test]
+fn review_url_for_scp_style_remote_without_user_is_normalized() {
+    let fixture = TempRepo::new("review-url-scp-no-user");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_bookmark(fixture.path(), "feature/scp-no-user")
+        .expect("creating bookmark should succeed");
+
+    run_jj(
+        fixture.path(),
+        [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "github.com:example-org/hunk.git",
+        ],
+    );
+
+    let review_url = review_url_for_bookmark(fixture.path(), "feature/scp-no-user")
+        .expect("review URL should be computed")
+        .expect("scp-style remote should produce review URL");
+
+    assert_eq!(
+        review_url,
+        "https://github.com/example-org/hunk/compare/feature%2Fscp-no-user?expand=1"
+    );
+}
+
+#[test]
+fn reordering_bookmark_tip_swaps_top_two_revisions() {
+    let fixture = TempRepo::new("reorder-bookmark-tip");
+
+    write_file(fixture.path().join("tracked-1.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_bookmark(fixture.path(), "stack")
+        .expect("creating stack bookmark should succeed");
+
+    write_file(fixture.path().join("tracked-2.txt"), "line two\n");
+    commit_staged(fixture.path(), "stack second commit")
+        .expect("second commit should succeed");
+
+    write_file(fixture.path().join("tracked-3.txt"), "line three\n");
+    commit_staged(fixture.path(), "stack third commit")
+        .expect("third commit should succeed");
+
+    reorder_bookmark_tip_older(fixture.path(), "stack")
+        .expect("reordering top revisions should succeed");
+
+    let snapshot = load_snapshot(fixture.path()).expect("snapshot should load after reorder");
+    assert_eq!(snapshot.branch_name, "stack");
+    assert!(
+        snapshot.bookmark_revisions.len() >= 2,
+        "stack should still include reordered revisions"
+    );
+    assert_eq!(
+        snapshot.bookmark_revisions[0].subject, "stack second commit",
+        "former parent should become the top revision after reorder"
+    );
+    assert_eq!(
+        snapshot.bookmark_revisions[1].subject, "stack third commit",
+        "former tip should be directly below the new top revision"
+    );
+}
+
+#[test]
+fn reordering_two_revision_stack_swaps_tip_and_parent() {
+    let fixture = TempRepo::new("reorder-two-revisions");
+
+    write_file(fixture.path().join("tracked-1.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_bookmark(fixture.path(), "stack")
+        .expect("creating stack bookmark should succeed");
+
+    write_file(fixture.path().join("tracked-2.txt"), "line two\n");
+    commit_staged(fixture.path(), "stack second commit")
+        .expect("second commit should succeed");
+
+    let before = load_snapshot(fixture.path()).expect("snapshot should load before reorder");
+    assert!(before.bookmark_revisions.len() >= 2);
+    let before_tip_subject = before.bookmark_revisions[0].subject.clone();
+    let before_parent_subject = before.bookmark_revisions[1].subject.clone();
+
+    reorder_bookmark_tip_older(fixture.path(), "stack")
+        .expect("reordering two-revision stack should succeed");
+
+    let after = load_snapshot(fixture.path()).expect("snapshot should load after reorder");
+    assert_eq!(after.bookmark_revisions[0].subject, before_parent_subject);
+    assert_eq!(after.bookmark_revisions[1].subject, before_tip_subject);
+}
+
+#[test]
+fn reordering_requires_at_least_two_revisions() {
+    let fixture = TempRepo::new("reorder-requires-two");
+
+    write_file(fixture.path().join("tracked-1.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_bookmark(fixture.path(), "stack")
+        .expect("creating stack bookmark should succeed");
+
+    let err = reorder_bookmark_tip_older(fixture.path(), "stack")
+        .expect_err("reordering with fewer than two revisions should fail");
+    assert!(
+        err.to_string().contains("at least two revisions")
+            || err.to_string().contains("not active"),
+        "error should explain stack size or inactive bookmark constraint"
+    );
+}
+
+#[test]
+fn reordering_requires_bookmark_to_be_active() {
+    let fixture = TempRepo::new("reorder-requires-active");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_bookmark(fixture.path(), "main")
+        .expect("creating main bookmark should succeed");
+    checkout_or_create_bookmark(fixture.path(), "feature")
+        .expect("creating feature bookmark should succeed");
+    checkout_or_create_bookmark(fixture.path(), "main")
+        .expect("switching back to main should succeed");
+
+    write_file(fixture.path().join("tracked-two.txt"), "line two\n");
+    commit_staged(fixture.path(), "main second commit").expect("main second commit should succeed");
+
+    let err = reorder_bookmark_tip_older(fixture.path(), "feature")
+        .expect_err("reorder should fail for a non-active bookmark");
+    assert!(
+        err.to_string().contains("not active"),
+        "error should explain that bookmark must be active"
+    );
+}
+
+#[test]
+fn describing_requires_bookmark_to_be_active() {
+    let fixture = TempRepo::new("describe-requires-active");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_bookmark(fixture.path(), "main")
+        .expect("creating main bookmark should succeed");
+    checkout_or_create_bookmark(fixture.path(), "feature")
+        .expect("creating feature bookmark should succeed");
+    checkout_or_create_bookmark(fixture.path(), "main")
+        .expect("switching back to main should succeed");
+
+    let err = describe_bookmark_head(fixture.path(), "feature", "new description")
+        .expect_err("describe should fail for a non-active bookmark");
+    assert!(
+        err.to_string().contains("not active"),
+        "error should explain that bookmark must be active"
+    );
+}
+
+#[test]
+fn commit_staged_ignores_stale_active_bookmark_preference() {
+    let fixture = TempRepo::new("commit-ignores-stale-active-preference");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_bookmark(fixture.path(), "main")
+        .expect("creating main bookmark should succeed");
+    checkout_or_create_bookmark(fixture.path(), "feature")
+        .expect("creating feature bookmark should succeed");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\nfeature diverged\n");
+    commit_staged(fixture.path(), "feature diverge").expect("feature commit should succeed");
+    checkout_or_create_bookmark(fixture.path(), "main")
+        .expect("switching back to main should succeed");
+
+    fs::write(
+        fixture.path().join(".jj").join("hunk-active-bookmark"),
+        "feature\n",
+    )
+    .expect("stale active bookmark preference should be written");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\nmain followup\n");
+    commit_staged(fixture.path(), "main followup").expect("main commit should succeed");
+
+    let main_log = run_jj_capture(
+        fixture.path(),
+        ["log", "-r", "main", "-n", "1", "--no-graph"],
+    );
+    assert!(
+        main_log.contains("main followup"),
+        "main bookmark should advance after committing on checked-out main"
+    );
+
+    let feature_log = run_jj_capture(
+        fixture.path(),
+        ["log", "-r", "feature", "-n", "1", "--no-graph"],
+    );
+    assert!(
+        feature_log.contains("feature diverge"),
+        "feature bookmark should remain at its prior tip when preference is stale"
+    );
+    assert!(
+        !feature_log.contains("main followup"),
+        "feature bookmark should not be moved by stale active bookmark preference"
+    );
+}
+
+#[test]
+fn review_url_for_ssh_scheme_remote_is_normalized() {
+    let fixture = TempRepo::new("review-url-ssh-scheme");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_bookmark(fixture.path(), "feature/ssh")
+        .expect("creating bookmark should succeed");
+
+    run_jj(
+        fixture.path(),
+        [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "ssh://git@github.com/example-org/hunk.git",
+        ],
+    );
+
+    let review_url = review_url_for_bookmark(fixture.path(), "feature/ssh")
+        .expect("review URL should be computed")
+        .expect("ssh scheme remote should produce review URL");
+    assert_eq!(
+        review_url,
+        "https://github.com/example-org/hunk/compare/feature%2Fssh?expand=1"
+    );
+}
+
+#[test]
+fn review_url_for_path_remote_returns_none() {
+    let fixture = TempRepo::new("review-url-path-remote");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_bookmark(fixture.path(), "feature/path")
+        .expect("creating bookmark should succeed");
+
+    run_jj(
+        fixture.path(),
+        ["git", "remote", "add", "origin", "../local-bare-remote"],
+    );
+
+    let review_url = review_url_for_bookmark(fixture.path(), "feature/path")
+        .expect("review URL computation should succeed");
+    assert!(
+        review_url.is_none(),
+        "path remotes should not produce a review URL"
+    );
+}
+
+#[test]
+fn review_url_strips_credentials_from_https_remote() {
+    let fixture = TempRepo::new("review-url-strips-credentials");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_bookmark(fixture.path(), "feature/creds")
+        .expect("creating bookmark should succeed");
+
+    run_jj(
+        fixture.path(),
+        [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "https://user:secret-token@github.com/example-org/hunk.git",
+        ],
+    );
+
+    let review_url = review_url_for_bookmark(fixture.path(), "feature/creds")
+        .expect("review URL should be computed")
+        .expect("https remote should produce review URL");
+    assert_eq!(
+        review_url,
+        "https://github.com/example-org/hunk/compare/feature%2Fcreds?expand=1"
     );
 }
 

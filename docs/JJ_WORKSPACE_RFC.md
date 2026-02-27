@@ -158,17 +158,17 @@ Create JJ-focused view models for UI binding:
   - [x] publish/push/sync bookmark
   - [x] rename bookmark flow
   - [x] explicit move-changes action when activating bookmark
-- [~] Phase 4: Revision stack view and revision actions.
+- [x] Phase 4: Revision stack view and revision actions.
   - [x] read-only revision stack list for active bookmark
-  - [~] revision actions
+  - [x] revision actions
   - [x] describe/edit message for tip revision
   - [x] abandon tip revision
   - [x] squash tip revision into parent
-  - [ ] reorder
-- [~] Phase 5: PR/MR quick actions and remote collaboration refinements.
+  - [x] reorder
+- [x] Phase 5: PR/MR quick actions and remote collaboration refinements.
   - [x] copy review URL quick action from JJ workspace (GitHub/GitLab URL support)
-  - [ ] additional remote collaboration refinements
-- [ ] Phase 6: Full legacy flow removal and internal naming cleanup.
+  - [x] additional remote collaboration refinements (SSH/SCP normalization, provider gating, credential-safe URL handling)
+- [x] Phase 6: Full legacy flow removal and internal naming cleanup.
 
 ## Testing Strategy
 1. Keep existing JJ workflow tests passing.

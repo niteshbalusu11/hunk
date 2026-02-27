@@ -2,23 +2,21 @@ impl DiffViewer {
     fn render_jj_workspace(&self, cx: &mut Context<Self>) -> AnyElement {
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
-        let branch_syncable = self.branch_syncable();
+        let branch_syncable = self.can_run_active_bookmark_actions();
         let show_sync = branch_syncable && self.branch_has_upstream;
         let show_publish = branch_syncable && !self.branch_has_upstream;
         let show_push = branch_syncable && self.branch_has_upstream;
-        let sync_disabled = !self.can_sync_current_branch();
-        let push_or_publish_disabled = !self.can_push_or_publish_current_branch();
+        let sync_disabled = !self.can_sync_current_bookmark();
+        let push_or_publish_disabled = !self.can_push_or_publish_current_bookmark();
         let review_url_disabled = self.git_action_loading || !branch_syncable;
         let action_label = if show_publish {
             "Publish Bookmark"
         } else {
             "Push Bookmark"
         };
-        let active_bookmark_label = if branch_syncable {
-            self.branch_name.clone()
-        } else {
-            "detached".to_string()
-        };
+        let active_bookmark_label = self
+            .checked_out_bookmark_name()
+            .map_or_else(|| "detached".to_string(), ToOwned::to_owned);
         let sync_state_label = if !branch_syncable {
             "Detached".to_string()
         } else if self.branch_has_upstream {
@@ -128,11 +126,11 @@ impl DiffViewer {
                             .rounded(px(7.0))
                             .bg(cx.theme().secondary.opacity(if is_dark { 0.50 } else { 0.70 }))
                             .border_color(cx.theme().border.opacity(if is_dark { 0.90 } else { 0.74 }))
-                            .label(self.branch_name.clone())
+                            .label(active_bookmark_label.clone())
                             .disabled(self.git_action_loading)
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
-                                    this.toggle_branch_picker(cx);
+                                    this.toggle_bookmark_picker(cx);
                                 });
                             })
                     })
@@ -161,7 +159,7 @@ impl DiffViewer {
                             .disabled(self.git_action_loading)
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
-                                    this.toggle_branch_picker(cx);
+                                    this.toggle_bookmark_picker(cx);
                                 });
                             });
 
@@ -183,7 +181,7 @@ impl DiffViewer {
                                 .disabled(sync_disabled)
                                 .on_click(move |_, _, cx| {
                                     view.update(cx, |this, cx| {
-                                        this.sync_current_branch_from_remote(cx);
+                                        this.sync_current_bookmark_from_remote(cx);
                                     });
                                 })
                         })
@@ -200,7 +198,7 @@ impl DiffViewer {
                                 .disabled(push_or_publish_disabled)
                                 .on_click(move |_, _, cx| {
                                     view.update(cx, |this, cx| {
-                                        this.push_or_publish_current_branch(cx);
+                                        this.push_or_publish_current_bookmark(cx);
                                     });
                                 })
                             })
@@ -216,7 +214,7 @@ impl DiffViewer {
                             .disabled(review_url_disabled)
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
-                                    this.copy_current_branch_review_url(cx);
+                                    this.copy_current_bookmark_review_url(cx);
                                 });
                             })
                     }),
@@ -295,7 +293,7 @@ impl DiffViewer {
                             .disabled(describe_tip_disabled)
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
-                                    this.describe_current_branch_from_input(cx);
+                                    this.describe_current_bookmark_from_input(cx);
                                 });
                             })
                     }),
@@ -324,9 +322,11 @@ impl DiffViewer {
         let is_dark = cx.theme().mode.is_dark();
         let revisions = &self.bookmark_revisions;
         let can_abandon_tip =
-            !self.git_action_loading && self.branch_syncable() && !revisions.is_empty();
+            !self.git_action_loading && self.bookmark_syncable() && !revisions.is_empty();
         let can_squash_tip =
-            !self.git_action_loading && self.branch_syncable() && revisions.len() >= 2;
+            !self.git_action_loading && self.bookmark_syncable() && revisions.len() >= 2;
+        let can_reorder_tip =
+            !self.git_action_loading && self.bookmark_syncable() && revisions.len() >= 2;
 
         v_flex()
             .w_full()
@@ -364,6 +364,21 @@ impl DiffViewer {
                             )
                             .child({
                                 let view = view.clone();
+                                Button::new("reorder-top-two-revisions")
+                                    .outline()
+                                    .compact()
+                                    .with_size(gpui_component::Size::Small)
+                                    .rounded(px(7.0))
+                                    .label("Swap Top 2")
+                                    .disabled(!can_reorder_tip)
+                                    .on_click(move |_, _, cx| {
+                                        view.update(cx, |this, cx| {
+                                            this.reorder_current_bookmark_tip_older(cx);
+                                        });
+                                    })
+                            })
+                            .child({
+                                let view = view.clone();
                                 Button::new("squash-tip-revision")
                                     .outline()
                                     .compact()
@@ -373,7 +388,7 @@ impl DiffViewer {
                                     .disabled(!can_squash_tip)
                                     .on_click(move |_, _, cx| {
                                         view.update(cx, |this, cx| {
-                                            this.squash_current_branch_tip_into_parent(cx);
+                                            this.squash_current_bookmark_tip_into_parent(cx);
                                         });
                                     })
                             })
@@ -388,7 +403,7 @@ impl DiffViewer {
                                     .disabled(!can_abandon_tip)
                                     .on_click(move |_, _, cx| {
                                         view.update(cx, |this, cx| {
-                                            this.abandon_current_branch_tip(cx);
+                                            this.abandon_current_bookmark_tip(cx);
                                         });
                                     })
                             }),
@@ -464,16 +479,15 @@ impl DiffViewer {
     }
 
     fn render_workspace_changes_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let tracked = self
-            .files
-            .iter()
-            .filter(|file| file.is_tracked())
-            .collect::<Vec<_>>();
-        let untracked = self
-            .files
-            .iter()
-            .filter(|file| !file.is_tracked())
-            .collect::<Vec<_>>();
+        let mut tracked = Vec::with_capacity(self.files.len());
+        let mut untracked = Vec::new();
+        for file in &self.files {
+            if file.is_tracked() {
+                tracked.push(file);
+            } else {
+                untracked.push(file);
+            }
+        }
         let is_dark = cx.theme().mode.is_dark();
 
         v_flex()
@@ -546,11 +560,10 @@ impl DiffViewer {
                     .max_h(px(120.0))
                     .overflow_y_scrollbar()
                     .gap_0p5()
-                    .children(
-                        files
-                            .iter()
-                            .map(|file| self.render_workspace_change_row(file, cx)),
-                    )
+                    .children(files.iter().enumerate().map(|(row_ix, file)| {
+                        let section_offset: usize = if title == "Tracked" { 0 } else { 1_000_000 };
+                        self.render_workspace_change_row(section_offset + row_ix, file, cx)
+                    }))
                     .into_any_element()
             })
             .into_any_element()
@@ -558,6 +571,7 @@ impl DiffViewer {
 
     fn render_workspace_change_row(
         &self,
+        row_id: usize,
         file: &ChangedFile,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -579,11 +593,6 @@ impl DiffViewer {
             cx.theme().accent.opacity(if is_dark { 0.22 } else { 0.14 })
         } else {
             cx.theme().background.opacity(0.0)
-        };
-        let row_id = {
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            std::hash::Hash::hash(&file.path, &mut hasher);
-            std::hash::Hasher::finish(&hasher)
         };
         let path = file.path.clone();
 
@@ -652,7 +661,7 @@ impl DiffViewer {
         let is_dark = cx.theme().mode.is_dark();
         let bookmark_input_empty = self.branch_input_state.read(cx).value().trim().is_empty();
         let rename_disabled =
-            self.git_action_loading || bookmark_input_empty || !self.branch_syncable();
+            self.git_action_loading || bookmark_input_empty || !self.can_run_active_bookmark_actions();
         let create_or_activate_disabled = self.git_action_loading || bookmark_input_empty;
 
         v_flex()
@@ -708,7 +717,7 @@ impl DiffViewer {
                                         })
                                         .on_click(move |_, window, cx| {
                                             activate_view.update(cx, |this, cx| {
-                                                this.checkout_branch(
+                                                this.checkout_bookmark(
                                                     activate_branch_name.clone(),
                                                     window,
                                                     cx,
@@ -747,7 +756,7 @@ impl DiffViewer {
                                                 .on_click(move |_, _, cx| {
                                                     cx.stop_propagation();
                                                     move_view.update(cx, |this, cx| {
-                                                        this.checkout_branch_with_change_transfer(
+                                                        this.checkout_bookmark_with_change_transfer(
                                                             move_branch_name.clone(),
                                                             cx,
                                                         );
@@ -787,7 +796,7 @@ impl DiffViewer {
                                 let view = view.clone();
                                 move |_, window, cx| {
                                     view.update(cx, |this, cx| {
-                                        this.create_or_switch_branch_from_input(window, cx);
+                                        this.create_or_switch_bookmark_from_input(window, cx);
                                     });
                                 }
                             }),
@@ -800,7 +809,7 @@ impl DiffViewer {
                             .disabled(rename_disabled)
                             .on_click(move |_, window, cx| {
                                 view.update(cx, |this, cx| {
-                                    this.rename_current_branch_from_input(window, cx);
+                                    this.rename_current_bookmark_from_input(window, cx);
                                 });
                             }),
                     )

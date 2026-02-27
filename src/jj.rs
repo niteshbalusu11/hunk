@@ -23,6 +23,7 @@ use backend::{
     load_tracked_paths_from_context, materialized_entry_matches_path,
     move_bookmark_to_parent_of_working_copy, normalize_path, push_bookmark, render_patch_for_entry,
     rename_bookmark as rename_local_bookmark, repo_line_stats_from_context, bookmark_review_url,
+    reorder_bookmark_tip_older as reorder_local_bookmark_tip_older,
     squash_bookmark_head_into_parent as squash_local_bookmark_head_into_parent,
     sync_bookmark_from_remote, walk_repo_tree,
 };
@@ -146,12 +147,7 @@ pub fn load_snapshot(cwd: &Path) -> Result<RepoSnapshot> {
     let current_bookmarks = current_bookmarks_from_context(&context)?;
     let active_bookmark = load_active_bookmark_preference(&context.root);
     let git_head_branch = git_head_branch_name_from_context(&context);
-    let branch_name = select_snapshot_branch_name(
-        &context,
-        &current_bookmarks,
-        active_bookmark,
-        git_head_branch,
-    );
+    let branch_name = select_snapshot_branch_name(&current_bookmarks, active_bookmark, git_head_branch);
     let mut branch_selection = current_bookmarks.clone();
     if branch_selection.is_empty() && branch_name != "detached" {
         branch_selection.insert(branch_name.clone());
@@ -184,12 +180,7 @@ pub fn load_snapshot_fingerprint(cwd: &Path) -> Result<RepoSnapshotFingerprint> 
     let current_bookmarks = current_bookmarks_from_context(&context)?;
     let active_bookmark = load_active_bookmark_preference(&context.root);
     let git_head_branch = git_head_branch_name_from_context(&context);
-    let branch_name = select_snapshot_branch_name(
-        &context,
-        &current_bookmarks,
-        active_bookmark,
-        git_head_branch,
-    );
+    let branch_name = select_snapshot_branch_name(&current_bookmarks, active_bookmark, git_head_branch);
     let head_target = current_commit_id_from_context(&context)?;
     Ok(snapshot_fingerprint(
         context.root,
@@ -321,10 +312,11 @@ pub fn commit_staged(repo_root: &Path, message: &str) -> Result<()> {
     if load_changed_files_from_context(&context)?.is_empty() {
         return Err(anyhow!("no changes to commit"));
     }
+    let active_bookmark = resolved_active_bookmark(&context)?;
 
     commit_working_copy_changes(&mut context, trimmed)?;
 
-    if let Some(active_bookmark) = load_active_bookmark_preference(&context.root) {
+    if let Some(active_bookmark) = active_bookmark {
         move_bookmark_to_parent_of_working_copy(&mut context, active_bookmark.as_str())?;
     }
 
@@ -348,56 +340,65 @@ pub fn commit_selected_paths(
     if load_changed_files_from_context(&context)?.is_empty() {
         return Err(anyhow!("no changes to commit"));
     }
+    let active_bookmark = resolved_active_bookmark(&context)?;
 
     let committed_count =
         commit_working_copy_selected_paths(&mut context, trimmed, selected_paths)?;
 
-    if let Some(active_bookmark) = load_active_bookmark_preference(&context.root) {
+    if let Some(active_bookmark) = active_bookmark {
         move_bookmark_to_parent_of_working_copy(&mut context, active_bookmark.as_str())?;
     }
 
     Ok(committed_count)
 }
 
-pub fn checkout_or_create_branch(repo_root: &Path, branch_name: &str) -> Result<()> {
-    checkout_or_create_branch_with_change_transfer(repo_root, branch_name, false)
+pub fn checkout_or_create_bookmark(repo_root: &Path, bookmark_name: &str) -> Result<()> {
+    checkout_or_create_bookmark_with_change_transfer(repo_root, bookmark_name, false)
 }
 
-pub fn rename_branch(repo_root: &Path, old_branch_name: &str, new_branch_name: &str) -> Result<()> {
-    let old_branch_name = old_branch_name.trim();
-    if old_branch_name.is_empty() {
+pub fn rename_bookmark(
+    repo_root: &Path,
+    old_bookmark_name: &str,
+    new_bookmark_name: &str,
+) -> Result<()> {
+    let old_bookmark_name = old_bookmark_name.trim();
+    if old_bookmark_name.is_empty() {
         return Err(anyhow!("current bookmark name cannot be empty"));
     }
 
-    let new_branch_name = new_branch_name.trim();
-    if new_branch_name.is_empty() {
+    let new_bookmark_name = new_bookmark_name.trim();
+    if new_bookmark_name.is_empty() {
         return Err(anyhow!("new bookmark name cannot be empty"));
     }
-    if old_branch_name == new_branch_name {
+    if old_bookmark_name == new_bookmark_name {
         return Err(anyhow!("new bookmark name must differ from current bookmark"));
     }
-    if !is_valid_branch_name(new_branch_name) {
-        return Err(anyhow!("invalid bookmark name: {new_branch_name}"));
+    if !is_valid_bookmark_name(new_bookmark_name) {
+        return Err(anyhow!("invalid bookmark name: {new_bookmark_name}"));
     }
 
     let mut context = load_repo_context_at_root(repo_root, true)?;
-    rename_local_bookmark(&mut context, old_branch_name, new_branch_name)?;
+    rename_local_bookmark(&mut context, old_bookmark_name, new_bookmark_name)?;
 
-    if load_active_bookmark_preference(&context.root).as_deref() == Some(old_branch_name)
-        && let Err(err) = persist_active_bookmark_preference(&context.root, new_branch_name)
+    if load_active_bookmark_preference(&context.root).as_deref() == Some(old_bookmark_name)
+        && let Err(err) = persist_active_bookmark_preference(&context.root, new_bookmark_name)
     {
         warn!(
             "failed to persist active bookmark preference for '{}': {err:#}",
-            new_branch_name
+            new_bookmark_name
         );
     }
 
     Ok(())
 }
 
-pub fn describe_branch_head(repo_root: &Path, branch_name: &str, description: &str) -> Result<()> {
-    let branch_name = branch_name.trim();
-    if branch_name.is_empty() || branch_name == "detached" {
+pub fn describe_bookmark_head(
+    repo_root: &Path,
+    bookmark_name: &str,
+    description: &str,
+) -> Result<()> {
+    let bookmark_name = bookmark_name.trim();
+    if bookmark_name.is_empty() || bookmark_name == "detached" {
         return Err(anyhow!("cannot edit revision description without a bookmark name"));
     }
 
@@ -407,108 +408,118 @@ pub fn describe_branch_head(repo_root: &Path, branch_name: &str, description: &s
     }
 
     let mut context = load_repo_context_at_root(repo_root, true)?;
-    describe_local_bookmark_head(&mut context, branch_name, description)
+    describe_local_bookmark_head(&mut context, bookmark_name, description)
 }
 
-pub fn abandon_branch_head(repo_root: &Path, branch_name: &str) -> Result<()> {
-    let branch_name = branch_name.trim();
-    if branch_name.is_empty() || branch_name == "detached" {
+pub fn abandon_bookmark_head(repo_root: &Path, bookmark_name: &str) -> Result<()> {
+    let bookmark_name = bookmark_name.trim();
+    if bookmark_name.is_empty() || bookmark_name == "detached" {
         return Err(anyhow!("cannot abandon a revision without a bookmark name"));
     }
 
     let mut context = load_repo_context_at_root(repo_root, true)?;
-    abandon_local_bookmark_head(&mut context, branch_name)
+    abandon_local_bookmark_head(&mut context, bookmark_name)
 }
 
-pub fn squash_branch_head_into_parent(repo_root: &Path, branch_name: &str) -> Result<()> {
-    let branch_name = branch_name.trim();
-    if branch_name.is_empty() || branch_name == "detached" {
+pub fn squash_bookmark_head_into_parent(repo_root: &Path, bookmark_name: &str) -> Result<()> {
+    let bookmark_name = bookmark_name.trim();
+    if bookmark_name.is_empty() || bookmark_name == "detached" {
         return Err(anyhow!("cannot squash a revision without a bookmark name"));
     }
 
     let mut context = load_repo_context_at_root(repo_root, true)?;
-    squash_local_bookmark_head_into_parent(&mut context, branch_name)
+    squash_local_bookmark_head_into_parent(&mut context, bookmark_name)
 }
 
-pub fn review_url_for_branch(repo_root: &Path, branch_name: &str) -> Result<Option<String>> {
-    let branch_name = branch_name.trim();
-    if branch_name.is_empty() || branch_name == "detached" {
+pub fn reorder_bookmark_tip_older(repo_root: &Path, bookmark_name: &str) -> Result<()> {
+    let bookmark_name = bookmark_name.trim();
+    if bookmark_name.is_empty() || bookmark_name == "detached" {
+        return Err(anyhow!("cannot reorder revisions without a bookmark name"));
+    }
+
+    let mut context = load_repo_context_at_root(repo_root, true)?;
+    reorder_local_bookmark_tip_older(&mut context, bookmark_name)
+}
+
+pub fn review_url_for_bookmark(repo_root: &Path, bookmark_name: &str) -> Result<Option<String>> {
+    let bookmark_name = bookmark_name.trim();
+    if bookmark_name.is_empty() || bookmark_name == "detached" {
         return Err(anyhow!("cannot build review URL without a bookmark name"));
     }
 
     let context = load_repo_context_at_root(repo_root, false)?;
-    bookmark_review_url(&context, branch_name)
+    bookmark_review_url(&context, bookmark_name)
 }
 
-pub fn checkout_or_create_branch_with_change_transfer(
+pub fn checkout_or_create_bookmark_with_change_transfer(
     repo_root: &Path,
-    branch_name: &str,
-    move_changes_to_new_bookmark: bool,
+    bookmark_name: &str,
+    move_changes_to_bookmark: bool,
 ) -> Result<()> {
-    let branch_name = branch_name.trim();
-    if branch_name.is_empty() {
+    let bookmark_name = bookmark_name.trim();
+    if bookmark_name.is_empty() {
         return Err(anyhow!("bookmark name cannot be empty"));
     }
-    if !is_valid_branch_name(branch_name) {
-        return Err(anyhow!("invalid bookmark name: {branch_name}"));
+    if !is_valid_bookmark_name(bookmark_name) {
+        return Err(anyhow!("invalid bookmark name: {bookmark_name}"));
     }
 
     let mut context = load_repo_context_at_root(repo_root, true)?;
-    let ref_name = RefName::new(branch_name);
+    let ref_name = RefName::new(bookmark_name);
     let bookmark_target = context.repo.view().get_local_bookmark(ref_name);
     if bookmark_target.is_present() {
-        if move_changes_to_new_bookmark {
-            checkout_existing_bookmark_with_change_transfer(&mut context, branch_name)?;
+        if move_changes_to_bookmark {
+            checkout_existing_bookmark_with_change_transfer(&mut context, bookmark_name)?;
         } else {
-            checkout_existing_bookmark(&mut context, branch_name)?;
+            checkout_existing_bookmark(&mut context, bookmark_name)?;
         }
     } else {
-        let previous_bookmarks = if move_changes_to_new_bookmark {
+        let previous_bookmarks = if move_changes_to_bookmark {
             current_bookmarks_from_context(&context)?
         } else {
             BTreeSet::new()
         };
-        create_bookmark_at_working_copy(&mut context, branch_name)?;
-        if move_changes_to_new_bookmark {
+        create_bookmark_at_working_copy(&mut context, bookmark_name)?;
+        if move_changes_to_bookmark {
             for bookmark in previous_bookmarks {
-                if bookmark != branch_name {
+                if bookmark != bookmark_name {
                     move_bookmark_to_parent_of_working_copy(&mut context, bookmark.as_str())?;
                 }
             }
         }
     }
 
-    if let Err(err) = persist_active_bookmark_preference(&context.root, branch_name) {
+    if let Err(err) = persist_active_bookmark_preference(&context.root, bookmark_name) {
         warn!(
             "failed to persist active bookmark preference for '{}': {err:#}",
-            branch_name
+            bookmark_name
         );
     }
 
     Ok(())
 }
 
-pub fn push_current_branch(repo_root: &Path, branch_name: &str, _: bool) -> Result<()> {
-    let branch_name = branch_name.trim();
-    if branch_name.is_empty() || branch_name == "detached" {
+pub fn push_current_bookmark(repo_root: &Path, bookmark_name: &str, _: bool) -> Result<()> {
+    let bookmark_name = bookmark_name.trim();
+    if bookmark_name.is_empty() || bookmark_name == "detached" {
         return Err(anyhow!("cannot push without a bookmark name"));
     }
 
     let mut context = load_repo_context_at_root(repo_root, false)?;
-    push_bookmark(&mut context, branch_name)
+    push_bookmark(&mut context, bookmark_name)
 }
 
-pub fn sync_current_branch(repo_root: &Path, branch_name: &str) -> Result<()> {
-    let branch_name = branch_name.trim();
-    if branch_name.is_empty() || branch_name == "detached" {
+pub fn sync_current_bookmark(repo_root: &Path, bookmark_name: &str) -> Result<()> {
+    let bookmark_name = bookmark_name.trim();
+    if bookmark_name.is_empty() || bookmark_name == "detached" {
         return Err(anyhow!("cannot sync without a bookmark name"));
     }
 
     let mut context = load_repo_context_at_root(repo_root, true)?;
-    sync_bookmark_from_remote(&mut context, branch_name)
+    sync_bookmark_from_remote(&mut context, bookmark_name)
 }
 
-pub fn sanitize_branch_name(input: &str) -> String {
+pub fn sanitize_bookmark_name(input: &str) -> String {
     let lowered = input.trim().to_lowercase();
 
     let mut normalized = String::with_capacity(lowered.len());
@@ -560,18 +571,18 @@ pub fn sanitize_branch_name(input: &str) -> String {
     }
 
     let mut candidate = if segments.is_empty() {
-        "branch".to_string()
+        "bookmark".to_string()
     } else {
         segments.join("/")
     };
 
     if candidate.eq_ignore_ascii_case("head") {
-        candidate = "head-branch".to_string();
+        candidate = "head-bookmark".to_string();
     }
 
     candidate = candidate.trim_matches('/').to_string();
 
-    if !is_valid_branch_name(&candidate) {
+    if !is_valid_bookmark_name(&candidate) {
         candidate = candidate
             .chars()
             .map(|ch| match ch {
@@ -595,17 +606,17 @@ pub fn sanitize_branch_name(input: &str) -> String {
     }
 
     if candidate.is_empty() {
-        candidate = "branch".to_string();
+        candidate = "bookmark".to_string();
     }
 
-    if !is_valid_branch_name(&candidate) {
-        "branch-new".to_string()
+    if !is_valid_bookmark_name(&candidate) {
+        "bookmark-new".to_string()
     } else {
         candidate
     }
 }
 
-pub fn is_valid_branch_name(name: &str) -> bool {
+pub fn is_valid_bookmark_name(name: &str) -> bool {
     if name.trim().is_empty() {
         return false;
     }
@@ -665,29 +676,16 @@ fn persist_active_bookmark_preference(repo_root: &Path, branch_name: &str) -> Re
 }
 
 fn select_snapshot_branch_name(
-    context: &backend::RepoContext,
     current_bookmarks: &BTreeSet<String>,
     preferred: Option<String>,
     git_head_branch: Option<String>,
 ) -> String {
-    if let Some(preferred) = preferred
-        && (current_bookmarks.contains(preferred.as_str())
-            || context
-                .repo
-                .view()
-                .get_local_bookmark(RefName::new(preferred.as_str()))
-                .is_present())
-    {
+    if let Some(preferred) = preferred && current_bookmarks.contains(preferred.as_str()) {
         return preferred;
     }
 
     if let Some(git_head_branch) = git_head_branch
-        && (current_bookmarks.contains(git_head_branch.as_str())
-            || context
-                .repo
-                .view()
-                .get_local_bookmark(RefName::new(git_head_branch.as_str()))
-                .is_present())
+        && current_bookmarks.contains(git_head_branch.as_str())
     {
         return git_head_branch;
     }
@@ -697,6 +695,42 @@ fn select_snapshot_branch_name(
         .next()
         .cloned()
         .unwrap_or_else(|| "detached".to_string())
+}
+
+fn select_commit_branch_name(
+    current_bookmarks: &BTreeSet<String>,
+    preferred: Option<String>,
+    git_head_branch: Option<String>,
+) -> String {
+    if let Some(git_head_branch) = git_head_branch
+        && current_bookmarks.contains(git_head_branch.as_str())
+    {
+        return git_head_branch;
+    }
+
+    if let Some(preferred) = preferred && current_bookmarks.contains(preferred.as_str()) {
+        return preferred;
+    }
+
+    current_bookmarks
+        .iter()
+        .next()
+        .cloned()
+        .unwrap_or_else(|| "detached".to_string())
+}
+
+fn resolved_active_bookmark(context: &backend::RepoContext) -> Result<Option<String>> {
+    let current_bookmarks = current_bookmarks_from_context(context)?;
+    let branch_name = select_commit_branch_name(
+        &current_bookmarks,
+        load_active_bookmark_preference(&context.root),
+        git_head_branch_name_from_context(context),
+    );
+    if branch_name == "detached" {
+        Ok(None)
+    } else {
+        Ok(Some(branch_name))
+    }
 }
 
 fn snapshot_fingerprint(

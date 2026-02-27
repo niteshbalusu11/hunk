@@ -261,12 +261,24 @@ fn merge_file_status(existing: FileStatus, incoming: FileStatus) -> FileStatus {
 
 pub(super) fn current_bookmarks_from_context(context: &RepoContext) -> Result<BTreeSet<String>> {
     let wc_commit = current_wc_commit(context)?;
-    Ok(context
+    let mut current: BTreeSet<String> = context
         .repo
         .view()
         .local_bookmarks_for_commit(wc_commit.id())
         .map(|(name, _)| name.as_str().to_string())
-        .collect())
+        .collect();
+
+    if let Some(parent_id) = wc_commit.parent_ids().first() {
+        current.extend(
+            context
+                .repo
+                .view()
+                .local_bookmarks_for_commit(parent_id)
+                .map(|(name, _)| name.as_str().to_string()),
+        );
+    }
+
+    Ok(current)
 }
 
 pub(super) fn git_head_branch_name_from_context(context: &RepoContext) -> Option<String> {

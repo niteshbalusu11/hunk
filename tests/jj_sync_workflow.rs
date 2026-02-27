@@ -4,32 +4,32 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use hunk::jj::{
-    checkout_or_create_branch, commit_staged, load_snapshot, push_current_branch,
-    sync_current_branch,
+    checkout_or_create_bookmark, commit_staged, load_snapshot, push_current_bookmark,
+    sync_current_bookmark,
 };
 
 #[test]
 fn sync_current_branch_fetches_and_updates_from_remote() {
     let fixture = SyncFixture::new("sync-current-branch");
 
-    checkout_or_create_branch(fixture.local_path(), "master")
+    checkout_or_create_bookmark(fixture.local_path(), "master")
         .expect("master bookmark should be created in local repo");
     let tracked_local = fixture.local_path().join("tracked.txt");
     write_file(tracked_local, "line one\n");
     commit_staged(fixture.local_path(), "initial commit").expect("initial commit should succeed");
-    push_current_branch(fixture.local_path(), "master", false)
+    push_current_bookmark(fixture.local_path(), "master", false)
         .expect("initial publish should succeed");
 
     run_jj(fixture.peer_path(), &["git", "fetch", "--remote", "origin"]);
     run_jj(fixture.peer_path(), &["bookmark", "track", "master@origin"]);
-    checkout_or_create_branch(fixture.peer_path(), "master")
+    checkout_or_create_bookmark(fixture.peer_path(), "master")
         .expect("peer should checkout fetched master bookmark");
     let tracked_peer = fixture.peer_path().join("tracked.txt");
     write_file(tracked_peer, "line one\nline two\n");
     commit_staged(fixture.peer_path(), "peer update").expect("peer commit should succeed");
-    push_current_branch(fixture.peer_path(), "master", true).expect("peer push should succeed");
+    push_current_bookmark(fixture.peer_path(), "master", true).expect("peer push should succeed");
 
-    sync_current_branch(fixture.local_path(), "master").expect("sync should succeed");
+    sync_current_bookmark(fixture.local_path(), "master").expect("sync should succeed");
 
     let snapshot =
         load_snapshot(fixture.local_path()).expect("snapshot should load after successful sync");
@@ -57,12 +57,12 @@ fn sync_current_branch_fetches_and_updates_from_remote() {
 fn sync_prefers_present_untracked_remote_over_origin_fallback() {
     let fixture = DualRemoteSyncFixture::new("sync-prefers-untracked-remote");
 
-    checkout_or_create_branch(fixture.peer_path(), "master")
+    checkout_or_create_bookmark(fixture.peer_path(), "master")
         .expect("peer should create master bookmark");
     write_file(fixture.peer_path().join("tracked.txt"), "line one\n");
     commit_staged(fixture.peer_path(), "initial peer commit")
         .expect("initial peer commit should succeed");
-    push_current_branch(fixture.peer_path(), "master", false)
+    push_current_bookmark(fixture.peer_path(), "master", false)
         .expect("peer should publish master to upstream");
 
     run_jj(
@@ -73,7 +73,7 @@ fn sync_prefers_present_untracked_remote_over_origin_fallback() {
         fixture.local_path(),
         &["bookmark", "track", "master@upstream"],
     );
-    checkout_or_create_branch(fixture.local_path(), "master")
+    checkout_or_create_bookmark(fixture.local_path(), "master")
         .expect("local should checkout fetched upstream master bookmark");
     run_jj(
         fixture.local_path(),
@@ -86,10 +86,10 @@ fn sync_prefers_present_untracked_remote_over_origin_fallback() {
     );
     commit_staged(fixture.peer_path(), "peer upstream update")
         .expect("peer update commit should succeed");
-    push_current_branch(fixture.peer_path(), "master", true)
+    push_current_bookmark(fixture.peer_path(), "master", true)
         .expect("peer should push update to upstream");
 
-    sync_current_branch(fixture.local_path(), "master").expect("sync should succeed");
+    sync_current_bookmark(fixture.local_path(), "master").expect("sync should succeed");
 
     let snapshot =
         load_snapshot(fixture.local_path()).expect("snapshot should load after successful sync");

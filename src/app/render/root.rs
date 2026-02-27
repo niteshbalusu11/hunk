@@ -78,12 +78,29 @@ impl DiffViewer {
     }
 
     fn render_jj_workspace_screen(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        if self.repo_discovery_failed {
+            return self.render_open_project_empty_state(cx);
+        }
+
+        if let Some(error_message) = &self.error_message {
+            return v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .p_4()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().danger)
+                        .child(error_message.clone()),
+                )
+                .into_any_element();
+        }
+
         let is_dark = cx.theme().mode.is_dark();
-        let active_bookmark = if self.branch_syncable() {
-            self.branch_name.clone()
-        } else {
-            "detached".to_string()
-        };
+        let active_bookmark = self
+            .checked_out_bookmark_name()
+            .map_or_else(|| "detached".to_string(), ToOwned::to_owned);
 
         v_flex()
             .size_full()

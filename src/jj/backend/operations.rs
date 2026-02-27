@@ -287,11 +287,53 @@ pub(super) fn rename_bookmark(
     persist_working_copy_state(context, repo, "after bookmark rename")
 }
 
+fn ensure_bookmark_is_checked_out(context: &RepoContext, branch_name: &str) -> Result<()> {
+    let Some(bookmark_tip_id) = context
+        .repo
+        .view()
+        .get_local_bookmark(RefName::new(branch_name))
+        .as_normal()
+        .cloned()
+    else {
+        return Err(anyhow!("bookmark '{branch_name}' does not exist"));
+    };
+
+    let wc_commit = current_wc_commit(context)?;
+    let Some(wc_parent_id) = wc_commit.parent_ids().first() else {
+        return Err(anyhow!(
+            "cannot operate on bookmark '{branch_name}' because the working copy has no parent"
+        ));
+    };
+
+    if wc_parent_id != &bookmark_tip_id {
+        return Err(anyhow!(
+            "bookmark '{branch_name}' is not active; activate it before running this action"
+        ));
+    }
+
+    if let Some(active_bookmark) = load_active_bookmark_preference(&context.root)
+        && active_bookmark != branch_name
+        && context
+            .repo
+            .view()
+            .local_bookmarks_for_commit(&bookmark_tip_id)
+            .any(|(name, _)| name.as_str() == active_bookmark)
+    {
+        return Err(anyhow!(
+            "bookmark '{branch_name}' is not active; activate it before running this action"
+        ));
+    }
+
+    Ok(())
+}
+
 pub(super) fn describe_bookmark_head(
     context: &mut RepoContext,
     branch_name: &str,
     description: &str,
 ) -> Result<()> {
+    ensure_bookmark_is_checked_out(context, branch_name)?;
+
     let bookmark = RefName::new(branch_name);
     let Some(commit_id) = context
         .repo
@@ -331,6 +373,8 @@ pub(super) fn describe_bookmark_head(
 }
 
 pub(super) fn abandon_bookmark_head(context: &mut RepoContext, branch_name: &str) -> Result<()> {
+    ensure_bookmark_is_checked_out(context, branch_name)?;
+
     let bookmark = RefName::new(branch_name);
     let Some(commit_id) = context
         .repo
@@ -367,6 +411,8 @@ pub(super) fn squash_bookmark_head_into_parent(
     context: &mut RepoContext,
     branch_name: &str,
 ) -> Result<()> {
+    ensure_bookmark_is_checked_out(context, branch_name)?;
+
     let bookmark = RefName::new(branch_name);
     let Some(commit_id) = context
         .repo
@@ -383,6 +429,11 @@ pub(super) fn squash_bookmark_head_into_parent(
         .store()
         .get_commit(&commit_id)
         .with_context(|| format!("failed to load bookmark head for '{branch_name}'"))?;
+    if source_commit.parent_ids().len() != 1 {
+        return Err(anyhow!(
+            "cannot squash bookmark '{branch_name}' tip because it has multiple parents"
+        ));
+    }
 
     let Some(parent_id) = source_commit.parent_ids().first().cloned() else {
         return Err(anyhow!("cannot squash a root revision"));
@@ -426,6 +477,60 @@ pub(super) fn squash_bookmark_head_into_parent(
         .commit(format!("squash bookmark {branch_name} head into parent"))
         .context("failed to finalize bookmark squash")?;
     persist_working_copy_state(context, repo, "after bookmark head squash")
+}
+
+pub(super) fn reorder_bookmark_tip_older(
+    context: &mut RepoContext,
+    branch_name: &str,
+) -> Result<()> {
+    ensure_bookmark_is_checked_out(context, branch_name)?;
+
+    let revisions = list_bookmark_revisions_from_context(context, branch_name, 3)?;
+    if revisions.len() < 2 {
+        return Err(anyhow!(
+            "need at least two revisions to reorder the bookmark stack"
+        ));
+    }
+
+    let Some(tip_commit_id) = context
+        .repo
+        .view()
+        .get_local_bookmark(RefName::new(branch_name))
+        .as_normal()
+        .cloned()
+    else {
+        return Err(anyhow!("bookmark '{branch_name}' does not exist"));
+    };
+    let tip_revision_id = tip_commit_id.hex();
+    let tip_commit = context
+        .repo
+        .store()
+        .get_commit(&tip_commit_id)
+        .with_context(|| format!("failed to load tip revision '{tip_revision_id}' for reorder"))?;
+    if tip_commit.parent_ids().len() != 1 {
+        return Err(anyhow!(
+            "cannot reorder bookmark '{branch_name}' tip because it has multiple parents"
+        ));
+    }
+    let anchor_revision = revisions
+        .get(2)
+        .map(|revision| revision.id.clone())
+        .unwrap_or_else(|| context.repo.store().root_commit_id().hex());
+
+    // Use JJ's native rebase semantics to demote the tip by one position, then
+    // repoint the bookmark to the new top revision.
+    run_jj_command(
+        context.root.as_path(),
+        &["rebase", "-r", tip_revision_id.as_str(), "-A", anchor_revision.as_str()],
+        "failed to reorder bookmark stack",
+    )?;
+
+    let root = context.root.clone();
+    *context = load_repo_context_at_root(root.as_path(), true)?;
+    move_bookmark_to_parent_of_working_copy(context, branch_name)?
+        .then_some(())
+        .ok_or_else(|| anyhow!("bookmark '{branch_name}' no longer exists after reorder"))?;
+    Ok(())
 }
 
 pub(super) fn push_bookmark(context: &mut RepoContext, branch_name: &str) -> Result<()> {
@@ -744,51 +849,81 @@ fn resolve_remote_url_from_cli(repo_root: &Path, remote_name: &str) -> Result<Op
 
 fn review_url_for_remote(remote_url: &str, branch_name: &str) -> Option<String> {
     let (host, base_url) = normalized_remote_base_url(remote_url)?;
+    let provider = review_provider_from_host(host.as_str())?;
     let encoded_branch = percent_encode(branch_name);
-    if host.contains("gitlab") {
-        Some(format!(
+    match provider {
+        ReviewProvider::GitLab => Some(format!(
             "{base_url}/-/merge_requests/new?merge_request[source_branch]={encoded_branch}"
-        ))
-    } else {
-        Some(format!("{base_url}/compare/{encoded_branch}?expand=1"))
+        )),
+        ReviewProvider::GitHub => Some(format!("{base_url}/compare/{encoded_branch}?expand=1")),
     }
 }
 
 fn normalized_remote_base_url(remote_url: &str) -> Option<(String, String)> {
-    if let Some(stripped) = remote_url.strip_prefix("git@") {
-        let (host, path) = stripped.split_once(':')?;
+    if let Some((authority, path)) = remote_url
+        .strip_prefix("https://")
+        .or_else(|| remote_url.strip_prefix("http://"))
+        .and_then(split_authority_and_path)
+    {
+        let host = sanitize_host(authority)?;
         let clean_path = trim_remote_path(path);
-        return Some((
-            host.to_string(),
-            format!("https://{host}/{}", clean_path),
-        ));
+        return Some((host.clone(), format!("https://{host}/{}", clean_path)));
     }
 
     if let Some(stripped) = remote_url.strip_prefix("ssh://") {
         let after_user = stripped
             .split_once('@')
             .map_or(stripped, |(_, remainder)| remainder);
-        let (host, path) = after_user.split_once('/')?;
+        let (authority, path) = split_authority_and_path(after_user)?;
+        let host = sanitize_host(authority)?;
         let clean_path = trim_remote_path(path);
-        return Some((
-            host.to_string(),
-            format!("https://{host}/{}", clean_path),
-        ));
+        return Some((host.clone(), format!("https://{host}/{}", clean_path)));
     }
 
-    if let Some(stripped) = remote_url
-        .strip_prefix("https://")
-        .or_else(|| remote_url.strip_prefix("http://"))
-    {
-        let (host, path) = stripped.split_once('/')?;
+    if let Some((authority, path)) = split_scp_like(remote_url) {
+        let host = sanitize_host(authority)?;
         let clean_path = trim_remote_path(path);
-        return Some((
-            host.to_string(),
-            format!("https://{host}/{}", clean_path),
-        ));
+        return Some((host.clone(), format!("https://{host}/{}", clean_path)));
     }
 
     None
+}
+
+fn split_authority_and_path(value: &str) -> Option<(&str, &str)> {
+    value.split_once('/')
+}
+
+fn split_scp_like(remote_url: &str) -> Option<(&str, &str)> {
+    if remote_url.contains("://") {
+        return None;
+    }
+    let (authority, path) = remote_url.split_once(':')?;
+    if authority.is_empty() || path.is_empty() {
+        return None;
+    }
+    if authority.contains('/') {
+        return None;
+    }
+    if authority.len() == 1 && authority.bytes().all(|byte| byte.is_ascii_alphabetic()) {
+        return None;
+    }
+    Some((authority, path))
+}
+
+fn sanitize_host(authority: &str) -> Option<String> {
+    let without_user = authority.rsplit('@').next().unwrap_or(authority);
+    if without_user.is_empty() {
+        return None;
+    }
+    let without_port = if without_user.starts_with('[') {
+        without_user
+            .split_once(']')
+            .map(|(host, _)| format!("{host}]"))
+            .filter(|host| !host.is_empty())?
+    } else {
+        without_user.split(':').next()?.to_string()
+    };
+    (!without_port.is_empty()).then_some(without_port)
 }
 
 fn trim_remote_path(path: &str) -> String {
@@ -796,6 +931,22 @@ fn trim_remote_path(path: &str) -> String {
         .trim_end_matches('/')
         .trim_end_matches(".git")
         .to_string()
+}
+
+#[derive(Clone, Copy)]
+enum ReviewProvider {
+    GitHub,
+    GitLab,
+}
+
+fn review_provider_from_host(host: &str) -> Option<ReviewProvider> {
+    if host.contains("gitlab") {
+        Some(ReviewProvider::GitLab)
+    } else if host.contains("github") {
+        Some(ReviewProvider::GitHub)
+    } else {
+        None
+    }
 }
 
 fn percent_encode(value: &str) -> String {
@@ -809,4 +960,23 @@ fn percent_encode(value: &str) -> String {
         }
     }
     encoded
+}
+
+fn run_jj_command(repo_root: &Path, args: &[&str], failure_context: &str) -> Result<()> {
+    let output = Command::new("jj")
+        .args(args)
+        .current_dir(repo_root)
+        .output()
+        .with_context(|| format!("{failure_context}: failed to run jj command"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let message = stderr.trim();
+    if message.is_empty() {
+        return Err(anyhow!("{failure_context}: jj command failed"));
+    }
+
+    Err(anyhow!("{failure_context}: {message}"))
 }
