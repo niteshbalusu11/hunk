@@ -17,12 +17,19 @@ impl DiffViewer {
     }
 
     pub(super) fn request_file_editor_reload(&mut self, path: String, cx: &mut Context<Self>) {
+        let retain_markdown_preview = if self.editor_path.as_deref() == Some(path.as_str()) {
+            self.editor_markdown_preview
+        } else {
+            false
+        };
         let Some(repo_root) = self.repo_root.clone() else {
             self.editor_loading = false;
             self.editor_error = Some("No repository is open.".to_string());
             self.editor_path = None;
             self.editor_last_saved_text = None;
             self.editor_dirty = false;
+            self.editor_markdown_preview = false;
+            self.invalidate_editor_markdown_preview();
             self.reset_editor_input(cx);
             cx.notify();
             return;
@@ -32,6 +39,9 @@ impl DiffViewer {
         self.editor_loading = true;
         self.editor_error = None;
         self.editor_path = Some(path.clone());
+        self.editor_markdown_preview =
+            is_markdown_path(path.as_str()) && retain_markdown_preview;
+        self.invalidate_editor_markdown_preview();
         cx.notify();
 
         self.editor_task = cx.spawn(async move |this, cx| {
@@ -56,6 +66,9 @@ impl DiffViewer {
                             this.editor_dirty = false;
                             this.editor_error = None;
                             this.apply_editor_document(language, text, cx);
+                            if this.editor_markdown_preview {
+                                this.schedule_editor_markdown_preview_parse(cx);
+                            }
                         }
                         Err(err) => {
                             this.editor_last_saved_text = None;
@@ -146,6 +159,25 @@ impl DiffViewer {
         });
     }
 
+    pub(super) fn toggle_editor_markdown_preview(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.editor_path.as_deref() else {
+            return;
+        };
+        if !is_markdown_path(path) {
+            self.editor_markdown_preview = false;
+            self.clear_editor_markdown_preview_state();
+            return;
+        }
+
+        self.editor_markdown_preview = !self.editor_markdown_preview;
+        if self.editor_markdown_preview {
+            self.schedule_editor_markdown_preview_parse(cx);
+        } else {
+            self.clear_editor_markdown_preview_state();
+        }
+        cx.notify();
+    }
+
     pub(super) fn sync_editor_dirty_from_input(&mut self, cx: &mut Context<Self>) {
         if self.editor_loading || self.editor_path.is_none() {
             return;
@@ -158,6 +190,7 @@ impl DiffViewer {
             self.editor_dirty = dirty;
             cx.notify();
         }
+        self.schedule_editor_markdown_preview_parse(cx);
     }
 
     fn apply_editor_document(&mut self, language: String, text: String, cx: &mut Context<Self>) {
@@ -179,6 +212,80 @@ impl DiffViewer {
         }
     }
 
+    fn invalidate_editor_markdown_preview(&mut self) {
+        self.clear_editor_markdown_preview_state();
+        self.next_editor_markdown_preview_revision();
+    }
+
+    fn next_editor_markdown_preview_revision(&mut self) -> usize {
+        self.editor_markdown_preview_revision =
+            self.editor_markdown_preview_revision.saturating_add(1);
+        self.editor_markdown_preview_revision
+    }
+
+    fn schedule_editor_markdown_preview_parse(&mut self, cx: &mut Context<Self>) {
+        if !self.editor_markdown_preview {
+            self.clear_editor_markdown_preview_state();
+            return;
+        }
+
+        let Some(path) = self.editor_path.as_deref().map(ToOwned::to_owned) else {
+            self.clear_editor_markdown_preview_state();
+            return;
+        };
+        if !is_markdown_path(path.as_str()) || self.editor_loading {
+            self.clear_editor_markdown_preview_state();
+            return;
+        }
+
+        self.cancel_editor_markdown_preview_task();
+        let revision = self.next_editor_markdown_preview_revision();
+        let markdown_text = self.editor_input_state.read(cx).value().to_string();
+        self.editor_markdown_preview_loading = true;
+        cx.notify();
+
+        self.editor_markdown_preview_task = cx.spawn(async move |this, cx| {
+            Timer::after(MARKDOWN_PREVIEW_DEBOUNCE).await;
+            let preview_path = path;
+            let blocks = cx.background_executor().spawn(async move {
+                hunk::markdown_preview::parse_markdown_preview(markdown_text.as_str())
+            });
+            let blocks = blocks.await;
+
+            if let Some(this) = this.upgrade() {
+                this.update(cx, |this, cx| {
+                    if revision != this.editor_markdown_preview_revision {
+                        return;
+                    }
+                    if this.editor_loading
+                        || !this.editor_markdown_preview
+                        || this.editor_path.as_deref() != Some(preview_path.as_str())
+                    {
+                        this.editor_markdown_preview_loading = false;
+                        return;
+                    }
+
+                    this.editor_markdown_preview_blocks = blocks;
+                    this.editor_markdown_preview_loading = false;
+                    cx.notify();
+                })
+                .ok();
+            }
+        });
+    }
+
+    fn clear_editor_markdown_preview_state(&mut self) {
+        self.cancel_editor_markdown_preview_task();
+        self.editor_markdown_preview_blocks.clear();
+        self.editor_markdown_preview_loading = false;
+    }
+
+    fn cancel_editor_markdown_preview_task(&mut self) {
+        let previous_task =
+            std::mem::replace(&mut self.editor_markdown_preview_task, Task::ready(()));
+        drop(previous_task);
+    }
+
     pub(super) fn clear_editor_state(&mut self, cx: &mut Context<Self>) {
         self.editor_path = None;
         self.editor_loading = false;
@@ -186,6 +293,8 @@ impl DiffViewer {
         self.editor_dirty = false;
         self.editor_last_saved_text = None;
         self.editor_save_loading = false;
+        self.editor_markdown_preview = false;
+        self.invalidate_editor_markdown_preview();
         self.reset_editor_input(cx);
     }
 

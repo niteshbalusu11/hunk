@@ -102,13 +102,22 @@ impl DiffViewer {
             self.sidebar_repo_list_state.reset(0);
             self.repo_tree_loading = false;
             self.repo_tree_error = None;
+            self.repo_tree_last_reload = Instant::now();
             cx.notify();
             return;
         };
 
+        if self.repo_tree_loading {
+            return;
+        }
+
         let epoch = self.next_repo_tree_epoch();
-        self.repo_tree_loading = true;
+        let initial_load = self.repo_tree_nodes.is_empty();
+        if initial_load {
+            self.repo_tree_loading = true;
+        }
         self.repo_tree_error = None;
+        self.repo_tree_last_reload = std::time::Instant::now();
 
         self.repo_tree_task = cx.spawn(async move |this, cx| {
             let result = cx

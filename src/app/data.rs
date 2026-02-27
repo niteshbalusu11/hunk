@@ -403,6 +403,10 @@ fn editor_language_hint(file_path: &str) -> String {
     "text".to_string()
 }
 
+pub(super) fn is_markdown_path(file_path: &str) -> bool {
+    editor_language_hint(file_path) == "markdown"
+}
+
 pub(super) fn message_row(kind: DiffRowKind, text: impl Into<String>) -> SideBySideRow {
     SideBySideRow {
         kind,

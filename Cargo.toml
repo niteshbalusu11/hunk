@@ -20,7 +20,9 @@ gpui-component = { version = "0.5.1", features = ["tree-sitter-languages"] }
 gpui-component-assets = "0.5.1"
 jj-lib = "0.38.0"
 serde = { version = "1.0", features = ["derive"] }
+notify = "8.2.0"
 toml = "0.9"
+markdown = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 syntect = "5.3"

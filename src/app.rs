@@ -30,6 +30,7 @@ use hunk::diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
 use hunk::jj::{
     BookmarkRevision, ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFingerprint,
 };
+use hunk::markdown_preview::MarkdownPreviewBlock;
 use hunk::state::{AppState, AppStateStore};
 
 use data::{
@@ -37,7 +38,6 @@ use data::{
     WorkspaceViewMode,
 };
 
-const AUTO_REFRESH_INTERVAL: Duration = Duration::from_millis(900);
 const FPS_SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
 const AUTO_REFRESH_SCROLL_DEBOUNCE: Duration = Duration::from_millis(500);
 const DIFF_MONO_CHAR_WIDTH: f32 = 8.0;
@@ -49,6 +49,7 @@ const DIFF_BOTTOM_SAFE_INSET: f32 = APP_BOTTOM_SAFE_INSET;
 const DIFF_SCROLLBAR_RIGHT_INSET: f32 = 0.0;
 const DIFF_SCROLLBAR_SIZE: f32 = 16.0;
 const FILE_EDITOR_MAX_BYTES: usize = 2_400_000;
+const MARKDOWN_PREVIEW_DEBOUNCE: Duration = Duration::from_millis(200);
 const DIFF_SEGMENT_PREFETCH_RADIUS_ROWS: usize = 120;
 const DIFF_SEGMENT_PREFETCH_STEP_ROWS: usize = 24;
 const DIFF_SEGMENT_PREFETCH_BATCH_ROWS: usize = 96;
@@ -648,7 +649,9 @@ struct DiffViewer {
     diff_right_line_number_width: f32,
     overall_line_stats: LineStats,
     refresh_epoch: usize,
+    auto_refresh_unmodified_streak: u32,
     auto_refresh_task: Task<()>,
+    repo_watch_task: Task<()>,
     snapshot_epoch: usize,
     snapshot_task: Task<()>,
     snapshot_loading: bool,
@@ -689,6 +692,7 @@ struct DiffViewer {
     repo_tree_task: Task<()>,
     repo_tree_loading: bool,
     repo_tree_error: Option<String>,
+    repo_tree_last_reload: Instant,
     right_pane_mode: RightPaneMode,
     editor_input_state: Entity<InputState>,
     editor_path: Option<String>,
@@ -701,4 +705,9 @@ struct DiffViewer {
     editor_save_loading: bool,
     editor_save_epoch: usize,
     editor_save_task: Task<()>,
+    editor_markdown_preview_task: Task<()>,
+    editor_markdown_preview_blocks: Vec<MarkdownPreviewBlock>,
+    editor_markdown_preview_loading: bool,
+    editor_markdown_preview_revision: usize,
+    editor_markdown_preview: bool,
 }
