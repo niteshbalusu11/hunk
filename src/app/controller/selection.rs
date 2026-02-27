@@ -85,6 +85,7 @@ impl DiffViewer {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.on_diff_row_hover(row_ix, cx);
         if !self.drag_selecting_rows {
             return;
         }
@@ -222,29 +223,7 @@ impl DiffViewer {
         let mut lines = Vec::new();
         for row_ix in start..=end.min(self.diff_rows.len().saturating_sub(1)) {
             let row = &self.diff_rows[row_ix];
-            match row.kind {
-                DiffRowKind::Code => {
-                    if row.left.kind == DiffCellKind::Removed {
-                        lines.push(format!("-{}", row.left.text));
-                    }
-                    if row.right.kind == DiffCellKind::Added {
-                        lines.push(format!("+{}", row.right.text));
-                    }
-                    if row.left.kind == DiffCellKind::Context {
-                        lines.push(format!(" {}", row.left.text));
-                    }
-                    if row.left.kind == DiffCellKind::None
-                        && row.right.kind == DiffCellKind::None
-                        && !row.text.is_empty()
-                    {
-                        lines.push(row.text.clone());
-                    }
-                }
-                DiffRowKind::HunkHeader => {}
-                DiffRowKind::Meta | DiffRowKind::Empty => {
-                    lines.push(row.text.clone());
-                }
-            }
+            lines.extend(Self::row_diff_lines(row));
         }
 
         if lines.is_empty() {

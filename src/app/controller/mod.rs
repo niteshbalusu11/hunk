@@ -25,6 +25,7 @@ include!("core.rs");
 include!("git_ops.rs");
 include!("file_tree.rs");
 include!("editor.rs");
+include!("comments.rs");
 include!("selection.rs");
 include!("scroll.rs");
 include!("fps.rs");

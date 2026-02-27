@@ -19,6 +19,7 @@ include!("tree.rs");
 include!("commit.rs");
 include!("file_banner.rs");
 include!("file_status.rs");
+include!("comments.rs");
 include!("diff.rs");
 include!("file_editor.rs");
 include!("settings.rs");
