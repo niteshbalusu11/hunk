@@ -345,6 +345,14 @@ pub fn commit_selected_paths(
 }
 
 pub fn checkout_or_create_branch(repo_root: &Path, branch_name: &str) -> Result<()> {
+    checkout_or_create_branch_with_change_transfer(repo_root, branch_name, false)
+}
+
+pub fn checkout_or_create_branch_with_change_transfer(
+    repo_root: &Path,
+    branch_name: &str,
+    move_changes_to_new_bookmark: bool,
+) -> Result<()> {
     let branch_name = branch_name.trim();
     if branch_name.is_empty() {
         return Err(anyhow!("branch name cannot be empty"));
@@ -359,7 +367,19 @@ pub fn checkout_or_create_branch(repo_root: &Path, branch_name: &str) -> Result<
     if bookmark_target.is_present() {
         checkout_existing_bookmark(&mut context, branch_name)?;
     } else {
+        let previous_bookmarks = if move_changes_to_new_bookmark {
+            current_bookmarks_from_context(&context)?
+        } else {
+            BTreeSet::new()
+        };
         create_bookmark_at_working_copy(&mut context, branch_name)?;
+        if move_changes_to_new_bookmark {
+            for bookmark in previous_bookmarks {
+                if bookmark != branch_name {
+                    move_bookmark_to_parent_of_working_copy(&mut context, bookmark.as_str())?;
+                }
+            }
+        }
     }
 
     if let Err(err) = persist_active_bookmark_preference(&context.root, branch_name) {

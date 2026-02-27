@@ -3,7 +3,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use hunk::jj::{checkout_or_create_branch, commit_staged, load_snapshot};
+use hunk::jj::{
+    checkout_or_create_branch, checkout_or_create_branch_with_change_transfer, commit_staged,
+    load_snapshot,
+};
 
 #[test]
 fn checkout_existing_bookmark_switches_without_crashing() {
@@ -52,6 +55,54 @@ fn committing_on_checked_out_bookmark_advances_that_bookmark() {
     assert!(
         master_log.contains("master update should move bookmark"),
         "master bookmark should point to latest commit after commit_staged"
+    );
+}
+
+#[test]
+fn creating_bookmark_can_move_uncommitted_changes_off_current_bookmark() {
+    let fixture = TempRepo::new("create-bookmark-move-uncommitted");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_branch(fixture.path(), "main")
+        .expect("creating main bookmark should succeed");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\nline two\n");
+    checkout_or_create_branch_with_change_transfer(fixture.path(), "feature", true)
+        .expect("creating feature bookmark should succeed");
+
+    let snapshot = load_snapshot(fixture.path()).expect("snapshot should load after branch create");
+    assert_eq!(snapshot.branch_name, "feature");
+    assert!(
+        snapshot.files.iter().any(|file| file.path == "tracked.txt"),
+        "uncommitted changes should remain in working copy after moving to feature"
+    );
+
+    let bookmark_listing = run_jj_capture(fixture.path(), ["bookmark", "list", "main", "feature"]);
+    assert!(
+        bookmark_listing.contains("main:"),
+        "main bookmark should still exist after creating feature"
+    );
+    assert!(
+        bookmark_listing.contains("feature:"),
+        "feature bookmark should exist after creation"
+    );
+
+    let main_target = bookmark_listing
+        .lines()
+        .find(|line| line.starts_with("main:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .expect("main target commit should be listed")
+        .to_string();
+    let feature_target = bookmark_listing
+        .lines()
+        .find(|line| line.starts_with("feature:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .expect("feature target commit should be listed")
+        .to_string();
+    assert_ne!(
+        main_target, feature_target,
+        "moving changes should leave main and feature on different commits"
     );
 }
 

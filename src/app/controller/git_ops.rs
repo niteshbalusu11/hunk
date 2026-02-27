@@ -100,11 +100,28 @@ impl DiffViewer {
         });
     }
 
-    pub(super) fn checkout_branch(&mut self, branch_name: String, cx: &mut Context<Self>) {
+    fn checkout_or_create_branch_with_options(
+        &mut self,
+        branch_name: String,
+        move_changes_to_new_bookmark: bool,
+        cx: &mut Context<Self>,
+    ) {
         self.run_git_action("Switch branch", cx, move |repo_root| {
-            checkout_or_create_branch(&repo_root, &branch_name)?;
-            Ok(format!("Switched to {}", branch_name))
+            checkout_or_create_branch_with_change_transfer(
+                &repo_root,
+                &branch_name,
+                move_changes_to_new_bookmark,
+            )?;
+            if move_changes_to_new_bookmark {
+                Ok(format!("Switched to {} and moved changes", branch_name))
+            } else {
+                Ok(format!("Switched to {}", branch_name))
+            }
         });
+    }
+
+    pub(super) fn checkout_branch(&mut self, branch_name: String, cx: &mut Context<Self>) {
+        self.checkout_or_create_branch_with_options(branch_name, false, cx);
     }
 
     pub(super) fn toggle_commit_file_included(
@@ -190,10 +207,75 @@ impl DiffViewer {
             state.set_value(sanitized.clone(), window, cx);
         });
 
-        self.run_git_action("Switch branch", cx, move |repo_root| {
-            checkout_or_create_branch(&repo_root, &sanitized)?;
-            Ok(format!("Switched to {}", sanitized))
-        });
+        let creating_new_bookmark = !self.branches.iter().any(|branch| branch.name == sanitized);
+        let has_local_changes = !self.files.is_empty();
+
+        if creating_new_bookmark && has_local_changes {
+            let tracked_count = self.files.iter().filter(|file| !file.untracked).count();
+            let untracked_count = self.files.iter().filter(|file| file.untracked).count();
+            let change_summary = match (tracked_count, untracked_count) {
+                (tracked, 0) => format!("{tracked} tracked change{}", if tracked == 1 { "" } else { "s" }),
+                (0, untracked) => format!(
+                    "{untracked} untracked file{}",
+                    if untracked == 1 { "" } else { "s" }
+                ),
+                (tracked, untracked) => format!(
+                    "{tracked} tracked change{} and {untracked} untracked file{}",
+                    if tracked == 1 { "" } else { "s" },
+                    if untracked == 1 { "" } else { "s" }
+                ),
+            };
+
+            let view = cx.entity();
+            let move_branch_name = sanitized.clone();
+            let keep_branch_name = sanitized.clone();
+            let dialog_branch_name = sanitized.clone();
+
+            gpui_component::WindowExt::open_dialog(window, cx, move |dialog, _, _| {
+                let view_for_move = view.clone();
+                let view_for_keep = view.clone();
+                let move_branch_name_for_ok = move_branch_name.clone();
+                let keep_branch_name_for_cancel = keep_branch_name.clone();
+                dialog
+                    .confirm()
+                    .title("Move local changes to new bookmark?")
+                    .button_props(
+                        gpui_component::dialog::DialogButtonProps::default()
+                            .ok_text("Move changes")
+                            .cancel_text("Keep on current"),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .child(format!(
+                                "Detected {change_summary}. Move them to '{dialog_branch_name}'?"
+                            )),
+                    )
+                    .on_ok(move |_, _, cx| {
+                        view_for_move.update(cx, |this, cx| {
+                            this.checkout_or_create_branch_with_options(
+                                move_branch_name_for_ok.clone(),
+                                true,
+                                cx,
+                            );
+                        });
+                        true
+                    })
+                    .on_cancel(move |_, _, cx| {
+                        view_for_keep.update(cx, |this, cx| {
+                            this.checkout_or_create_branch_with_options(
+                                keep_branch_name_for_cancel.clone(),
+                                false,
+                                cx,
+                            );
+                        });
+                        true
+                    })
+            });
+            return;
+        }
+
+        self.checkout_or_create_branch_with_options(sanitized, false, cx);
     }
 
     pub(super) fn push_or_publish_current_branch(&mut self, cx: &mut Context<Self>) {
