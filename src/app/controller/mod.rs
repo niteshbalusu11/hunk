@@ -14,10 +14,11 @@ use super::data::{
 use super::*;
 use hunk::jj::{
     RepoSnapshot, abandon_bookmark_head, checkout_or_create_bookmark_with_change_transfer,
-    commit_selected_paths, commit_staged, describe_bookmark_head, load_patches_for_files,
-    load_repo_tree, load_snapshot, load_snapshot_fingerprint, push_current_bookmark,
-    rename_bookmark, reorder_bookmark_tip_older, review_url_for_bookmark, sanitize_bookmark_name,
-    squash_bookmark_head_into_parent, sync_current_bookmark,
+    commit_selected_paths, commit_staged, count_non_ignored_repo_tree_entries,
+    describe_bookmark_head, load_patches_for_files, load_repo_tree, load_snapshot,
+    load_snapshot_fingerprint, push_current_bookmark, rename_bookmark, reorder_bookmark_tip_older,
+    review_url_for_bookmark, sanitize_bookmark_name, squash_bookmark_head_into_parent,
+    sync_current_bookmark,
 };
 
 include!("core.rs");

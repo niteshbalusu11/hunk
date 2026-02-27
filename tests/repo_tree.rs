@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use hunk::jj::{RepoTreeEntryKind, load_repo_tree};
+use hunk::jj::{RepoTreeEntryKind, count_non_ignored_repo_tree_entries, load_repo_tree};
 
 #[test]
 fn load_repo_tree_marks_jj_ignored_entries() {
@@ -31,6 +31,25 @@ fn load_repo_tree_marks_jj_ignored_entries() {
     assert!(entries.iter().any(|entry| {
         entry.path == "logs/app.log" && entry.kind == RepoTreeEntryKind::File && entry.ignored
     }));
+}
+
+#[test]
+fn count_non_ignored_repo_tree_entries_excludes_gitignored_paths() {
+    let fixture = TempRepo::new("repo-tree-counts-ignore-gitignored");
+    write_file(fixture.path().join(".gitignore"), "target/\n*.log\n");
+    write_file(fixture.path().join("src/main.rs"), "fn main() {}\n");
+    write_file(fixture.path().join("target/cache.bin"), "cache\n");
+    write_file(fixture.path().join("logs/app.log"), "hello\n");
+    run_jj(fixture.path(), ["status"]);
+
+    let entries = load_repo_tree(fixture.path()).expect("repo tree should load");
+    let (file_count, folder_count) = count_non_ignored_repo_tree_entries(&entries);
+
+    assert_eq!(
+        file_count, 2,
+        "only .gitignore and src/main.rs should be counted"
+    );
+    assert_eq!(folder_count, 1, "only src should be counted");
 }
 
 #[test]

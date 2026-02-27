@@ -156,11 +156,10 @@ fn apply_repo_tree_reload(
     this.repo_tree_loading = false;
     match result {
         Ok(entries) => {
+            let (file_count, folder_count) = count_non_ignored_repo_tree_entries(&entries);
             this.repo_tree_nodes = build_repo_tree(&entries);
-            this.repo_tree_file_count =
-                count_repo_tree_kind(&this.repo_tree_nodes, RepoTreeNodeKind::File);
-            this.repo_tree_folder_count =
-                count_repo_tree_kind(&this.repo_tree_nodes, RepoTreeNodeKind::Directory);
+            this.repo_tree_file_count = file_count;
+            this.repo_tree_folder_count = folder_count;
             this.repo_tree_error = None;
             this.repo_tree_expanded_dirs
                 .retain(|path| repo_tree_has_directory(&this.repo_tree_nodes, path.as_str()));
@@ -209,14 +208,4 @@ fn repo_tree_has_directory(nodes: &[RepoTreeNode], path: &str) -> bool {
         }
     }
     false
-}
-
-fn count_repo_tree_kind(nodes: &[RepoTreeNode], kind: RepoTreeNodeKind) -> usize {
-    nodes
-        .iter()
-        .map(|node| {
-            let self_count = usize::from(node.kind == kind);
-            self_count + count_repo_tree_kind(&node.children, kind)
-        })
-        .sum::<usize>()
 }

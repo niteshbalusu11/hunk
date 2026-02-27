@@ -287,6 +287,24 @@ pub fn load_repo_tree(repo_root: &Path) -> Result<Vec<RepoTreeEntry>> {
     Ok(entries)
 }
 
+pub fn count_non_ignored_repo_tree_entries(entries: &[RepoTreeEntry]) -> (usize, usize) {
+    let mut file_count = 0usize;
+    let mut folder_count = 0usize;
+
+    for entry in entries {
+        if entry.ignored {
+            continue;
+        }
+
+        match entry.kind {
+            RepoTreeEntryKind::File => file_count += 1,
+            RepoTreeEntryKind::Directory => folder_count += 1,
+        }
+    }
+
+    (file_count, folder_count)
+}
+
 pub fn stage_file(_: &Path, _: &str) -> Result<()> {
     Err(anyhow!(JJ_STAGE_UNSUPPORTED))
 }
