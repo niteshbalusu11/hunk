@@ -96,6 +96,15 @@ enum GraphRightPanelMode {
     SelectedBookmark,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WorkingCopyRecoveryCandidate {
+    source_revision_id: String,
+    source_bookmark: String,
+    switched_to_bookmark: String,
+    changed_file_count: usize,
+    unix_time: i64,
+}
+
 mod controller;
 mod data;
 mod data_segments;
@@ -727,6 +736,7 @@ struct DiffViewer {
     git_action_task: Task<()>,
     git_action_loading: bool,
     git_status_message: Option<String>,
+    working_copy_recovery_candidates: Vec<WorkingCopyRecoveryCandidate>,
     collapsed_files: BTreeSet<String>,
     selected_path: Option<String>,
     selected_status: Option<FileStatus>,

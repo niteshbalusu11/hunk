@@ -152,6 +152,41 @@ Redesign the JJ Workspace into an interactive graph-first workflow inspired by `
 - [x] Phase 9F deep review gate: comprehensive bug hunt and maintainability pass before marking Phase 9 complete.
 - Phase 9 review note (2026-02-28): split right panel into explicit `Active Workflow` vs `Selected Bookmark` modes to remove mixed mental model; moved focus-strip-only workflows into selected mode; unified tracked/untracked working-copy rows into one scroll list; made narrow-width action rows wrap across commit, revision-stack, and inspector surfaces; prefills PR/MR title from tip revision subject (fallback bookmark name) for both GitHub and GitLab review URLs; re-ran full validation (`cargo fmt --all`, strict `cargo clippy --all-targets -- -D warnings`, full `cargo test`).
 
+### Phase 10: Bookmark Switch Reliability + Recovery UX
+- [x] Phase 10A: Reapply lost right-panel interaction fixes:
+  - clear bookmark-create input after successful `Create / Activate`
+  - keep create/activate buttons inactive again after success
+  - add explicit success feedback for git actions
+- [x] Phase 10A deep review gate: verify post-action state resets, input lifecycle, and user feedback behavior.
+- [x] Phase 10B: Stabilize action-row behavior under publish/sync/push/open-review transitions:
+  - fixed action-row footprint (no button insertion/removal swaps)
+  - deterministic loading labels (`Syncing...`, `Publishing...`, etc.) on existing buttons
+  - loading status text reflects current action in progress
+- [x] Phase 10B deep review gate: verify no misclick-prone layout shifts and no disabled-state regressions.
+- [x] Phase 10C: Fix stale-state edge case where publish/sync eligibility could lag until restart:
+  - queue forced snapshot refresh requests while a refresh is already in-flight
+  - process queued refresh immediately after the active refresh completes
+- [x] Phase 10C deep review gate: audit refresh queue/race behavior and ensure no dropped forced refreshes.
+- [x] Phase 10D: Add UI-only recovery path for “missing files after bookmark switch”:
+  - capture recoverable working-copy revision candidates on switch-away when there are local changes
+  - add `Recover Previous Working Copy` action in bookmark picker
+  - restore captured revision content into current `@` via backend JJ operation
+- [x] Phase 10D deep review gate: verify recovery candidate targeting (source bookmark semantics), restore safety, and error paths.
+- [x] Phase 10E: Reapply button help text/hints requested for right-panel and mode controls:
+  - `Create Revision`
+  - `Edit Tip Revision`
+  - `Active Workflow`
+  - `Selected Bookmark`
+  - `Focus Active Bookmark`
+  - revision-stack action renames/tooltips (`Move Tip Down`, `Squash Into Parent`, `Drop Tip Revision`)
+- [x] Phase 10E deep review gate: verify tooltip coverage and naming consistency across the workflow surface.
+- [x] Phase 10F: Full validation and cleanup:
+  - `cargo fmt --all`
+  - strict `cargo clippy --all-targets -- -D warnings`
+  - `cargo test`
+- [x] Phase 10F deep review gate: final bug/refactor sweep before closing the phase.
+- Phase 10 review note (2026-02-28): implemented deterministic action loading state + stable right-panel action layout, queued forced snapshot refreshes to avoid stale publish/sync state, restored create/activate UX feedback/reset behavior, added in-app recovery of previously captured working-copy revisions after bookmark switches (no CLI required), reintroduced requested button tooltips/naming, and revalidated with formatting, strict clippy, and full test pass.
+
 ## Acceptance Criteria (V1)
 1. User can click any bookmark and view its revision chain.
 2. User can distinguish local vs remote bookmarks visually.
