@@ -1,5 +1,5 @@
 impl DiffViewer {
-    fn render_jj_workspace(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_jj_graph_operations_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
         let branch_syncable = self.can_run_active_bookmark_actions();
@@ -201,6 +201,21 @@ impl DiffViewer {
                                         this.push_or_publish_current_bookmark(cx);
                                     });
                                 })
+                            })
+                    })
+                    .child({
+                        let view = view.clone();
+                        Button::new("open-review-url")
+                            .primary()
+                            .compact()
+                            .with_size(gpui_component::Size::Small)
+                            .rounded(px(7.0))
+                            .label("Open PR/MR")
+                            .disabled(review_url_disabled)
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.open_current_bookmark_review_url(cx);
+                                });
                             })
                     })
                     .child({

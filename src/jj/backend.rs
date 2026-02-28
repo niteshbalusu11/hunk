@@ -112,5 +112,6 @@ pub(super) fn load_repo_context_at_root(
 
 include!("backend/settings.rs");
 include!("backend/snapshot_diff.rs");
+include!("backend/graph.rs");
 include!("backend/operations.rs");
 include!("backend/workspace.rs");

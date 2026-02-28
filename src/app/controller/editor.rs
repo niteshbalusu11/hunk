@@ -94,10 +94,7 @@ impl DiffViewer {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.workspace_view_mode != WorkspaceViewMode::Files
-            || self.editor_loading
-            || self.editor_save_loading
-        {
+        if self.editor_loading || self.editor_save_loading {
             return;
         }
 

@@ -256,7 +256,10 @@ fn keeps_payload_lines_that_look_like_file_header_markers() {
     assert_eq!(lines[1].text, "keep removed");
 
     assert_eq!(lines[2].kind, DiffLineKind::Added);
-    assert_eq!(lines[2].text, "+++ added payload that starts with three pluses");
+    assert_eq!(
+        lines[2].text,
+        "+++ added payload that starts with three pluses"
+    );
 
     assert_eq!(lines[3].kind, DiffLineKind::Added);
     assert_eq!(lines[3].text, "keep added");

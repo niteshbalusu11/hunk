@@ -128,6 +128,47 @@ pub(super) fn move_bookmark_to_parent_of_working_copy(
     Ok(true)
 }
 
+pub(super) fn set_local_bookmark_target_revision(
+    context: &mut RepoContext,
+    branch_name: &str,
+    revision_id: &str,
+    require_existing_bookmark: bool,
+) -> Result<()> {
+    let revision_id = revision_id.trim();
+    let Some(target_commit_id) = jj_lib::backend::CommitId::try_from_hex(revision_id) else {
+        return Err(anyhow!("invalid revision id '{revision_id}'"));
+    };
+    context
+        .repo
+        .store()
+        .get_commit(&target_commit_id)
+        .with_context(|| format!("failed to load target revision '{revision_id}'"))?;
+
+    let bookmark_target = context
+        .repo
+        .view()
+        .get_local_bookmark(RefName::new(branch_name));
+    if require_existing_bookmark && !bookmark_target.is_present() {
+        return Err(anyhow!("bookmark '{branch_name}' does not exist"));
+    }
+    if !require_existing_bookmark && bookmark_target.is_present() {
+        return Err(anyhow!("bookmark '{branch_name}' already exists"));
+    }
+    if bookmark_target.as_normal() == Some(&target_commit_id) {
+        return Ok(());
+    }
+
+    let mut tx = context.repo.start_transaction();
+    tx.repo_mut().set_local_bookmark_target(
+        RefName::new(branch_name),
+        RefTarget::normal(target_commit_id),
+    );
+    let repo = tx
+        .commit(format!("set bookmark {branch_name} to revision {revision_id}"))
+        .with_context(|| format!("failed to update bookmark '{branch_name}'"))?;
+    persist_working_copy_state(context, repo, "after setting bookmark target")
+}
+
 pub(super) fn checkout_existing_bookmark(
     context: &mut RepoContext,
     branch_name: &str,
@@ -807,14 +848,22 @@ fn resolve_push_remote_name(context: &RepoContext, branch_name: &str) -> Result<
     Err(anyhow!("no Git remote configured for push"))
 }
 
-pub(super) fn bookmark_review_url(context: &RepoContext, branch_name: &str) -> Result<Option<String>> {
+pub(super) fn bookmark_review_url(
+    context: &RepoContext,
+    branch_name: &str,
+    provider_mappings: &[crate::config::ReviewProviderMapping],
+) -> Result<Option<String>> {
     let remote_name = resolve_push_remote_name(context, branch_name)?;
     let Some(remote_url) = resolve_remote_url_from_cli(context.root.as_path(), remote_name.as_str())?
     else {
         return Ok(None);
     };
 
-    Ok(review_url_for_remote(remote_url.as_str(), branch_name))
+    Ok(review_url_for_remote(
+        remote_url.as_str(),
+        branch_name,
+        provider_mappings,
+    ))
 }
 
 fn resolve_remote_url_from_cli(repo_root: &Path, remote_name: &str) -> Result<Option<String>> {
@@ -852,15 +901,21 @@ fn resolve_remote_url_from_cli(repo_root: &Path, remote_name: &str) -> Result<Op
     Ok(None)
 }
 
-fn review_url_for_remote(remote_url: &str, branch_name: &str) -> Option<String> {
+fn review_url_for_remote(
+    remote_url: &str,
+    branch_name: &str,
+    provider_mappings: &[crate::config::ReviewProviderMapping],
+) -> Option<String> {
     let (host, base_url) = normalized_remote_base_url(remote_url)?;
-    let provider = review_provider_from_host(host.as_str())?;
+    let provider = review_provider_from_host(host.as_str(), provider_mappings)?;
     let encoded_branch = percent_encode(branch_name);
     match provider {
-        ReviewProvider::GitLab => Some(format!(
+        crate::config::ReviewProviderKind::GitLab => Some(format!(
             "{base_url}/-/merge_requests/new?merge_request[source_branch]={encoded_branch}"
         )),
-        ReviewProvider::GitHub => Some(format!("{base_url}/compare/{encoded_branch}?expand=1")),
+        crate::config::ReviewProviderKind::GitHub => {
+            Some(format!("{base_url}/compare/{encoded_branch}?expand=1"))
+        }
     }
 }
 
@@ -938,20 +993,54 @@ fn trim_remote_path(path: &str) -> String {
         .to_string()
 }
 
-#[derive(Clone, Copy)]
-enum ReviewProvider {
-    GitHub,
-    GitLab,
-}
+fn review_provider_from_host(
+    host: &str,
+    provider_mappings: &[crate::config::ReviewProviderMapping],
+) -> Option<crate::config::ReviewProviderKind> {
+    if let Some(provider) = review_provider_from_mappings(host, provider_mappings) {
+        return Some(provider);
+    }
 
-fn review_provider_from_host(host: &str) -> Option<ReviewProvider> {
     if host.contains("gitlab") {
-        Some(ReviewProvider::GitLab)
+        Some(crate::config::ReviewProviderKind::GitLab)
     } else if host.contains("github") {
-        Some(ReviewProvider::GitHub)
+        Some(crate::config::ReviewProviderKind::GitHub)
     } else {
         None
     }
+}
+
+fn review_provider_from_mappings(
+    host: &str,
+    provider_mappings: &[crate::config::ReviewProviderMapping],
+) -> Option<crate::config::ReviewProviderKind> {
+    let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+    if host.is_empty() {
+        return None;
+    }
+
+    provider_mappings
+        .iter()
+        .find(|mapping| host_matches_provider_pattern(host.as_str(), mapping.host.as_str()))
+        .map(|mapping| mapping.provider)
+}
+
+fn host_matches_provider_pattern(host: &str, raw_pattern: &str) -> bool {
+    let pattern = raw_pattern.trim().trim_end_matches('.').to_ascii_lowercase();
+    if pattern.is_empty() {
+        return false;
+    }
+    if let Some(suffix) = pattern.strip_prefix("*.") {
+        if host == suffix {
+            return true;
+        }
+        if host.len() <= suffix.len() || !host.ends_with(suffix) {
+            return false;
+        }
+        let separator_ix = host.len().saturating_sub(suffix.len() + 1);
+        return host.as_bytes().get(separator_ix) == Some(&b'.');
+    }
+    host == pattern
 }
 
 fn percent_encode(value: &str) -> String {

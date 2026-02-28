@@ -21,6 +21,20 @@ pub enum ThemePreference {
     Dark,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReviewProviderKind {
+    #[serde(rename = "github")]
+    GitHub,
+    #[serde(rename = "gitlab")]
+    GitLab,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReviewProviderMapping {
+    pub host: String,
+    pub provider: ReviewProviderKind,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct KeyboardShortcuts {
@@ -34,6 +48,8 @@ pub struct KeyboardShortcuts {
     pub previous_hunk: Vec<String>,
     pub next_file: Vec<String>,
     pub previous_file: Vec<String>,
+    pub next_bookmark_revision: Vec<String>,
+    pub previous_bookmark_revision: Vec<String>,
     pub toggle_sidebar_tree: Vec<String>,
     pub open_project: Vec<String>,
     pub save_current_file: Vec<String>,
@@ -54,6 +70,8 @@ impl Default for KeyboardShortcuts {
             previous_hunk: vec!["shift-f7".into()],
             next_file: vec!["alt-down".into()],
             previous_file: vec!["alt-up".into()],
+            next_bookmark_revision: vec!["alt-right".into()],
+            previous_bookmark_revision: vec!["alt-left".into()],
             toggle_sidebar_tree: vec!["cmd-b".into(), "ctrl-b".into()],
             open_project: vec!["cmd-shift-o".into(), "ctrl-shift-o".into()],
             save_current_file: vec!["cmd-s".into(), "ctrl-s".into()],
@@ -69,7 +87,9 @@ pub struct AppConfig {
     pub theme: ThemePreference,
     pub show_whitespace: bool,
     pub show_eol_markers: bool,
+    pub reduce_motion: bool,
     pub keyboard_shortcuts: KeyboardShortcuts,
+    pub review_provider_mappings: Vec<ReviewProviderMapping>,
     #[serde(default = "default_auto_refresh_interval_ms")]
     pub auto_refresh_interval_ms: u64,
 }
@@ -80,7 +100,9 @@ impl Default for AppConfig {
             theme: ThemePreference::System,
             show_whitespace: false,
             show_eol_markers: false,
+            reduce_motion: false,
             keyboard_shortcuts: KeyboardShortcuts::default(),
+            review_provider_mappings: Vec::new(),
             auto_refresh_interval_ms: default_auto_refresh_interval_ms(),
         }
     }

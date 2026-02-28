@@ -1,4 +1,4 @@
-use hunk::config::{AppConfig, KeyboardShortcuts, ThemePreference};
+use hunk::config::{AppConfig, KeyboardShortcuts, ReviewProviderKind, ThemePreference};
 
 fn strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_string()).collect()
@@ -43,6 +43,14 @@ fn app_config_defaults_include_existing_keyboard_shortcuts() {
         strings(&["alt-up"])
     );
     assert_eq!(
+        config.keyboard_shortcuts.next_bookmark_revision,
+        strings(&["alt-right"])
+    );
+    assert_eq!(
+        config.keyboard_shortcuts.previous_bookmark_revision,
+        strings(&["alt-left"])
+    );
+    assert_eq!(
         config.keyboard_shortcuts.toggle_sidebar_tree,
         strings(&["cmd-b", "ctrl-b"])
     );
@@ -59,6 +67,14 @@ fn app_config_defaults_include_existing_keyboard_shortcuts() {
         strings(&["cmd-,", "ctrl-,"])
     );
     assert_eq!(config.keyboard_shortcuts.quit_app, strings(&["cmd-q"]));
+    assert!(
+        config.review_provider_mappings.is_empty(),
+        "review provider mappings should default to empty"
+    );
+    assert!(
+        !config.reduce_motion,
+        "reduced motion should default to disabled"
+    );
 }
 
 #[test]
@@ -71,6 +87,10 @@ theme = "dark"
 
     assert_eq!(config.theme, ThemePreference::Dark);
     assert_eq!(config.keyboard_shortcuts, KeyboardShortcuts::default());
+    assert!(
+        !config.reduce_motion,
+        "configs missing reduce_motion should fall back to false"
+    );
 }
 
 #[test]
@@ -90,6 +110,14 @@ next_hunk = ["f8"]
     assert_eq!(
         config.keyboard_shortcuts.save_current_file,
         strings(&["cmd-s", "ctrl-s"])
+    );
+    assert_eq!(
+        config.keyboard_shortcuts.next_bookmark_revision,
+        strings(&["alt-right"])
+    );
+    assert_eq!(
+        config.keyboard_shortcuts.previous_bookmark_revision,
+        strings(&["alt-left"])
     );
     assert_eq!(
         config.keyboard_shortcuts.toggle_sidebar_tree,
@@ -121,5 +149,37 @@ quit_app = []
     assert_eq!(
         config.keyboard_shortcuts.open_settings,
         strings(&["cmd-,", "ctrl-,"])
+    );
+}
+
+#[test]
+fn app_config_parses_review_provider_mappings() {
+    let raw = r#"
+[[review_provider_mappings]]
+host = "git.company.internal"
+provider = "gitlab"
+
+[[review_provider_mappings]]
+host = "*.forge.corp.example"
+provider = "github"
+"#;
+    let config: AppConfig = toml::from_str(raw).expect("review provider mappings should parse");
+
+    assert_eq!(config.review_provider_mappings.len(), 2);
+    assert_eq!(
+        config.review_provider_mappings[0].host,
+        "git.company.internal"
+    );
+    assert_eq!(
+        config.review_provider_mappings[0].provider,
+        ReviewProviderKind::GitLab
+    );
+    assert_eq!(
+        config.review_provider_mappings[1].host,
+        "*.forge.corp.example"
+    );
+    assert_eq!(
+        config.review_provider_mappings[1].provider,
+        ReviewProviderKind::GitHub
     );
 }

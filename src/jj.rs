@@ -9,11 +9,13 @@ use jj_lib::ref_name::RefName;
 use jj_lib::repo::Repo as _;
 use tracing::warn;
 
+use crate::config::ReviewProviderMapping;
+
 mod backend;
 
 use backend::{
     abandon_bookmark_head as abandon_local_bookmark_head, bookmark_remote_sync_state,
-    bookmark_review_url, checkout_existing_bookmark,
+    bookmark_review_url, build_graph_snapshot_from_context, checkout_existing_bookmark,
     checkout_existing_bookmark_with_change_transfer, collect_materialized_diff_entries_for_paths,
     commit_working_copy_changes, commit_working_copy_selected_paths, conflict_materialize_options,
     create_bookmark_at_working_copy, current_bookmarks_from_context,
@@ -25,6 +27,7 @@ use backend::{
     move_bookmark_to_parent_of_working_copy, normalize_path, push_bookmark,
     rename_bookmark as rename_local_bookmark, render_patch_for_entry,
     reorder_bookmark_tip_older as reorder_local_bookmark_tip_older, repo_line_stats_from_context,
+    set_local_bookmark_target_revision,
     squash_bookmark_head_into_parent as squash_local_bookmark_head_into_parent,
     sync_bookmark_from_remote, walk_repo_tree,
 };
@@ -110,6 +113,177 @@ pub struct RepoSnapshot {
     pub last_commit_subject: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GraphBookmarkScope {
+    Local,
+    Remote,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphBookmarkRef {
+    pub name: String,
+    pub remote: Option<String>,
+    pub scope: GraphBookmarkScope,
+    pub is_active: bool,
+    pub tracked: bool,
+    pub needs_push: bool,
+    pub conflicted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphNode {
+    pub id: String,
+    pub subject: String,
+    pub unix_time: i64,
+    pub bookmarks: Vec<GraphBookmarkRef>,
+    pub is_working_copy_parent: bool,
+    pub is_active_bookmark_target: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphEdge {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GraphSnapshotOptions {
+    pub max_nodes: usize,
+    pub offset: usize,
+    pub include_remote_bookmarks: bool,
+}
+
+impl Default for GraphSnapshotOptions {
+    fn default() -> Self {
+        Self {
+            max_nodes: 250,
+            offset: 0,
+            include_remote_bookmarks: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphSnapshot {
+    pub root: PathBuf,
+    pub active_bookmark: Option<String>,
+    pub working_copy_commit_id: String,
+    pub working_copy_parent_commit_id: Option<String>,
+    pub nodes: Vec<GraphNode>,
+    pub edges: Vec<GraphEdge>,
+    pub has_more: bool,
+    pub next_offset: Option<usize>,
+}
+
+pub fn graph_bookmark_revision_chain(
+    nodes: &[GraphNode],
+    edges: &[GraphEdge],
+    bookmark_name: &str,
+    bookmark_remote: Option<&str>,
+    bookmark_scope: GraphBookmarkScope,
+) -> Vec<String> {
+    let Some(tip_node_id) =
+        graph_bookmark_tip_node_id(nodes, bookmark_name, bookmark_remote, bookmark_scope)
+    else {
+        return Vec::new();
+    };
+
+    let node_ids = nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut stack = vec![tip_node_id.to_string()];
+    let mut visited = BTreeSet::new();
+
+    while let Some(node_id) = stack.pop() {
+        if !visited.insert(node_id.clone()) {
+            continue;
+        }
+
+        for edge in edges.iter().filter(|edge| edge.from == node_id) {
+            if !node_ids.contains(edge.to.as_str()) {
+                continue;
+            }
+            if !visited.contains(edge.to.as_str()) {
+                stack.push(edge.to.clone());
+            }
+        }
+    }
+
+    let mut chain_nodes = visited
+        .into_iter()
+        .filter_map(|id| {
+            nodes
+                .iter()
+                .find(|node| node.id == id)
+                .map(|node| (node.unix_time, node.id.clone()))
+        })
+        .collect::<Vec<_>>();
+    chain_nodes.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+
+    chain_nodes
+        .into_iter()
+        .map(|(_, node_id)| node_id)
+        .collect()
+}
+
+pub fn graph_bookmark_drop_validation(
+    nodes: &[GraphNode],
+    bookmark_name: &str,
+    bookmark_remote: Option<&str>,
+    bookmark_scope: GraphBookmarkScope,
+    target_node_id: &str,
+) -> std::result::Result<(), String> {
+    if bookmark_scope != GraphBookmarkScope::Local {
+        return Err("Only local bookmarks can be moved by drag-and-drop.".to_string());
+    }
+    if !nodes.iter().any(|node| node.id == target_node_id) {
+        return Err("Drop target revision is not in the current graph window.".to_string());
+    }
+    let Some(source_node_id) =
+        graph_bookmark_tip_node_id(nodes, bookmark_name, bookmark_remote, bookmark_scope)
+    else {
+        return Err(format!(
+            "Bookmark '{}' is not present in the current graph window.",
+            bookmark_name
+        ));
+    };
+    if source_node_id == target_node_id {
+        return Err("Bookmark is already targeting that revision.".to_string());
+    }
+    Ok(())
+}
+
+fn graph_bookmark_tip_node_id<'a>(
+    nodes: &'a [GraphNode],
+    bookmark_name: &str,
+    bookmark_remote: Option<&str>,
+    bookmark_scope: GraphBookmarkScope,
+) -> Option<&'a str> {
+    nodes
+        .iter()
+        .filter(|node| {
+            node.bookmarks.iter().any(|bookmark| {
+                graph_bookmark_matches(bookmark, bookmark_name, bookmark_remote, bookmark_scope)
+            })
+        })
+        .max_by(|left, right| {
+            left.unix_time
+                .cmp(&right.unix_time)
+                .then_with(|| right.id.cmp(&left.id))
+        })
+        .map(|node| node.id.as_str())
+}
+
+fn graph_bookmark_matches(
+    bookmark: &GraphBookmarkRef,
+    name: &str,
+    remote: Option<&str>,
+    scope: GraphBookmarkScope,
+) -> bool {
+    bookmark.name == name && bookmark.scope == scope && bookmark.remote.as_deref() == remote
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepoSnapshotFingerprint {
     root: PathBuf,
@@ -175,6 +349,14 @@ pub fn load_snapshot(cwd: &Path) -> Result<RepoSnapshot> {
         line_stats,
         last_commit_subject,
     })
+}
+
+pub fn load_graph_snapshot(
+    repo_root: &Path,
+    options: GraphSnapshotOptions,
+) -> Result<GraphSnapshot> {
+    let context = load_repo_context_at_root(repo_root, true)?;
+    build_graph_snapshot_from_context(&context, options)
 }
 
 pub fn load_snapshot_fingerprint(cwd: &Path) -> Result<RepoSnapshotFingerprint> {
@@ -378,6 +560,50 @@ pub fn checkout_or_create_bookmark(repo_root: &Path, bookmark_name: &str) -> Res
     checkout_or_create_bookmark_with_change_transfer(repo_root, bookmark_name, false)
 }
 
+pub fn create_bookmark_at_revision(
+    repo_root: &Path,
+    bookmark_name: &str,
+    revision_id: &str,
+) -> Result<()> {
+    let bookmark_name = bookmark_name.trim();
+    if bookmark_name.is_empty() {
+        return Err(anyhow!("bookmark name cannot be empty"));
+    }
+    if !is_valid_bookmark_name(bookmark_name) {
+        return Err(anyhow!("invalid bookmark name: {bookmark_name}"));
+    }
+
+    let revision_id = revision_id.trim();
+    if revision_id.is_empty() {
+        return Err(anyhow!("revision id cannot be empty"));
+    }
+
+    let mut context = load_repo_context_at_root(repo_root, true)?;
+    set_local_bookmark_target_revision(&mut context, bookmark_name, revision_id, false)
+}
+
+pub fn move_bookmark_to_revision(
+    repo_root: &Path,
+    bookmark_name: &str,
+    revision_id: &str,
+) -> Result<()> {
+    let bookmark_name = bookmark_name.trim();
+    if bookmark_name.is_empty() {
+        return Err(anyhow!("bookmark name cannot be empty"));
+    }
+    if bookmark_name == "detached" {
+        return Err(anyhow!("cannot move detached bookmark"));
+    }
+
+    let revision_id = revision_id.trim();
+    if revision_id.is_empty() {
+        return Err(anyhow!("revision id cannot be empty"));
+    }
+
+    let mut context = load_repo_context_at_root(repo_root, true)?;
+    set_local_bookmark_target_revision(&mut context, bookmark_name, revision_id, true)
+}
+
 pub fn rename_bookmark(
     repo_root: &Path,
     old_bookmark_name: &str,
@@ -468,13 +694,21 @@ pub fn reorder_bookmark_tip_older(repo_root: &Path, bookmark_name: &str) -> Resu
 }
 
 pub fn review_url_for_bookmark(repo_root: &Path, bookmark_name: &str) -> Result<Option<String>> {
+    review_url_for_bookmark_with_provider_map(repo_root, bookmark_name, &[])
+}
+
+pub fn review_url_for_bookmark_with_provider_map(
+    repo_root: &Path,
+    bookmark_name: &str,
+    provider_mappings: &[ReviewProviderMapping],
+) -> Result<Option<String>> {
     let bookmark_name = bookmark_name.trim();
     if bookmark_name.is_empty() || bookmark_name == "detached" {
         return Err(anyhow!("cannot build review URL without a bookmark name"));
     }
 
     let context = load_repo_context_at_root(repo_root, false)?;
-    bookmark_review_url(&context, bookmark_name)
+    bookmark_review_url(&context, bookmark_name, provider_mappings)
 }
 
 pub fn checkout_or_create_bookmark_with_change_transfer(
@@ -829,7 +1063,10 @@ fn resolved_active_bookmark(context: &backend::RepoContext) -> Result<Option<Str
     }
 }
 
-fn local_bookmark_target_hex(context: &backend::RepoContext, bookmark_name: &str) -> Option<String> {
+fn local_bookmark_target_hex(
+    context: &backend::RepoContext,
+    bookmark_name: &str,
+) -> Option<String> {
     let target = context
         .repo
         .view()

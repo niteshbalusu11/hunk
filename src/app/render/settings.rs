@@ -285,6 +285,7 @@ impl DiffViewer {
         };
         let whitespace_label = if settings.show_whitespace { "On" } else { "Off" };
         let eol_label = if settings.show_eol_markers { "On" } else { "Off" };
+        let reduced_motion_label = if settings.reduce_motion { "On" } else { "Off" };
         v_flex()
             .w_full()
             .gap_3()
@@ -490,6 +491,57 @@ impl DiffViewer {
                             }),
                     )
                     .child(
+                        h_flex()
+                            .w_full()
+                            .items_center()
+                            .justify_between()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_semibold()
+                                    .text_color(cx.theme().foreground)
+                                    .child("Reduced Motion"),
+                            )
+                            .child({
+                                let view = view.clone();
+                                let reduce_motion = settings.reduce_motion;
+                                Button::new("settings-reduced-motion-dropdown")
+                                    .outline()
+                                    .compact()
+                                    .rounded(px(8.0))
+                                    .bg(dropdown_bg)
+                                    .dropdown_caret(true)
+                                    .label(reduced_motion_label)
+                                    .dropdown_menu(move |menu, _, _| {
+                                        menu.item(
+                                            PopupMenuItem::new("On")
+                                                .checked(reduce_motion)
+                                                .on_click({
+                                                    let view = view.clone();
+                                                    move |_, _, cx| {
+                                                        view.update(cx, |this, cx| {
+                                                            this.set_settings_reduce_motion(true, cx);
+                                                        });
+                                                    }
+                                                }),
+                                        )
+                                        .item(
+                                            PopupMenuItem::new("Off")
+                                                .checked(!reduce_motion)
+                                                .on_click({
+                                                    let view = view.clone();
+                                                    move |_, _, cx| {
+                                                        view.update(cx, |this, cx| {
+                                                            this.set_settings_reduce_motion(false, cx);
+                                                        });
+                                                    }
+                                                }),
+                                        )
+                                    })
+                            }),
+                    )
+                    .child(
                         v_flex()
                             .w_full()
                             .gap_1()
@@ -506,7 +558,8 @@ impl DiffViewer {
                                     .text_color(cx.theme().muted_foreground)
                                     .child(
                                         "Diffs refresh immediately on file events. The app also performs \
-                            a background periodic check as a fallback if file events are missed.",
+                            a background periodic check as a fallback if file events are missed. \
+                            Reduced Motion disables JJ graph transition/pulse animations.",
                                     ),
                             ),
                     ),

@@ -142,9 +142,7 @@ impl DiffViewer {
                 if let Some(this) = this.upgrade() {
                     this.update(cx, |this, cx| {
                         this.request_snapshot_refresh_internal(true, cx);
-                        if this.workspace_view_mode == WorkspaceViewMode::Files {
-                            this.request_repo_tree_reload(cx);
-                        }
+                        this.request_repo_tree_reload(cx);
                     })
                     .ok();
                 }

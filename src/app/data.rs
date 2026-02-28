@@ -33,13 +33,6 @@ struct RepoTreeFile {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum WorkspaceViewMode {
-    Files,
-    Diff,
-    JjWorkspace,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RepoTreeNodeKind {
     Directory,
     File,
@@ -64,6 +57,13 @@ pub(super) struct RepoTreeRow {
     pub(super) file_status: Option<FileStatus>,
     pub(super) depth: usize,
     pub(super) expanded: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum WorkspaceViewMode {
+    Files,
+    Diff,
+    JjWorkspace,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -271,7 +271,9 @@ pub(super) fn save_file_editor_document(
     text: &str,
 ) -> Result<()> {
     let absolute_path = repo_root.join(file_path);
-    let existing_permissions = fs::metadata(&absolute_path).ok().map(|meta| meta.permissions());
+    let existing_permissions = fs::metadata(&absolute_path)
+        .ok()
+        .map(|meta| meta.permissions());
     let parent = absolute_path.parent().ok_or_else(|| {
         anyhow!(
             "cannot save {}: resolved path has no parent",
@@ -677,21 +679,13 @@ pub(super) fn build_diff_row_segment_cache_from_cells(
         DiffSegmentQuality::Detailed => {
             let left = compact_cached_segments_for_render(
                 cached_segments_from_styled(build_line_segments(
-                    file_path,
-                    left_text,
-                    left_kind,
-                    right_text,
-                    right_kind,
+                    file_path, left_text, left_kind, right_text, right_kind,
                 )),
                 MAX_RENDER_SEGMENTS_PER_CELL_DETAILED,
             );
             let right = compact_cached_segments_for_render(
                 cached_segments_from_styled(build_line_segments(
-                    file_path,
-                    right_text,
-                    right_kind,
-                    left_text,
-                    left_kind,
+                    file_path, right_text, right_kind, left_text, left_kind,
                 )),
                 MAX_RENDER_SEGMENTS_PER_CELL_DETAILED,
             );
@@ -704,17 +698,11 @@ pub(super) fn build_diff_row_segment_cache_from_cells(
         }
         DiffSegmentQuality::SyntaxOnly => {
             let left = compact_cached_segments_for_render(
-                cached_segments_from_styled(build_syntax_only_line_segments(
-                    file_path,
-                    left_text,
-                )),
+                cached_segments_from_styled(build_syntax_only_line_segments(file_path, left_text)),
                 MAX_RENDER_SEGMENTS_PER_CELL_LARGE_FILE,
             );
             let right = compact_cached_segments_for_render(
-                cached_segments_from_styled(build_syntax_only_line_segments(
-                    file_path,
-                    right_text,
-                )),
+                cached_segments_from_styled(build_syntax_only_line_segments(file_path, right_text)),
                 MAX_RENDER_SEGMENTS_PER_CELL_LARGE_FILE,
             );
 

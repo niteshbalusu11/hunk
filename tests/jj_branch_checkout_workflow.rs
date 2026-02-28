@@ -3,11 +3,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use hunk::config::{ReviewProviderKind, ReviewProviderMapping};
 use hunk::jj::{
     abandon_bookmark_head, checkout_or_create_bookmark,
     checkout_or_create_bookmark_with_change_transfer, commit_staged, describe_bookmark_head,
     load_snapshot, rename_bookmark, reorder_bookmark_tip_older, review_url_for_bookmark,
-    squash_bookmark_head_into_parent,
+    review_url_for_bookmark_with_provider_map, squash_bookmark_head_into_parent,
 };
 
 #[test]
@@ -371,6 +372,43 @@ fn review_url_for_gitlab_remote_uses_merge_request_link() {
         review_url,
         "https://gitlab.com/example-org/hunk/-/merge_requests/new?merge_request[source_branch]=feature%2Fmr",
         "gitlab remotes should use merge-request creation links"
+    );
+}
+
+#[test]
+fn review_url_for_self_hosted_gitlab_uses_provider_mapping() {
+    let fixture = TempRepo::new("review-url-self-hosted-gitlab");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_bookmark(fixture.path(), "feature/self-hosted")
+        .expect("creating bookmark should succeed");
+
+    run_jj(
+        fixture.path(),
+        [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "https://git.company.internal/example-org/hunk.git",
+        ],
+    );
+
+    let review_url = review_url_for_bookmark_with_provider_map(
+        fixture.path(),
+        "feature/self-hosted",
+        &[ReviewProviderMapping {
+            host: "git.company.internal".to_string(),
+            provider: ReviewProviderKind::GitLab,
+        }],
+    )
+    .expect("review URL should be computed")
+    .expect("self-hosted GitLab remote should produce review URL with mapping");
+
+    assert_eq!(
+        review_url,
+        "https://git.company.internal/example-org/hunk/-/merge_requests/new?merge_request[source_branch]=feature%2Fself-hosted"
     );
 }
 
