@@ -143,6 +143,7 @@ pub(super) fn set_local_bookmark_target_revision(
         .store()
         .get_commit(&target_commit_id)
         .with_context(|| format!("failed to load target revision '{revision_id}'"))?;
+    ensure_revision_is_not_working_copy_commit(context, branch_name, &target_commit_id)?;
 
     let bookmark_target = context
         .repo
@@ -167,6 +168,23 @@ pub(super) fn set_local_bookmark_target_revision(
         .commit(format!("set bookmark {branch_name} to revision {revision_id}"))
         .with_context(|| format!("failed to update bookmark '{branch_name}'"))?;
     persist_working_copy_state(context, repo, "after setting bookmark target")
+}
+
+fn ensure_revision_is_not_working_copy_commit(
+    context: &RepoContext,
+    branch_name: &str,
+    target_commit_id: &jj_lib::backend::CommitId,
+) -> Result<()> {
+    let wc_commit = current_wc_commit(context)?;
+    if wc_commit.id() != target_commit_id {
+        return Ok(());
+    }
+
+    let short_id = target_commit_id.hex().chars().take(12).collect::<String>();
+    Err(anyhow!(
+        "cannot point bookmark '{branch_name}' to mutable working-copy revision {short_id}; \
+select a committed revision instead"
+    ))
 }
 
 pub(super) fn checkout_existing_bookmark(
@@ -580,6 +598,7 @@ pub(super) fn reorder_bookmark_tip_older(
 }
 
 pub(super) fn push_bookmark(context: &mut RepoContext, branch_name: &str) -> Result<()> {
+    ensure_bookmark_target_is_not_working_copy_commit(context, branch_name)?;
     ensure_bookmark_tip_identity(context, branch_name)?;
     let remote_name = resolve_push_remote_name(context, branch_name)?;
     let remote = RemoteName::new(remote_name.as_str());
@@ -639,6 +658,30 @@ pub(super) fn push_bookmark(context: &mut RepoContext, branch_name: &str) -> Res
         .commit(format!("push bookmark {branch_name}"))
         .context("failed to finalize push operation")?;
     persist_working_copy_state(context, repo, "after push")
+}
+
+fn ensure_bookmark_target_is_not_working_copy_commit(
+    context: &RepoContext,
+    branch_name: &str,
+) -> Result<()> {
+    let Some(target_commit_id) = context
+        .repo
+        .view()
+        .get_local_bookmark(RefName::new(branch_name))
+        .as_normal()
+    else {
+        return Ok(());
+    };
+
+    let wc_commit = current_wc_commit(context)?;
+    if wc_commit.id() != target_commit_id {
+        return Ok(());
+    }
+
+    Err(anyhow!(
+        "cannot push bookmark '{branch_name}' because it points to the mutable working-copy \
+revision (@); commit or retarget it to a committed revision first"
+    ))
 }
 
 fn ensure_bookmark_tip_identity(context: &mut RepoContext, branch_name: &str) -> Result<()> {

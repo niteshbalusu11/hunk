@@ -282,6 +282,15 @@ impl DiffViewer {
             cx.notify();
             return;
         };
+        if self.graph_node_is_working_copy_commit(selected_node_id.as_str()) {
+            let message =
+                "Cannot create a bookmark at the mutable working-copy revision. Select a committed revision."
+                    .to_string();
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
+            cx.notify();
+            return;
+        }
         let input_name = self.graph_action_input_state.read(cx).value().to_string();
         if input_name.trim().is_empty() {
             self.git_status_message = Some("Bookmark name is required.".to_string());
@@ -315,6 +324,15 @@ impl DiffViewer {
             cx.notify();
             return;
         };
+        if self.graph_node_is_working_copy_commit(selected_node_id.as_str()) {
+            let message =
+                "Cannot fork a bookmark at the mutable working-copy revision. Select a committed revision."
+                    .to_string();
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
+            cx.notify();
+            return;
+        }
         let input_name = self.graph_action_input_state.read(cx).value().to_string();
         let inferred_name = self
             .graph_selected_bookmark
@@ -490,6 +508,12 @@ impl DiffViewer {
         bookmark: &GraphBookmarkSelection,
         target_node_id: &str,
     ) -> Result<(), String> {
+        if self.graph_node_is_working_copy_commit(target_node_id) {
+            return Err(
+                "Cannot move bookmark to mutable working-copy revision. Drop onto a committed revision instead."
+                    .to_string(),
+            );
+        }
         graph_bookmark_drop_validation(
             &self.graph_nodes,
             bookmark.name.as_str(),
@@ -497,6 +521,10 @@ impl DiffViewer {
             bookmark.scope,
             target_node_id,
         )
+    }
+
+    fn graph_node_is_working_copy_commit(&self, node_id: &str) -> bool {
+        self.graph_working_copy_commit_id.as_deref() == Some(node_id)
     }
 
     fn graph_focused_revision_ids(&self) -> Vec<String> {

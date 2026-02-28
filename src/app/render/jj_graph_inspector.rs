@@ -8,6 +8,8 @@ impl DiffViewer {
         let selected_bookmark_is_local = selected_bookmark_selection
             .is_some_and(|bookmark| bookmark.scope == GraphBookmarkScope::Local);
         let has_selected_node = self.graph_selected_node_id.is_some();
+        let selected_node_is_working_copy = selected_node
+            .is_some_and(|node| self.graph_working_copy_commit_id.as_deref() == Some(node.id.as_str()));
         let graph_action_input_empty = self
             .graph_action_input_state
             .read(cx)
@@ -117,6 +119,15 @@ impl DiffViewer {
                                     node.bookmarks.len()
                                 )),
                         )
+                        .when(selected_node_is_working_copy, |this| {
+                            this.child(
+                                div()
+                                    .text_xs()
+                                    .font_semibold()
+                                    .text_color(cx.theme().warning)
+                                    .child("Mutable working-copy revision"),
+                            )
+                        })
                         .into_any_element();
                 }
 
@@ -214,7 +225,8 @@ impl DiffViewer {
                                     .disabled(
                                         self.git_action_loading
                                             || !has_selected_node
-                                            || graph_action_input_empty,
+                                            || graph_action_input_empty
+                                            || selected_node_is_working_copy,
                                     )
                                     .on_click(move |_, _, cx| {
                                         view.update(cx, |this, cx| {
@@ -233,7 +245,8 @@ impl DiffViewer {
                                     .disabled(
                                         self.git_action_loading
                                             || !has_selected_node
-                                            || selected_bookmark_selection.is_none(),
+                                            || selected_bookmark_selection.is_none()
+                                            || selected_node_is_working_copy,
                                     )
                                     .on_click(move |_, _, cx| {
                                         view.update(cx, |this, cx| {
