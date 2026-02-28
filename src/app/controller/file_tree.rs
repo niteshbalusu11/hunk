@@ -31,7 +31,6 @@ impl DiffViewer {
         self.workspace_view_mode = mode;
 
         if mode == WorkspaceViewMode::Files {
-            self.right_pane_mode = RightPaneMode::FileEditor;
             let target_path = self
                 .selected_path
                 .clone()
@@ -57,7 +56,6 @@ impl DiffViewer {
                 self.clear_editor_state(cx);
             }
         } else if mode == WorkspaceViewMode::Diff {
-            self.right_pane_mode = RightPaneMode::Diff;
             let selected_in_changed_files = self
                 .selected_path
                 .as_ref()
@@ -97,10 +95,8 @@ impl DiffViewer {
         self.selected_path = Some(path.clone());
         self.selected_status = self.status_for_path(path.as_str());
         if self.workspace_view_mode == WorkspaceViewMode::Files {
-            self.right_pane_mode = RightPaneMode::FileEditor;
             self.request_file_editor_reload(path, cx);
         } else {
-            self.right_pane_mode = RightPaneMode::Diff;
             self.scroll_to_file_start(&path);
             self.last_visible_row_start = None;
             self.last_diff_scroll_offset = None;

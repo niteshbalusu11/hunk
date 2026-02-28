@@ -5,12 +5,11 @@ use notify::Watcher;
 use tracing::{error, info};
 
 use super::data::{
-    DiffSegmentQuality, DiffStream, DiffStreamRowKind, RepoTreeNodeKind, RightPaneMode,
-    WorkspaceViewMode, base_segment_quality_for_file, build_changed_files_tree,
-    build_diff_row_segment_cache, build_diff_stream_from_patch_map, build_repo_tree,
-    count_repo_tree_kind, decimal_digits, effective_segment_quality, flatten_repo_tree_rows,
-    is_markdown_path, line_number_column_width, load_file_editor_document, message_row,
-    save_file_editor_document,
+    DiffSegmentQuality, DiffStream, DiffStreamRowKind, RepoTreeNodeKind, WorkspaceViewMode,
+    base_segment_quality_for_file, build_changed_files_tree,
+    build_diff_row_segment_cache_from_cells, build_diff_stream_from_patch_map, build_repo_tree,
+    count_repo_tree_kind, decimal_digits, effective_segment_quality, flatten_repo_tree_rows, is_markdown_path,
+    line_number_column_width, load_file_editor_document, message_row, save_file_editor_document,
 };
 use super::*;
 use hunk::jj::{

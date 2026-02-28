@@ -40,12 +40,6 @@ pub(super) enum WorkspaceViewMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum RightPaneMode {
-    Diff,
-    FileEditor,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RepoTreeNodeKind {
     Directory,
     File,
@@ -671,9 +665,12 @@ pub(super) fn cached_segments_from_styled(
         .collect::<Vec<_>>()
 }
 
-pub(super) fn build_diff_row_segment_cache(
+pub(super) fn build_diff_row_segment_cache_from_cells(
     file_path: Option<&str>,
-    row: &SideBySideRow,
+    left_text: &str,
+    left_kind: DiffCellKind,
+    right_text: &str,
+    right_kind: DiffCellKind,
     quality: DiffSegmentQuality,
 ) -> DiffRowSegmentCache {
     match quality {
@@ -681,20 +678,20 @@ pub(super) fn build_diff_row_segment_cache(
             let left = compact_cached_segments_for_render(
                 cached_segments_from_styled(build_line_segments(
                     file_path,
-                    &row.left.text,
-                    row.left.kind,
-                    &row.right.text,
-                    row.right.kind,
+                    left_text,
+                    left_kind,
+                    right_text,
+                    right_kind,
                 )),
                 MAX_RENDER_SEGMENTS_PER_CELL_DETAILED,
             );
             let right = compact_cached_segments_for_render(
                 cached_segments_from_styled(build_line_segments(
                     file_path,
-                    &row.right.text,
-                    row.right.kind,
-                    &row.left.text,
-                    row.left.kind,
+                    right_text,
+                    right_kind,
+                    left_text,
+                    left_kind,
                 )),
                 MAX_RENDER_SEGMENTS_PER_CELL_DETAILED,
             );
@@ -709,14 +706,14 @@ pub(super) fn build_diff_row_segment_cache(
             let left = compact_cached_segments_for_render(
                 cached_segments_from_styled(build_syntax_only_line_segments(
                     file_path,
-                    &row.left.text,
+                    left_text,
                 )),
                 MAX_RENDER_SEGMENTS_PER_CELL_LARGE_FILE,
             );
             let right = compact_cached_segments_for_render(
                 cached_segments_from_styled(build_syntax_only_line_segments(
                     file_path,
-                    &row.right.text,
+                    right_text,
                 )),
                 MAX_RENDER_SEGMENTS_PER_CELL_LARGE_FILE,
             );
@@ -729,8 +726,8 @@ pub(super) fn build_diff_row_segment_cache(
         }
         DiffSegmentQuality::Plain => DiffRowSegmentCache {
             quality,
-            left: cached_runtime_fallback_segments(&row.left.text, true),
-            right: cached_runtime_fallback_segments(&row.right.text, true),
+            left: cached_runtime_fallback_segments(left_text, true),
+            right: cached_runtime_fallback_segments(right_text, true),
         },
     }
 }
@@ -900,8 +897,14 @@ mod tests {
             text: String::new(),
         };
 
-        let cache =
-            build_diff_row_segment_cache(Some("Cargo.toml"), &row, DiffSegmentQuality::SyntaxOnly);
+        let cache = build_diff_row_segment_cache_from_cells(
+            Some("Cargo.toml"),
+            &row.left.text,
+            row.left.kind,
+            &row.right.text,
+            row.right.kind,
+            DiffSegmentQuality::SyntaxOnly,
+        );
         assert!(
             cache
                 .left

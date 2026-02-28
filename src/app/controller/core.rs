@@ -261,7 +261,6 @@ impl DiffViewer {
             repo_tree_reload_pending: false,
             repo_tree_error: None,
             repo_tree_last_reload: Instant::now(),
-            right_pane_mode: RightPaneMode::Diff,
             editor_input_state,
             editor_path: None,
             editor_loading: false,
@@ -313,7 +312,6 @@ impl DiffViewer {
     pub(super) fn select_file(&mut self, path: String, cx: &mut Context<Self>) {
         self.selected_path = Some(path.clone());
         self.selected_status = self.status_for_path(path.as_str());
-        self.right_pane_mode = RightPaneMode::Diff;
         self.scroll_to_file_start(&path);
         self.last_visible_row_start = None;
         self.last_diff_scroll_offset = None;
@@ -521,7 +519,6 @@ impl DiffViewer {
             self.sidebar_repo_row_count = 0;
             self.sidebar_repo_list_state.reset(0);
             self.repo_tree_error = None;
-            self.right_pane_mode = RightPaneMode::Diff;
             self.clear_editor_state(cx);
         }
         self.collapsed_files
@@ -613,7 +610,6 @@ impl DiffViewer {
         self.repo_tree_loading = false;
         self.repo_tree_reload_pending = false;
         self.repo_tree_error = None;
-        self.right_pane_mode = RightPaneMode::Diff;
         self.clear_editor_state(cx);
         cx.notify();
     }

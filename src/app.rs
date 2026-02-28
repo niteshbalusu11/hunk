@@ -39,7 +39,7 @@ use hunk::markdown_preview::MarkdownPreviewBlock;
 use hunk::state::{AppState, AppStateStore};
 
 use data::{
-    DiffRowSegmentCache, DiffStreamRowMeta, FileRowRange, RepoTreeNode, RepoTreeRow, RightPaneMode,
+    DiffRowSegmentCache, DiffStreamRowMeta, FileRowRange, RepoTreeNode, RepoTreeRow,
     WorkspaceViewMode,
 };
 
@@ -719,7 +719,6 @@ struct DiffViewer {
     repo_tree_reload_pending: bool,
     repo_tree_error: Option<String>,
     repo_tree_last_reload: Instant,
-    right_pane_mode: RightPaneMode,
     editor_input_state: Entity<InputState>,
     editor_path: Option<String>,
     editor_loading: bool,

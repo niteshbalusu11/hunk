@@ -35,19 +35,41 @@ impl DiffViewer {
         if self.diff_rows.is_empty() || self.comments_cache.is_empty() {
             return;
         }
+        let (row_anchor_index, rows_by_path) = self.build_comment_row_anchor_index();
 
         for comment in self
             .comments_cache
             .iter()
             .filter(|comment| comment.status == CommentStatus::Open)
         {
-            if let Some(row_ix) = self.find_matching_row_for_comment(comment) {
+            if let Some(row_ix) =
+                self.find_matching_row_for_comment_with_index(comment, &row_anchor_index, &rows_by_path)
+            {
                 self.comment_row_matches.insert(comment.id.clone(), row_ix);
                 if let Some(count) = self.comment_open_row_counts.get_mut(row_ix) {
                     *count += 1;
                 }
             }
         }
+    }
+
+    fn build_comment_row_anchor_index(
+        &self,
+    ) -> (BTreeMap<usize, RowCommentAnchor>, BTreeMap<String, Vec<usize>>) {
+        let mut row_anchor_index = BTreeMap::new();
+        let mut rows_by_path = BTreeMap::<String, Vec<usize>>::new();
+
+        for row_ix in 0..self.diff_rows.len() {
+            if let Some(anchor) = self.build_row_comment_anchor(row_ix) {
+                rows_by_path
+                    .entry(anchor.file_path.clone())
+                    .or_default()
+                    .push(row_ix);
+                row_anchor_index.insert(row_ix, anchor);
+            }
+        }
+
+        (row_anchor_index, rows_by_path)
     }
 
     fn load_database_store() -> Option<DatabaseStore> {
@@ -560,7 +582,6 @@ impl DiffViewer {
             self.comments_preview_open = false;
             self.selected_path = Some(comment.file_path);
             self.selected_status = Some(status);
-            self.right_pane_mode = RightPaneMode::Diff;
             self.select_row_and_scroll(start_row, false, cx);
             self.comment_status_message =
                 Some("Comment anchor not found; jumped to file.".to_string());
@@ -660,42 +681,61 @@ impl DiffViewer {
     }
 
     fn find_matching_row_for_comment(&self, comment: &CommentRecord) -> Option<usize> {
+        let (row_anchor_index, rows_by_path) = self.build_comment_row_anchor_index();
+        self.find_matching_row_for_comment_with_index(comment, &row_anchor_index, &rows_by_path)
+    }
+
+    fn find_matching_row_for_comment_with_index(
+        &self,
+        comment: &CommentRecord,
+        row_anchor_index: &BTreeMap<usize, RowCommentAnchor>,
+        rows_by_path: &BTreeMap<String, Vec<usize>>,
+    ) -> Option<usize> {
         let mut hash_fallback = None;
         let mut fuzzy_fallback = None::<(usize, i32)>;
         let mut rename_fuzzy_fallback = None::<(usize, i32)>;
         let key = Self::build_fuzzy_comment_key(comment);
 
-        for row_ix in 0..self.diff_rows.len() {
-            let row_path = self.row_file_path(row_ix);
-            let same_path = row_path.as_deref() == Some(comment.file_path.as_str());
-            if same_path && self.row_exact_anchor_match(row_ix, comment) {
-                return Some(row_ix);
-            }
+        if let Some(row_ixs) = rows_by_path.get(comment.file_path.as_str()) {
+            for row_ix in row_ixs {
+                let row_ix = *row_ix;
+                if self.row_exact_anchor_match(row_ix, comment) {
+                    return Some(row_ix);
+                }
 
-            if let Some(anchor) = self.build_row_comment_anchor(row_ix) {
-                let score = Self::fuzzy_anchor_match_score(&key, &anchor);
-                if same_path {
-                    if hash_fallback.is_none() && anchor.anchor_hash == comment.anchor_hash {
-                        hash_fallback = Some(row_ix);
-                    }
+                let Some(anchor) = row_anchor_index.get(&row_ix) else {
+                    continue;
+                };
+                let score = Self::fuzzy_anchor_match_score(&key, anchor);
+                if hash_fallback.is_none() && anchor.anchor_hash == comment.anchor_hash {
+                    hash_fallback = Some(row_ix);
+                }
 
-                    if score >= COMMENT_FUZZY_MATCH_MIN_SCORE {
-                        let should_replace = fuzzy_fallback
-                            .as_ref()
-                            .map(|(_, best)| score > *best)
-                            .unwrap_or(true);
-                        if should_replace {
-                            fuzzy_fallback = Some((row_ix, score));
-                        }
-                    }
-                } else if score >= COMMENT_FUZZY_RENAME_MATCH_MIN_SCORE {
-                    let should_replace = rename_fuzzy_fallback
+                if score >= COMMENT_FUZZY_MATCH_MIN_SCORE {
+                    let should_replace = fuzzy_fallback
                         .as_ref()
                         .map(|(_, best)| score > *best)
                         .unwrap_or(true);
                     if should_replace {
-                        rename_fuzzy_fallback = Some((row_ix, score));
+                        fuzzy_fallback = Some((row_ix, score));
                     }
+                }
+            }
+        }
+
+        for (row_ix, anchor) in row_anchor_index {
+            if anchor.file_path == comment.file_path {
+                continue;
+            }
+
+            let score = Self::fuzzy_anchor_match_score(&key, anchor);
+            if score >= COMMENT_FUZZY_RENAME_MATCH_MIN_SCORE {
+                let should_replace = rename_fuzzy_fallback
+                    .as_ref()
+                    .map(|(_, best)| score > *best)
+                    .unwrap_or(true);
+                if should_replace {
+                    rename_fuzzy_fallback = Some((*row_ix, score));
                 }
             }
         }

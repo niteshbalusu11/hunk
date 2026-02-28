@@ -122,7 +122,15 @@ impl DiffViewer {
                 continue;
             }
 
-            pending_rows.push((row_ix, row.clone(), file_path, target_quality));
+            pending_rows.push((
+                row_ix,
+                row.left.text.clone(),
+                row.left.kind,
+                row.right.text.clone(),
+                row.right.kind,
+                file_path,
+                target_quality,
+            ));
         }
 
         if pending_rows.is_empty() {
@@ -136,16 +144,29 @@ impl DiffViewer {
                 .spawn(async move {
                     pending_rows
                         .into_iter()
-                        .map(|(row_ix, row, file_path, quality)| {
+                        .map(
+                            |(
+                                row_ix,
+                                left_text,
+                                left_kind,
+                                right_text,
+                                right_kind,
+                                file_path,
+                                quality,
+                            )| {
                             (
                                 row_ix,
-                                build_diff_row_segment_cache(
+                                build_diff_row_segment_cache_from_cells(
                                     file_path.as_deref(),
-                                    &row,
+                                    left_text.as_str(),
+                                    left_kind,
+                                    right_text.as_str(),
+                                    right_kind,
                                     quality,
                                 ),
                             )
-                        })
+                        },
+                        )
                         .collect::<Vec<_>>()
                 })
                 .await;
@@ -161,7 +182,7 @@ impl DiffViewer {
                         if let Some(slot) = this.diff_row_segment_cache.get_mut(row_ix) {
                             let should_replace = slot
                                 .as_ref()
-                                .map(|cached| row_cache.quality > cached.quality)
+                                .map(|cached: &DiffRowSegmentCache| row_cache.quality > cached.quality)
                                 .unwrap_or(true);
                             if should_replace {
                                 *slot = Some(row_cache);

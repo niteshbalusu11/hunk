@@ -121,7 +121,6 @@ impl DiffViewer {
         {
             self.selected_path = Some(path);
             self.selected_status = Some(status);
-            self.right_pane_mode = RightPaneMode::Diff;
         }
 
         cx.notify();
@@ -208,7 +207,6 @@ impl DiffViewer {
 
         self.selected_path = Some(path.clone());
         self.selected_status = Some(status);
-        self.right_pane_mode = RightPaneMode::Diff;
         self.scroll_to_file_start(&path);
         self.select_row(start_row, false, cx);
         cx.notify();
