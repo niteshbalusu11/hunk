@@ -579,16 +579,7 @@ impl DiffViewer {
         let included_in_commit = !self.commit_excluded_files.contains(file.path.as_str());
         let is_selected = self.selected_path.as_deref() == Some(file.path.as_str());
         let is_dark = cx.theme().mode.is_dark();
-        let (status_label, status_color) = match file.status {
-            FileStatus::Added => ("ADD", cx.theme().success),
-            FileStatus::Modified => ("MOD", cx.theme().warning),
-            FileStatus::Deleted => ("DEL", cx.theme().danger),
-            FileStatus::Renamed => ("REN", cx.theme().accent),
-            FileStatus::Untracked => ("NEW", cx.theme().success),
-            FileStatus::TypeChange => ("TYP", cx.theme().warning),
-            FileStatus::Conflicted => ("CON", cx.theme().danger),
-            FileStatus::Unknown => ("---", cx.theme().muted_foreground),
-        };
+        let (status_label, status_color) = change_status_label_color(file.status, cx);
         let row_bg = if is_selected {
             cx.theme().accent.opacity(if is_dark { 0.22 } else { 0.14 })
         } else {

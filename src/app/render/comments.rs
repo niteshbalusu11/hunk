@@ -5,14 +5,15 @@ impl DiffViewer {
         let comments = self.comments_preview_records();
         let open_count = self.comments_open_count();
 
-        div()
+        v_flex()
             .absolute()
             .top(px(48.0))
             .right(px(12.0))
             .w(px(520.0))
-            .max_h(px(420.0))
+            .h(px(520.0))
             .rounded(px(10.0))
             .border_1()
+            .overflow_hidden()
             .border_color(cx.theme().border.opacity(if is_dark { 0.92 } else { 0.72 }))
             .bg(cx.theme().popover.blend(
                 cx.theme()
@@ -107,7 +108,8 @@ impl DiffViewer {
             )
             .child(
                 div()
-                    .max_h(px(280.0))
+                    .flex_1()
+                    .min_h_0()
                     .overflow_y_scrollbar()
                     .when(comments.is_empty(), |this| {
                         this.child(
@@ -358,13 +360,14 @@ impl DiffViewer {
         let is_dark = cx.theme().mode.is_dark();
 
         v_flex()
-            .w_full()
+            .w(px(380.0))
+            .max_w(px(420.0))
             .gap_2()
-            .px_3()
+            .px_2p5()
             .py_2()
-            .border_t_1()
-            .border_b_1()
-            .border_color(cx.theme().border.opacity(if is_dark { 0.86 } else { 0.70 }))
+            .rounded(px(9.0))
+            .border_1()
+            .border_color(cx.theme().border.opacity(if is_dark { 0.90 } else { 0.74 }))
             .bg(cx
                 .theme()
                 .popover
@@ -393,7 +396,7 @@ impl DiffViewer {
             .child(
                 Input::new(&self.comment_input_state)
                     .rounded(px(8.0))
-                    .h(px(84.0))
+                    .h(px(64.0))
                     .border_1()
                     .border_color(cx.theme().border.opacity(if is_dark { 0.88 } else { 0.72 }))
                     .bg(cx.theme().background.blend(

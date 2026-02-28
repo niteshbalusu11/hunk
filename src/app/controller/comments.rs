@@ -274,7 +274,7 @@ impl DiffViewer {
         match store.create_comment(&input) {
             Ok(_) => {
                 self.active_comment_editor_row = None;
-                self.comments_preview_open = true;
+                self.comments_preview_open = false;
                 self.comment_status_message = Some("Comment added.".to_string());
                 let state = self.comment_input_state.clone();
                 state.update(cx, |input, cx| {

@@ -216,6 +216,9 @@ Integration points:
 - [x] Auto-show non-open comments when open count is zero.
 - [x] Add per-comment `Reopen` action in preview.
 - [x] Require repeated misses before auto-transitioning open comments (`threshold=2`).
+- [x] Keep preview panel closed after saving a new inline comment.
+- [x] Render compact inline comment editor near the row affordance instead of full-width.
+- [x] Make preview panel content fully contained and scrollable for long comment lists.
 - [ ] Add stronger fuzzy remap heuristics for moved/edited hunks.
 - [ ] Add filters: `open/stale/resolved`, file path, and search text.
 - [ ] Add manual bulk actions: resolve all stale, delete resolved, reopen stale.

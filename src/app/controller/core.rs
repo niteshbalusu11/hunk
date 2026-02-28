@@ -536,7 +536,7 @@ impl DiffViewer {
 
         self.refresh_comments_cache_from_store();
 
-        if root_changed {
+        if root_changed || self.workspace_view_mode == WorkspaceViewMode::Diff {
             self.request_repo_tree_reload(cx);
         }
 

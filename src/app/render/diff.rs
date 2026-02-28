@@ -573,7 +573,14 @@ impl DiffViewer {
         v_flex()
             .w_full()
             .child(meta_row)
-            .child(self.render_row_comment_editor(ix, cx))
+            .child(
+                h_flex()
+                    .w_full()
+                    .justify_end()
+                    .px_3()
+                    .pt_1()
+                    .child(self.render_row_comment_editor(ix, cx)),
+            )
             .into_any_element()
     }
 
@@ -645,7 +652,14 @@ impl DiffViewer {
         v_flex()
             .w_full()
             .child(code_row)
-            .child(self.render_row_comment_editor(ix, cx))
+            .child(
+                h_flex()
+                    .w_full()
+                    .justify_end()
+                    .px_3()
+                    .pt_1()
+                    .child(self.render_row_comment_editor(ix, cx)),
+            )
             .into_any_element()
     }
 
