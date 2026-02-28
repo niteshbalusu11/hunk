@@ -1,3 +1,4 @@
+use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::env;
 use std::fs;
@@ -44,6 +45,7 @@ pub(super) struct RepoContext {
     pub(super) settings: UserSettings,
     pub(super) workspace: Workspace,
     pub(super) repo: Arc<ReadonlyRepo>,
+    pub(super) nested_repo_roots_cache: OnceCell<BTreeSet<String>>,
 }
 
 pub(super) struct RenderedPatch {
@@ -100,6 +102,7 @@ pub(super) fn load_repo_context_at_root(
         settings,
         workspace,
         repo,
+        nested_repo_roots_cache: OnceCell::new(),
     };
     if refresh_snapshot {
         refresh_working_copy_snapshot(&mut context)?;

@@ -77,4 +77,8 @@ fn append_hunk_rows(hunk: &DiffHunk, rows: &mut Vec<SideBySideRow>) {
             }
         }
     }
+
+    for meta_line in &hunk.trailing_meta {
+        rows.push(SideBySideRow::meta(DiffRowKind::Meta, meta_line.clone()));
+    }
 }

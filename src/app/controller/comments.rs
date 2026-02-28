@@ -35,19 +35,41 @@ impl DiffViewer {
         if self.diff_rows.is_empty() || self.comments_cache.is_empty() {
             return;
         }
+        let (row_anchor_index, rows_by_path) = self.build_comment_row_anchor_index();
 
         for comment in self
             .comments_cache
             .iter()
             .filter(|comment| comment.status == CommentStatus::Open)
         {
-            if let Some(row_ix) = self.find_matching_row_for_comment(comment) {
+            if let Some(row_ix) =
+                self.find_matching_row_for_comment_with_index(comment, &row_anchor_index, &rows_by_path)
+            {
                 self.comment_row_matches.insert(comment.id.clone(), row_ix);
                 if let Some(count) = self.comment_open_row_counts.get_mut(row_ix) {
                     *count += 1;
                 }
             }
         }
+    }
+
+    fn build_comment_row_anchor_index(
+        &self,
+    ) -> (BTreeMap<usize, RowCommentAnchor>, BTreeMap<String, Vec<usize>>) {
+        let mut row_anchor_index = BTreeMap::new();
+        let mut rows_by_path = BTreeMap::<String, Vec<usize>>::new();
+
+        for row_ix in 0..self.diff_rows.len() {
+            if let Some(anchor) = self.build_row_comment_anchor(row_ix) {
+                rows_by_path
+                    .entry(anchor.file_path.clone())
+                    .or_default()
+                    .push(row_ix);
+                row_anchor_index.insert(row_ix, anchor);
+            }
+        }
+
+        (row_anchor_index, rows_by_path)
     }
 
     fn load_database_store() -> Option<DatabaseStore> {
@@ -215,10 +237,20 @@ impl DiffViewer {
     }
 
     pub(super) fn row_supports_comments(&self, row_ix: usize) -> bool {
-        self.diff_rows.get(row_ix).is_some_and(|row| {
+        let Some(row) = self.diff_rows.get(row_ix) else {
+            return false;
+        };
+        if !matches!(row.kind, DiffRowKind::Code | DiffRowKind::Meta | DiffRowKind::Empty) {
+            return false;
+        }
+        if self.diff_row_metadata.len() != self.diff_rows.len() {
+            return false;
+        }
+
+        self.diff_row_metadata.get(row_ix).is_some_and(|meta| {
             matches!(
-                row.kind,
-                DiffRowKind::Code | DiffRowKind::Meta | DiffRowKind::Empty
+                meta.kind,
+                DiffStreamRowKind::CoreCode | DiffStreamRowKind::CoreMeta | DiffStreamRowKind::CoreEmpty
             )
         })
     }
@@ -550,7 +582,6 @@ impl DiffViewer {
             self.comments_preview_open = false;
             self.selected_path = Some(comment.file_path);
             self.selected_status = Some(status);
-            self.right_pane_mode = RightPaneMode::Diff;
             self.select_row_and_scroll(start_row, false, cx);
             self.comment_status_message =
                 Some("Comment anchor not found; jumped to file.".to_string());
@@ -594,6 +625,14 @@ impl DiffViewer {
                 continue;
             }
 
+            let file_is_changed = changed_paths.contains(comment.file_path.as_str());
+            if file_is_changed {
+                match self.file_anchor_reconcile_state(comment.file_path.as_str()) {
+                    FileAnchorReconcileState::Ready | FileAnchorReconcileState::Unavailable => {}
+                    FileAnchorReconcileState::Deferred => continue,
+                }
+            }
+
             let next_miss_streak = self
                 .comment_miss_streaks
                 .get(comment.id.as_str())
@@ -607,8 +646,7 @@ impl DiffViewer {
             }
             self.comment_miss_streaks.remove(comment.id.as_str());
 
-            let (next_status, _) =
-                next_status_for_unmatched_anchor(changed_paths.contains(comment.file_path.as_str()));
+            let (next_status, _) = next_status_for_unmatched_anchor(file_is_changed);
             match next_status {
                 CommentStatus::Stale => stale_ids.push(comment.id.clone()),
                 CommentStatus::Resolved => resolved_ids.push(comment.id.clone()),
@@ -643,24 +681,36 @@ impl DiffViewer {
     }
 
     fn find_matching_row_for_comment(&self, comment: &CommentRecord) -> Option<usize> {
+        let (row_anchor_index, rows_by_path) = self.build_comment_row_anchor_index();
+        self.find_matching_row_for_comment_with_index(comment, &row_anchor_index, &rows_by_path)
+    }
+
+    fn find_matching_row_for_comment_with_index(
+        &self,
+        comment: &CommentRecord,
+        row_anchor_index: &BTreeMap<usize, RowCommentAnchor>,
+        rows_by_path: &BTreeMap<String, Vec<usize>>,
+    ) -> Option<usize> {
         let mut hash_fallback = None;
         let mut fuzzy_fallback = None::<(usize, i32)>;
+        let mut rename_fuzzy_fallback = None::<(usize, i32)>;
         let key = Self::build_fuzzy_comment_key(comment);
 
-        for row_ix in 0..self.diff_rows.len() {
-            if self.row_file_path(row_ix).as_deref() != Some(comment.file_path.as_str()) {
-                continue;
-            }
-            if self.row_exact_anchor_match(row_ix, comment) {
-                return Some(row_ix);
-            }
+        if let Some(row_ixs) = rows_by_path.get(comment.file_path.as_str()) {
+            for row_ix in row_ixs {
+                let row_ix = *row_ix;
+                if self.row_exact_anchor_match(row_ix, comment) {
+                    return Some(row_ix);
+                }
 
-            if let Some(anchor) = self.build_row_comment_anchor(row_ix) {
+                let Some(anchor) = row_anchor_index.get(&row_ix) else {
+                    continue;
+                };
+                let score = Self::fuzzy_anchor_match_score(&key, anchor);
                 if hash_fallback.is_none() && anchor.anchor_hash == comment.anchor_hash {
                     hash_fallback = Some(row_ix);
                 }
 
-                let score = Self::fuzzy_anchor_match_score(&key, &anchor);
                 if score >= COMMENT_FUZZY_MATCH_MIN_SCORE {
                     let should_replace = fuzzy_fallback
                         .as_ref()
@@ -673,7 +723,26 @@ impl DiffViewer {
             }
         }
 
-        hash_fallback.or_else(|| fuzzy_fallback.map(|(row_ix, _)| row_ix))
+        for (row_ix, anchor) in row_anchor_index {
+            if anchor.file_path == comment.file_path {
+                continue;
+            }
+
+            let score = Self::fuzzy_anchor_match_score(&key, anchor);
+            if score >= COMMENT_FUZZY_RENAME_MATCH_MIN_SCORE {
+                let should_replace = rename_fuzzy_fallback
+                    .as_ref()
+                    .map(|(_, best)| score > *best)
+                    .unwrap_or(true);
+                if should_replace {
+                    rename_fuzzy_fallback = Some((*row_ix, score));
+                }
+            }
+        }
+
+        hash_fallback
+            .or_else(|| fuzzy_fallback.map(|(row_ix, _)| row_ix))
+            .or_else(|| rename_fuzzy_fallback.map(|(row_ix, _)| row_ix))
     }
 
     fn build_fuzzy_comment_key(comment: &CommentRecord) -> FuzzyCommentKey {
@@ -848,7 +917,7 @@ impl DiffViewer {
                 .get(row_ix)
                 .and_then(|row| row.file_path.clone());
         }
-        self.selected_path.clone()
+        None
     }
 
     fn row_hunk_header(&self, row_ix: usize) -> Option<String> {
@@ -861,6 +930,9 @@ impl DiffViewer {
     }
 
     pub(super) fn build_row_comment_anchor(&self, row_ix: usize) -> Option<RowCommentAnchor> {
+        if !self.row_supports_comments(row_ix) {
+            return None;
+        }
         let row = self.diff_rows.get(row_ix)?;
         let file_path = self.row_file_path(row_ix)?;
         let hunk_header = self.row_hunk_header(row_ix);
@@ -905,6 +977,7 @@ impl DiffViewer {
         if self.diff_rows.is_empty() {
             return String::new();
         }
+        let anchor_path = self.row_file_path(row_ix);
 
         let range = if before {
             let start = row_ix.saturating_sub(COMMENT_CONTEXT_RADIUS_ROWS);
@@ -920,6 +993,9 @@ impl DiffViewer {
         let mut lines = Vec::new();
         for ix in range {
             if let Some(row) = self.diff_rows.get(ix) {
+                if anchor_path.is_some() && self.row_file_path(ix) != anchor_path {
+                    continue;
+                }
                 lines.extend(Self::row_diff_lines(row));
             }
         }

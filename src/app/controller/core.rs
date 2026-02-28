@@ -184,6 +184,7 @@ impl DiffViewer {
             branches: Vec::new(),
             bookmark_revisions: Vec::new(),
             files: Vec::new(),
+            file_status_by_path: BTreeMap::new(),
             branch_picker_open: false,
             branch_input_state,
             commit_input_state,
@@ -253,12 +254,13 @@ impl DiffViewer {
             repo_tree_file_count: 0,
             repo_tree_folder_count: 0,
             repo_tree_expanded_dirs: BTreeSet::new(),
+            sidebar_repo_scroll_anchor_path: None,
             repo_tree_epoch: 0,
             repo_tree_task: Task::ready(()),
             repo_tree_loading: false,
+            repo_tree_reload_pending: false,
             repo_tree_error: None,
             repo_tree_last_reload: Instant::now(),
-            right_pane_mode: RightPaneMode::Diff,
             editor_input_state,
             editor_path: None,
             editor_loading: false,
@@ -280,7 +282,6 @@ impl DiffViewer {
         let editor_state = view.editor_input_state.clone();
         cx.observe(&editor_state, |this, _, cx| {
             this.sync_editor_dirty_from_input(cx);
-            this.schedule_editor_markdown_preview_parse(cx);
         })
         .detach();
 
@@ -310,17 +311,16 @@ impl DiffViewer {
 
     pub(super) fn select_file(&mut self, path: String, cx: &mut Context<Self>) {
         self.selected_path = Some(path.clone());
-        self.selected_status = self
-            .files
-            .iter()
-            .find(|file| file.path == path)
-            .map(|file| file.status);
-        self.right_pane_mode = RightPaneMode::Diff;
+        self.selected_status = self.status_for_path(path.as_str());
         self.scroll_to_file_start(&path);
         self.last_visible_row_start = None;
         self.last_diff_scroll_offset = None;
         self.last_scroll_activity_at = Instant::now();
         cx.notify();
+    }
+
+    pub(super) fn status_for_path(&self, path: &str) -> Option<FileStatus> {
+        self.file_status_by_path.get(path).copied()
     }
 
     pub(super) fn request_snapshot_refresh(&mut self, cx: &mut Context<Self>) {
@@ -493,6 +493,11 @@ impl DiffViewer {
         self.branches = branches;
         self.bookmark_revisions = bookmark_revisions;
         self.files = files;
+        self.file_status_by_path = self
+            .files
+            .iter()
+            .map(|file| (file.path.clone(), file.status))
+            .collect();
         self.commit_excluded_files
             .retain(|path| self.files.iter().any(|file| file.path == *path));
         self.overall_line_stats = line_stats;
@@ -510,28 +515,27 @@ impl DiffViewer {
             self.repo_tree_file_count = 0;
             self.repo_tree_folder_count = 0;
             self.repo_tree_expanded_dirs.clear();
+            self.sidebar_repo_scroll_anchor_path = None;
             self.sidebar_repo_row_count = 0;
             self.sidebar_repo_list_state.reset(0);
             self.repo_tree_error = None;
-            self.right_pane_mode = RightPaneMode::Diff;
             self.clear_editor_state(cx);
         }
         self.collapsed_files
             .retain(|path| self.files.iter().any(|file| file.path == *path));
 
-        let current_selection = self
+        let current_selection = self.selected_path.clone();
+        self.selected_path = if self.workspace_view_mode == WorkspaceViewMode::Files {
+            current_selection.or_else(|| self.files.first().map(|file| file.path.clone()))
+        } else {
+            current_selection
+                .filter(|selected| self.files.iter().any(|file| &file.path == selected))
+                .or_else(|| self.files.first().map(|file| file.path.clone()))
+        };
+        self.selected_status = self
             .selected_path
-            .as_ref()
-            .filter(|selected| self.files.iter().any(|file| &file.path == *selected))
-            .cloned();
-        self.selected_path =
-            current_selection.or_else(|| self.files.first().map(|file| file.path.clone()));
-        self.selected_status = self.selected_path.as_ref().and_then(|selected| {
-            self.files
-                .iter()
-                .find(|file| &file.path == selected)
-                .map(|file| file.status)
-        });
+            .as_deref()
+            .and_then(|selected| self.status_for_path(selected));
 
         let selected_changed = self.selected_path != previous_selected_path
             || self.selected_status != previous_selected_status;
@@ -563,6 +567,7 @@ impl DiffViewer {
         self.branches.clear();
         self.bookmark_revisions.clear();
         self.files.clear();
+        self.file_status_by_path.clear();
         self.last_commit_subject = None;
         self.commit_excluded_files.clear();
         self.selected_path = None;
@@ -599,11 +604,12 @@ impl DiffViewer {
         self.repo_tree_file_count = 0;
         self.repo_tree_folder_count = 0;
         self.repo_tree_expanded_dirs.clear();
+        self.sidebar_repo_scroll_anchor_path = None;
         self.sidebar_repo_row_count = 0;
         self.sidebar_repo_list_state.reset(0);
         self.repo_tree_loading = false;
+        self.repo_tree_reload_pending = false;
         self.repo_tree_error = None;
-        self.right_pane_mode = RightPaneMode::Diff;
         self.clear_editor_state(cx);
         cx.notify();
     }
@@ -940,19 +946,24 @@ impl DiffViewer {
         self.file_line_stats = stream.file_line_stats;
         self.recompute_diff_layout();
 
-        let has_selection = self.selected_path.as_ref().is_some_and(|path| {
-            self.files.iter().any(|file| file.path == *path)
-        });
-        if !has_selection {
-            self.selected_path = self.files.first().map(|file| file.path.clone());
+        if self.workspace_view_mode == WorkspaceViewMode::Files {
+            if self.selected_path.is_none() {
+                self.selected_path = self.files.first().map(|file| file.path.clone());
+            }
+        } else {
+            let has_selection = self
+                .selected_path
+                .as_ref()
+                .is_some_and(|path| self.files.iter().any(|file| file.path == *path));
+            if !has_selection {
+                self.selected_path = self.files.first().map(|file| file.path.clone());
+            }
         }
 
-        self.selected_status = self.selected_path.as_ref().and_then(|selected| {
-            self.files
-                .iter()
-                .find(|file| &file.path == selected)
-                .map(|file| file.status)
-        });
+        self.selected_status = self
+            .selected_path
+            .as_deref()
+            .and_then(|selected| self.status_for_path(selected));
         self.last_visible_row_start = None;
         self.recompute_diff_visible_header_lookup();
         self.rebuild_comment_row_match_cache();
@@ -990,254 +1001,4 @@ impl DiffViewer {
         self.rebuild_comment_row_match_cache();
     }
 
-    fn recompute_diff_visible_header_lookup(&mut self) {
-        let row_count = self.diff_rows.len();
-        self.diff_visible_file_header_lookup = vec![None; row_count];
-        self.diff_visible_hunk_header_lookup = vec![None; row_count];
-        if row_count == 0 {
-            return;
-        }
-
-        if self.diff_row_metadata.len() == row_count {
-            let mut current_file_header = None::<usize>;
-            let mut current_hunk_header = None::<usize>;
-            for row_ix in 0..row_count {
-                let meta = &self.diff_row_metadata[row_ix];
-                match meta.kind {
-                    DiffStreamRowKind::EmptyState => {
-                        current_file_header = None;
-                        current_hunk_header = None;
-                    }
-                    DiffStreamRowKind::FileHeader => {
-                        current_file_header = Some(row_ix);
-                        current_hunk_header = None;
-                    }
-                    DiffStreamRowKind::CoreHunkHeader => {
-                        if current_file_header.is_none() {
-                            current_file_header = self.file_row_ranges.iter().find_map(|range| {
-                                if row_ix >= range.start_row && row_ix < range.end_row {
-                                    Some(range.start_row)
-                                } else {
-                                    None
-                                }
-                            });
-                        }
-                        current_hunk_header = Some(row_ix);
-                    }
-                    _ => {}
-                }
-
-                self.diff_visible_file_header_lookup[row_ix] = current_file_header;
-                self.diff_visible_hunk_header_lookup[row_ix] = current_hunk_header;
-            }
-            return;
-        }
-
-        let mut current_hunk_header = None::<usize>;
-        for row_ix in 0..row_count {
-            if self
-                .diff_rows
-                .get(row_ix)
-                .is_some_and(|row| row.kind == DiffRowKind::HunkHeader)
-            {
-                current_hunk_header = Some(row_ix);
-            }
-
-            let file_header_ix = self.file_row_ranges.iter().find_map(|range| {
-                if row_ix >= range.start_row && row_ix < range.end_row {
-                    Some(range.start_row)
-                } else {
-                    None
-                }
-            });
-            self.diff_visible_file_header_lookup[row_ix] = file_header_ix;
-            self.diff_visible_hunk_header_lookup[row_ix] = current_hunk_header;
-        }
-    }
-
-    fn next_snapshot_epoch(&mut self) -> usize {
-        self.snapshot_epoch = self.snapshot_epoch.saturating_add(1);
-        self.snapshot_epoch
-    }
-
-    fn auto_refresh_interval(&self) -> Duration {
-        if self.config.auto_refresh_interval_ms == 0 {
-            return Duration::ZERO;
-        }
-
-        let base_ms = self.config.auto_refresh_interval_ms.max(250);
-        let backoff_factor =
-            1_u64 << self.auto_refresh_unmodified_streak.min(Self::AUTO_REFRESH_BACKOFF_STEPS);
-        let interval_ms = (base_ms.saturating_mul(backoff_factor))
-            .min(Self::AUTO_REFRESH_MAX_INTERVAL_MS);
-        Duration::from_millis(interval_ms)
-    }
-
-    fn should_ignore_repo_watch_path(
-        path: &std::path::Path,
-        repo_root: &std::path::Path,
-    ) -> bool {
-        let Ok(relative_path) = path.strip_prefix(repo_root) else {
-            return false;
-        };
-
-        relative_path
-            .components()
-            .any(|component| component.as_os_str() == ".jj" || component.as_os_str() == ".git")
-    }
-
-    fn start_repo_watch(&mut self, cx: &mut Context<Self>) {
-        self.repo_watch_task = Task::ready(());
-
-        let Some(repo_root) = self.repo_root.clone().or_else(|| self.project_path.clone()) else {
-            return;
-        };
-        let (event_tx, mut event_rx) = mpsc::unbounded::<notify::Result<notify::Event>>();
-        let repo_root_path = repo_root.clone();
-        let repo_root_for_cb = repo_root.to_string_lossy().to_string();
-        let watcher = notify::recommended_watcher(move |result| {
-            event_tx.unbounded_send(result).ok();
-        });
-
-        let mut watcher = match watcher {
-            Ok(watcher) => watcher,
-            Err(err) => {
-                error!("failed to start file watch for {}: {err}", repo_root_for_cb);
-                return;
-            }
-        };
-
-        if let Err(err) = watcher.watch(&repo_root, notify::RecursiveMode::Recursive) {
-            error!("failed to watch repository at {}: {err}", repo_root_for_cb);
-            return;
-        }
-
-        self.repo_watch_task = cx.spawn(async move |this, cx| {
-            let mut last_event_at = Instant::now() - Self::REPO_WATCH_DEBOUNCE;
-            while let Some(event) = event_rx.next().await {
-                let Ok(event) = event else {
-                    continue;
-                };
-
-                if event
-                    .paths
-                    .iter()
-                    .all(|path| Self::should_ignore_repo_watch_path(path, &repo_root_path))
-                {
-                    continue;
-                }
-
-                let now = Instant::now();
-                if now.duration_since(last_event_at) < Self::REPO_WATCH_DEBOUNCE {
-                    continue;
-                }
-                last_event_at = now;
-
-                if let Some(this) = this.upgrade() {
-                    this.update(cx, |this, cx| {
-                        this.request_snapshot_refresh_internal(true, cx);
-                        if this.workspace_view_mode == WorkspaceViewMode::Files {
-                            this.request_repo_tree_reload(cx);
-                        }
-                    })
-                    .ok();
-                }
-            }
-            drop(watcher);
-        });
-    }
-
-    fn next_patch_epoch(&mut self) -> usize {
-        self.patch_epoch = self.patch_epoch.saturating_add(1);
-        self.patch_epoch
-    }
-
-    fn cancel_patch_reload(&mut self) {
-        self.next_patch_epoch();
-        self.patch_task = Task::ready(());
-        self.patch_loading = false;
-    }
-
-    fn next_segment_prefetch_epoch(&mut self) -> usize {
-        self.segment_prefetch_epoch = self.segment_prefetch_epoch.saturating_add(1);
-        self.segment_prefetch_epoch
-    }
-
-    fn invalidate_segment_prefetch(&mut self) {
-        self.next_segment_prefetch_epoch();
-        self.segment_prefetch_task = Task::ready(());
-        self.segment_prefetch_anchor_row = None;
-    }
-
-    fn start_auto_refresh(&mut self, cx: &mut Context<Self>) {
-        let epoch = self.next_refresh_epoch();
-        if self.config.auto_refresh_interval_ms == 0 {
-            return;
-        }
-
-        let interval = self.auto_refresh_interval();
-        self.schedule_auto_refresh(epoch, interval, cx);
-    }
-
-    pub(super) fn restart_auto_refresh(&mut self, cx: &mut Context<Self>) {
-        self.auto_refresh_task = Task::ready(());
-        self.auto_refresh_unmodified_streak = 0;
-        if self.config.auto_refresh_interval_ms == 0 {
-            return;
-        }
-
-        let epoch = self.next_refresh_epoch();
-        let interval = self.auto_refresh_interval();
-        self.schedule_auto_refresh(epoch, interval, cx);
-    }
-
-    fn next_refresh_epoch(&mut self) -> usize {
-        self.refresh_epoch = self.refresh_epoch.saturating_add(1);
-        self.refresh_epoch
-    }
-
-    fn schedule_auto_refresh(
-        &mut self,
-        epoch: usize,
-        delay: Duration,
-        cx: &mut Context<Self>,
-    ) {
-        if epoch != self.refresh_epoch {
-            return;
-        }
-        if delay == Duration::ZERO || self.config.auto_refresh_interval_ms == 0 {
-            return;
-        }
-
-        self.auto_refresh_task = cx.spawn(async move |this, cx| {
-            Timer::after(delay).await;
-            if let Some(this) = this.upgrade() {
-                this.update(cx, |this, cx| {
-                    if this.config.auto_refresh_interval_ms == 0 {
-                        return;
-                    }
-
-                    if this.recently_scrolling() {
-                        let next_epoch = this.next_refresh_epoch();
-                        let next_delay = this.auto_refresh_interval();
-                        this.schedule_auto_refresh(next_epoch, next_delay, cx);
-                        return;
-                    }
-
-                    if this.project_path.is_some() {
-                        this.request_snapshot_refresh(cx);
-                    }
-
-                    let next_delay = this.auto_refresh_interval();
-                    let next_epoch = this.next_refresh_epoch();
-                    this.schedule_auto_refresh(next_epoch, next_delay, cx);
-                })
-                .ok();
-            }
-        });
-    }
-
-    fn recently_scrolling(&self) -> bool {
-        self.last_scroll_activity_at.elapsed() < AUTO_REFRESH_SCROLL_DEBOUNCE
-    }
 }

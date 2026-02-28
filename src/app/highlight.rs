@@ -1,6 +1,7 @@
 use hunk::diff::DiffCellKind;
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock};
 use syntect::easy::ScopeRegionIterator;
 use syntect::parsing::{ParseState, ScopeStack, SyntaxReference, SyntaxSet};
 
@@ -406,22 +407,58 @@ fn syntax_for_path<'a>(
     syntax_set: &'a SyntaxSet,
     file_path: Option<&str>,
 ) -> Option<&'a SyntaxReference> {
-    let path = Path::new(file_path?);
+    let file_path = file_path?;
+    if let Some(cached) = lookup_syntax_name_cache(file_path) {
+        return cached.and_then(|name| syntax_set.find_syntax_by_name(name.as_str()));
+    }
+
+    let path = Path::new(file_path);
     let file_name = path.file_name()?.to_str()?;
-    if let Some(tokens) = special_file_tokens(file_name)
+    let resolved = if let Some(tokens) = special_file_tokens(file_name)
         && let Some(syntax) = find_first_syntax_by_tokens(syntax_set, tokens)
     {
-        return Some(syntax);
-    }
-
-    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
-    if let Some(tokens) = language_tokens_for_extension(&extension)
-        && let Some(syntax) = find_first_syntax_by_tokens(syntax_set, tokens)
+        Some(syntax)
+    } else if let Some(extension) = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
     {
-        return Some(syntax);
-    }
+        if let Some(tokens) = language_tokens_for_extension(&extension)
+            && let Some(syntax) = find_first_syntax_by_tokens(syntax_set, tokens)
+        {
+            Some(syntax)
+        } else {
+            syntax_set.find_syntax_by_extension(&extension)
+        }
+    } else {
+        None
+    };
 
-    syntax_set.find_syntax_by_extension(&extension)
+    store_syntax_name_cache(file_path, resolved.map(|syntax| syntax.name.clone()));
+    resolved
+}
+
+fn syntax_name_cache() -> &'static RwLock<HashMap<String, Option<String>>> {
+    static SYNTAX_NAME_CACHE: OnceLock<RwLock<HashMap<String, Option<String>>>> = OnceLock::new();
+    SYNTAX_NAME_CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+fn lookup_syntax_name_cache(file_path: &str) -> Option<Option<String>> {
+    syntax_name_cache()
+        .read()
+        .ok()
+        .and_then(|cache| cache.get(file_path).cloned())
+}
+
+fn store_syntax_name_cache(file_path: &str, syntax_name: Option<String>) {
+    let Ok(mut cache) = syntax_name_cache().write() else {
+        return;
+    };
+    const SYNTAX_NAME_CACHE_MAX_ENTRIES: usize = 4096;
+    if cache.len() >= SYNTAX_NAME_CACHE_MAX_ENTRIES {
+        cache.clear();
+    }
+    cache.insert(file_path.to_string(), syntax_name);
 }
 
 fn find_first_syntax_by_tokens<'a>(

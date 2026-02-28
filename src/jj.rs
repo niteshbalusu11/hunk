@@ -4,7 +4,9 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
+use jj_lib::object_id::ObjectId;
 use jj_lib::ref_name::RefName;
+use jj_lib::repo::Repo as _;
 use tracing::warn;
 
 mod backend;
@@ -138,6 +140,7 @@ pub(super) const MAX_REPO_TREE_ENTRIES: usize = 60_000;
 const JJ_STAGE_UNSUPPORTED: &str =
     "JJ does not use a staging index. Stage/unstage actions are unavailable.";
 const ACTIVE_BOOKMARK_FILE: &str = "hunk-active-bookmark";
+const RESERVED_BOOKMARK_NAMES: &[&str] = &["detached", "unknown"];
 
 pub fn load_snapshot(cwd: &Path) -> Result<RepoSnapshot> {
     let context = load_repo_context(cwd, true)?;
@@ -509,6 +512,8 @@ pub fn checkout_or_create_bookmark_with_change_transfer(
                     move_bookmark_to_parent_of_working_copy(&mut context, bookmark.as_str())?;
                 }
             }
+        } else {
+            move_bookmark_to_parent_of_working_copy(&mut context, bookmark_name)?;
         }
     }
 
@@ -602,6 +607,9 @@ pub fn sanitize_bookmark_name(input: &str) -> String {
     if candidate.eq_ignore_ascii_case("head") {
         candidate = "head-bookmark".to_string();
     }
+    if is_reserved_bookmark_name(candidate.as_str()) {
+        candidate = format!("{candidate}-bookmark");
+    }
 
     candidate = candidate.trim_matches('/').to_string();
 
@@ -643,6 +651,9 @@ pub fn is_valid_bookmark_name(name: &str) -> bool {
     if name.trim().is_empty() {
         return false;
     }
+    if is_reserved_bookmark_name(name) {
+        return false;
+    }
 
     if name.starts_with('/') || name.ends_with('/') {
         return false;
@@ -671,6 +682,12 @@ pub fn is_valid_bookmark_name(name: &str) -> bool {
             && !segment.ends_with('.')
             && segment != "@"
     })
+}
+
+fn is_reserved_bookmark_name(name: &str) -> bool {
+    RESERVED_BOOKMARK_NAMES
+        .iter()
+        .any(|reserved| name.eq_ignore_ascii_case(reserved))
 }
 
 fn active_bookmark_path(repo_root: &Path) -> PathBuf {
@@ -723,20 +740,69 @@ fn select_snapshot_branch_name(
 }
 
 fn select_commit_branch_name(
+    context: &backend::RepoContext,
     current_bookmarks: &BTreeSet<String>,
+    parent_bookmarks: &BTreeSet<String>,
     preferred: Option<String>,
     git_head_branch: Option<String>,
 ) -> String {
-    if let Some(git_head_branch) = git_head_branch
-        && current_bookmarks.contains(git_head_branch.as_str())
-    {
-        return git_head_branch;
+    let preferred = preferred.filter(|name| current_bookmarks.contains(name.as_str()));
+    let git_head_branch = git_head_branch.filter(|name| current_bookmarks.contains(name.as_str()));
+
+    if !parent_bookmarks.is_empty() {
+        if let (Some(preferred), Some(git_head_branch)) = (&preferred, &git_head_branch)
+            && parent_bookmarks.contains(preferred.as_str())
+            && parent_bookmarks.contains(git_head_branch.as_str())
+        {
+            if preferred == git_head_branch {
+                return preferred.clone();
+            }
+
+            let preferred_target = local_bookmark_target_hex(context, preferred.as_str());
+            let git_head_target = local_bookmark_target_hex(context, git_head_branch.as_str());
+            if preferred_target.is_some() && preferred_target == git_head_target {
+                return preferred.clone();
+            }
+
+            return git_head_branch.clone();
+        }
+
+        if let Some(git_head_branch) = &git_head_branch
+            && parent_bookmarks.contains(git_head_branch.as_str())
+        {
+            return git_head_branch.clone();
+        }
+
+        if let Some(preferred) = &preferred
+            && parent_bookmarks.contains(preferred.as_str())
+        {
+            return preferred.clone();
+        }
+
+        if let Some(parent_bookmark) = parent_bookmarks.iter().next() {
+            return parent_bookmark.clone();
+        }
     }
 
-    if let Some(preferred) = preferred
-        && current_bookmarks.contains(preferred.as_str())
-    {
+    if let (Some(preferred), Some(git_head_branch)) = (&preferred, &git_head_branch) {
+        if preferred == git_head_branch {
+            return preferred.clone();
+        }
+
+        let preferred_target = local_bookmark_target_hex(context, preferred.as_str());
+        let git_head_target = local_bookmark_target_hex(context, git_head_branch.as_str());
+        if preferred_target.is_some() && preferred_target == git_head_target {
+            return preferred.clone();
+        }
+
+        return git_head_branch.clone();
+    }
+
+    if let Some(preferred) = preferred {
         return preferred;
+    }
+    if let Some(git_head_branch) = git_head_branch {
+        return git_head_branch;
     }
 
     current_bookmarks
@@ -748,8 +814,11 @@ fn select_commit_branch_name(
 
 fn resolved_active_bookmark(context: &backend::RepoContext) -> Result<Option<String>> {
     let current_bookmarks = current_bookmarks_from_context(context)?;
+    let parent_bookmarks = parent_bookmarks_from_context(context)?;
     let branch_name = select_commit_branch_name(
+        context,
         &current_bookmarks,
+        &parent_bookmarks,
         load_active_bookmark_preference(&context.root),
         git_head_branch_name_from_context(context),
     );
@@ -758,6 +827,39 @@ fn resolved_active_bookmark(context: &backend::RepoContext) -> Result<Option<Str
     } else {
         Ok(Some(branch_name))
     }
+}
+
+fn local_bookmark_target_hex(context: &backend::RepoContext, bookmark_name: &str) -> Option<String> {
+    let target = context
+        .repo
+        .view()
+        .get_local_bookmark(RefName::new(bookmark_name));
+    target.as_normal().map(|id| id.hex().to_string())
+}
+
+fn parent_bookmarks_from_context(context: &backend::RepoContext) -> Result<BTreeSet<String>> {
+    let Some(wc_commit_id) = context
+        .repo
+        .view()
+        .get_wc_commit_id(context.workspace.workspace_name())
+    else {
+        return Ok(BTreeSet::new());
+    };
+    let wc_commit = context
+        .repo
+        .store()
+        .get_commit(wc_commit_id)
+        .map_err(|err| anyhow!("failed to load working-copy commit: {err}"))?;
+    let Some(parent_id) = wc_commit.parent_ids().first() else {
+        return Ok(BTreeSet::new());
+    };
+
+    Ok(context
+        .repo
+        .view()
+        .local_bookmarks_for_commit(parent_id)
+        .map(|(name, _)| name.as_str().to_string())
+        .collect())
 }
 
 fn snapshot_fingerprint(

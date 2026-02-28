@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -210,4 +211,26 @@ fn touch_and_delete_comment_work() {
         .get_comment(created.id.as_str())
         .expect("load missing comment");
     assert!(missing.is_none());
+}
+
+#[test]
+fn create_comment_ids_are_unique_within_process() {
+    let fixture = TempDb::new("comments-id-unique");
+    let mut ids = HashSet::new();
+
+    for ix in 0..256 {
+        let created = fixture
+            .store
+            .create_comment(&new_comment(
+                "/repo",
+                "main",
+                "src/lib.rs",
+                format!("comment-{ix}").as_str(),
+            ))
+            .expect("create comment");
+        assert!(
+            ids.insert(created.id),
+            "duplicate comment id should never be generated"
+        );
+    }
 }

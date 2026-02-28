@@ -90,7 +90,7 @@ impl DiffViewer {
         };
         let mut pending_rows = Vec::with_capacity(batch_limit);
         let recently_scrolling = self.recently_scrolling();
-        for row_ix in start..end {
+        for row_ix in prioritized_prefetch_row_indices(start, end, visible_row) {
             if pending_rows.len() >= batch_limit {
                 break;
             }
@@ -122,7 +122,15 @@ impl DiffViewer {
                 continue;
             }
 
-            pending_rows.push((row_ix, row.clone(), file_path, target_quality));
+            pending_rows.push((
+                row_ix,
+                row.left.text.clone(),
+                row.left.kind,
+                row.right.text.clone(),
+                row.right.kind,
+                file_path,
+                target_quality,
+            ));
         }
 
         if pending_rows.is_empty() {
@@ -136,16 +144,29 @@ impl DiffViewer {
                 .spawn(async move {
                     pending_rows
                         .into_iter()
-                        .map(|(row_ix, row, file_path, quality)| {
+                        .map(
+                            |(
+                                row_ix,
+                                left_text,
+                                left_kind,
+                                right_text,
+                                right_kind,
+                                file_path,
+                                quality,
+                            )| {
                             (
                                 row_ix,
-                                build_diff_row_segment_cache(
+                                build_diff_row_segment_cache_from_cells(
                                     file_path.as_deref(),
-                                    &row,
+                                    left_text.as_str(),
+                                    left_kind,
+                                    right_text.as_str(),
+                                    right_kind,
                                     quality,
                                 ),
                             )
-                        })
+                        },
+                        )
                         .collect::<Vec<_>>()
                 })
                 .await;
@@ -161,7 +182,7 @@ impl DiffViewer {
                         if let Some(slot) = this.diff_row_segment_cache.get_mut(row_ix) {
                             let should_replace = slot
                                 .as_ref()
-                                .map(|cached| row_cache.quality > cached.quality)
+                                .map(|cached: &DiffRowSegmentCache| row_cache.quality > cached.quality)
                                 .unwrap_or(true);
                             if should_replace {
                                 *slot = Some(row_cache);
@@ -186,12 +207,9 @@ impl DiffViewer {
         }
 
         let path = row.file_path.clone()?;
-        let status = row.file_status.or_else(|| {
-            self.files
-                .iter()
-                .find(|file| file.path == path)
-                .map(|file| file.status)
-        })?;
+        let status = row
+            .file_status
+            .or_else(|| self.status_for_path(path.as_str()))?;
 
         Some((path, status))
     }
@@ -249,9 +267,51 @@ impl DiffViewer {
                 .item_ix
                 .min(self.diff_rows.len().saturating_sub(1))
         };
+        let offset_in_item = if self.diff_rows.is_empty() || clamped_item_ix != previous_top.item_ix
+        {
+            px(0.)
+        } else {
+            previous_top.offset_in_item
+        };
         self.diff_list_state.scroll_to(ListOffset {
             item_ix: clamped_item_ix,
-            offset_in_item: px(0.),
+            offset_in_item,
         });
     }
+}
+
+fn prioritized_prefetch_row_indices(start: usize, end: usize, anchor_row: usize) -> Vec<usize> {
+    if start >= end {
+        return Vec::new();
+    }
+
+    let anchor = anchor_row.clamp(start, end.saturating_sub(1));
+    let mut rows = Vec::with_capacity(end.saturating_sub(start));
+    rows.push(anchor);
+
+    let mut step = 1usize;
+    while rows.len() < end.saturating_sub(start) {
+        let mut inserted = false;
+
+        if let Some(right) = anchor.checked_add(step)
+            && right < end
+        {
+            rows.push(right);
+            inserted = true;
+        }
+
+        if let Some(left) = anchor.checked_sub(step)
+            && left >= start
+        {
+            rows.push(left);
+            inserted = true;
+        }
+
+        if !inserted {
+            break;
+        }
+        step = step.saturating_add(1);
+    }
+
+    rows
 }

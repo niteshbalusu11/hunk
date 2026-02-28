@@ -87,8 +87,8 @@ index 123..456 100644
 
     let hunk = &document.hunks[0];
     assert_eq!(hunk.header, "@@ -10,2 +10,3 @@");
-    assert_eq!(hunk.old_start, 10);
-    assert_eq!(hunk.new_start, 10);
+    assert_eq!(hunk.old_start, Some(10));
+    assert_eq!(hunk.new_start, Some(10));
     assert_eq!(hunk.lines.len(), 4);
 
     assert_eq!(hunk.lines[0].kind, DiffLineKind::Removed);
@@ -108,6 +108,21 @@ index 123..456 100644
 }
 
 #[test]
+fn side_by_side_includes_hunk_trailing_meta_rows() {
+    let patch = "\
+@@ -1,2 +1,2 @@
+-old
++new
+ keep
+\\ No newline at end of file";
+
+    let rows = parse_patch_side_by_side(patch);
+    assert!(rows.iter().any(|row| {
+        row.kind == DiffRowKind::Meta && row.text == "\\ No newline at end of file"
+    }));
+}
+
+#[test]
 fn keeps_multiple_hunks_as_separate_structures() {
     let patch = "\
 @@ -1,2 +1,2 @@
@@ -120,10 +135,10 @@ fn keeps_multiple_hunks_as_separate_structures() {
 
     let document = parse_patch_document(patch);
     assert_eq!(document.hunks.len(), 2);
-    assert_eq!(document.hunks[0].old_start, 1);
-    assert_eq!(document.hunks[0].new_start, 1);
-    assert_eq!(document.hunks[1].old_start, 10);
-    assert_eq!(document.hunks[1].new_start, 10);
+    assert_eq!(document.hunks[0].old_start, Some(1));
+    assert_eq!(document.hunks[0].new_start, Some(1));
+    assert_eq!(document.hunks[1].old_start, Some(10));
+    assert_eq!(document.hunks[1].new_start, Some(10));
 }
 
 #[test]
@@ -217,6 +232,40 @@ fn preserves_leading_diff_marker_characters_in_payload() {
 }
 
 #[test]
+fn keeps_payload_lines_that_look_like_file_header_markers() {
+    let patch = "\
+@@ -1,3 +1,3 @@
+---- removed payload that starts with three dashes
+-keep removed
+++++ added payload that starts with three pluses
++keep added
+ context";
+
+    let document = parse_patch_document(patch);
+    assert_eq!(document.hunks.len(), 1);
+    let lines = &document.hunks[0].lines;
+    assert_eq!(lines.len(), 5);
+
+    assert_eq!(lines[0].kind, DiffLineKind::Removed);
+    assert_eq!(
+        lines[0].text,
+        "--- removed payload that starts with three dashes"
+    );
+
+    assert_eq!(lines[1].kind, DiffLineKind::Removed);
+    assert_eq!(lines[1].text, "keep removed");
+
+    assert_eq!(lines[2].kind, DiffLineKind::Added);
+    assert_eq!(lines[2].text, "+++ added payload that starts with three pluses");
+
+    assert_eq!(lines[3].kind, DiffLineKind::Added);
+    assert_eq!(lines[3].text, "keep added");
+
+    assert_eq!(lines[4].kind, DiffLineKind::Context);
+    assert_eq!(lines[4].text, "context");
+}
+
+#[test]
 fn parses_new_file_patch_with_only_added_lines() {
     let patch = "\
 diff --git a/src/new_file.rs b/src/new_file.rs
@@ -254,4 +303,23 @@ index 0000000..1111111
             .iter()
             .all(|row| row.right.kind == DiffCellKind::Added)
     );
+}
+
+#[test]
+fn malformed_hunk_header_does_not_fabricate_zero_line_numbers() {
+    let patch = "\
+@@ -x,y +z,w @@
+-old
++new";
+
+    let document = parse_patch_document(patch);
+    assert_eq!(document.hunks.len(), 1);
+    let hunk = &document.hunks[0];
+    assert_eq!(hunk.old_start, None);
+    assert_eq!(hunk.new_start, None);
+    assert_eq!(hunk.lines.len(), 2);
+    assert_eq!(hunk.lines[0].old_line, None);
+    assert_eq!(hunk.lines[0].new_line, None);
+    assert_eq!(hunk.lines[1].old_line, None);
+    assert_eq!(hunk.lines[1].new_line, None);
 }

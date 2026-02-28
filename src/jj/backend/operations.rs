@@ -486,7 +486,12 @@ pub(super) fn reorder_bookmark_tip_older(
     ensure_bookmark_is_checked_out(context, branch_name)?;
 
     let revisions = list_bookmark_revisions_from_context(context, branch_name, 3)?;
-    if revisions.len() < 2 {
+    let root_revision_id = context.repo.store().root_commit_id().hex();
+    let non_root_revisions = revisions
+        .iter()
+        .filter(|revision| revision.id != root_revision_id)
+        .count();
+    if non_root_revisions < 2 {
         return Err(anyhow!(
             "need at least two revisions to reorder the bookmark stack"
         ));

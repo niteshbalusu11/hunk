@@ -385,13 +385,10 @@ impl DiffViewer {
                 return None;
             }
             let path = meta.file_path.clone()?;
-            let status = meta.file_status.unwrap_or_else(|| {
-                self.files
-                    .iter()
-                    .find(|file| file.path == path)
-                    .map(|file| file.status)
-                    .unwrap_or(FileStatus::Unknown)
-            });
+            let status = meta
+                .file_status
+                .or_else(|| self.status_for_path(path.as_str()))
+                .unwrap_or(FileStatus::Unknown);
             return Some((header_ix, path, status));
         }
 

@@ -39,7 +39,7 @@ use hunk::markdown_preview::MarkdownPreviewBlock;
 use hunk::state::{AppState, AppStateStore};
 
 use data::{
-    DiffRowSegmentCache, DiffStreamRowMeta, FileRowRange, RepoTreeNode, RepoTreeRow, RightPaneMode,
+    DiffRowSegmentCache, DiffStreamRowMeta, FileRowRange, RepoTreeNode, RepoTreeRow,
     WorkspaceViewMode,
 };
 
@@ -65,9 +65,11 @@ const COMMENT_RETENTION_DAYS: i64 = 14;
 const COMMENT_PREVIEW_MAX_ITEMS: usize = 64;
 const COMMENT_RECONCILE_MISS_THRESHOLD: u8 = 2;
 const COMMENT_FUZZY_MATCH_MIN_SCORE: i32 = 6;
+const COMMENT_FUZZY_RENAME_MATCH_MIN_SCORE: i32 = 11;
 
 mod controller;
 mod data;
+mod data_segments;
 mod highlight;
 mod render;
 
@@ -644,6 +646,7 @@ struct DiffViewer {
     branches: Vec<LocalBranch>,
     bookmark_revisions: Vec<BookmarkRevision>,
     files: Vec<ChangedFile>,
+    file_status_by_path: BTreeMap<String, FileStatus>,
     branch_picker_open: bool,
     branch_input_state: Entity<InputState>,
     commit_input_state: Entity<InputState>,
@@ -709,12 +712,13 @@ struct DiffViewer {
     repo_tree_file_count: usize,
     repo_tree_folder_count: usize,
     repo_tree_expanded_dirs: BTreeSet<String>,
+    sidebar_repo_scroll_anchor_path: Option<String>,
     repo_tree_epoch: usize,
     repo_tree_task: Task<()>,
     repo_tree_loading: bool,
+    repo_tree_reload_pending: bool,
     repo_tree_error: Option<String>,
     repo_tree_last_reload: Instant,
-    right_pane_mode: RightPaneMode,
     editor_input_state: Entity<InputState>,
     editor_path: Option<String>,
     editor_loading: bool,

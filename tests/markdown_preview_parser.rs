@@ -104,3 +104,18 @@ fn resolves_reference_links() {
         span.text == "hello" && span.style.link.as_deref() == Some("https://example.com")
     }));
 }
+
+#[test]
+fn preserves_hard_line_breaks() {
+    let markdown = "first line  \nsecond line";
+    let blocks = parse_markdown_preview(markdown);
+    assert_eq!(blocks.len(), 1);
+
+    let MarkdownPreviewBlock::Paragraph(spans) = &blocks[0] else {
+        panic!("expected paragraph block");
+    };
+
+    assert!(spans.iter().any(|span| span.text == "first line"));
+    assert!(spans.iter().any(|span| span.style.hard_break));
+    assert!(spans.iter().any(|span| span.text == "second line"));
+}

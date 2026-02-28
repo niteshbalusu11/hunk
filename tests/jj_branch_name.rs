@@ -36,6 +36,17 @@ fn avoids_reserved_head_name() {
 }
 
 #[test]
+fn avoids_reserved_internal_bookmark_names() {
+    let detached = sanitize_bookmark_name("detached");
+    assert_eq!(detached, "detached-bookmark");
+    assert!(is_valid_bookmark_name(&detached));
+
+    let unknown = sanitize_bookmark_name("UNKNOWN");
+    assert_eq!(unknown, "unknown-bookmark");
+    assert!(is_valid_bookmark_name(&unknown));
+}
+
+#[test]
 fn rejects_invalid_bookmark_names() {
     let invalid = [
         "",
@@ -50,6 +61,9 @@ fn rejects_invalid_bookmark_names() {
         "white space",
         "feature/@/x",
         "feature:colon",
+        "detached",
+        "unknown",
+        "DETACHED",
     ];
 
     for name in invalid {
