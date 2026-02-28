@@ -121,6 +121,7 @@ impl DiffViewer {
     pub(super) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let (config_store, config) = Self::load_app_config();
         let (state_store, mut state) = Self::load_app_state();
+        let database_store = Self::load_database_store();
         if state.last_project_path.is_none()
             && let Some(config_store) = config_store.as_ref()
             && let Some(last_project_path) = Self::load_legacy_last_project_path(config_store)
@@ -150,6 +151,12 @@ impl DiffViewer {
                 .soft_wrap(false)
                 .placeholder("Select a file from Files tree to edit it.")
         });
+        let comment_input_state = cx.new(|cx| {
+            InputState::new(window, cx)
+                .multi_line(true)
+                .rows(3)
+                .placeholder("Add comment for this diff row")
+        });
         let in_app_menu_bar = (!cfg!(target_os = "macos")).then(|| AppMenuBar::new(window, cx));
 
         let mut view = Self {
@@ -158,6 +165,17 @@ impl DiffViewer {
             settings_draft: None,
             state_store,
             state,
+            database_store,
+            comments_cache: Vec::new(),
+            comments_preview_open: false,
+            comments_show_non_open: false,
+            comment_miss_streaks: BTreeMap::new(),
+            comment_row_matches: BTreeMap::new(),
+            comment_open_row_counts: Vec::new(),
+            hovered_comment_row: None,
+            active_comment_editor_row: None,
+            comment_input_state,
+            comment_status_message: None,
             project_path: last_project_path,
             repo_root: None,
             branch_name: "unknown".to_string(),
@@ -276,6 +294,8 @@ impl DiffViewer {
         view.start_auto_refresh(cx);
         view.start_repo_watch(cx);
         view.start_fps_monitor(cx);
+        view.prune_expired_comments();
+        view.refresh_comments_cache_from_store();
         view
     }
 
@@ -479,6 +499,7 @@ impl DiffViewer {
         self.last_commit_subject = last_commit_subject;
         self.repo_discovery_failed = false;
         self.error_message = None;
+        self.clear_comment_ui_state();
         if root_changed {
             self.start_repo_watch(cx);
         }
@@ -515,7 +536,9 @@ impl DiffViewer {
         let selected_changed = self.selected_path != previous_selected_path
             || self.selected_status != previous_selected_status;
 
-        if root_changed {
+        self.refresh_comments_cache_from_store();
+
+        if root_changed || self.workspace_view_mode == WorkspaceViewMode::Diff {
             self.request_repo_tree_reload(cx);
         }
 
@@ -545,6 +568,10 @@ impl DiffViewer {
         self.selected_path = None;
         self.selected_status = None;
         self.overall_line_stats = LineStats::default();
+        self.comments_cache.clear();
+        self.comment_miss_streaks.clear();
+        self.reset_comment_row_match_cache();
+        self.clear_comment_ui_state();
         self.file_row_ranges.clear();
         self.file_line_stats.clear();
         self.diff_row_metadata.clear();
@@ -594,6 +621,10 @@ impl DiffViewer {
     fn request_selected_diff_reload(&mut self, cx: &mut Context<Self>) {
         let Some(repo_root) = self.repo_root.clone() else {
             self.cancel_patch_reload();
+            self.comments_cache.clear();
+            self.comment_miss_streaks.clear();
+            self.reset_comment_row_match_cache();
+            self.clear_comment_ui_state();
             self.diff_rows.clear();
             self.diff_row_metadata.clear();
             self.diff_row_segment_cache.clear();
@@ -625,6 +656,8 @@ impl DiffViewer {
             self.file_row_ranges.clear();
             self.file_line_stats.clear();
             self.recompute_diff_layout();
+            self.reconcile_comments_with_loaded_diff();
+            cx.notify();
             return;
         }
 
@@ -778,6 +811,7 @@ impl DiffViewer {
                             return;
                         }
                         this.patch_loading = false;
+                        this.reconcile_comments_with_loaded_diff();
                         cx.notify();
                     })
                     .ok();
@@ -864,10 +898,10 @@ impl DiffViewer {
                             stream.rows.len(),
                             loading_paths.len()
                         );
-                        this.apply_loaded_diff_stream(stream);
                         if batch_ix.saturating_add(1) == total_batches {
                             this.patch_loading = false;
                         }
+                        this.apply_loaded_diff_stream(stream);
                         cx.notify();
                     })
                     .ok();
@@ -898,6 +932,7 @@ impl DiffViewer {
         self.diff_rows = stream.rows;
         self.diff_row_metadata = stream.row_metadata;
         self.diff_row_segment_cache = stream.row_segments;
+        self.clamp_comment_rows_to_diff();
         self.clamp_selection_to_rows();
         self.drag_selecting_rows = false;
         self.sync_diff_list_state();
@@ -920,12 +955,16 @@ impl DiffViewer {
         });
         self.last_visible_row_start = None;
         self.recompute_diff_visible_header_lookup();
+        self.rebuild_comment_row_match_cache();
 
         if self.scroll_selected_after_reload {
             self.scroll_selected_file_to_top();
             if !self.patch_loading {
                 self.scroll_selected_after_reload = false;
             }
+        }
+        if !self.patch_loading {
+            self.reconcile_comments_with_loaded_diff();
         }
     }
 
@@ -947,6 +986,8 @@ impl DiffViewer {
         self.diff_visible_file_header_lookup.clear();
         self.diff_visible_hunk_header_lookup.clear();
         self.scroll_selected_after_reload = false;
+        self.clamp_comment_rows_to_diff();
+        self.rebuild_comment_row_match_cache();
     }
 
     fn recompute_diff_visible_header_lookup(&mut self) {

@@ -514,7 +514,7 @@ impl DiffViewer {
             ),
         };
 
-        div()
+        let meta_row = div()
             .id(("diff-meta-row", stable_row_id))
             .relative()
             .overflow_x_hidden()
@@ -568,6 +568,19 @@ impl DiffViewer {
                     .w(px(2.))
                     .bg(accent),
             )
+            .child(self.render_row_comment_affordance(ix, cx));
+
+        v_flex()
+            .w_full()
+            .child(meta_row)
+            .child(
+                h_flex()
+                    .w_full()
+                    .justify_end()
+                    .px_3()
+                    .pt_1()
+                    .child(self.render_row_comment_editor(ix, cx)),
+            )
             .into_any_element()
     }
 
@@ -579,8 +592,9 @@ impl DiffViewer {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let stable_row_id = self.diff_row_stable_id(ix);
-        h_flex()
+        let code_row = h_flex()
             .id(("diff-code-row", stable_row_id))
+            .relative()
             .overflow_x_hidden()
             .on_mouse_down(MouseButton::Left, {
                 let row_ix = ix;
@@ -633,6 +647,19 @@ impl DiffViewer {
                 },
                 cx,
             ))
+            .child(self.render_row_comment_affordance(ix, cx));
+
+        v_flex()
+            .w_full()
+            .child(code_row)
+            .child(
+                h_flex()
+                    .w_full()
+                    .justify_end()
+                    .px_3()
+                    .pt_1()
+                    .child(self.render_row_comment_editor(ix, cx)),
+            )
             .into_any_element()
     }
 

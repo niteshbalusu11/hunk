@@ -49,13 +49,22 @@ impl DiffViewer {
             }
         } else if mode == WorkspaceViewMode::Diff {
             self.right_pane_mode = RightPaneMode::Diff;
+            let selected_in_changed_files = self
+                .selected_path
+                .as_ref()
+                .is_some_and(|selected| self.files.iter().any(|file| &file.path == selected));
+            if !selected_in_changed_files {
+                self.selected_path = self.files.first().map(|file| file.path.clone());
+                self.selected_status = self.selected_path.as_ref().and_then(|selected| {
+                    self.files
+                        .iter()
+                        .find(|file| &file.path == selected)
+                        .map(|file| file.status)
+                });
+            }
         }
 
-        if !self.sidebar_collapsed
-            && mode != WorkspaceViewMode::JjWorkspace
-            && self.repo_tree_nodes.is_empty()
-            && !self.repo_tree_loading
-        {
+        if mode != WorkspaceViewMode::JjWorkspace {
             self.request_repo_tree_reload(cx);
         }
         cx.notify();
@@ -107,6 +116,17 @@ impl DiffViewer {
             return;
         };
 
+        if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            self.next_repo_tree_epoch();
+            self.repo_tree_task = Task::ready(());
+            self.repo_tree_loading = false;
+            self.repo_tree_error = None;
+            self.repo_tree_last_reload = std::time::Instant::now();
+            self.rebuild_repo_tree_for_changed_files();
+            cx.notify();
+            return;
+        }
+
         if self.repo_tree_loading {
             return;
         }
@@ -145,6 +165,15 @@ impl DiffViewer {
 
     fn rebuild_repo_tree_rows(&mut self) {
         self.repo_tree_rows = flatten_repo_tree_rows(&self.repo_tree_nodes, &self.repo_tree_expanded_dirs);
+    }
+
+    fn rebuild_repo_tree_for_changed_files(&mut self) {
+        self.repo_tree_nodes = build_changed_files_tree(&self.files);
+        self.repo_tree_file_count = count_repo_tree_kind(&self.repo_tree_nodes, RepoTreeNodeKind::File);
+        self.repo_tree_folder_count =
+            count_repo_tree_kind(&self.repo_tree_nodes, RepoTreeNodeKind::Directory);
+        self.repo_tree_expanded_dirs.clear();
+        self.rebuild_repo_tree_rows();
     }
 }
 

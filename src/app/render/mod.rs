@@ -14,11 +14,28 @@ use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 use gpui_component::{Icon, IconName};
 use hunk::markdown_preview::{MarkdownCodeTokenKind, MarkdownInlineSpan, MarkdownPreviewBlock};
 
+fn change_status_label_color(
+    status: FileStatus,
+    cx: &mut Context<DiffViewer>,
+) -> (&'static str, Hsla) {
+    match status {
+        FileStatus::Added => ("ADD", cx.theme().success),
+        FileStatus::Modified => ("MOD", cx.theme().warning),
+        FileStatus::Deleted => ("DEL", cx.theme().danger),
+        FileStatus::Renamed => ("REN", cx.theme().accent),
+        FileStatus::Untracked => ("NEW", cx.theme().success),
+        FileStatus::TypeChange => ("TYP", cx.theme().warning),
+        FileStatus::Conflicted => ("CON", cx.theme().danger),
+        FileStatus::Unknown => ("---", cx.theme().muted_foreground),
+    }
+}
+
 include!("toolbar.rs");
 include!("tree.rs");
 include!("commit.rs");
 include!("file_banner.rs");
 include!("file_status.rs");
+include!("comments.rs");
 include!("diff.rs");
 include!("file_editor.rs");
 include!("settings.rs");

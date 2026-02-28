@@ -169,6 +169,7 @@ impl DiffViewer {
             RepoTreeNodeKind::File => file_icon_for_path(row.path.as_str()),
         };
         let row_id = stable_row_id_for_path(row.path.as_str());
+        let file_status = row.file_status;
 
         h_flex()
             .id(("repo-tree-row", row_id))
@@ -194,6 +195,20 @@ impl DiffViewer {
                         .text_color(icon_color),
                 ),
             )
+            .when_some(file_status, |this, status| {
+                let (status_label, status_color) = change_status_label_color(status, cx);
+                this.child(
+                    div()
+                        .px_1()
+                        .py_0p5()
+                        .rounded(px(4.0))
+                        .text_xs()
+                        .font_semibold()
+                        .bg(status_color.opacity(if is_dark { 0.24 } else { 0.16 }))
+                        .text_color(cx.theme().foreground)
+                        .child(status_label),
+                )
+            })
             .child(
                 div()
                     .flex_1()

@@ -19,7 +19,13 @@ use hunk::jj::{RepoTreeEntry, RepoTreeEntryKind};
 struct RepoTreeFolder {
     ignored: bool,
     folders: BTreeMap<String, RepoTreeFolder>,
-    files: BTreeMap<String, bool>,
+    files: BTreeMap<String, RepoTreeFile>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RepoTreeFile {
+    ignored: bool,
+    status: Option<FileStatus>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +53,7 @@ pub(super) struct RepoTreeNode {
     pub(super) name: String,
     pub(super) kind: RepoTreeNodeKind,
     pub(super) ignored: bool,
+    pub(super) file_status: Option<FileStatus>,
     pub(super) children: Vec<RepoTreeNode>,
 }
 
@@ -56,6 +63,7 @@ pub(super) struct RepoTreeRow {
     pub(super) name: String,
     pub(super) kind: RepoTreeNodeKind,
     pub(super) ignored: bool,
+    pub(super) file_status: Option<FileStatus>,
     pub(super) depth: usize,
     pub(super) expanded: bool,
 }
@@ -182,13 +190,33 @@ pub(super) fn build_repo_tree(entries: &[RepoTreeEntry]) -> Vec<RepoTreeNode> {
                     folder.ignored = entry.ignored;
                 }
                 RepoTreeEntryKind::File => {
-                    cursor.files.insert(part.to_string(), entry.ignored);
+                    cursor.files.insert(
+                        part.to_string(),
+                        RepoTreeFile {
+                            ignored: entry.ignored,
+                            status: None,
+                        },
+                    );
                 }
             }
         }
     }
 
     build_repo_tree_nodes(&root, "")
+}
+
+pub(super) fn build_changed_files_tree(files: &[ChangedFile]) -> Vec<RepoTreeNode> {
+    files
+        .iter()
+        .map(|file| RepoTreeNode {
+            path: file.path.clone(),
+            name: file.path.clone(),
+            kind: RepoTreeNodeKind::File,
+            ignored: false,
+            file_status: Some(file.status),
+            children: Vec::new(),
+        })
+        .collect()
 }
 
 pub(super) fn flatten_repo_tree_rows(
@@ -198,6 +226,16 @@ pub(super) fn flatten_repo_tree_rows(
     let mut rows = Vec::new();
     append_repo_tree_rows(nodes, expanded_dirs, 0, &mut rows);
     rows
+}
+
+pub(super) fn count_repo_tree_kind(nodes: &[RepoTreeNode], kind: RepoTreeNodeKind) -> usize {
+    nodes
+        .iter()
+        .map(|node| {
+            let self_count = usize::from(node.kind == kind);
+            self_count + count_repo_tree_kind(&node.children, kind)
+        })
+        .sum::<usize>()
 }
 
 pub(super) fn load_file_editor_document(
@@ -302,17 +340,19 @@ fn build_repo_tree_nodes(folder: &RepoTreeFolder, prefix: &str) -> Vec<RepoTreeN
             name: name.clone(),
             kind: RepoTreeNodeKind::Directory,
             ignored: child_folder.ignored,
+            file_status: None,
             children: build_repo_tree_nodes(child_folder, &path),
         });
     }
 
-    for (name, ignored) in &folder.files {
+    for (name, file) in &folder.files {
         let path = join_path(prefix, name);
         nodes.push(RepoTreeNode {
             path,
             name: name.clone(),
             kind: RepoTreeNodeKind::File,
-            ignored: *ignored,
+            ignored: file.ignored,
+            file_status: file.status,
             children: Vec::new(),
         });
     }
@@ -334,6 +374,7 @@ fn append_repo_tree_rows(
             name: node.name.clone(),
             kind: node.kind,
             ignored: node.ignored,
+            file_status: node.file_status,
             depth,
             expanded,
         });
@@ -996,5 +1037,35 @@ mod tests {
         assert_eq!(cache.quality, DiffSegmentQuality::SyntaxOnly);
         assert!(cache.left.iter().all(|segment| !segment.changed));
         assert!(cache.right.iter().all(|segment| !segment.changed));
+    }
+
+    #[test]
+    fn changed_files_tree_is_flat_and_uses_full_paths() {
+        let files = vec![
+            ChangedFile {
+                path: "src/main.rs".to_string(),
+                status: FileStatus::Modified,
+                staged: false,
+                untracked: false,
+            },
+            ChangedFile {
+                path: "README.md".to_string(),
+                status: FileStatus::Untracked,
+                staged: false,
+                untracked: true,
+            },
+        ];
+
+        let nodes = build_changed_files_tree(&files);
+        assert_eq!(nodes.len(), 2);
+        assert!(
+            nodes
+                .iter()
+                .all(|node| node.kind == RepoTreeNodeKind::File && node.children.is_empty())
+        );
+        assert_eq!(nodes[0].name, "src/main.rs");
+        assert_eq!(nodes[0].file_status, Some(FileStatus::Modified));
+        assert_eq!(nodes[1].name, "README.md");
+        assert_eq!(nodes[1].file_status, Some(FileStatus::Untracked));
     }
 }

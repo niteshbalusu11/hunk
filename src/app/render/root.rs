@@ -360,6 +360,9 @@ impl Render for DiffViewer {
                     }),
             )
             .child(self.render_app_footer(cx))
+            .when(self.comments_preview_open && !jj_fullscreen, |this| {
+                this.child(self.render_comments_preview(cx))
+            })
             .when(self.settings_draft.is_some(), |this| {
                 this.child(self.render_settings_popup(cx))
             })

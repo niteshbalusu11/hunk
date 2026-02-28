@@ -26,6 +26,11 @@ use gpui_component_assets::Assets;
 use tracing::error;
 
 use hunk::config::{AppConfig, ConfigStore, KeyboardShortcuts, ThemePreference};
+use hunk::db::{
+    CommentLineSide, CommentRecord, CommentStatus, DatabaseStore, NewComment,
+    compute_comment_anchor_hash, format_comment_clipboard_blob, next_status_for_unmatched_anchor,
+    now_unix_ms,
+};
 use hunk::diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
 use hunk::jj::{
     BookmarkRevision, ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFingerprint,
@@ -55,6 +60,11 @@ const DIFF_SEGMENT_PREFETCH_STEP_ROWS: usize = 24;
 const DIFF_SEGMENT_PREFETCH_BATCH_ROWS: usize = 96;
 const DIFF_PROGRESSIVE_BATCH_FILES: usize = 8;
 const SIDEBAR_REPO_LIST_ESTIMATED_ROW_HEIGHT: f32 = 24.0;
+const COMMENT_CONTEXT_RADIUS_ROWS: usize = 2;
+const COMMENT_RETENTION_DAYS: i64 = 14;
+const COMMENT_PREVIEW_MAX_ITEMS: usize = 64;
+const COMMENT_RECONCILE_MISS_THRESHOLD: u8 = 2;
+const COMMENT_FUZZY_MATCH_MIN_SCORE: i32 = 6;
 
 mod controller;
 mod data;
@@ -615,6 +625,17 @@ struct DiffViewer {
     settings_draft: Option<SettingsDraft>,
     state_store: Option<AppStateStore>,
     state: AppState,
+    database_store: Option<DatabaseStore>,
+    comments_cache: Vec<CommentRecord>,
+    comments_preview_open: bool,
+    comments_show_non_open: bool,
+    comment_miss_streaks: BTreeMap<String, u8>,
+    comment_row_matches: BTreeMap<String, usize>,
+    comment_open_row_counts: Vec<usize>,
+    hovered_comment_row: Option<usize>,
+    active_comment_editor_row: Option<usize>,
+    comment_input_state: Entity<InputState>,
+    comment_status_message: Option<String>,
     project_path: Option<PathBuf>,
     repo_root: Option<PathBuf>,
     branch_name: String,
