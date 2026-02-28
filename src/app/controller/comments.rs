@@ -119,6 +119,20 @@ impl DiffViewer {
             .count()
     }
 
+    pub(super) fn comments_stale_count(&self) -> usize {
+        self.comments_cache
+            .iter()
+            .filter(|comment| comment.status == CommentStatus::Stale)
+            .count()
+    }
+
+    pub(super) fn comments_resolved_count(&self) -> usize {
+        self.comments_cache
+            .iter()
+            .filter(|comment| comment.status == CommentStatus::Resolved)
+            .count()
+    }
+
     pub(super) fn comments_preview_records(&self) -> Vec<CommentRecord> {
         self.comments_cache
             .iter()
@@ -359,6 +373,116 @@ impl DiffViewer {
         cx.notify();
     }
 
+    pub(super) fn resolve_all_stale_comments(&mut self, cx: &mut Context<Self>) {
+        let Some(store) = self.database_store.clone() else {
+            return;
+        };
+        let stale_ids = self
+            .comments_cache
+            .iter()
+            .filter(|comment| comment.status == CommentStatus::Stale)
+            .map(|comment| comment.id.clone())
+            .collect::<Vec<_>>();
+        if stale_ids.is_empty() {
+            self.comment_status_message = Some("No stale comments to resolve.".to_string());
+            cx.notify();
+            return;
+        }
+
+        let now = now_unix_ms();
+        let mut resolved = 0usize;
+        for id in stale_ids {
+            match store.mark_comment_status(id.as_str(), CommentStatus::Resolved, None, now) {
+                Ok(updated) => {
+                    if updated {
+                        self.comment_miss_streaks.remove(id.as_str());
+                        resolved += 1;
+                    }
+                }
+                Err(err) => {
+                    error!("failed to resolve stale comment {id}: {err:#}");
+                }
+            }
+        }
+
+        self.refresh_comments_cache_from_store();
+        self.comment_status_message = Some(format!("Resolved {resolved} stale comments."));
+        cx.notify();
+    }
+
+    pub(super) fn reopen_all_stale_comments(&mut self, cx: &mut Context<Self>) {
+        let Some(store) = self.database_store.clone() else {
+            return;
+        };
+        let stale_ids = self
+            .comments_cache
+            .iter()
+            .filter(|comment| comment.status == CommentStatus::Stale)
+            .map(|comment| comment.id.clone())
+            .collect::<Vec<_>>();
+        if stale_ids.is_empty() {
+            self.comment_status_message = Some("No stale comments to reopen.".to_string());
+            cx.notify();
+            return;
+        }
+
+        let now = now_unix_ms();
+        let mut reopened = 0usize;
+        for id in stale_ids {
+            match store.mark_comment_status(id.as_str(), CommentStatus::Open, None, now) {
+                Ok(updated) => {
+                    if updated {
+                        self.comment_miss_streaks.remove(id.as_str());
+                        reopened += 1;
+                    }
+                }
+                Err(err) => {
+                    error!("failed to reopen stale comment {id}: {err:#}");
+                }
+            }
+        }
+
+        self.refresh_comments_cache_from_store();
+        self.comment_status_message = Some(format!("Reopened {reopened} stale comments."));
+        cx.notify();
+    }
+
+    pub(super) fn delete_all_resolved_comments(&mut self, cx: &mut Context<Self>) {
+        let Some(store) = self.database_store.clone() else {
+            return;
+        };
+        let resolved_ids = self
+            .comments_cache
+            .iter()
+            .filter(|comment| comment.status == CommentStatus::Resolved)
+            .map(|comment| comment.id.clone())
+            .collect::<Vec<_>>();
+        if resolved_ids.is_empty() {
+            self.comment_status_message = Some("No resolved comments to delete.".to_string());
+            cx.notify();
+            return;
+        }
+
+        let mut deleted = 0usize;
+        for id in resolved_ids {
+            match store.delete_comment(id.as_str()) {
+                Ok(was_deleted) => {
+                    if was_deleted {
+                        self.comment_miss_streaks.remove(id.as_str());
+                        deleted += 1;
+                    }
+                }
+                Err(err) => {
+                    error!("failed to delete resolved comment {id}: {err:#}");
+                }
+            }
+        }
+
+        self.refresh_comments_cache_from_store();
+        self.comment_status_message = Some(format!("Deleted {deleted} resolved comments."));
+        cx.notify();
+    }
+
     pub(super) fn jump_to_comment_by_id(&mut self, id: String, cx: &mut Context<Self>) {
         let Some(comment) = self
             .comments_cache
@@ -461,7 +585,8 @@ impl DiffViewer {
     }
 
     fn find_matching_row_for_comment(&self, comment: &CommentRecord) -> Option<usize> {
-        let mut fallback = None;
+        let mut hash_fallback = None;
+        let mut fuzzy_fallback = None::<(usize, i32)>;
 
         for row_ix in 0..self.diff_rows.len() {
             if self.row_file_path(row_ix).as_deref() != Some(comment.file_path.as_str()) {
@@ -471,15 +596,132 @@ impl DiffViewer {
                 return Some(row_ix);
             }
 
-            if fallback.is_none()
-                && let Some(anchor) = self.build_row_comment_anchor(row_ix)
-                && anchor.anchor_hash == comment.anchor_hash
-            {
-                fallback = Some(row_ix);
+            if let Some(anchor) = self.build_row_comment_anchor(row_ix) {
+                if hash_fallback.is_none() && anchor.anchor_hash == comment.anchor_hash {
+                    hash_fallback = Some(row_ix);
+                }
+
+                let score = Self::fuzzy_anchor_match_score(comment, &anchor);
+                if score >= COMMENT_FUZZY_MATCH_MIN_SCORE {
+                    let should_replace = fuzzy_fallback
+                        .as_ref()
+                        .map(|(_, best)| score > *best)
+                        .unwrap_or(true);
+                    if should_replace {
+                        fuzzy_fallback = Some((row_ix, score));
+                    }
+                }
             }
         }
 
-        fallback
+        hash_fallback.or_else(|| fuzzy_fallback.map(|(row_ix, _)| row_ix))
+    }
+
+    fn fuzzy_anchor_match_score(comment: &CommentRecord, anchor: &RowCommentAnchor) -> i32 {
+        let mut score = 0i32;
+
+        if comment.line_side == anchor.line_side {
+            score += 2;
+        } else {
+            score -= 1;
+        }
+
+        let comment_line = Self::normalize_text_for_fuzzy(comment.line_text.as_str());
+        let anchor_line = Self::normalize_text_for_fuzzy(anchor.line_text.as_str());
+        if !comment_line.is_empty() && comment_line == anchor_line {
+            score += 6;
+        } else {
+            let comment_core = Self::normalize_diff_line_body(comment.line_text.as_str());
+            let anchor_core = Self::normalize_diff_line_body(anchor.line_text.as_str());
+            if !comment_core.is_empty() && comment_core == anchor_core {
+                score += 5;
+            } else if Self::has_substring_overlap(comment_core.as_str(), anchor_core.as_str()) {
+                score += 3;
+            }
+        }
+
+        let comment_hunk = Self::normalize_text_for_fuzzy(comment.hunk_header.as_deref().unwrap_or(""));
+        let anchor_hunk = Self::normalize_text_for_fuzzy(anchor.hunk_header.as_deref().unwrap_or(""));
+        if !comment_hunk.is_empty() && comment_hunk == anchor_hunk {
+            score += 2;
+        }
+
+        score +=
+            Self::context_overlap_score(comment.context_before.as_str(), anchor.context_before.as_str());
+        score +=
+            Self::context_overlap_score(comment.context_after.as_str(), anchor.context_after.as_str());
+        score += Self::line_distance_score(comment.old_line, anchor.old_line);
+        score += Self::line_distance_score(comment.new_line, anchor.new_line);
+
+        score
+    }
+
+    fn normalize_text_for_fuzzy(text: &str) -> String {
+        text.split_whitespace()
+            .map(|part| part.to_ascii_lowercase())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn normalize_diff_line_body(text: &str) -> String {
+        text.lines()
+            .map(|line| {
+                let trimmed = line.trim_start();
+                trimmed
+                    .strip_prefix('+')
+                    .or_else(|| trimmed.strip_prefix('-'))
+                    .or_else(|| trimmed.strip_prefix(' '))
+                    .unwrap_or(trimmed)
+                    .trim()
+            })
+            .filter(|line| !line.is_empty())
+            .map(Self::normalize_text_for_fuzzy)
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn has_substring_overlap(lhs: &str, rhs: &str) -> bool {
+        let min_len = lhs.len().min(rhs.len());
+        min_len >= 12 && (lhs.contains(rhs) || rhs.contains(lhs))
+    }
+
+    fn context_overlap_score(lhs: &str, rhs: &str) -> i32 {
+        let lhs_lines = lhs
+            .lines()
+            .map(Self::normalize_diff_line_body)
+            .filter(|line| line.len() >= 3)
+            .collect::<BTreeSet<_>>();
+        let rhs_lines = rhs
+            .lines()
+            .map(Self::normalize_diff_line_body)
+            .filter(|line| line.len() >= 3)
+            .collect::<BTreeSet<_>>();
+
+        let overlap = lhs_lines.intersection(&rhs_lines).count();
+        match overlap {
+            0 => 0,
+            1 => 1,
+            2 => 2,
+            _ => 3,
+        }
+    }
+
+    fn line_distance_score(lhs: Option<u32>, rhs: Option<u32>) -> i32 {
+        match (lhs, rhs) {
+            (Some(a), Some(b)) => {
+                let distance = a.abs_diff(b);
+                if distance == 0 {
+                    2
+                } else if distance <= 2 {
+                    1
+                } else if distance <= 8 {
+                    0
+                } else {
+                    -1
+                }
+            }
+            _ => 0,
+        }
     }
 
     fn row_exact_anchor_match(&self, row_ix: usize, comment: &CommentRecord) -> bool {

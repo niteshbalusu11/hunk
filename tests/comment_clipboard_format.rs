@@ -31,16 +31,11 @@ fn clipboard_blob_matches_expected_format() {
     let blob = format_comment_clipboard_blob(&sample_comment());
     let expected = concat!(
         "[Hunk Comment]\n",
-        "Repo: /repo\n",
-        "Bookmark: main\n",
         "File: src/lib.rs\n",
         "Lines: old 14 | new 16\n",
-        "Status: open\n",
-        "\n",
         "Comment:\n",
         "Handle invalid input here.\n",
-        "\n",
-        "Diff Context:\n",
+        "Snippet:\n",
         " let input = payload.trim();\n",
         "+let value = parse(input)?;\n",
         " return Ok(value);",
@@ -56,5 +51,17 @@ fn clipboard_blob_omits_empty_context_sections() {
     comment.context_after.clear();
 
     let blob = format_comment_clipboard_blob(&comment);
-    assert!(blob.ends_with("Diff Context:\n+let value = parse(input)?;"));
+    assert!(blob.ends_with("Snippet:\n+let value = parse(input)?;"));
+}
+
+#[test]
+fn clipboard_blob_keeps_tight_context_window() {
+    let mut comment = sample_comment();
+    comment.context_before = " first before\n second before\n third before".to_string();
+    comment.context_after = " first after\n second after\n third after".to_string();
+
+    let blob = format_comment_clipboard_blob(&comment);
+    assert!(blob.contains("Snippet:\n third before\n+let value = parse(input)?;\n first after"));
+    assert!(!blob.contains(" first before"));
+    assert!(!blob.contains(" second after"));
 }

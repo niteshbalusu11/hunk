@@ -64,6 +64,7 @@ const COMMENT_CONTEXT_RADIUS_ROWS: usize = 2;
 const COMMENT_RETENTION_DAYS: i64 = 14;
 const COMMENT_PREVIEW_MAX_ITEMS: usize = 64;
 const COMMENT_RECONCILE_MISS_THRESHOLD: u8 = 2;
+const COMMENT_FUZZY_MATCH_MIN_SCORE: i32 = 6;
 
 mod controller;
 mod data;

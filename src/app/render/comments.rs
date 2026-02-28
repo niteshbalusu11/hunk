@@ -4,6 +4,8 @@ impl DiffViewer {
         let is_dark = cx.theme().mode.is_dark();
         let comments = self.comments_preview_records();
         let open_count = self.comments_open_count();
+        let stale_count = self.comments_stale_count();
+        let resolved_count = self.comments_resolved_count();
 
         v_flex()
             .absolute()
@@ -107,6 +109,65 @@ impl DiffViewer {
                     }),
             )
             .child(
+                h_flex()
+                    .items_center()
+                    .justify_between()
+                    .px_3()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border.opacity(if is_dark { 0.82 } else { 0.66 }))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Bulk actions"),
+                    )
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_2()
+                            .child({
+                                let view = view.clone();
+                                Button::new("comments-bulk-reopen-stale")
+                                    .compact()
+                                    .outline()
+                                    .rounded(px(7.0))
+                                    .label(format!("Reopen stale ({stale_count})"))
+                                    .on_click(move |_, _, cx| {
+                                        view.update(cx, |this, cx| {
+                                            this.reopen_all_stale_comments(cx);
+                                        });
+                                    })
+                            })
+                            .child({
+                                let view = view.clone();
+                                Button::new("comments-bulk-resolve-stale")
+                                    .compact()
+                                    .outline()
+                                    .rounded(px(7.0))
+                                    .label(format!("Resolve stale ({stale_count})"))
+                                    .on_click(move |_, _, cx| {
+                                        view.update(cx, |this, cx| {
+                                            this.resolve_all_stale_comments(cx);
+                                        });
+                                    })
+                            })
+                            .child({
+                                let view = view.clone();
+                                Button::new("comments-bulk-delete-resolved")
+                                    .compact()
+                                    .ghost()
+                                    .rounded(px(7.0))
+                                    .label(format!("Delete resolved ({resolved_count})"))
+                                    .on_click(move |_, _, cx| {
+                                        view.update(cx, |this, cx| {
+                                            this.delete_all_resolved_comments(cx);
+                                        });
+                                    })
+                            }),
+                    ),
+            )
+            .child(
                 div()
                     .flex_1()
                     .min_h_0()
@@ -153,38 +214,45 @@ impl DiffViewer {
                             .border_b_1()
                             .border_color(cx.theme().border.opacity(if is_dark { 0.74 } else { 0.58 }))
                             .child(
-                                h_flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .gap_2()
-                                    .child(
-                                        v_flex()
-                                            .gap_0p5()
-                                            .child(
-                                                div()
-                                                    .text_sm()
-                                                    .font_semibold()
-                                                    .text_color(cx.theme().foreground)
-                                                    .child(comment.file_path),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_xs()
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child(line_hint),
-                                            ),
-                                    )
+                                v_flex()
+                                    .gap_1()
                                     .child(
                                         h_flex()
                                             .items_center()
+                                            .justify_between()
                                             .gap_2()
+                                            .child(
+                                                v_flex()
+                                                    .min_w_0()
+                                                    .gap_0p5()
+                                                    .child(
+                                                        div()
+                                                            .text_sm()
+                                                            .font_semibold()
+                                                            .text_color(cx.theme().foreground)
+                                                            .truncate()
+                                                            .child(comment.file_path),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .text_color(cx.theme().muted_foreground)
+                                                            .child(line_hint),
+                                                    ),
+                                            )
                                             .child(
                                                 div()
                                                     .text_xs()
                                                     .font_semibold()
                                                     .text_color(status_color)
                                                     .child(status_text),
-                                            )
+                                            ),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .items_center()
+                                            .gap_2()
+                                            .flex_wrap()
                                             .child({
                                                 let view = view.clone();
                                                 Button::new(("comments-jump", ix))
@@ -256,6 +324,7 @@ impl DiffViewer {
                             .child(
                                 div()
                                     .text_sm()
+                                    .whitespace_normal()
                                     .text_color(cx.theme().foreground)
                                     .child(comment.comment_text),
                             )

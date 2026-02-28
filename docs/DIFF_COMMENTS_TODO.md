@@ -219,9 +219,9 @@ Integration points:
 - [x] Keep preview panel closed after saving a new inline comment.
 - [x] Render compact inline comment editor near the row affordance instead of full-width.
 - [x] Make preview panel content fully contained and scrollable for long comment lists.
-- [ ] Add stronger fuzzy remap heuristics for moved/edited hunks.
+- [x] Add stronger fuzzy remap heuristics for moved/edited hunks.
 - [ ] Add filters: `open/stale/resolved`, file path, and search text.
-- [ ] Add manual bulk actions: resolve all stale, delete resolved, reopen stale.
+- [x] Add manual bulk actions: resolve all stale, delete resolved, reopen stale.
 - [ ] Add configurable retention in `config.toml`.
 
 ## Phase 3: Advanced Work

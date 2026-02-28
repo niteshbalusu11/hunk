@@ -164,27 +164,41 @@ pub fn format_comment_clipboard_blob(comment: &CommentRecord) -> String {
         .map(|line| line.to_string())
         .unwrap_or_else(|| "-".to_string());
 
-    let mut context_lines = Vec::new();
-    if !comment.context_before.trim().is_empty() {
-        context_lines.push(comment.context_before.clone());
-    }
-    if !comment.line_text.trim().is_empty() {
-        context_lines.push(comment.line_text.clone());
-    }
-    if !comment.context_after.trim().is_empty() {
-        context_lines.push(comment.context_after.clone());
+    let mut snippet_lines = Vec::new();
+    if let Some(before) = comment
+        .context_before
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+    {
+        snippet_lines.push(before.to_string());
     }
 
+    snippet_lines.extend(
+        comment
+            .line_text
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(ToString::to_string),
+    );
+
+    if let Some(after) = comment
+        .context_after
+        .lines()
+        .find(|line| !line.trim().is_empty())
+    {
+        snippet_lines.push(after.to_string());
+    }
+
+    let snippet = if snippet_lines.is_empty() {
+        "(no diff context captured)".to_string()
+    } else {
+        snippet_lines.join("\n")
+    };
+
     format!(
-        "[Hunk Comment]\nRepo: {}\nBookmark: {}\nFile: {}\nLines: old {} | new {}\nStatus: {}\n\nComment:\n{}\n\nDiff Context:\n{}",
-        comment.repo_root,
-        comment.bookmark_name,
-        comment.file_path,
-        old_line,
-        new_line,
-        comment_status_label(comment.status),
-        comment.comment_text,
-        context_lines.join("\n"),
+        "[Hunk Comment]\nFile: {}\nLines: old {} | new {}\nComment:\n{}\nSnippet:\n{}",
+        comment.file_path, old_line, new_line, comment.comment_text, snippet,
     )
 }
 
