@@ -242,28 +242,7 @@ fn git_signing_config_paths(workspace_root: &Path) -> Vec<PathBuf> {
 }
 
 fn workspace_git_config_path(workspace_root: &Path) -> Option<PathBuf> {
-    let dot_git = workspace_root.join(".git");
-    if dot_git.is_dir() {
-        return Some(dot_git.join("config"));
-    }
-    if dot_git.is_file() {
-        let git_dir = fs::read_to_string(&dot_git).ok().and_then(|contents| {
-            contents
-                .lines()
-                .find_map(|line| line.trim().strip_prefix("gitdir:"))
-                .map(str::trim)
-                .filter(|path| !path.is_empty())
-                .map(PathBuf::from)
-        })?;
-        let git_dir = if git_dir.is_absolute() {
-            git_dir
-        } else {
-            workspace_root.join(git_dir)
-        };
-        return Some(git_dir.join("config"));
-    }
-
-    None
+    workspace_git_dir_path(workspace_root).map(|git_dir| git_dir.join("config"))
 }
 
 fn git_target_config_path(workspace_root: &Path) -> Option<PathBuf> {
@@ -284,6 +263,30 @@ fn git_target_config_path(workspace_root: &Path) -> Option<PathBuf> {
         }
     };
     Some(git_repo_path.join("config"))
+}
+
+fn workspace_git_dir_path(workspace_root: &Path) -> Option<PathBuf> {
+    let dot_git = workspace_root.join(".git");
+    if dot_git.is_dir() {
+        return Some(dot_git);
+    }
+    if dot_git.is_file() {
+        let git_dir = fs::read_to_string(&dot_git).ok().and_then(|contents| {
+            contents
+                .lines()
+                .find_map(|line| line.trim().strip_prefix("gitdir:"))
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from)
+        })?;
+        return Some(if git_dir.is_absolute() {
+            git_dir
+        } else {
+            workspace_root.join(git_dir)
+        });
+    }
+
+    git_target_config_path(workspace_root).and_then(|config_path| config_path.parent().map(Path::to_path_buf))
 }
 
 fn merge_git_signing_config_file(
@@ -541,11 +544,15 @@ fn matches_include_if_condition(
         return false;
     };
 
+    let Some(workspace_git_dir) = workspace_git_dir_path(workspace_root) else {
+        return false;
+    };
+
     if let Some(pattern) = subsection.strip_prefix("gitdir/i:") {
-        return gitdir_pattern_matches(pattern, config_path, workspace_root, true);
+        return gitdir_pattern_matches(pattern, config_path, workspace_git_dir.as_path(), true);
     }
     if let Some(pattern) = subsection.strip_prefix("gitdir:") {
-        return gitdir_pattern_matches(pattern, config_path, workspace_root, false);
+        return gitdir_pattern_matches(pattern, config_path, workspace_git_dir.as_path(), false);
     }
 
     false
@@ -554,7 +561,7 @@ fn matches_include_if_condition(
 fn gitdir_pattern_matches(
     raw_pattern: &str,
     config_path: &Path,
-    workspace_root: &Path,
+    workspace_git_dir: &Path,
     case_insensitive: bool,
 ) -> bool {
     let Some(resolved_pattern) =
@@ -562,7 +569,7 @@ fn gitdir_pattern_matches(
     else {
         return false;
     };
-    let workspace = normalize_gitdir_match_text(workspace_root, case_insensitive);
+    let workspace = normalize_gitdir_match_text(workspace_git_dir, case_insensitive);
     wildcard_pattern_matches(resolved_pattern.as_str(), workspace.as_str())
 }
 
@@ -704,6 +711,7 @@ mod tests {
         let fixture = TempDir::new("git-identity-include-chain");
         let workspace_root = fixture.path.join("repo");
         fs::create_dir_all(&workspace_root).expect("workspace root should be created");
+        fs::create_dir_all(workspace_root.join(".git")).expect("workspace .git should be created");
         let root_config = fixture.path.join("root.gitconfig");
         let child_config = fixture.path.join("child.gitconfig");
         let scoped_config = fixture.path.join("scoped.gitconfig");
@@ -754,6 +762,7 @@ mod tests {
         let fixture = TempDir::new("git-signing-includeif-skip");
         let workspace_root = fixture.path.join("repo");
         fs::create_dir_all(&workspace_root).expect("workspace root should be created");
+        fs::create_dir_all(workspace_root.join(".git")).expect("workspace .git should be created");
         let root_config = fixture.path.join("root.gitconfig");
         let child_config = fixture.path.join("child.gitconfig");
         let skipped_config = fixture.path.join("skipped.gitconfig");
@@ -797,5 +806,48 @@ mod tests {
         assert_eq!(config.commit_gpgsign, Some(true));
         assert_eq!(config.gpg_format.as_deref(), Some("ssh"));
         assert!(config.signing_key.is_none());
+    }
+
+    #[test]
+    fn include_if_gitdir_uses_git_target_when_workspace_has_no_dot_git_dir() {
+        let fixture = TempDir::new("git-includeif-git-target");
+        let workspace_root = fixture.path.join("workspace");
+        fs::create_dir_all(workspace_root.join(".jj").join("repo").join("store"))
+            .expect("workspace store path should be created");
+        let external_git_dir = fixture.path.join("external").join(".git");
+        fs::create_dir_all(&external_git_dir).expect("external git dir should be created");
+        write_file(
+            &workspace_root.join(".jj").join("repo").join("store").join("git_target"),
+            external_git_dir.to_string_lossy().as_ref(),
+        );
+
+        let root_config = fixture.path.join("root.gitconfig");
+        let scoped_config = fixture.path.join("scoped.gitconfig");
+        write_file(
+            &root_config,
+            "\
+[includeIf \"gitdir:external/.git/\"]
+    path = scoped.gitconfig
+",
+        );
+        write_file(
+            &scoped_config,
+            "\
+[user]
+    name = Target Name
+",
+        );
+
+        let mut config = GitIdentityConfig::default();
+        let mut visited = BTreeSet::new();
+        let saw_any = merge_git_identity_config_file(
+            &mut config,
+            root_config.as_path(),
+            workspace_root.as_path(),
+            &mut visited,
+        );
+
+        assert!(saw_any);
+        assert_eq!(config.name.as_deref(), Some("Target Name"));
     }
 }

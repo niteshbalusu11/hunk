@@ -186,12 +186,9 @@ impl DiffViewer {
         }
 
         let path = row.file_path.clone()?;
-        let status = row.file_status.or_else(|| {
-            self.files
-                .iter()
-                .find(|file| file.path == path)
-                .map(|file| file.status)
-        })?;
+        let status = row
+            .file_status
+            .or_else(|| self.status_for_path(path.as_str()))?;
 
         Some((path, status))
     }

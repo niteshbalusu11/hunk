@@ -108,6 +108,21 @@ index 123..456 100644
 }
 
 #[test]
+fn side_by_side_includes_hunk_trailing_meta_rows() {
+    let patch = "\
+@@ -1,2 +1,2 @@
+-old
++new
+ keep
+\\ No newline at end of file";
+
+    let rows = parse_patch_side_by_side(patch);
+    assert!(rows.iter().any(|row| {
+        row.kind == DiffRowKind::Meta && row.text == "\\ No newline at end of file"
+    }));
+}
+
+#[test]
 fn keeps_multiple_hunks_as_separate_structures() {
     let patch = "\
 @@ -1,2 +1,2 @@

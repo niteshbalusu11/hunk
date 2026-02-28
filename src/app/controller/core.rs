@@ -184,6 +184,7 @@ impl DiffViewer {
             branches: Vec::new(),
             bookmark_revisions: Vec::new(),
             files: Vec::new(),
+            file_status_by_path: BTreeMap::new(),
             branch_picker_open: false,
             branch_input_state,
             commit_input_state,
@@ -311,17 +312,17 @@ impl DiffViewer {
 
     pub(super) fn select_file(&mut self, path: String, cx: &mut Context<Self>) {
         self.selected_path = Some(path.clone());
-        self.selected_status = self
-            .files
-            .iter()
-            .find(|file| file.path == path)
-            .map(|file| file.status);
+        self.selected_status = self.status_for_path(path.as_str());
         self.right_pane_mode = RightPaneMode::Diff;
         self.scroll_to_file_start(&path);
         self.last_visible_row_start = None;
         self.last_diff_scroll_offset = None;
         self.last_scroll_activity_at = Instant::now();
         cx.notify();
+    }
+
+    pub(super) fn status_for_path(&self, path: &str) -> Option<FileStatus> {
+        self.file_status_by_path.get(path).copied()
     }
 
     pub(super) fn request_snapshot_refresh(&mut self, cx: &mut Context<Self>) {
@@ -494,6 +495,11 @@ impl DiffViewer {
         self.branches = branches;
         self.bookmark_revisions = bookmark_revisions;
         self.files = files;
+        self.file_status_by_path = self
+            .files
+            .iter()
+            .map(|file| (file.path.clone(), file.status))
+            .collect();
         self.commit_excluded_files
             .retain(|path| self.files.iter().any(|file| file.path == *path));
         self.overall_line_stats = line_stats;
@@ -529,12 +535,10 @@ impl DiffViewer {
                 .filter(|selected| self.files.iter().any(|file| &file.path == selected))
                 .or_else(|| self.files.first().map(|file| file.path.clone()))
         };
-        self.selected_status = self.selected_path.as_ref().and_then(|selected| {
-            self.files
-                .iter()
-                .find(|file| &file.path == selected)
-                .map(|file| file.status)
-        });
+        self.selected_status = self
+            .selected_path
+            .as_deref()
+            .and_then(|selected| self.status_for_path(selected));
 
         let selected_changed = self.selected_path != previous_selected_path
             || self.selected_status != previous_selected_status;
@@ -566,6 +570,7 @@ impl DiffViewer {
         self.branches.clear();
         self.bookmark_revisions.clear();
         self.files.clear();
+        self.file_status_by_path.clear();
         self.last_commit_subject = None;
         self.commit_excluded_files.clear();
         self.selected_path = None;
@@ -959,12 +964,10 @@ impl DiffViewer {
             }
         }
 
-        self.selected_status = self.selected_path.as_ref().and_then(|selected| {
-            self.files
-                .iter()
-                .find(|file| &file.path == selected)
-                .map(|file| file.status)
-        });
+        self.selected_status = self
+            .selected_path
+            .as_deref()
+            .and_then(|selected| self.status_for_path(selected));
         self.last_visible_row_start = None;
         self.recompute_diff_visible_header_lookup();
         self.rebuild_comment_row_match_cache();

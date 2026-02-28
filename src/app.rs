@@ -646,6 +646,7 @@ struct DiffViewer {
     branches: Vec<LocalBranch>,
     bookmark_revisions: Vec<BookmarkRevision>,
     files: Vec<ChangedFile>,
+    file_status_by_path: BTreeMap<String, FileStatus>,
     branch_picker_open: bool,
     branch_input_state: Entity<InputState>,
     commit_input_state: Entity<InputState>,

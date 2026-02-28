@@ -47,11 +47,7 @@ impl DiffViewer {
                     return;
                 }
                 self.selected_path = Some(path.clone());
-                self.selected_status = self
-                    .files
-                    .iter()
-                    .find(|file| file.path == path)
-                    .map(|file| file.status);
+                self.selected_status = self.status_for_path(path.as_str());
                 self.request_file_editor_reload(path, cx);
             } else {
                 if self.prevent_unsaved_editor_discard(None, cx) {
@@ -68,12 +64,10 @@ impl DiffViewer {
                 .is_some_and(|selected| self.files.iter().any(|file| &file.path == selected));
             if !selected_in_changed_files {
                 self.selected_path = self.files.first().map(|file| file.path.clone());
-                self.selected_status = self.selected_path.as_ref().and_then(|selected| {
-                    self.files
-                        .iter()
-                        .find(|file| &file.path == selected)
-                        .map(|file| file.status)
-                });
+                self.selected_status = self
+                    .selected_path
+                    .as_deref()
+                    .and_then(|selected| self.status_for_path(selected));
             }
         }
 
@@ -101,11 +95,7 @@ impl DiffViewer {
         }
 
         self.selected_path = Some(path.clone());
-        self.selected_status = self
-            .files
-            .iter()
-            .find(|file| file.path == path)
-            .map(|file| file.status);
+        self.selected_status = self.status_for_path(path.as_str());
         if self.workspace_view_mode == WorkspaceViewMode::Files {
             self.right_pane_mode = RightPaneMode::FileEditor;
             self.request_file_editor_reload(path, cx);

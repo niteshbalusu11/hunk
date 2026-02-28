@@ -462,8 +462,17 @@ pub(super) fn repo_line_stats_from_context(context: &RepoContext) -> Result<Line
     let materialize_options = conflict_materialize_options(context);
     let nested_repo_roots = nested_repo_roots_for_context(context)?;
     let mut stats = LineStats::default();
+    let wc_commit = current_wc_commit(context)?;
+    let base_tree = wc_commit.parent_tree(context.repo.as_ref())?;
+    let current_tree = wc_commit.tree();
+    let copy_records = CopyRecords::default();
+    let stream = materialized_diff_stream(
+        context.repo.store().as_ref(),
+        base_tree.diff_stream_with_copies(&current_tree, &EverythingMatcher, &copy_records),
+        Diff::new(base_tree.labels(), current_tree.labels()),
+    );
 
-    for entry in collect_materialized_diff_entries(context)? {
+    for entry in block_on_stream(stream) {
         if materialized_entry_within_nested_repo(&entry, nested_repo_roots) {
             continue;
         }
@@ -494,27 +503,6 @@ pub(super) fn conflict_materialize_options(context: &RepoContext) -> ConflictMat
         marker_len: None,
         merge: context.repo.store().merge_options().clone(),
     }
-}
-
-pub(super) fn collect_materialized_diff_entries(
-    context: &RepoContext,
-) -> Result<Vec<MaterializedTreeDiffEntry>> {
-    let wc_commit = current_wc_commit(context)?;
-    let base_tree = wc_commit.parent_tree(context.repo.as_ref())?;
-    let current_tree = wc_commit.tree();
-    let copy_records = CopyRecords::default();
-
-    let stream = materialized_diff_stream(
-        context.repo.store().as_ref(),
-        base_tree.diff_stream_with_copies(&current_tree, &EverythingMatcher, &copy_records),
-        Diff::new(base_tree.labels(), current_tree.labels()),
-    );
-
-    let mut entries = Vec::new();
-    for entry in block_on_stream(stream) {
-        entries.push(entry);
-    }
-    Ok(entries)
 }
 
 pub(super) fn collect_materialized_diff_entries_for_paths(
@@ -736,6 +724,9 @@ fn path_is_within_nested_repo(path: &str, nested_repo_roots: &BTreeSet<String>) 
     }
 
     nested_repo_roots.iter().any(|nested_root| {
+        if path == nested_root {
+            return true;
+        }
         path.strip_prefix(nested_root.as_str())
             .is_some_and(|suffix| suffix.starts_with('/'))
     })
