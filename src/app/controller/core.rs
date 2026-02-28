@@ -212,6 +212,7 @@ impl DiffViewer {
             git_action_task: Task::ready(()),
             git_action_loading: false,
             git_status_message: None,
+            working_copy_recovery_candidates: Vec::new(),
             collapsed_files: BTreeSet::new(),
             selected_path: None,
             selected_status: None,
@@ -557,6 +558,7 @@ impl DiffViewer {
             self.start_repo_watch(cx);
         }
         if root_changed {
+            self.working_copy_recovery_candidates.clear();
             self.commit_excluded_files.clear();
             self.repo_tree_nodes.clear();
             self.repo_tree_rows.clear();
@@ -629,6 +631,7 @@ impl DiffViewer {
         self.graph_right_panel_mode = GraphRightPanelMode::ActiveWorkflow;
         self.files.clear();
         self.file_status_by_path.clear();
+        self.working_copy_recovery_candidates.clear();
         self.last_commit_subject = None;
         self.commit_excluded_files.clear();
         self.selected_path = None;

@@ -101,6 +101,61 @@ pub(super) fn commit_working_copy_selected_paths(
     Ok(repo_paths.len())
 }
 
+pub(super) fn restore_working_copy_from_revision(
+    context: &mut RepoContext,
+    source_revision_id: &str,
+) -> Result<()> {
+    let source_revision_id = source_revision_id.trim();
+    if source_revision_id.is_empty() {
+        return Err(anyhow!("source revision id cannot be empty"));
+    }
+    let Some(source_commit_id) = jj_lib::backend::CommitId::try_from_hex(source_revision_id) else {
+        return Err(anyhow!("invalid source revision id '{source_revision_id}'"));
+    };
+
+    let source_commit = context
+        .repo
+        .store()
+        .get_commit(&source_commit_id)
+        .with_context(|| format!("failed to load source revision '{source_revision_id}'"))?;
+    let workspace_name = context.workspace.workspace_name().to_owned();
+    let wc_commit = current_wc_commit(context)?;
+
+    let mut locked_workspace = context
+        .workspace
+        .start_working_copy_mutation()
+        .context("failed to lock working copy for restore")?;
+
+    let mut tx = context.repo.start_transaction();
+    let rewritten_wc = tx
+        .repo_mut()
+        .rewrite_commit(&wc_commit)
+        .set_tree(source_commit.tree())
+        .write()
+        .context("failed to rewrite working-copy commit for restore")?;
+    tx.repo_mut()
+        .set_wc_commit(workspace_name.clone(), rewritten_wc.id().clone())
+        .context("failed to update working-copy commit for restore")?;
+    tx.repo_mut()
+        .rebase_descendants()
+        .context("failed to rebase descendants after restore")?;
+
+    let short_source = source_revision_id.chars().take(12).collect::<String>();
+    let repo = tx
+        .commit(format!("restore working copy from revision {short_source}"))
+        .context("failed to finalize working-copy restore")?;
+
+    let new_wc_commit = current_wc_commit_with_repo(repo.as_ref(), &workspace_name)?;
+    block_on(locked_workspace.locked_wc().check_out(&new_wc_commit))
+        .context("failed to update working-copy files after restore")?;
+    locked_workspace
+        .finish(repo.op_id().clone())
+        .context("failed to persist working-copy state after restore")?;
+
+    context.repo = repo;
+    Ok(())
+}
+
 pub(super) fn move_bookmark_to_parent_of_working_copy(
     context: &mut RepoContext,
     branch_name: &str,

@@ -20,8 +20,8 @@ use hunk::jj::{
     graph_bookmark_drop_validation, graph_bookmark_revision_chain, load_graph_snapshot,
     load_patches_for_files, load_repo_tree, load_snapshot, load_snapshot_fingerprint,
     move_bookmark_to_revision, push_current_bookmark, rename_bookmark, reorder_bookmark_tip_older,
-    review_url_for_bookmark_with_provider_map, sanitize_bookmark_name,
-    squash_bookmark_head_into_parent, sync_current_bookmark,
+    restore_working_copy_from_revision, review_url_for_bookmark_with_provider_map,
+    sanitize_bookmark_name, squash_bookmark_head_into_parent, sync_current_bookmark,
 };
 
 include!("core.rs");

@@ -9,6 +9,7 @@ impl DiffViewer {
         let sync_disabled = !self.can_sync_current_bookmark();
         let push_or_publish_disabled = !self.can_push_or_publish_current_bookmark();
         let review_url_disabled = self.git_action_loading || !branch_syncable;
+        let recovery_candidate = self.latest_working_copy_recovery_candidate_for_active_bookmark();
         let action_label = if show_publish {
             "Publish Bookmark"
         } else {
@@ -245,6 +246,56 @@ impl DiffViewer {
                             })
                     }),
             )
+            .when_some(recovery_candidate.as_ref(), |this, candidate| {
+                this.child(
+                    h_flex()
+                        .w_full()
+                        .items_center()
+                        .justify_between()
+                        .gap_2()
+                        .px_2()
+                        .py_1()
+                        .rounded(px(8.0))
+                        .border_1()
+                        .border_color(cx.theme().border.opacity(if is_dark { 0.90 } else { 0.74 }))
+                        .bg(cx.theme().background.blend(cx.theme().muted.opacity(if is_dark {
+                            0.18
+                        } else {
+                            0.24
+                        })))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .whitespace_normal()
+                                .child(format!(
+                                    "{} files captured from {} -> {} at {}",
+                                    candidate.changed_file_count,
+                                    candidate.source_bookmark,
+                                    candidate.switched_to_bookmark,
+                                    relative_time_label(Some(candidate.unix_time))
+                                )),
+                        )
+                        .child({
+                            let view = view.clone();
+                            Button::new("recover-working-copy")
+                                .outline()
+                                .compact()
+                                .with_size(gpui_component::Size::Small)
+                                .rounded(px(7.0))
+                                .label("Recover Previous Working Copy")
+                                .tooltip("Restore files from the last captured pre-switch working-copy revision")
+                                .disabled(self.git_action_loading)
+                                .on_click(move |_, _, cx| {
+                                    view.update(cx, |this, cx| {
+                                        this.recover_latest_working_copy_for_active_bookmark(cx);
+                                    });
+                                })
+                        }),
+                )
+            })
             .when(self.branch_picker_open, |this| {
                 this.child(self.render_branch_picker_panel(cx))
             })

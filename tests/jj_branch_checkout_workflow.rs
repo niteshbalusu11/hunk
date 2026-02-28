@@ -7,8 +7,9 @@ use hunk::config::{ReviewProviderKind, ReviewProviderMapping};
 use hunk::jj::{
     abandon_bookmark_head, checkout_or_create_bookmark,
     checkout_or_create_bookmark_with_change_transfer, commit_staged, describe_bookmark_head,
-    load_snapshot, rename_bookmark, reorder_bookmark_tip_older, review_url_for_bookmark,
-    review_url_for_bookmark_with_provider_map, squash_bookmark_head_into_parent,
+    load_snapshot, rename_bookmark, reorder_bookmark_tip_older, restore_working_copy_from_revision,
+    review_url_for_bookmark, review_url_for_bookmark_with_provider_map,
+    squash_bookmark_head_into_parent,
 };
 
 #[test]
@@ -131,6 +132,68 @@ fn switching_to_existing_bookmark_can_move_uncommitted_changes() {
     assert!(
         snapshot.files.iter().any(|file| file.path == "tracked.txt"),
         "uncommitted changes should remain in working copy after switching with move enabled"
+    );
+}
+
+#[test]
+fn restoring_working_copy_revision_recovers_changes_after_plain_bookmark_switch() {
+    let fixture = TempRepo::new("restore-working-copy-after-switch");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_bookmark(fixture.path(), "main")
+        .expect("creating main bookmark should succeed");
+    checkout_or_create_bookmark(fixture.path(), "feature")
+        .expect("creating feature bookmark should succeed");
+    checkout_or_create_bookmark(fixture.path(), "main")
+        .expect("switching back to main should succeed");
+
+    write_file(fixture.path().join("tracked.txt"), "line one\nline two\n");
+    write_file(fixture.path().join("scratch.txt"), "temporary text\n");
+    let before_switch = load_snapshot(fixture.path()).expect("snapshot should load before switch");
+    let source_revision = current_working_copy_revision(fixture.path());
+    assert!(
+        before_switch
+            .files
+            .iter()
+            .any(|file| file.path == "tracked.txt"),
+        "tracked change should exist before switching"
+    );
+    assert!(
+        before_switch
+            .files
+            .iter()
+            .any(|file| file.path == "scratch.txt"),
+        "untracked change should exist before switching"
+    );
+
+    checkout_or_create_bookmark(fixture.path(), "feature")
+        .expect("switching to feature without move should succeed");
+    checkout_or_create_bookmark(fixture.path(), "main")
+        .expect("switching back to main should succeed");
+
+    let after_switch = load_snapshot(fixture.path()).expect("snapshot should load after switch");
+    assert!(
+        after_switch.files.is_empty(),
+        "plain switch should not carry uncommitted changes"
+    );
+
+    restore_working_copy_from_revision(fixture.path(), source_revision.as_str())
+        .expect("restoring working-copy revision should succeed");
+    let after_restore = load_snapshot(fixture.path()).expect("snapshot should load after restore");
+    assert!(
+        after_restore
+            .files
+            .iter()
+            .any(|file| file.path == "tracked.txt"),
+        "tracked change should be restored"
+    );
+    assert!(
+        after_restore
+            .files
+            .iter()
+            .any(|file| file.path == "scratch.txt"),
+        "untracked change should be restored"
     );
 }
 
@@ -761,6 +824,15 @@ fn write_file(path: PathBuf, contents: &str) {
         fs::create_dir_all(parent).expect("parent directories should be created");
     }
     fs::write(path, contents).expect("file should be written");
+}
+
+fn current_working_copy_revision(cwd: &Path) -> String {
+    run_jj_capture(
+        cwd,
+        ["log", "-r", "@", "-n", "1", "--no-graph", "-T", "commit_id"],
+    )
+    .trim()
+    .to_string()
 }
 
 fn run_jj<const N: usize>(cwd: &Path, args: [&str; N]) {

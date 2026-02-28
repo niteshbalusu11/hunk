@@ -27,6 +27,7 @@ use backend::{
     move_bookmark_to_parent_of_working_copy, normalize_path, push_bookmark,
     rename_bookmark as rename_local_bookmark, render_patch_for_entry,
     reorder_bookmark_tip_older as reorder_local_bookmark_tip_older, repo_line_stats_from_context,
+    restore_working_copy_from_revision as restore_wc_from_revision,
     set_local_bookmark_target_revision,
     squash_bookmark_head_into_parent as squash_local_bookmark_head_into_parent,
     sync_bookmark_from_remote, walk_repo_tree,
@@ -558,6 +559,19 @@ pub fn commit_selected_paths(
 
 pub fn checkout_or_create_bookmark(repo_root: &Path, bookmark_name: &str) -> Result<()> {
     checkout_or_create_bookmark_with_change_transfer(repo_root, bookmark_name, false)
+}
+
+pub fn restore_working_copy_from_revision(
+    repo_root: &Path,
+    source_revision_id: &str,
+) -> Result<()> {
+    let source_revision_id = source_revision_id.trim();
+    if source_revision_id.is_empty() {
+        return Err(anyhow!("source revision id cannot be empty"));
+    }
+
+    let mut context = load_repo_context_at_root(repo_root, true)?;
+    restore_wc_from_revision(&mut context, source_revision_id)
 }
 
 pub fn create_bookmark_at_revision(

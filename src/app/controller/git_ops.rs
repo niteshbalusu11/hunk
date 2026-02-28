@@ -39,6 +39,57 @@ impl DiffViewer {
         }
     }
 
+    fn now_unix_seconds() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs() as i64)
+            .unwrap_or(0)
+    }
+
+    fn push_recovery_candidate_for_switch(
+        &mut self,
+        target_bookmark: &str,
+    ) -> Option<WorkingCopyRecoveryCandidate> {
+        if self.files.is_empty() {
+            return None;
+        }
+        let source_revision_id = self.graph_working_copy_commit_id.clone()?;
+        let source_bookmark = self
+            .checked_out_bookmark_name()
+            .unwrap_or(self.branch_name.as_str())
+            .to_string();
+        let switched_to_bookmark = target_bookmark.trim().to_string();
+        if source_bookmark == switched_to_bookmark {
+            return None;
+        }
+
+        let candidate = WorkingCopyRecoveryCandidate {
+            source_revision_id,
+            source_bookmark,
+            switched_to_bookmark,
+            changed_file_count: self.files.len(),
+            unix_time: Self::now_unix_seconds(),
+        };
+        self.working_copy_recovery_candidates
+            .retain(|existing| existing.source_revision_id != candidate.source_revision_id);
+        self.working_copy_recovery_candidates
+            .insert(0, candidate.clone());
+        self.working_copy_recovery_candidates.truncate(8);
+        Some(candidate)
+    }
+
+    pub(super) fn latest_working_copy_recovery_candidate_for_active_bookmark(
+        &self,
+    ) -> Option<WorkingCopyRecoveryCandidate> {
+        let active_bookmark = self
+            .checked_out_bookmark_name()
+            .unwrap_or(self.branch_name.as_str());
+        self.working_copy_recovery_candidates
+            .iter()
+            .find(|candidate| candidate.source_bookmark == active_bookmark)
+            .cloned()
+    }
+
     fn next_git_action_epoch(&mut self) -> usize {
         self.git_action_epoch = self.git_action_epoch.saturating_add(1);
         self.git_action_epoch
@@ -104,6 +155,7 @@ impl DiffViewer {
         &mut self,
         branch_name: String,
         move_changes_to_new_bookmark: bool,
+        recovery_candidate: Option<WorkingCopyRecoveryCandidate>,
         cx: &mut Context<Self>,
     ) {
         self.run_git_action("Activate bookmark", cx, move |repo_root| {
@@ -112,14 +164,24 @@ impl DiffViewer {
                 &branch_name,
                 move_changes_to_new_bookmark,
             )?;
-            if move_changes_to_new_bookmark {
-                Ok(format!(
+            let message = if move_changes_to_new_bookmark {
+                format!(
                     "Activated bookmark {} and moved changes",
                     branch_name
-                ))
+                )
             } else {
-                Ok(format!("Activated bookmark {}", branch_name))
+                format!("Activated bookmark {}", branch_name)
+            };
+            if let Some(candidate) = recovery_candidate {
+                return Ok(format!(
+                    "{} · {} files captured from {} -> {}",
+                    message,
+                    candidate.changed_file_count,
+                    candidate.source_bookmark,
+                    candidate.switched_to_bookmark
+                ));
             }
+            Ok(message)
         });
     }
 
@@ -142,7 +204,17 @@ impl DiffViewer {
         }
         let move_changes =
             move_changes_to_new_bookmark && !self.files.is_empty() && !self.branch_name.is_empty();
-        self.checkout_or_create_bookmark_with_options(target_branch, move_changes, cx);
+        let recovery_candidate = if move_changes {
+            None
+        } else {
+            self.push_recovery_candidate_for_switch(target_branch.as_str())
+        };
+        self.checkout_or_create_bookmark_with_options(
+            target_branch,
+            move_changes,
+            recovery_candidate,
+            cx,
+        );
     }
 
     pub(super) fn checkout_bookmark(
@@ -751,6 +823,28 @@ impl DiffViewer {
     pub(super) fn toggle_bookmark_picker(&mut self, cx: &mut Context<Self>) {
         self.branch_picker_open = !self.branch_picker_open;
         cx.notify();
+    }
+
+    pub(super) fn recover_latest_working_copy_for_active_bookmark(&mut self, cx: &mut Context<Self>) {
+        let Some(candidate) = self.latest_working_copy_recovery_candidate_for_active_bookmark() else {
+            let message = "No recoverable working-copy changes were captured for this bookmark."
+                .to_string();
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
+            cx.notify();
+            return;
+        };
+        let source_revision_id = candidate.source_revision_id.clone();
+        let changed_file_count = candidate.changed_file_count;
+
+        self.run_git_action("Recover working copy", cx, move |repo_root| {
+            restore_working_copy_from_revision(&repo_root, &source_revision_id)?;
+            let short_revision = source_revision_id.chars().take(12).collect::<String>();
+            Ok(format!(
+                "Recovered {} files from working-copy revision {}",
+                changed_file_count, short_revision
+            ))
+        });
     }
 }
 
