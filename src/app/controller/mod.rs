@@ -23,10 +23,12 @@ use hunk::jj::{
 };
 
 include!("core.rs");
+include!("core_runtime.rs");
 include!("git_ops.rs");
 include!("file_tree.rs");
 include!("editor.rs");
 include!("comments.rs");
+include!("comments_match.rs");
 include!("selection.rs");
 include!("scroll.rs");
 include!("fps.rs");

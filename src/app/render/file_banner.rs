@@ -120,7 +120,10 @@ impl DiffViewer {
             )
             .child(
                 div()
+                    .flex_1()
+                    .min_w_0()
                     .text_xs()
+                    .truncate()
                     .font_family(cx.theme().mono_font_family.clone())
                     .text_color(cx.theme().foreground)
                     .child(path.clone()),

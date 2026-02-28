@@ -3,7 +3,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use hunk::jj::{commit_selected_paths, commit_staged, load_snapshot, stage_all, unstage_all};
+use hunk::jj::{
+    checkout_or_create_bookmark, commit_selected_paths, commit_staged, load_snapshot, stage_all,
+    unstage_all,
+};
 
 #[test]
 fn stage_actions_are_rejected_with_jj_backend() {
@@ -40,6 +43,47 @@ fn commit_staged_commits_working_copy_changes_with_jj() {
     assert!(
         snapshot.last_commit_subject.as_deref() == Some("update tracked"),
         "last commit subject should match the latest commit"
+    );
+}
+
+#[test]
+fn commit_prefers_active_bookmark_preference_over_git_head() {
+    let fixture = TempRepo::new("commit-prefers-active-bookmark");
+    let tracked = fixture.path().join("tracked.txt");
+    write_file(tracked.clone(), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+    checkout_or_create_bookmark(fixture.path(), "main")
+        .expect("creating main bookmark should succeed");
+    checkout_or_create_bookmark(fixture.path(), "feature")
+        .expect("creating feature bookmark should succeed");
+    checkout_or_create_bookmark(fixture.path(), "main")
+        .expect("switching back to main should succeed");
+
+    fs::write(
+        fixture.path().join(".jj").join("hunk-active-bookmark"),
+        "feature\n",
+    )
+    .expect("active bookmark preference should be writable");
+
+    write_file(tracked, "line one\nline two\n");
+    commit_staged(fixture.path(), "prefer active bookmark").expect("commit should succeed");
+
+    let feature_log = run_jj_capture(
+        fixture.path(),
+        ["log", "-r", "feature", "-n", "1", "--no-graph"],
+    );
+    assert!(
+        feature_log.contains("prefer active bookmark"),
+        "feature bookmark should advance when it is the active preference"
+    );
+
+    let main_log = run_jj_capture(
+        fixture.path(),
+        ["log", "-r", "main", "-n", "1", "--no-graph"],
+    );
+    assert!(
+        !main_log.contains("prefer active bookmark"),
+        "main bookmark should not advance when active preference points to feature"
     );
 }
 
@@ -158,4 +202,14 @@ fn run_jj<const N: usize>(cwd: &Path, args: [&str; N]) {
         .status()
         .expect("jj command should run");
     assert!(status.success(), "jj command failed");
+}
+
+fn run_jj_capture<const N: usize>(cwd: &Path, args: [&str; N]) -> String {
+    let output = Command::new("jj")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .expect("jj command should run");
+    assert!(output.status.success(), "jj command failed");
+    String::from_utf8(output.stdout).expect("jj output should be utf-8")
 }

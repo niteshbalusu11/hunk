@@ -189,7 +189,7 @@ pub(super) fn load_changed_files_from_context(context: &RepoContext) -> Result<V
     let wc_commit = current_wc_commit(context)?;
     let base_tree = wc_commit.parent_tree(context.repo.as_ref())?;
     let current_tree = wc_commit.tree();
-    let nested_repo_roots = nested_repo_roots_from_fs(&context.root)?;
+    let nested_repo_roots = nested_repo_roots_for_context(context)?;
 
     let mut file_map = BTreeMap::<String, ChangedFile>::new();
     for entry in block_on_stream(base_tree.diff_stream(&current_tree, &EverythingMatcher)) {
@@ -197,7 +197,7 @@ pub(super) fn load_changed_files_from_context(context: &RepoContext) -> Result<V
         if path.is_empty() {
             continue;
         }
-        if path_is_within_nested_repo(path.as_str(), &nested_repo_roots) {
+        if path_is_within_nested_repo(path.as_str(), nested_repo_roots) {
             continue;
         }
 
@@ -460,11 +460,11 @@ pub(super) fn last_commit_subject_from_context(context: &RepoContext) -> Result<
 
 pub(super) fn repo_line_stats_from_context(context: &RepoContext) -> Result<LineStats> {
     let materialize_options = conflict_materialize_options(context);
-    let nested_repo_roots = nested_repo_roots_from_fs(&context.root)?;
+    let nested_repo_roots = nested_repo_roots_for_context(context)?;
     let mut stats = LineStats::default();
 
     for entry in collect_materialized_diff_entries(context)? {
-        if materialized_entry_within_nested_repo(&entry, &nested_repo_roots) {
+        if materialized_entry_within_nested_repo(&entry, nested_repo_roots) {
             continue;
         }
         let entry_stats = line_stats_for_entry(entry, &materialize_options)?;
@@ -473,6 +473,19 @@ pub(super) fn repo_line_stats_from_context(context: &RepoContext) -> Result<Line
     }
 
     Ok(stats)
+}
+
+fn nested_repo_roots_for_context(context: &RepoContext) -> Result<&BTreeSet<String>> {
+    if let Some(cached) = context.nested_repo_roots_cache.get() {
+        return Ok(cached);
+    }
+
+    let roots = nested_repo_roots_from_fs(&context.root)?;
+    let _ = context.nested_repo_roots_cache.set(roots);
+    context
+        .nested_repo_roots_cache
+        .get()
+        .ok_or_else(|| anyhow!("failed to cache nested repository roots"))
 }
 
 pub(super) fn conflict_materialize_options(context: &RepoContext) -> ConflictMaterializeOptions {

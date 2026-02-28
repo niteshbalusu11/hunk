@@ -106,25 +106,54 @@ impl DiffViewer {
     }
 
     fn sync_sidebar_repo_list_state(&mut self, row_count: usize) {
-        if self.sidebar_repo_row_count == row_count {
+        if self.sidebar_repo_row_count == row_count
+            && self.sidebar_repo_scroll_anchor_path.is_none()
+        {
             return;
         }
         self.sidebar_repo_row_count = row_count;
-        Self::sync_sidebar_list_state(&self.sidebar_repo_list_state, row_count);
+        let anchor_path = self.sidebar_repo_scroll_anchor_path.take();
+        Self::sync_sidebar_list_state(
+            &self.sidebar_repo_list_state,
+            &self.repo_tree_rows,
+            anchor_path.as_deref(),
+        );
     }
 
-    fn sync_sidebar_list_state(list_state: &ListState, row_count: usize) {
+    fn sync_sidebar_list_state(
+        list_state: &ListState,
+        rows: &[super::data::RepoTreeRow],
+        anchor_path: Option<&str>,
+    ) {
+        let row_count = rows.len();
         let previous_top = list_state.logical_scroll_top();
         list_state.reset(row_count);
-        let clamped_item_ix = if row_count == 0 {
+        let fallback_item_ix = if row_count == 0 {
             0
         } else {
             previous_top.item_ix.min(row_count.saturating_sub(1))
         };
+        let item_ix = if let Some(path) = anchor_path {
+            rows.iter()
+                .position(|row| row.path == path)
+                .unwrap_or(fallback_item_ix)
+        } else {
+            fallback_item_ix
+        };
+        let offset_in_item = if row_count == 0 || item_ix != previous_top.item_ix {
+            px(0.)
+        } else {
+            previous_top.offset_in_item
+        };
         list_state.scroll_to(ListOffset {
-            item_ix: clamped_item_ix,
-            offset_in_item: px(0.),
+            item_ix,
+            offset_in_item,
         });
+    }
+
+    pub(crate) fn capture_sidebar_repo_scroll_anchor(&mut self) {
+        let top_row_ix = self.sidebar_repo_list_state.logical_scroll_top().item_ix;
+        self.sidebar_repo_scroll_anchor_path = self.repo_tree_rows.get(top_row_ix).map(|row| row.path.clone());
     }
 
     fn render_repo_tree_row(

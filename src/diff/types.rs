@@ -101,8 +101,8 @@ impl DiffLine {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffHunk {
     pub header: String,
-    pub old_start: u32,
-    pub new_start: u32,
+    pub old_start: Option<u32>,
+    pub new_start: Option<u32>,
     pub lines: Vec<DiffLine>,
     pub trailing_meta: Vec<String>,
 }

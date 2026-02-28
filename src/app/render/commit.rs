@@ -21,7 +21,7 @@ impl DiffViewer {
             "Detached".to_string()
         } else if self.branch_has_upstream {
             if self.branch_ahead_count > 0 {
-                format!("{} ahead", self.branch_ahead_count)
+                "Needs push".to_string()
             } else {
                 "Up to date".to_string()
             }
@@ -321,12 +321,13 @@ impl DiffViewer {
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
         let revisions = &self.bookmark_revisions;
+        let actions_enabled = self.can_run_active_bookmark_actions();
         let can_abandon_tip =
-            !self.git_action_loading && self.bookmark_syncable() && !revisions.is_empty();
+            !self.git_action_loading && actions_enabled && !revisions.is_empty();
         let can_squash_tip =
-            !self.git_action_loading && self.bookmark_syncable() && revisions.len() >= 2;
+            !self.git_action_loading && actions_enabled && revisions.len() >= 2;
         let can_reorder_tip =
-            !self.git_action_loading && self.bookmark_syncable() && revisions.len() >= 2;
+            !self.git_action_loading && actions_enabled && revisions.len() >= 2;
 
         v_flex()
             .w_full()

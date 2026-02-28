@@ -466,6 +466,10 @@ impl DiffViewer {
         is_dark: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if span.style.hard_break {
+            return div().w_full().h(px(0.0)).into_any_element();
+        }
+
         let mut element = div()
             .flex_none()
             .whitespace_nowrap()

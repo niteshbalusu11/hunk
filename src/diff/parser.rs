@@ -13,7 +13,10 @@ pub fn parse_patch_document(patch: &str) -> DiffDocument {
         let line = lines[ix];
 
         if line.starts_with("@@") {
-            let (old_start, new_start) = parse_hunk_header(line).unwrap_or((0, 0));
+            let (old_start, new_start) = parse_hunk_header(line)
+                .map_or((None, None), |(old_start, new_start)| {
+                    (Some(old_start), Some(new_start))
+                });
             ix += 1;
 
             let mut old_line = old_start;
@@ -27,41 +30,43 @@ pub fn parse_patch_document(patch: &str) -> DiffDocument {
                 if hunk_line.starts_with("@@") || hunk_line.starts_with("diff --git") {
                     break;
                 }
-                if is_meta_line(hunk_line) && !hunk_line.starts_with("\\ No newline at end of file")
-                {
-                    break;
-                }
 
                 match hunk_line.chars().next() {
                     Some(' ') => {
                         hunk_lines.push(DiffLine::new(
                             DiffLineKind::Context,
-                            Some(old_line),
-                            Some(new_line),
+                            old_line,
+                            new_line,
                             hunk_line.strip_prefix(' ').unwrap_or(hunk_line),
                         ));
-                        old_line = old_line.saturating_add(1);
-                        new_line = new_line.saturating_add(1);
+                        old_line = old_line.map(|line| line.saturating_add(1));
+                        new_line = new_line.map(|line| line.saturating_add(1));
                     }
                     Some('-') => {
                         hunk_lines.push(DiffLine::new(
                             DiffLineKind::Removed,
-                            Some(old_line),
+                            old_line,
                             None,
                             hunk_line.strip_prefix('-').unwrap_or(hunk_line),
                         ));
-                        old_line = old_line.saturating_add(1);
+                        old_line = old_line.map(|line| line.saturating_add(1));
                     }
                     Some('+') => {
                         hunk_lines.push(DiffLine::new(
                             DiffLineKind::Added,
                             None,
-                            Some(new_line),
+                            new_line,
                             hunk_line.strip_prefix('+').unwrap_or(hunk_line),
                         ));
-                        new_line = new_line.saturating_add(1);
+                        new_line = new_line.map(|line| line.saturating_add(1));
                     }
-                    _ => trailing_meta.push(hunk_line.to_string()),
+                    Some('\\') => trailing_meta.push(hunk_line.to_string()),
+                    _ => {
+                        if is_meta_line(hunk_line) {
+                            break;
+                        }
+                        trailing_meta.push(hunk_line.to_string());
+                    }
                 }
 
                 ix += 1;

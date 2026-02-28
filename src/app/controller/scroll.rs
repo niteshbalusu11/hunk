@@ -90,7 +90,7 @@ impl DiffViewer {
         };
         let mut pending_rows = Vec::with_capacity(batch_limit);
         let recently_scrolling = self.recently_scrolling();
-        for row_ix in start..end {
+        for row_ix in prioritized_prefetch_row_indices(start, end, visible_row) {
             if pending_rows.len() >= batch_limit {
                 break;
             }
@@ -249,9 +249,51 @@ impl DiffViewer {
                 .item_ix
                 .min(self.diff_rows.len().saturating_sub(1))
         };
+        let offset_in_item = if self.diff_rows.is_empty() || clamped_item_ix != previous_top.item_ix
+        {
+            px(0.)
+        } else {
+            previous_top.offset_in_item
+        };
         self.diff_list_state.scroll_to(ListOffset {
             item_ix: clamped_item_ix,
-            offset_in_item: px(0.),
+            offset_in_item,
         });
     }
+}
+
+fn prioritized_prefetch_row_indices(start: usize, end: usize, anchor_row: usize) -> Vec<usize> {
+    if start >= end {
+        return Vec::new();
+    }
+
+    let anchor = anchor_row.clamp(start, end.saturating_sub(1));
+    let mut rows = Vec::with_capacity(end.saturating_sub(start));
+    rows.push(anchor);
+
+    let mut step = 1usize;
+    while rows.len() < end.saturating_sub(start) {
+        let mut inserted = false;
+
+        if let Some(right) = anchor.checked_add(step)
+            && right < end
+        {
+            rows.push(right);
+            inserted = true;
+        }
+
+        if let Some(left) = anchor.checked_sub(step)
+            && left >= start
+        {
+            rows.push(left);
+            inserted = true;
+        }
+
+        if !inserted {
+            break;
+        }
+        step = step.saturating_add(1);
+    }
+
+    rows
 }

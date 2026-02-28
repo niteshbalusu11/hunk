@@ -419,8 +419,12 @@ fn fnv1a64_update(mut hash: u64, bytes: &[u8]) -> u64 {
 
 fn next_comment_id() -> String {
     let counter = COMMENT_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let now = now_unix_ms();
-    format!("comment-{now:016x}-{counter:08x}")
+    let now_nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let pid = std::process::id();
+    format!("comment-{now_nanos:032x}-{pid:08x}-{counter:016x}")
 }
 
 fn map_comment_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CommentRecord> {

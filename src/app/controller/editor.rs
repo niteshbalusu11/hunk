@@ -17,6 +17,10 @@ impl DiffViewer {
     }
 
     pub(super) fn request_file_editor_reload(&mut self, path: String, cx: &mut Context<Self>) {
+        if self.prevent_unsaved_editor_discard(Some(path.as_str()), cx) {
+            return;
+        }
+
         let retain_markdown_preview = if self.editor_path.as_deref() == Some(path.as_str()) {
             self.editor_markdown_preview
         } else {
@@ -141,8 +145,10 @@ impl DiffViewer {
                     this.editor_save_loading = false;
                     match result {
                         Ok(()) => {
-                            this.editor_last_saved_text = Some(saved_text.clone());
-                            this.sync_editor_dirty_from_input(cx);
+                            if this.editor_path.as_deref() == Some(status_path.as_str()) {
+                                this.editor_last_saved_text = Some(saved_text.clone());
+                                this.sync_editor_dirty_from_input(cx);
+                            }
                             this.git_status_message = Some(format!("Saved {}", status_path));
                             this.request_snapshot_refresh(cx);
                         }
@@ -284,6 +290,39 @@ impl DiffViewer {
         let previous_task =
             std::mem::replace(&mut self.editor_markdown_preview_task, Task::ready(()));
         drop(previous_task);
+    }
+
+    fn prevent_unsaved_editor_discard(
+        &mut self,
+        next_path: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.editor_path.is_none() || self.editor_loading {
+            return false;
+        }
+        if self.editor_save_loading {
+            let current_path = self.editor_path.as_deref().unwrap_or_default();
+            self.git_status_message = Some(format!(
+                "Save in progress for {current_path}. Wait before switching files."
+            ));
+            cx.notify();
+            return true;
+        }
+
+        self.sync_editor_dirty_from_input(cx);
+        if !self.editor_dirty {
+            return false;
+        }
+
+        let current_path = self.editor_path.as_deref().unwrap_or_default();
+        let message = if next_path == Some(current_path) {
+            format!("Unsaved changes in {current_path}. Save before reloading.")
+        } else {
+            format!("Unsaved changes in {current_path}. Save before switching files.")
+        };
+        self.git_status_message = Some(message);
+        cx.notify();
+        true
     }
 
     pub(super) fn clear_editor_state(&mut self, cx: &mut Context<Self>) {

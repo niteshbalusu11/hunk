@@ -34,6 +34,7 @@ pub struct MarkdownInlineStyle {
     pub italic: bool,
     pub strikethrough: bool,
     pub code: bool,
+    pub hard_break: bool,
     pub link: Option<String>,
 }
 
@@ -378,7 +379,7 @@ fn parse_inline_node(
                 style,
             );
         }
-        Node::Break(_) => push_inline_span(out, " ", style),
+        Node::Break(_) => push_hard_break_span(out, style),
         Node::Html(html) => push_inline_span(out, html.value.as_str(), style),
         Node::MdxTextExpression(expr) => push_inline_span(out, expr.value.as_str(), style),
         _ => {
@@ -414,9 +415,22 @@ fn push_inline_span(out: &mut Vec<MarkdownInlineSpan>, text: &str, style: &Markd
     });
 }
 
+fn push_hard_break_span(out: &mut Vec<MarkdownInlineSpan>, style: &MarkdownInlineStyle) {
+    let mut next_style = style.clone();
+    next_style.hard_break = true;
+    out.push(MarkdownInlineSpan {
+        text: String::new(),
+        style: next_style,
+    });
+}
+
 fn compact_inline_spans(spans: Vec<MarkdownInlineSpan>) -> Vec<MarkdownInlineSpan> {
     let mut compacted: Vec<MarkdownInlineSpan> = Vec::with_capacity(spans.len());
     for span in spans {
+        if span.style.hard_break {
+            compacted.push(span);
+            continue;
+        }
         if span.text.is_empty() {
             continue;
         }
@@ -432,6 +446,9 @@ fn compact_inline_spans(spans: Vec<MarkdownInlineSpan>) -> Vec<MarkdownInlineSpa
 }
 
 fn spans_end_with_whitespace(spans: &[MarkdownInlineSpan]) -> bool {
+    if spans.last().is_some_and(|span| span.style.hard_break) {
+        return true;
+    }
     spans
         .last()
         .and_then(|span| span.text.chars().last())
