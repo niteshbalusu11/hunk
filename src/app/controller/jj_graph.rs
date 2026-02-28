@@ -24,6 +24,7 @@ impl DiffViewer {
         });
         self.graph_pending_confirmation = None;
         self.graph_drag_state = None;
+        self.graph_right_panel_mode = GraphRightPanelMode::SelectedBookmark;
         self.scroll_graph_node_into_view(node_id.as_str());
         cx.notify();
     }
@@ -53,6 +54,7 @@ impl DiffViewer {
         });
         self.graph_pending_confirmation = None;
         self.graph_drag_state = None;
+        self.graph_right_panel_mode = GraphRightPanelMode::SelectedBookmark;
         self.scroll_graph_node_into_view(node_id.as_str());
         cx.notify();
     }
@@ -64,6 +66,34 @@ impl DiffViewer {
         self.graph_selected_bookmark = None;
         self.graph_pending_confirmation = None;
         self.graph_drag_state = None;
+        self.graph_right_panel_mode = GraphRightPanelMode::ActiveWorkflow;
+        cx.notify();
+    }
+
+    pub(super) fn set_graph_right_panel_mode_active(&mut self, cx: &mut Context<Self>) {
+        if self.graph_right_panel_mode == GraphRightPanelMode::ActiveWorkflow {
+            return;
+        }
+        self.graph_right_panel_mode = GraphRightPanelMode::ActiveWorkflow;
+        cx.notify();
+    }
+
+    pub(super) fn set_graph_right_panel_mode_selected(&mut self, cx: &mut Context<Self>) {
+        if self.graph_right_panel_mode == GraphRightPanelMode::SelectedBookmark {
+            return;
+        }
+        if self.graph_selected_bookmark.is_none() {
+            self.git_status_message =
+                Some("Select a bookmark chip in the graph before opening bookmark focus mode.".to_string());
+            Self::push_warning_notification(
+                "Select a bookmark chip in the graph before opening bookmark focus mode."
+                    .to_string(),
+                cx,
+            );
+            cx.notify();
+            return;
+        }
+        self.graph_right_panel_mode = GraphRightPanelMode::SelectedBookmark;
         cx.notify();
     }
 
@@ -174,6 +204,7 @@ impl DiffViewer {
             scope,
         });
         self.graph_pending_confirmation = None;
+        self.graph_right_panel_mode = GraphRightPanelMode::SelectedBookmark;
         self.graph_drag_state = self.graph_selected_bookmark.clone().map(|bookmark| {
             GraphBookmarkDragState {
                 bookmark,
@@ -663,6 +694,12 @@ impl DiffViewer {
                     self.graph_selected_node_id = Some(focused_tip_id);
                 }
             }
+        }
+
+        if self.graph_right_panel_mode == GraphRightPanelMode::SelectedBookmark
+            && self.graph_selected_bookmark.is_none()
+        {
+            self.graph_right_panel_mode = GraphRightPanelMode::ActiveWorkflow;
         }
     }
 }

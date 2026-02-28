@@ -124,6 +124,34 @@ Redesign the JJ Workspace into an interactive graph-first workflow inspired by `
 - [x] Deep phase review gate: perform final end-to-end code review across all phases, fix remaining bugs/refactors, then release.
 - Phase 8 review note (2026-02-28): hard-cut legacy JJ workspace wrappers in favor of the graph-first shell, renamed remaining JJ panel surface to graph operations terminology, completed full validation (`cargo check`, full `cargo test` 138 passed/0 failed, strict clippy), and finalized rollout as a breaking change without feature flags.
 
+### Phase 9: Right Panel Usability Recovery (Current)
+- [x] Phase 9A: Spec + TODOs for right panel redesign documented in this RFC.
+- [x] Phase 9A deep review gate: review the spec/tasks for ambiguity, missing constraints, and edge cases before code changes.
+- [x] Phase 9B: Split right panel into two explicit modes:
+  - Active Workflow mode (working copy + commit/revision stack actions)
+  - Selected Bookmark mode (bookmark-focused exploration/actions)
+- [x] Phase 9B deep review gate: review mode transitions, state reconciliation, and render-path clarity before next phase.
+- [x] Phase 9C: Fix working-copy list UX:
+  - unify tracked/untracked rows into one list
+  - single scrollbar
+  - preserve include/exclude toggles and row selection behavior
+- [x] Phase 9C deep review gate: review row interactions, scroll behavior, and list stability under snapshot refreshes.
+- [x] Phase 9D: Make right-panel controls responsive:
+  - action rows must wrap cleanly in narrow panel widths
+  - no clipped/hidden buttons in revision stack or inspector sections
+- [x] Phase 9D deep review gate: review small-width layouts and button accessibility.
+- [x] Phase 9E: Prefill PR/MR title on open/copy review URL from bookmark context:
+  - prefer tip revision subject
+  - fallback to bookmark name
+  - support GitHub and GitLab URL parameter conventions
+- [x] Phase 9E deep review gate: review URL correctness, provider behavior, and encoding safety.
+- [x] Phase 9F: Regression pass + refactor cleanup:
+  - targeted tests for new right-panel behavior
+  - full validation (`fmt`, strict `clippy`, `test`)
+  - cleanup any code duplication introduced in Phases 9B-9E
+- [x] Phase 9F deep review gate: comprehensive bug hunt and maintainability pass before marking Phase 9 complete.
+- Phase 9 review note (2026-02-28): split right panel into explicit `Active Workflow` vs `Selected Bookmark` modes to remove mixed mental model; moved focus-strip-only workflows into selected mode; unified tracked/untracked working-copy rows into one scroll list; made narrow-width action rows wrap across commit, revision-stack, and inspector surfaces; prefills PR/MR title from tip revision subject (fallback bookmark name) for both GitHub and GitLab review URLs; re-ran full validation (`cargo fmt --all`, strict `cargo clippy --all-targets -- -D warnings`, full `cargo test`).
+
 ## Acceptance Criteria (V1)
 1. User can click any bookmark and view its revision chain.
 2. User can distinguish local vs remote bookmarks visually.

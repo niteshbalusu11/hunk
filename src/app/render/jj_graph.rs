@@ -11,22 +11,168 @@ impl DiffViewer {
                 resizable_panel()
                     .size(px(440.0))
                     .size_range(px(320.0)..px(760.0))
+                    .child(self.render_jj_graph_right_panel(cx)),
+            )
+            .into_any_element()
+    }
+
+    fn render_jj_graph_right_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let is_dark = cx.theme().mode.is_dark();
+        let panel_body = match self.graph_right_panel_mode {
+            GraphRightPanelMode::ActiveWorkflow => self.render_jj_graph_active_workflow_panel(cx),
+            GraphRightPanelMode::SelectedBookmark => self.render_jj_graph_selected_bookmark_panel(cx),
+        };
+
+        v_flex()
+            .size_full()
+            .min_h_0()
+            .gap_2()
+            .p_2()
+            .rounded(px(8.0))
+            .border_1()
+            .border_color(cx.theme().border.opacity(if is_dark { 0.90 } else { 0.74 }))
+            .bg(cx.theme().background.blend(cx.theme().muted.opacity(if is_dark {
+                0.16
+            } else {
+                0.24
+            })))
+            .child(self.render_jj_graph_right_panel_mode_switch(cx))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scrollbar()
+                    .child(panel_body),
+            )
+            .into_any_element()
+    }
+
+    fn render_jj_graph_right_panel_mode_switch(&self, cx: &mut Context<Self>) -> AnyElement {
+        let view = cx.entity();
+        let selected_available = self.graph_selected_bookmark.is_some();
+        let active_selected = self.graph_right_panel_mode == GraphRightPanelMode::ActiveWorkflow;
+        let bookmark_selected = self.graph_right_panel_mode == GraphRightPanelMode::SelectedBookmark;
+
+        v_flex()
+            .w_full()
+            .gap_1()
+            .child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Right Panel Mode"),
+            )
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .gap_1()
+                    .flex_wrap()
+                    .child({
+                        let view = view.clone();
+                        let button = Button::new("jj-graph-right-mode-active")
+                            .compact()
+                            .with_size(gpui_component::Size::Small)
+                            .rounded(px(7.0))
+                            .label("Active Workflow")
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.set_graph_right_panel_mode_active(cx);
+                                });
+                            });
+                        if active_selected {
+                            button.primary().into_any_element()
+                        } else {
+                            button.outline().into_any_element()
+                        }
+                    })
+                    .child({
+                        let view = view.clone();
+                        let button = Button::new("jj-graph-right-mode-selected")
+                            .compact()
+                            .with_size(gpui_component::Size::Small)
+                            .rounded(px(7.0))
+                            .label("Selected Bookmark")
+                            .disabled(!selected_available)
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.set_graph_right_panel_mode_selected(cx);
+                                });
+                            });
+                        if bookmark_selected {
+                            button.primary().into_any_element()
+                        } else {
+                            button.outline().into_any_element()
+                        }
+                    })
                     .child(
-                        v_flex()
-                            .size_full()
-                            .min_h_0()
-                            .gap_2()
-                            .p_2()
-                            .child(self.render_jj_graph_inspector(cx))
-                            .child(self.render_jj_graph_focus_strip(cx))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_h_0()
-                                    .child(self.render_jj_graph_operations_panel(cx)),
-                            ),
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(if selected_available {
+                                "Select bookmark chips in graph to populate bookmark mode."
+                            } else {
+                                "No bookmark selected in graph."
+                            }),
                     ),
             )
+            .into_any_element()
+    }
+
+    fn render_jj_graph_active_workflow_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        v_flex()
+            .w_full()
+            .gap_2()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Use this mode for working-copy changes, commit actions, and active bookmark operations."),
+            )
+            .child(self.render_jj_graph_operations_panel(cx))
+            .into_any_element()
+    }
+
+    fn render_jj_graph_selected_bookmark_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        if self.graph_selected_bookmark.is_none() {
+            return v_flex()
+                .w_full()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("No bookmark selected. Click a bookmark chip in the graph."),
+                )
+                .child({
+                    let view = cx.entity();
+                    Button::new("jj-graph-right-mode-fallback")
+                        .outline()
+                        .compact()
+                        .with_size(gpui_component::Size::Small)
+                        .rounded(px(7.0))
+                        .label("Back to Active Workflow")
+                        .on_click(move |_, _, cx| {
+                            view.update(cx, |this, cx| {
+                                this.set_graph_right_panel_mode_active(cx);
+                            });
+                        })
+                })
+                .into_any_element();
+        }
+
+        v_flex()
+            .w_full()
+            .gap_2()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Use this mode to inspect and edit the selected bookmark without mixing active working-copy actions."),
+            )
+            .child(self.render_jj_graph_inspector(cx))
+            .child(self.render_jj_graph_focus_strip(cx))
             .into_any_element()
     }
 

@@ -45,7 +45,7 @@ impl DiffViewer {
             || self.bookmark_revisions.is_empty();
 
         v_flex()
-            .size_full()
+            .w_full()
             .gap_2()
             .px_3()
             .pt_2()
@@ -117,6 +117,7 @@ impl DiffViewer {
                     .w_full()
                     .items_center()
                     .gap_1()
+                    .flex_wrap()
                     .child({
                         let view = view.clone();
                         Button::new("branch-picker-label")
@@ -234,6 +235,9 @@ impl DiffViewer {
                             })
                     }),
             )
+            .when(self.branch_picker_open, |this| {
+                this.child(self.render_branch_picker_panel(cx))
+            })
             .child(self.render_workspace_changes_panel(cx))
             .child(
                 h_flex()
@@ -264,9 +268,6 @@ impl DiffViewer {
                         })
                     }),
             )
-            .when(self.branch_picker_open, |this| {
-                this.child(self.render_branch_picker_panel(cx))
-            })
             .child(self.render_revision_stack_panel(cx))
             .child(
                 Input::new(&self.commit_input_state)
@@ -286,6 +287,7 @@ impl DiffViewer {
                     .w_full()
                     .items_center()
                     .gap_1()
+                    .flex_wrap()
                     .child({
                         let view = view.clone();
                         Button::new("commit-staged")
@@ -369,61 +371,63 @@ impl DiffViewer {
                             .child("Revision Stack"),
                     )
                     .child(
-                        h_flex()
-                            .items_center()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(format!("{}", revisions.len())),
-                            )
-                            .child({
-                                let view = view.clone();
-                                Button::new("reorder-top-two-revisions")
-                                    .outline()
-                                    .compact()
-                                    .with_size(gpui_component::Size::Small)
-                                    .rounded(px(7.0))
-                                    .label("Swap Top 2")
-                                    .disabled(!can_reorder_tip)
-                                    .on_click(move |_, _, cx| {
-                                        view.update(cx, |this, cx| {
-                                            this.reorder_current_bookmark_tip_older(cx);
-                                        });
-                                    })
-                            })
-                            .child({
-                                let view = view.clone();
-                                Button::new("squash-tip-revision")
-                                    .outline()
-                                    .compact()
-                                    .with_size(gpui_component::Size::Small)
-                                    .rounded(px(7.0))
-                                    .label("Squash Tip")
-                                    .disabled(!can_squash_tip)
-                                    .on_click(move |_, _, cx| {
-                                        view.update(cx, |this, cx| {
-                                            this.squash_current_bookmark_tip_into_parent(cx);
-                                        });
-                                    })
-                            })
-                            .child({
-                                let view = view.clone();
-                                Button::new("abandon-tip-revision")
-                                    .outline()
-                                    .compact()
-                                    .with_size(gpui_component::Size::Small)
-                                    .rounded(px(7.0))
-                                    .label("Abandon Tip")
-                                    .disabled(!can_abandon_tip)
-                                    .on_click(move |_, _, cx| {
-                                        view.update(cx, |this, cx| {
-                                            this.abandon_current_bookmark_tip(cx);
-                                        });
-                                    })
-                            }),
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("{}", revisions.len())),
                     ),
+            )
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .gap_1()
+                    .flex_wrap()
+                    .child({
+                        let view = view.clone();
+                        Button::new("reorder-top-two-revisions")
+                            .outline()
+                            .compact()
+                            .with_size(gpui_component::Size::Small)
+                            .rounded(px(7.0))
+                            .label("Swap Top 2")
+                            .disabled(!can_reorder_tip)
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.reorder_current_bookmark_tip_older(cx);
+                                });
+                            })
+                    })
+                    .child({
+                        let view = view.clone();
+                        Button::new("squash-tip-revision")
+                            .outline()
+                            .compact()
+                            .with_size(gpui_component::Size::Small)
+                            .rounded(px(7.0))
+                            .label("Squash Tip")
+                            .disabled(!can_squash_tip)
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.squash_current_bookmark_tip_into_parent(cx);
+                                });
+                            })
+                    })
+                    .child({
+                        let view = view.clone();
+                        Button::new("abandon-tip-revision")
+                            .outline()
+                            .compact()
+                            .with_size(gpui_component::Size::Small)
+                            .rounded(px(7.0))
+                            .label("Abandon Tip")
+                            .disabled(!can_abandon_tip)
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.abandon_current_bookmark_tip(cx);
+                                });
+                            })
+                    }),
             )
             .child({
                 if revisions.is_empty() {
@@ -495,15 +499,8 @@ impl DiffViewer {
     }
 
     fn render_workspace_changes_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let mut tracked = Vec::with_capacity(self.files.len());
-        let mut untracked = Vec::new();
-        for file in &self.files {
-            if file.is_tracked() {
-                tracked.push(file);
-            } else {
-                untracked.push(file);
-            }
-        }
+        let tracked_count = self.files.iter().filter(|file| file.is_tracked()).count();
+        let untracked_count = self.files.len().saturating_sub(tracked_count);
         let is_dark = cx.theme().mode.is_dark();
 
         v_flex()
@@ -525,41 +522,33 @@ impl DiffViewer {
                     .text_color(cx.theme().muted_foreground)
                     .child("Working Copy"),
             )
-            .child(self.render_workspace_change_section("Tracked", &tracked, cx))
-            .child(self.render_workspace_change_section("Untracked", &untracked, cx))
-            .into_any_element()
-    }
-
-    fn render_workspace_change_section(
-        &self,
-        title: &'static str,
-        files: &[&ChangedFile],
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        v_flex()
-            .w_full()
-            .gap_1()
             .child(
                 h_flex()
                     .w_full()
                     .items_center()
-                    .justify_between()
+                    .gap_1()
+                    .flex_wrap()
                     .child(
                         div()
                             .text_xs()
                             .font_semibold()
                             .text_color(cx.theme().muted_foreground)
-                            .child(title),
+                            .child(format!(
+                                "{} files (tracked: {}, untracked: {})",
+                                self.files.len(),
+                                tracked_count,
+                                untracked_count
+                            )),
                     )
                     .child(
                         div()
                             .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(format!("{}", files.len())),
+                            .text_color(cx.theme().muted_foreground.opacity(0.9))
+                            .child("Single unified working-copy list"),
                     ),
             )
             .child({
-                if files.is_empty() {
+                if self.files.is_empty() {
                     return div()
                         .w_full()
                         .px_1()
@@ -573,12 +562,11 @@ impl DiffViewer {
 
                 v_flex()
                     .w_full()
-                    .max_h(px(120.0))
+                    .max_h(px(220.0))
                     .overflow_y_scrollbar()
                     .gap_0p5()
-                    .children(files.iter().enumerate().map(|(row_ix, file)| {
-                        let section_offset: usize = if title == "Tracked" { 0 } else { 1_000_000 };
-                        self.render_workspace_change_row(section_offset + row_ix, file, cx)
+                    .children(self.files.iter().enumerate().map(|(row_ix, file)| {
+                        self.render_workspace_change_row(row_ix, file, cx)
                     }))
                     .into_any_element()
             })
@@ -596,6 +584,12 @@ impl DiffViewer {
         let is_selected = self.selected_path.as_deref() == Some(file.path.as_str());
         let is_dark = cx.theme().mode.is_dark();
         let (status_label, status_color) = change_status_label_color(file.status, cx);
+        let tracking_label = if file.is_tracked() { "tracked" } else { "untracked" };
+        let tracking_color = if file.is_tracked() {
+            cx.theme().secondary.opacity(if is_dark { 0.36 } else { 0.56 })
+        } else {
+            cx.theme().warning.opacity(if is_dark { 0.30 } else { 0.20 })
+        };
         let row_bg = if is_selected {
             cx.theme().accent.opacity(if is_dark { 0.22 } else { 0.14 })
         } else {
@@ -645,6 +639,17 @@ impl DiffViewer {
                     .bg(status_color.opacity(if is_dark { 0.24 } else { 0.16 }))
                     .text_color(cx.theme().foreground)
                     .child(status_label),
+            )
+            .child(
+                div()
+                    .px_1()
+                    .py_0p5()
+                    .rounded(px(4.0))
+                    .text_xs()
+                    .font_semibold()
+                    .bg(tracking_color)
+                    .text_color(cx.theme().foreground)
+                    .child(tracking_label),
             )
             .child(
                 div()
@@ -793,6 +798,7 @@ impl DiffViewer {
                     .w_full()
                     .items_center()
                     .gap_1()
+                    .flex_wrap()
                     .child(
                         Button::new("create-or-switch-bookmark")
                             .primary()
