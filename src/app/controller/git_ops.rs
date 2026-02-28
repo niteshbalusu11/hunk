@@ -554,8 +554,10 @@ impl DiffViewer {
             cx.notify();
             return;
         };
+        let review_title = self.preferred_review_title_for_bookmark(bookmark_name.as_str());
         let provider_mappings = self.config.review_provider_mappings.clone();
         let bookmark_for_task = bookmark_name.clone();
+        let review_title_for_task = review_title.clone();
 
         let epoch = self.next_git_action_epoch();
         self.git_action_loading = true;
@@ -581,9 +583,10 @@ impl DiffViewer {
                     this.git_action_loading = false;
                     match result {
                         Ok(Some(url)) => {
+                            let url = with_review_title_prefill(url, review_title_for_task.as_str());
                             match action {
                                 ReviewUrlAction::Copy => {
-                                    cx.write_to_clipboard(ClipboardItem::new_string(url));
+                                    cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
                                     this.git_status_message =
                                         Some(format!("Copied review URL for {}", bookmark_name));
                                 }
@@ -630,6 +633,34 @@ impl DiffViewer {
                 .ok();
             }
         });
+    }
+
+    fn preferred_review_title_for_bookmark(&self, bookmark_name: &str) -> String {
+        if self.branch_name == bookmark_name
+            && let Some(subject) = self
+                .bookmark_revisions
+                .first()
+                .map(|revision| revision.subject.as_str())
+                .and_then(normalized_review_title_subject)
+        {
+            return subject;
+        }
+
+        if let Some(subject) = self
+            .graph_nodes
+            .iter()
+            .find(|node| {
+                node.bookmarks.iter().any(|bookmark| {
+                    bookmark.scope == GraphBookmarkScope::Local && bookmark.name == bookmark_name
+                })
+            })
+            .map(|node| node.subject.as_str())
+            .and_then(normalized_review_title_subject)
+        {
+            return subject;
+        }
+
+        bookmark_name.to_string()
     }
 
     pub(super) fn commit_from_input(&mut self, _: &mut Window, cx: &mut Context<Self>) {
@@ -761,4 +792,64 @@ fn open_url_in_browser(url: &str) -> anyhow::Result<()> {
     Err(anyhow::anyhow!(
         "opening review URLs is not supported on this platform"
     ))
+}
+
+fn with_review_title_prefill(url: String, title: &str) -> String {
+    let normalized_title = normalized_review_title_subject(title);
+    let Some(title) = normalized_title else {
+        return url;
+    };
+
+    if url.contains("/-/merge_requests/new") {
+        return append_query_param(url, "merge_request[title]", title.as_str());
+    }
+
+    if url.contains("/compare/") {
+        let with_quick_pull = append_query_param(url, "quick_pull", "1");
+        return append_query_param(with_quick_pull, "title", title.as_str());
+    }
+
+    url
+}
+
+fn append_query_param(url: String, key: &str, value: &str) -> String {
+    let mut out = url;
+    let separator = if out.contains('?') {
+        if out.ends_with('?') || out.ends_with('&') {
+            ""
+        } else {
+            "&"
+        }
+    } else {
+        "?"
+    };
+    out.push_str(separator);
+    out.push_str(percent_encode_url_component(key).as_str());
+    out.push('=');
+    out.push_str(percent_encode_url_component(value).as_str());
+    out
+}
+
+fn normalized_review_title_subject(raw: &str) -> Option<String> {
+    let normalized = raw.trim();
+    if normalized.is_empty() {
+        return None;
+    }
+    if normalized.starts_with('(') && normalized.contains("no description") {
+        return None;
+    }
+    Some(normalized.to_string())
+}
+
+fn percent_encode_url_component(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        let is_unreserved = byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~');
+        if is_unreserved {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(format!("%{byte:02X}").as_str());
+        }
+    }
+    encoded
 }

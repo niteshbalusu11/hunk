@@ -199,6 +199,7 @@ impl DiffViewer {
             graph_action_input_state,
             graph_pending_confirmation: None,
             graph_drag_state: None,
+            graph_right_panel_mode: GraphRightPanelMode::ActiveWorkflow,
             workspace_view_mode: WorkspaceViewMode::JjWorkspace,
             files: Vec::new(),
             file_status_by_path: BTreeMap::new(),
@@ -625,6 +626,7 @@ impl DiffViewer {
         self.graph_list_state.reset(0);
         self.graph_pending_confirmation = None;
         self.graph_drag_state = None;
+        self.graph_right_panel_mode = GraphRightPanelMode::ActiveWorkflow;
         self.files.clear();
         self.file_status_by_path.clear();
         self.last_commit_subject = None;

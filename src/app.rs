@@ -90,6 +90,12 @@ struct GraphBookmarkDragState {
     hovered_node_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GraphRightPanelMode {
+    ActiveWorkflow,
+    SelectedBookmark,
+}
+
 mod controller;
 mod data;
 mod data_segments;
@@ -708,6 +714,7 @@ struct DiffViewer {
     graph_action_input_state: Entity<InputState>,
     graph_pending_confirmation: Option<GraphPendingConfirmation>,
     graph_drag_state: Option<GraphBookmarkDragState>,
+    graph_right_panel_mode: GraphRightPanelMode,
     workspace_view_mode: WorkspaceViewMode,
     files: Vec<ChangedFile>,
     file_status_by_path: BTreeMap<String, FileStatus>,

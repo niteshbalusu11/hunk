@@ -214,6 +214,7 @@ impl DiffViewer {
                             .w_full()
                             .items_center()
                             .gap_1()
+                            .flex_wrap()
                             .child({
                                 let view = view.clone();
                                 Button::new("jj-graph-inspector-create-bookmark")
@@ -260,6 +261,7 @@ impl DiffViewer {
                             .w_full()
                             .items_center()
                             .gap_1()
+                            .flex_wrap()
                             .child({
                                 let view = view.clone();
                                 Button::new("jj-graph-inspector-rename-bookmark")
@@ -313,6 +315,7 @@ impl DiffViewer {
                             .w_full()
                             .items_center()
                             .gap_1()
+                            .flex_wrap()
                             .child({
                                 let view = view.clone();
                                 Button::new("jj-graph-inspector-open-review-url")
@@ -429,6 +432,7 @@ impl DiffViewer {
                     .w_full()
                     .items_center()
                     .gap_1()
+                    .flex_wrap()
                     .child({
                         let view = view.clone();
                         Button::new("jj-graph-inspector-focus-active")
