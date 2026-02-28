@@ -512,6 +512,8 @@ pub fn checkout_or_create_bookmark_with_change_transfer(
                     move_bookmark_to_parent_of_working_copy(&mut context, bookmark.as_str())?;
                 }
             }
+        } else {
+            move_bookmark_to_parent_of_working_copy(&mut context, bookmark_name)?;
         }
     }
 
