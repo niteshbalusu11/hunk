@@ -157,6 +157,9 @@ impl DiffViewer {
                 .rows(3)
                 .placeholder("Add comment for this diff row")
         });
+        let graph_action_input_state = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("Bookmark name for create/fork/rename")
+        });
         let in_app_menu_bar = (!cfg!(target_os = "macos")).then(|| AppMenuBar::new(window, cx));
 
         let mut view = Self {
@@ -183,6 +186,20 @@ impl DiffViewer {
             branch_ahead_count: 0,
             branches: Vec::new(),
             bookmark_revisions: Vec::new(),
+            graph_nodes: Vec::new(),
+            graph_edges: Vec::new(),
+            graph_has_more: false,
+            graph_next_offset: None,
+            graph_active_bookmark: None,
+            graph_working_copy_commit_id: None,
+            graph_working_copy_parent_commit_id: None,
+            graph_selected_node_id: None,
+            graph_selected_bookmark: None,
+            graph_list_state: ListState::new(0, ListAlignment::Top, px(30.0)),
+            graph_action_input_state,
+            graph_pending_confirmation: None,
+            graph_drag_state: None,
+            workspace_view_mode: WorkspaceViewMode::JjWorkspace,
             files: Vec::new(),
             file_status_by_path: BTreeMap::new(),
             branch_picker_open: false,
@@ -242,7 +259,6 @@ impl DiffViewer {
             repo_discovery_failed: false,
             error_message: None,
             sidebar_collapsed: false,
-            workspace_view_mode: WorkspaceViewMode::JjWorkspace,
             sidebar_repo_list_state: ListState::new(
                 0,
                 ListAlignment::Top,
@@ -339,7 +355,8 @@ impl DiffViewer {
             Unchanged(RepoSnapshotFingerprint),
             Loaded {
                 fingerprint: RepoSnapshotFingerprint,
-                snapshot: RepoSnapshot,
+                snapshot: Box<RepoSnapshot>,
+                graph_snapshot: Box<GraphSnapshot>,
             },
         }
 
@@ -368,9 +385,12 @@ impl DiffViewer {
                             }
 
                             let snapshot = load_snapshot(&source_dir)?;
+                            let graph_snapshot =
+                                load_graph_snapshot(&source_dir, GraphSnapshotOptions::default())?;
                             Ok(SnapshotRefreshResult::Loaded {
                                 fingerprint,
-                                snapshot,
+                                snapshot: Box::new(snapshot),
+                                graph_snapshot: Box::new(graph_snapshot),
                             })
                         })
                         .await
@@ -390,11 +410,12 @@ impl DiffViewer {
                         Ok(SnapshotRefreshResult::Loaded {
                             fingerprint,
                             snapshot,
+                            graph_snapshot,
                         }) => {
                             info!("snapshot refresh completed in {:?}", elapsed);
                             this.auto_refresh_unmodified_streak = 0;
                             this.last_snapshot_fingerprint = Some(fingerprint);
-                            this.apply_snapshot(snapshot, cx)
+                            this.apply_snapshot(*snapshot, *graph_snapshot, cx)
                         }
                         Ok(SnapshotRefreshResult::Unchanged(fingerprint)) => {
                             info!("snapshot refresh skipped in {:?} (no repo changes)", elapsed);
@@ -465,7 +486,12 @@ impl DiffViewer {
         });
     }
 
-    fn apply_snapshot(&mut self, snapshot: RepoSnapshot, cx: &mut Context<Self>) {
+    fn apply_snapshot(
+        &mut self,
+        snapshot: RepoSnapshot,
+        graph_snapshot: GraphSnapshot,
+        cx: &mut Context<Self>,
+    ) {
         let RepoSnapshot {
             root,
             branch_name,
@@ -477,6 +503,16 @@ impl DiffViewer {
             line_stats,
             last_commit_subject,
         } = snapshot;
+        let GraphSnapshot {
+            active_bookmark: graph_active_bookmark,
+            working_copy_commit_id,
+            working_copy_parent_commit_id,
+            nodes: graph_nodes,
+            edges: graph_edges,
+            has_more: graph_has_more,
+            next_offset: graph_next_offset,
+            ..
+        } = graph_snapshot;
 
         info!("loaded repository snapshot from {}", root.display());
         let root_changed = self.repo_root.as_ref() != Some(&root);
@@ -492,6 +528,17 @@ impl DiffViewer {
         self.branch_ahead_count = branch_ahead_count;
         self.branches = branches;
         self.bookmark_revisions = bookmark_revisions;
+        self.graph_nodes = graph_nodes;
+        self.graph_edges = graph_edges;
+        self.graph_has_more = graph_has_more;
+        self.graph_next_offset = graph_next_offset;
+        self.graph_active_bookmark = graph_active_bookmark;
+        self.graph_working_copy_commit_id = Some(working_copy_commit_id);
+        self.graph_working_copy_parent_commit_id = working_copy_parent_commit_id;
+        self.graph_list_state.reset(self.graph_nodes.len());
+        self.graph_pending_confirmation = None;
+        self.graph_drag_state = None;
+        self.reconcile_graph_selection_after_snapshot();
         self.files = files;
         self.file_status_by_path = self
             .files
@@ -566,6 +613,18 @@ impl DiffViewer {
         self.branch_ahead_count = 0;
         self.branches.clear();
         self.bookmark_revisions.clear();
+        self.graph_nodes.clear();
+        self.graph_edges.clear();
+        self.graph_has_more = false;
+        self.graph_next_offset = None;
+        self.graph_active_bookmark = None;
+        self.graph_working_copy_commit_id = None;
+        self.graph_working_copy_parent_commit_id = None;
+        self.graph_selected_node_id = None;
+        self.graph_selected_bookmark = None;
+        self.graph_list_state.reset(0);
+        self.graph_pending_confirmation = None;
+        self.graph_drag_state = None;
         self.files.clear();
         self.file_status_by_path.clear();
         self.last_commit_subject = None;

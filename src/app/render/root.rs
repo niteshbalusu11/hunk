@@ -101,83 +101,10 @@ impl DiffViewer {
                 .into_any_element();
         }
 
-        let is_dark = cx.theme().mode.is_dark();
-        let active_bookmark = self
-            .checked_out_bookmark_name()
-            .map_or_else(|| "detached".to_string(), ToOwned::to_owned);
-
-        v_flex()
-            .size_full()
-            .child(
-                h_flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_2()
-                    .px_3()
-                    .py_1p5()
-                    .border_b_1()
-                    .border_color(cx.theme().border.opacity(if is_dark { 0.88 } else { 0.70 }))
-                    .bg(cx.theme().sidebar.blend(cx.theme().muted.opacity(if is_dark {
-                        0.20
-                    } else {
-                        0.30
-                    })))
-                    .child(
-                        v_flex()
-                            .gap_0p5()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_semibold()
-                                    .text_color(cx.theme().foreground)
-                                    .child("JJ Workspace"),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("Working copy changes and bookmark operations"),
-                            ),
-                    )
-                    .child(
-                        h_flex()
-                            .items_center()
-                            .gap_3()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(format!("Active bookmark: {active_bookmark}")),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(format!("{} changed files", self.files.len())),
-                            ),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .pb(px(APP_BOTTOM_SAFE_INSET))
-                    .child(self.render_jj_workspace_main_surface(cx)),
-            )
-            .into_any_element()
-    }
-
-    fn render_jj_workspace_main_surface(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let is_dark = cx.theme().mode.is_dark();
         div()
             .size_full()
-            .bg(cx.theme().sidebar.blend(cx.theme().muted.opacity(if is_dark {
-                0.18
-            } else {
-                0.24
-            })))
-            .overflow_y_scrollbar()
-            .child(self.render_jj_workspace(cx))
+            .pb(px(APP_BOTTOM_SAFE_INSET))
+            .child(self.render_jj_workspace_graph_shell(cx))
             .into_any_element()
     }
 
@@ -187,6 +114,9 @@ impl DiffViewer {
         let files_selected = self.workspace_view_mode == WorkspaceViewMode::Files;
         let diff_selected = self.workspace_view_mode == WorkspaceViewMode::Diff;
         let jj_selected = self.workspace_view_mode == WorkspaceViewMode::JjWorkspace;
+        let active_bookmark = self
+            .checked_out_bookmark_name()
+            .map_or_else(|| "detached".to_string(), ToOwned::to_owned);
 
         h_flex()
             .w_full()
@@ -245,8 +175,8 @@ impl DiffViewer {
                         let mut button = Button::new("footer-workspace-files")
                             .compact()
                             .rounded(px(7.0))
-                            .icon(Icon::new(IconName::FolderClosed).size(px(14.0)))
-                            .min_w(px(30.0))
+                            .label("Files")
+                            .min_w(px(52.0))
                             .h(px(28.0))
                             .tooltip("Switch to file view")
                             .on_click(move |_, _, cx| {
@@ -266,10 +196,10 @@ impl DiffViewer {
                         let mut button = Button::new("footer-workspace-diff")
                             .compact()
                             .rounded(px(7.0))
-                            .icon(Icon::new(IconName::File).size(px(14.0)))
-                            .min_w(px(30.0))
+                            .label("Review")
+                            .min_w(px(56.0))
                             .h(px(28.0))
-                            .tooltip("Switch to diff view")
+                            .tooltip("Switch to review mode")
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
                                     this.set_workspace_view_mode(WorkspaceViewMode::Diff, cx);
@@ -287,13 +217,16 @@ impl DiffViewer {
                         let mut button = Button::new("footer-workspace-jj")
                             .compact()
                             .rounded(px(7.0))
-                            .icon(Icon::new(IconName::BookOpen).size(px(14.0)))
-                            .min_w(px(30.0))
+                            .label("Graph")
+                            .min_w(px(52.0))
                             .h(px(28.0))
-                            .tooltip("Switch to JJ workspace")
+                            .tooltip("Switch to JJ graph workspace")
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
-                                    this.set_workspace_view_mode(WorkspaceViewMode::JjWorkspace, cx);
+                                    this.set_workspace_view_mode(
+                                        WorkspaceViewMode::JjWorkspace,
+                                        cx,
+                                    );
                                 });
                             });
                         if jj_selected {
@@ -302,13 +235,29 @@ impl DiffViewer {
                             button = button.outline();
                         }
                         button.into_any_element()
-                    }),
+                    })
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("JJ Graph Workspace"),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("Active bookmark: {active_bookmark}")),
+                    ),
             )
             .child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!("{} changed files", self.files.len())),
+                    .child(format!(
+                        "{} changed files • active bookmark: {}",
+                        self.files.len(),
+                        active_bookmark
+                    )),
             )
             .into_any_element()
     }
@@ -316,7 +265,6 @@ impl DiffViewer {
 
 impl Render for DiffViewer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let jj_fullscreen = self.workspace_view_mode == WorkspaceViewMode::JjWorkspace;
         let current_scroll_offset = self.diff_list_state.scroll_px_offset_for_scrollbar();
         if self.last_diff_scroll_offset != Some(current_scroll_offset) {
             self.last_diff_scroll_offset = Some(current_scroll_offset);
@@ -339,16 +287,18 @@ impl Render for DiffViewer {
             .on_action(cx.listener(Self::previous_hunk_action))
             .on_action(cx.listener(Self::next_file_action))
             .on_action(cx.listener(Self::previous_file_action))
+            .on_action(cx.listener(Self::next_bookmark_revision_action))
+            .on_action(cx.listener(Self::previous_bookmark_revision_action))
             .on_action(cx.listener(Self::toggle_sidebar_tree_action))
             .on_action(cx.listener(Self::open_project_action))
             .on_action(cx.listener(Self::save_current_file_action))
             .on_action(cx.listener(Self::open_settings_action))
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .when(!cfg!(target_os = "macos") && !jj_fullscreen, |this| {
+            .when(!cfg!(target_os = "macos"), |this| {
                 this.child(self.render_in_app_menu_bar(cx))
             })
-            .when(!jj_fullscreen, |this| this.child(self.render_toolbar(cx)))
+            .child(self.render_toolbar(cx))
             .child(
                 div()
                     .flex_1()
@@ -360,7 +310,7 @@ impl Render for DiffViewer {
                     }),
             )
             .child(self.render_app_footer(cx))
-            .when(self.comments_preview_open && !jj_fullscreen, |this| {
+            .when(self.comments_preview_open, |this| {
                 this.child(self.render_comments_preview(cx))
             })
             .when(self.settings_draft.is_some(), |this| {

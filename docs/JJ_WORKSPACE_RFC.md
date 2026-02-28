@@ -3,6 +3,7 @@
 ## Status
 - Draft
 - Owner: Hunk
+- Follow-up roadmap: [JJ_GRAPH_WORKSPACE_RFC.md](/Volumes/hulk/dev/projects/hunk/docs/JJ_GRAPH_WORKSPACE_RFC.md)
 
 ## Why This RFC Exists
 Hunk currently uses JJ as the backend but still presents a Git-first UX in key places. This causes user confusion because terms and interaction flow imply branch/index semantics that JJ does not use.

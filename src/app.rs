@@ -33,7 +33,8 @@ use hunk::db::{
 };
 use hunk::diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
 use hunk::jj::{
-    BookmarkRevision, ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFingerprint,
+    BookmarkRevision, ChangedFile, FileStatus, GraphBookmarkRef, GraphBookmarkScope, GraphEdge,
+    GraphNode, LineStats, LocalBranch, RepoSnapshotFingerprint,
 };
 use hunk::markdown_preview::MarkdownPreviewBlock;
 use hunk::state::{AppState, AppStateStore};
@@ -67,6 +68,28 @@ const COMMENT_RECONCILE_MISS_THRESHOLD: u8 = 2;
 const COMMENT_FUZZY_MATCH_MIN_SCORE: i32 = 6;
 const COMMENT_FUZZY_RENAME_MATCH_MIN_SCORE: i32 = 11;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GraphBookmarkSelection {
+    name: String,
+    remote: Option<String>,
+    scope: GraphBookmarkScope,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum GraphPendingConfirmation {
+    MoveBookmarkTarget {
+        bookmark: GraphBookmarkSelection,
+        target_node_id: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GraphBookmarkDragState {
+    bookmark: GraphBookmarkSelection,
+    source_node_id: String,
+    hovered_node_id: Option<String>,
+}
+
 mod controller;
 mod data;
 mod data_segments;
@@ -86,6 +109,8 @@ actions!(
         PreviousHunk,
         NextFile,
         PreviousFile,
+        NextBookmarkRevision,
+        PreviousBookmarkRevision,
         ToggleSidebarTree,
         OpenProject,
         SaveCurrentFile,
@@ -356,6 +381,16 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
             .iter()
             .map(|shortcut| KeyBinding::new(shortcut.as_str(), PreviousFile, Some("DiffViewer"))),
     );
+    bindings.extend(shortcuts.next_bookmark_revision.iter().map(|shortcut| {
+        KeyBinding::new(shortcut.as_str(), NextBookmarkRevision, Some("DiffViewer"))
+    }));
+    bindings.extend(shortcuts.previous_bookmark_revision.iter().map(|shortcut| {
+        KeyBinding::new(
+            shortcut.as_str(),
+            PreviousBookmarkRevision,
+            Some("DiffViewer"),
+        )
+    }));
     bindings.extend(
         shortcuts.toggle_sidebar_tree.iter().map(|shortcut| {
             KeyBinding::new(shortcut.as_str(), ToggleSidebarTree, Some("DiffViewer"))
@@ -471,6 +506,8 @@ struct SettingsShortcutInputs {
     previous_hunk: Entity<InputState>,
     next_file: Entity<InputState>,
     previous_file: Entity<InputState>,
+    next_bookmark_revision: Entity<InputState>,
+    previous_bookmark_revision: Entity<InputState>,
     toggle_sidebar_tree: Entity<InputState>,
     open_project: Entity<InputState>,
     save_current_file: Entity<InputState>,
@@ -542,6 +579,18 @@ impl SettingsShortcutInputs {
                 input_state: self.previous_file.clone(),
             },
             SettingsShortcutRow {
+                id: "next-bookmark-revision",
+                label: "Next Bookmark Revision",
+                hint: "Moves to the next focused bookmark revision.",
+                input_state: self.next_bookmark_revision.clone(),
+            },
+            SettingsShortcutRow {
+                id: "previous-bookmark-revision",
+                label: "Previous Bookmark Revision",
+                hint: "Moves to the previous focused bookmark revision.",
+                input_state: self.previous_bookmark_revision.clone(),
+            },
+            SettingsShortcutRow {
                 id: "toggle-sidebar-tree",
                 label: "Toggle File Tree",
                 hint: "Collapses or expands the left file tree pane.",
@@ -581,6 +630,7 @@ struct SettingsDraft {
     theme: ThemePreference,
     show_whitespace: bool,
     show_eol_markers: bool,
+    reduce_motion: bool,
     shortcuts: SettingsShortcutInputs,
     error_message: Option<String>,
 }
@@ -645,6 +695,20 @@ struct DiffViewer {
     branch_ahead_count: usize,
     branches: Vec<LocalBranch>,
     bookmark_revisions: Vec<BookmarkRevision>,
+    graph_nodes: Vec<GraphNode>,
+    graph_edges: Vec<GraphEdge>,
+    graph_has_more: bool,
+    graph_next_offset: Option<usize>,
+    graph_active_bookmark: Option<String>,
+    graph_working_copy_commit_id: Option<String>,
+    graph_working_copy_parent_commit_id: Option<String>,
+    graph_selected_node_id: Option<String>,
+    graph_selected_bookmark: Option<GraphBookmarkSelection>,
+    graph_list_state: ListState,
+    graph_action_input_state: Entity<InputState>,
+    graph_pending_confirmation: Option<GraphPendingConfirmation>,
+    graph_drag_state: Option<GraphBookmarkDragState>,
+    workspace_view_mode: WorkspaceViewMode,
     files: Vec<ChangedFile>,
     file_status_by_path: BTreeMap<String, FileStatus>,
     branch_picker_open: bool,
@@ -704,7 +768,6 @@ struct DiffViewer {
     repo_discovery_failed: bool,
     error_message: Option<String>,
     sidebar_collapsed: bool,
-    workspace_view_mode: WorkspaceViewMode,
     sidebar_repo_list_state: ListState,
     sidebar_repo_row_count: usize,
     repo_tree_nodes: Vec<RepoTreeNode>,

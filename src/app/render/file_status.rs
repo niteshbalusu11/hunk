@@ -39,7 +39,7 @@ impl DiffViewer {
             accent.darken(0.18)
         };
 
-        h_flex()
+        let row = h_flex()
             .id(("diff-file-header-sticky-row", stable_row_id))
             .relative()
             .overflow_x_hidden()
@@ -105,10 +105,14 @@ impl DiffViewer {
                     .bottom_0()
                     .w(px(2.0))
                     .bg(accent_strip),
-            )
-            .with_animation(
+            );
+
+        if self.reduced_motion_enabled() {
+            row.into_any_element()
+        } else {
+            row.with_animation(
                 ("diff-file-header-sticky-bump", stable_row_id),
-                Animation::new(Duration::from_secs_f64(0.18))
+                Animation::new(self.animation_duration_ms(180))
                     .with_easing(cubic_bezier(0.32, 0.72, 0.0, 1.0)),
                 |this, delta| {
                     let entering = 1.0 - delta;
@@ -118,6 +122,7 @@ impl DiffViewer {
                 },
             )
             .into_any_element()
+        }
     }
 
     fn render_line_stats(

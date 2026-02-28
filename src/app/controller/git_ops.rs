@@ -480,6 +480,21 @@ impl DiffViewer {
         });
     }
 
+    pub(super) fn open_current_bookmark_review_url(&mut self, cx: &mut Context<Self>) {
+        if !self.can_run_active_bookmark_actions() {
+            let message = "Activate a bookmark before building a review URL.".to_string();
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
+            cx.notify();
+            return;
+        }
+        self.run_review_url_action_for_bookmark(
+            self.branch_name.clone(),
+            ReviewUrlAction::Open,
+            cx,
+        );
+    }
+
     pub(super) fn copy_current_bookmark_review_url(&mut self, cx: &mut Context<Self>) {
         if !self.can_run_active_bookmark_actions() {
             let message = "Activate a bookmark before building a review URL.".to_string();
@@ -488,6 +503,48 @@ impl DiffViewer {
             cx.notify();
             return;
         }
+        self.run_review_url_action_for_bookmark(
+            self.branch_name.clone(),
+            ReviewUrlAction::Copy,
+            cx,
+        );
+    }
+
+    pub(super) fn open_selected_graph_bookmark_review_url(&mut self, cx: &mut Context<Self>) {
+        let Some(bookmark_name) = self.selected_local_graph_bookmark_name() else {
+            let message = "Select a local bookmark before opening PR/MR.".to_string();
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
+            cx.notify();
+            return;
+        };
+        self.run_review_url_action_for_bookmark(bookmark_name, ReviewUrlAction::Open, cx);
+    }
+
+    pub(super) fn copy_selected_graph_bookmark_review_url(&mut self, cx: &mut Context<Self>) {
+        let Some(bookmark_name) = self.selected_local_graph_bookmark_name() else {
+            let message = "Select a local bookmark before building a review URL.".to_string();
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
+            cx.notify();
+            return;
+        };
+        self.run_review_url_action_for_bookmark(bookmark_name, ReviewUrlAction::Copy, cx);
+    }
+
+    fn selected_local_graph_bookmark_name(&self) -> Option<String> {
+        self.graph_selected_bookmark
+            .as_ref()
+            .filter(|bookmark| bookmark.scope == GraphBookmarkScope::Local)
+            .map(|bookmark| bookmark.name.clone())
+    }
+
+    fn run_review_url_action_for_bookmark(
+        &mut self,
+        bookmark_name: String,
+        action: ReviewUrlAction,
+        cx: &mut Context<Self>,
+    ) {
         if self.git_action_loading {
             return;
         }
@@ -497,7 +554,8 @@ impl DiffViewer {
             cx.notify();
             return;
         };
-        let branch_name = self.branch_name.clone();
+        let provider_mappings = self.config.review_provider_mappings.clone();
+        let bookmark_for_task = bookmark_name.clone();
 
         let epoch = self.next_git_action_epoch();
         self.git_action_loading = true;
@@ -505,9 +563,12 @@ impl DiffViewer {
         cx.notify();
 
         self.git_action_task = cx.spawn(async move |this, cx| {
-            let branch_for_task = branch_name.clone();
             let result = cx.background_executor().spawn(async move {
-                review_url_for_bookmark(&repo_root, &branch_for_task)
+                review_url_for_bookmark_with_provider_map(
+                    &repo_root,
+                    &bookmark_for_task,
+                    &provider_mappings,
+                )
             });
             let result = result.await;
 
@@ -520,14 +581,35 @@ impl DiffViewer {
                     this.git_action_loading = false;
                     match result {
                         Ok(Some(url)) => {
-                            cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
-                            this.git_status_message =
-                                Some(format!("Copied review URL for {}", branch_name));
+                            match action {
+                                ReviewUrlAction::Copy => {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(url));
+                                    this.git_status_message =
+                                        Some(format!("Copied review URL for {}", bookmark_name));
+                                }
+                                ReviewUrlAction::Open => match open_url_in_browser(url.as_str()) {
+                                    Ok(()) => {
+                                        this.git_status_message = Some(format!(
+                                            "Opened PR/MR in browser for {}",
+                                            bookmark_name
+                                        ));
+                                    }
+                                    Err(err) => {
+                                        error!("Open review URL failed: {err:#}");
+                                        let summary = err.to_string();
+                                        this.git_status_message = Some(format!("Open URL failed: {summary}"));
+                                        Self::push_error_notification(
+                                            format!("Open review URL failed: {summary}"),
+                                            cx,
+                                        );
+                                    }
+                                },
+                            }
                         }
                         Ok(None) => {
                             let message = format!(
-                                "No supported remote URL found for bookmark {}.",
-                                branch_name
+                                "No review URL found for {}. Add review_provider_mappings in ~/.hunkdiff/config.toml for self-hosted remotes.",
+                                bookmark_name
                             );
                             this.git_status_message = Some(message.clone());
                             Self::push_warning_notification(message, cx);
@@ -639,4 +721,44 @@ impl DiffViewer {
         self.branch_picker_open = !self.branch_picker_open;
         cx.notify();
     }
+}
+
+#[derive(Clone, Copy)]
+enum ReviewUrlAction {
+    Open,
+    Copy,
+}
+
+fn open_url_in_browser(url: &str) -> anyhow::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(url)
+            .spawn()
+            .context("failed to launch macOS browser opener")?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .context("failed to launch Linux browser opener")?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .spawn()
+            .context("failed to launch Windows browser opener")?;
+        return Ok(());
+    }
+
+    #[allow(unreachable_code)]
+    Err(anyhow::anyhow!(
+        "opening review URLs is not supported on this platform"
+    ))
 }

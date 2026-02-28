@@ -41,6 +41,11 @@ fn validate_keyboard_shortcuts(shortcuts: &KeyboardShortcuts) -> Result<(), Stri
     validate_shortcut_list("Previous Hunk", &shortcuts.previous_hunk)?;
     validate_shortcut_list("Next File", &shortcuts.next_file)?;
     validate_shortcut_list("Previous File", &shortcuts.previous_file)?;
+    validate_shortcut_list("Next Bookmark Revision", &shortcuts.next_bookmark_revision)?;
+    validate_shortcut_list(
+        "Previous Bookmark Revision",
+        &shortcuts.previous_bookmark_revision,
+    )?;
     validate_shortcut_list("Toggle File Tree", &shortcuts.toggle_sidebar_tree)?;
     validate_shortcut_list("Open Project", &shortcuts.open_project)?;
     validate_shortcut_list("Save Current File", &shortcuts.save_current_file)?;
@@ -129,6 +134,18 @@ impl DiffViewer {
                 window,
                 cx,
             ),
+            next_bookmark_revision: settings_shortcut_input(
+                &self.config.keyboard_shortcuts.next_bookmark_revision,
+                "Comma-separated shortcuts, e.g. alt-right",
+                window,
+                cx,
+            ),
+            previous_bookmark_revision: settings_shortcut_input(
+                &self.config.keyboard_shortcuts.previous_bookmark_revision,
+                "Comma-separated shortcuts, e.g. alt-left",
+                window,
+                cx,
+            ),
             toggle_sidebar_tree: settings_shortcut_input(
                 &self.config.keyboard_shortcuts.toggle_sidebar_tree,
                 "Comma-separated shortcuts, e.g. cmd-b, ctrl-b",
@@ -166,6 +183,7 @@ impl DiffViewer {
             theme: self.config.theme,
             show_whitespace: self.config.show_whitespace,
             show_eol_markers: self.config.show_eol_markers,
+            reduce_motion: self.config.reduce_motion,
             shortcuts,
             error_message: None,
         });
@@ -244,8 +262,24 @@ impl DiffViewer {
         cx.notify();
     }
 
+    pub(super) fn set_settings_reduce_motion(
+        &mut self,
+        reduce_motion: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(settings) = self.settings_draft.as_mut() else {
+            return;
+        };
+        if settings.reduce_motion == reduce_motion {
+            return;
+        }
+        settings.reduce_motion = reduce_motion;
+        settings.error_message = None;
+        cx.notify();
+    }
+
     pub(super) fn save_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (theme, show_whitespace, show_eol_markers, keyboard_shortcuts) = {
+        let (theme, show_whitespace, show_eol_markers, reduce_motion, keyboard_shortcuts) = {
             let Some(settings) = self.settings_draft.as_mut() else {
                 return;
             };
@@ -273,6 +307,14 @@ impl DiffViewer {
                 previous_hunk: read_shortcut_input(&settings.shortcuts.previous_hunk, cx),
                 next_file: read_shortcut_input(&settings.shortcuts.next_file, cx),
                 previous_file: read_shortcut_input(&settings.shortcuts.previous_file, cx),
+                next_bookmark_revision: read_shortcut_input(
+                    &settings.shortcuts.next_bookmark_revision,
+                    cx,
+                ),
+                previous_bookmark_revision: read_shortcut_input(
+                    &settings.shortcuts.previous_bookmark_revision,
+                    cx,
+                ),
                 toggle_sidebar_tree: read_shortcut_input(
                     &settings.shortcuts.toggle_sidebar_tree,
                     cx,
@@ -297,6 +339,7 @@ impl DiffViewer {
                 settings.theme,
                 settings.show_whitespace,
                 settings.show_eol_markers,
+                settings.reduce_motion,
                 keyboard_shortcuts,
             )
         };
@@ -304,6 +347,7 @@ impl DiffViewer {
         self.config.theme = theme;
         self.config.show_whitespace = show_whitespace;
         self.config.show_eol_markers = show_eol_markers;
+        self.config.reduce_motion = reduce_motion;
         self.config.keyboard_shortcuts = keyboard_shortcuts;
         self.diff_show_whitespace = self.config.show_whitespace;
         self.diff_show_eol_markers = self.config.show_eol_markers;

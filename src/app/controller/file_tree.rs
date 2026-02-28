@@ -31,15 +31,12 @@ impl DiffViewer {
         self.workspace_view_mode = mode;
 
         if mode == WorkspaceViewMode::Files {
-            let target_path = self
-                .selected_path
-                .clone()
-                .or_else(|| {
-                    self.files
-                        .iter()
-                        .find(|file| file.status != FileStatus::Deleted)
-                        .map(|file| file.path.clone())
-                });
+            let target_path = self.selected_path.clone().or_else(|| {
+                self.files
+                    .iter()
+                    .find(|file| file.status != FileStatus::Deleted)
+                    .map(|file| file.path.clone())
+            });
             if let Some(path) = target_path {
                 if self.prevent_unsaved_editor_discard(Some(path.as_str()), cx) {
                     self.request_repo_tree_reload(cx);

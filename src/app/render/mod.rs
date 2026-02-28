@@ -1,6 +1,5 @@
 use super::data::{
-    DiffStreamRowKind, RepoTreeNodeKind, WorkspaceViewMode, cached_runtime_fallback_segments,
-    is_markdown_path,
+    DiffStreamRowKind, RepoTreeNodeKind, cached_runtime_fallback_segments, is_markdown_path,
 };
 use super::highlight::SyntaxTokenKind;
 use super::*;
@@ -33,6 +32,9 @@ fn change_status_label_color(
 include!("toolbar.rs");
 include!("tree.rs");
 include!("commit.rs");
+include!("jj_graph.rs");
+include!("jj_graph_inspector.rs");
+include!("jj_graph_focus_strip.rs");
 include!("file_banner.rs");
 include!("file_status.rs");
 include!("comments.rs");
