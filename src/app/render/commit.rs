@@ -14,6 +14,11 @@ impl DiffViewer {
         } else {
             "Push Bookmark"
         };
+        let action_tooltip = if show_publish {
+            "Publish this local bookmark to remote and start tracking it."
+        } else {
+            "Push new local revisions on this bookmark to its tracked remote."
+        };
         let active_bookmark_label = self
             .checked_out_bookmark_name()
             .map_or_else(|| "detached".to_string(), ToOwned::to_owned);
@@ -128,6 +133,7 @@ impl DiffViewer {
                             .bg(cx.theme().secondary.opacity(if is_dark { 0.50 } else { 0.70 }))
                             .border_color(cx.theme().border.opacity(if is_dark { 0.90 } else { 0.74 }))
                             .label(active_bookmark_label.clone())
+                            .tooltip("Open bookmark list to switch, move changes, create, or rename bookmarks.")
                             .disabled(self.git_action_loading)
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
@@ -179,6 +185,7 @@ impl DiffViewer {
                                 .with_size(gpui_component::Size::Small)
                                 .rounded(px(7.0))
                                 .label("Sync Bookmark")
+                                .tooltip("Fetch and update this bookmark from its upstream remote.")
                                 .disabled(sync_disabled)
                                 .on_click(move |_, _, cx| {
                                     view.update(cx, |this, cx| {
@@ -196,6 +203,7 @@ impl DiffViewer {
                                 .with_size(gpui_component::Size::Small)
                                 .rounded(px(7.0))
                                 .label(action_label)
+                                .tooltip(action_tooltip)
                                 .disabled(push_or_publish_disabled)
                                 .on_click(move |_, _, cx| {
                                     view.update(cx, |this, cx| {
@@ -212,6 +220,7 @@ impl DiffViewer {
                             .with_size(gpui_component::Size::Small)
                             .rounded(px(7.0))
                             .label("Open PR/MR")
+                            .tooltip("Open a prefilled pull/merge request page for the active bookmark.")
                             .disabled(review_url_disabled)
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
@@ -227,6 +236,7 @@ impl DiffViewer {
                             .with_size(gpui_component::Size::Small)
                             .rounded(px(7.0))
                             .label("Copy Review URL")
+                            .tooltip("Copy a prefilled pull/merge request URL for the active bookmark.")
                             .disabled(review_url_disabled)
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
@@ -259,6 +269,7 @@ impl DiffViewer {
                                 .compact()
                                 .rounded(px(7.0))
                                 .label("Include All")
+                                .tooltip("Include every changed file in the next revision.")
                                 .disabled(self.git_action_loading)
                                 .on_click(move |_, _, cx| {
                                     view.update(cx, |this, cx| {
@@ -294,6 +305,7 @@ impl DiffViewer {
                             .primary()
                             .rounded(px(7.0))
                             .label("Create Revision")
+                            .tooltip("Create a new revision from included files using the message above.")
                             .disabled(commit_disabled)
                             .on_click(move |_, window, cx| {
                                 view.update(cx, |this, cx| {
@@ -307,6 +319,7 @@ impl DiffViewer {
                             .outline()
                             .rounded(px(7.0))
                             .label("Edit Tip Revision")
+                            .tooltip("Rewrite the tip revision description for the active bookmark.")
                             .disabled(describe_tip_disabled)
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
@@ -390,7 +403,8 @@ impl DiffViewer {
                             .compact()
                             .with_size(gpui_component::Size::Small)
                             .rounded(px(7.0))
-                            .label("Swap Top 2")
+                            .label("Move Tip Down")
+                            .tooltip("Reorder the stack so the current tip becomes second and the previous revision becomes tip.")
                             .disabled(!can_reorder_tip)
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
@@ -405,7 +419,8 @@ impl DiffViewer {
                             .compact()
                             .with_size(gpui_component::Size::Small)
                             .rounded(px(7.0))
-                            .label("Squash Tip")
+                            .label("Squash Into Parent")
+                            .tooltip("Combine tip revision changes into its parent revision.")
                             .disabled(!can_squash_tip)
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
@@ -420,7 +435,8 @@ impl DiffViewer {
                             .compact()
                             .with_size(gpui_component::Size::Small)
                             .rounded(px(7.0))
-                            .label("Abandon Tip")
+                            .label("Drop Tip Revision")
+                            .tooltip("Abandon and remove the current tip revision from the stack.")
                             .disabled(!can_abandon_tip)
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
@@ -764,7 +780,7 @@ impl DiffViewer {
                                                 .rounded(px(6.0))
                                                 .label("Move")
                                                 .disabled(move_disabled)
-                                                .tooltip("Move local changes and activate bookmark")
+                                                .tooltip("Switch to this bookmark and carry current working-copy changes.")
                                                 .on_click(move |_, _, cx| {
                                                     cx.stop_propagation();
                                                     move_view.update(cx, |this, cx| {
@@ -804,6 +820,7 @@ impl DiffViewer {
                             .primary()
                             .rounded(px(7.0))
                             .label("Create / Activate")
+                            .tooltip("Create a bookmark from the entered name or activate it if it already exists.")
                             .disabled(create_or_activate_disabled)
                             .on_click({
                                 let view = view.clone();
@@ -819,6 +836,7 @@ impl DiffViewer {
                             .outline()
                             .rounded(px(7.0))
                             .label("Rename Active")
+                            .tooltip("Rename the currently active bookmark to the entered name.")
                             .disabled(rename_disabled)
                             .on_click(move |_, window, cx| {
                                 view.update(cx, |this, cx| {
