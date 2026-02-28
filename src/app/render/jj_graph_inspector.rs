@@ -223,6 +223,7 @@ impl DiffViewer {
                                     .with_size(gpui_component::Size::Small)
                                     .rounded(px(7.0))
                                     .label("Create At Revision")
+                                    .tooltip("Create a new bookmark at the selected revision.")
                                     .disabled(
                                         self.git_action_loading
                                             || !has_selected_node
@@ -243,6 +244,7 @@ impl DiffViewer {
                                     .with_size(gpui_component::Size::Small)
                                     .rounded(px(7.0))
                                     .label("Fork From Focus")
+                                    .tooltip("Create another bookmark from the selected revision, using focus as naming context.")
                                     .disabled(
                                         self.git_action_loading
                                             || !has_selected_node
@@ -270,6 +272,7 @@ impl DiffViewer {
                                     .with_size(gpui_component::Size::Small)
                                     .rounded(px(7.0))
                                     .label("Rename Focused")
+                                    .tooltip("Rename the selected local bookmark to the input name.")
                                     .disabled(
                                         self.git_action_loading
                                             || !selected_bookmark_is_local
@@ -290,6 +293,7 @@ impl DiffViewer {
                                     .rounded(px(7.0))
                                     .dropdown_caret(true)
                                     .label("Move Menu")
+                                    .tooltip("Open retarget actions for the selected local bookmark.")
                                     .disabled(
                                         self.git_action_loading
                                             || !selected_bookmark_is_local
@@ -324,6 +328,7 @@ impl DiffViewer {
                                     .with_size(gpui_component::Size::Small)
                                     .rounded(px(7.0))
                                     .label("Open PR/MR")
+                                    .tooltip("Open a prefilled pull/merge request for the selected local bookmark.")
                                     .disabled(self.git_action_loading || !selected_bookmark_is_local)
                                     .on_click(move |_, _, cx| {
                                         view.update(cx, |this, cx| {
@@ -339,6 +344,7 @@ impl DiffViewer {
                                     .with_size(gpui_component::Size::Small)
                                     .rounded(px(7.0))
                                     .label("Copy Review URL")
+                                    .tooltip("Copy a prefilled pull/merge request URL for the selected local bookmark.")
                                     .disabled(self.git_action_loading || !selected_bookmark_is_local)
                                     .on_click(move |_, _, cx| {
                                         view.update(cx, |this, cx| {
@@ -399,6 +405,7 @@ impl DiffViewer {
                                         .with_size(gpui_component::Size::Small)
                                         .rounded(px(7.0))
                                         .label("Confirm Move")
+                                        .tooltip("Apply bookmark retargeting to the selected revision.")
                                         .disabled(self.git_action_loading)
                                         .on_click(move |_, _, cx| {
                                             view.update(cx, |this, cx| {
@@ -414,6 +421,7 @@ impl DiffViewer {
                                         .with_size(gpui_component::Size::Small)
                                         .rounded(px(7.0))
                                         .label("Cancel")
+                                        .tooltip("Cancel the pending bookmark move.")
                                         .disabled(self.git_action_loading)
                                         .on_click(move |_, _, cx| {
                                             view.update(cx, |this, cx| {
@@ -441,6 +449,7 @@ impl DiffViewer {
                             .with_size(gpui_component::Size::Small)
                             .rounded(px(7.0))
                             .label("Focus Active")
+                            .tooltip("Select and focus the currently active bookmark.")
                             .disabled(self.graph_active_bookmark.is_none())
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
@@ -456,6 +465,7 @@ impl DiffViewer {
                             .with_size(gpui_component::Size::Small)
                             .rounded(px(7.0))
                             .label("Clear Bookmark Focus")
+                            .tooltip("Exit bookmark focus and return to full graph context.")
                             .disabled(self.graph_selected_bookmark.is_none())
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {

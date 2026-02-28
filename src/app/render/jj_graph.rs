@@ -76,6 +76,7 @@ impl DiffViewer {
                             .with_size(gpui_component::Size::Small)
                             .rounded(px(7.0))
                             .label("Active Workflow")
+                            .tooltip("Show working-copy, commit, and active-bookmark actions.")
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
                                     this.set_graph_right_panel_mode_active(cx);
@@ -94,6 +95,7 @@ impl DiffViewer {
                             .with_size(gpui_component::Size::Small)
                             .rounded(px(7.0))
                             .label("Selected Bookmark")
+                            .tooltip("Show bookmark-focused history and actions for the selected graph bookmark.")
                             .disabled(!selected_available)
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
@@ -153,6 +155,7 @@ impl DiffViewer {
                         .with_size(gpui_component::Size::Small)
                         .rounded(px(7.0))
                         .label("Back to Active Workflow")
+                        .tooltip("Return to active workflow actions.")
                         .on_click(move |_, _, cx| {
                             view.update(cx, |this, cx| {
                                 this.set_graph_right_panel_mode_active(cx);
@@ -320,6 +323,7 @@ impl DiffViewer {
                             .with_size(gpui_component::Size::Small)
                             .rounded(px(7.0))
                             .label("Focus Active Bookmark")
+                            .tooltip("Select and focus the currently active bookmark in the graph.")
                             .disabled(self.graph_active_bookmark.is_none())
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
@@ -638,6 +642,7 @@ impl DiffViewer {
                         .with_size(gpui_component::Size::Small)
                         .rounded(px(6.0))
                         .label("Rename")
+                        .tooltip("Rename the selected local bookmark.")
                         .disabled(self.git_action_loading)
                         .on_click(move |_, _, cx| {
                             cx.stop_propagation();

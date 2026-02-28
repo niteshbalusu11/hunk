@@ -136,6 +136,7 @@ impl DiffViewer {
                             .with_size(gpui_component::Size::Small)
                             .rounded(px(7.0))
                             .label("Return to Full Graph")
+                            .tooltip("Clear bookmark focus and show the full graph context.")
                             .disabled(focused_bookmark.is_none())
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
