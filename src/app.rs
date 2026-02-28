@@ -630,6 +630,8 @@ struct DiffViewer {
     comments_preview_open: bool,
     comments_show_non_open: bool,
     comment_miss_streaks: BTreeMap<String, u8>,
+    comment_row_matches: BTreeMap<String, usize>,
+    comment_open_row_counts: Vec<usize>,
     hovered_comment_row: Option<usize>,
     active_comment_editor_row: Option<usize>,
     comment_input_state: Entity<InputState>,

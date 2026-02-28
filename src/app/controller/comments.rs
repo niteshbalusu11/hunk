@@ -11,7 +11,45 @@ pub(super) struct RowCommentAnchor {
     pub(super) anchor_hash: String,
 }
 
+#[derive(Debug, Clone)]
+struct FuzzyCommentKey {
+    line_side: CommentLineSide,
+    old_line: Option<u32>,
+    new_line: Option<u32>,
+    line_text: String,
+    line_core: String,
+    hunk_header: String,
+    context_before_line: String,
+    context_after_line: String,
+}
+
 impl DiffViewer {
+    fn reset_comment_row_match_cache(&mut self) {
+        self.comment_row_matches.clear();
+        self.comment_open_row_counts.clear();
+    }
+
+    fn rebuild_comment_row_match_cache(&mut self) {
+        self.comment_row_matches.clear();
+        self.comment_open_row_counts = vec![0; self.diff_rows.len()];
+        if self.diff_rows.is_empty() || self.comments_cache.is_empty() {
+            return;
+        }
+
+        for comment in self
+            .comments_cache
+            .iter()
+            .filter(|comment| comment.status == CommentStatus::Open)
+        {
+            if let Some(row_ix) = self.find_matching_row_for_comment(comment) {
+                self.comment_row_matches.insert(comment.id.clone(), row_ix);
+                if let Some(count) = self.comment_open_row_counts.get_mut(row_ix) {
+                    *count += 1;
+                }
+            }
+        }
+    }
+
     fn load_database_store() -> Option<DatabaseStore> {
         match DatabaseStore::new() {
             Ok(store) => Some(store),
@@ -67,10 +105,12 @@ impl DiffViewer {
     fn refresh_comments_cache_from_store(&mut self) {
         let Some(store) = self.database_store.clone() else {
             self.comments_cache.clear();
+            self.reset_comment_row_match_cache();
             return;
         };
         let Some(repo_root) = self.comment_scope_repo_root() else {
             self.comments_cache.clear();
+            self.reset_comment_row_match_cache();
             return;
         };
         let bookmark_name = self.comment_scope_bookmark_name();
@@ -87,6 +127,7 @@ impl DiffViewer {
                 self.comment_miss_streaks
                     .retain(|comment_id, _| open_ids.contains(comment_id));
                 self.auto_show_non_open_if_open_empty();
+                self.rebuild_comment_row_match_cache();
                 self.comment_status_message = None;
             }
             Err(err) => {
@@ -95,6 +136,7 @@ impl DiffViewer {
                     repo_root, bookmark_name
                 );
                 self.comments_cache.clear();
+                self.reset_comment_row_match_cache();
                 self.comment_status_message =
                     Some("Failed to load comments from local database.".to_string());
             }
@@ -193,11 +235,7 @@ impl DiffViewer {
     }
 
     pub(super) fn row_open_comment_count(&self, row_ix: usize) -> usize {
-        self.comments_cache
-            .iter()
-            .filter(|comment| comment.status == CommentStatus::Open)
-            .filter(|comment| self.row_exact_anchor_match(row_ix, comment))
-            .count()
+        self.comment_open_row_counts.get(row_ix).copied().unwrap_or(0)
     }
 
     pub(super) fn open_comment_editor_for_row(
@@ -289,12 +327,12 @@ impl DiffViewer {
             Ok(_) => {
                 self.active_comment_editor_row = None;
                 self.comments_preview_open = false;
-                self.comment_status_message = Some("Comment added.".to_string());
                 let state = self.comment_input_state.clone();
                 state.update(cx, |input, cx| {
                     input.set_value("", window, cx);
                 });
                 self.refresh_comments_cache_from_store();
+                self.comment_status_message = Some("Comment added.".to_string());
             }
             Err(err) => {
                 error!("failed to create diff comment: {err:#}");
@@ -390,20 +428,19 @@ impl DiffViewer {
         }
 
         let now = now_unix_ms();
-        let mut resolved = 0usize;
-        for id in stale_ids {
-            match store.mark_comment_status(id.as_str(), CommentStatus::Resolved, None, now) {
+        let resolved =
+            match store.mark_many_comment_status(&stale_ids, CommentStatus::Resolved, None, now) {
                 Ok(updated) => {
-                    if updated {
+                    for id in &stale_ids {
                         self.comment_miss_streaks.remove(id.as_str());
-                        resolved += 1;
                     }
+                    updated
                 }
                 Err(err) => {
-                    error!("failed to resolve stale comment {id}: {err:#}");
+                    error!("failed to resolve stale comments in batch: {err:#}");
+                    0
                 }
-            }
-        }
+            };
 
         self.refresh_comments_cache_from_store();
         self.comment_status_message = Some(format!("Resolved {resolved} stale comments."));
@@ -427,20 +464,19 @@ impl DiffViewer {
         }
 
         let now = now_unix_ms();
-        let mut reopened = 0usize;
-        for id in stale_ids {
-            match store.mark_comment_status(id.as_str(), CommentStatus::Open, None, now) {
+        let reopened =
+            match store.mark_many_comment_status(&stale_ids, CommentStatus::Open, None, now) {
                 Ok(updated) => {
-                    if updated {
+                    for id in &stale_ids {
                         self.comment_miss_streaks.remove(id.as_str());
-                        reopened += 1;
                     }
+                    updated
                 }
                 Err(err) => {
-                    error!("failed to reopen stale comment {id}: {err:#}");
+                    error!("failed to reopen stale comments in batch: {err:#}");
+                    0
                 }
-            }
-        }
+            };
 
         self.refresh_comments_cache_from_store();
         self.comment_status_message = Some(format!("Reopened {reopened} stale comments."));
@@ -463,20 +499,18 @@ impl DiffViewer {
             return;
         }
 
-        let mut deleted = 0usize;
-        for id in resolved_ids {
-            match store.delete_comment(id.as_str()) {
-                Ok(was_deleted) => {
-                    if was_deleted {
-                        self.comment_miss_streaks.remove(id.as_str());
-                        deleted += 1;
-                    }
+        let deleted = match store.delete_many_comments(&resolved_ids) {
+            Ok(updated) => {
+                for id in &resolved_ids {
+                    self.comment_miss_streaks.remove(id.as_str());
                 }
-                Err(err) => {
-                    error!("failed to delete resolved comment {id}: {err:#}");
-                }
+                updated
             }
-        }
+            Err(err) => {
+                error!("failed to delete resolved comments in batch: {err:#}");
+                0
+            }
+        };
 
         self.refresh_comments_cache_from_store();
         self.comment_status_message = Some(format!("Deleted {deleted} resolved comments."));
@@ -493,7 +527,12 @@ impl DiffViewer {
             return;
         };
 
-        if let Some(row_ix) = self.find_matching_row_for_comment(&comment) {
+        let mapped_row = self
+            .comment_row_matches
+            .get(comment.id.as_str())
+            .copied()
+            .or_else(|| self.find_matching_row_for_comment(&comment));
+        if let Some(row_ix) = mapped_row {
             self.comments_preview_open = false;
             self.select_row_and_scroll(row_ix, false, cx);
             self.hovered_comment_row = Some(row_ix);
@@ -539,6 +578,9 @@ impl DiffViewer {
             .map(|file| file.path.as_str())
             .collect::<BTreeSet<_>>();
         let mut should_reload = false;
+        let mut seen_ids = Vec::new();
+        let mut stale_ids = Vec::new();
+        let mut resolved_ids = Vec::new();
 
         for comment in self
             .comments_cache
@@ -546,11 +588,9 @@ impl DiffViewer {
             .into_iter()
             .filter(|comment| comment.status == CommentStatus::Open)
         {
-            if self.find_matching_row_for_comment(&comment).is_some() {
+            if self.comment_row_matches.contains_key(comment.id.as_str()) {
                 self.comment_miss_streaks.remove(comment.id.as_str());
-                if let Err(err) = store.touch_comment_seen(comment.id.as_str(), now) {
-                    error!("failed to update comment last_seen for {}: {err:#}", comment.id);
-                }
+                seen_ids.push(comment.id.clone());
                 continue;
             }
 
@@ -567,15 +607,33 @@ impl DiffViewer {
             }
             self.comment_miss_streaks.remove(comment.id.as_str());
 
-            let (next_status, stale_reason) =
+            let (next_status, _) =
                 next_status_for_unmatched_anchor(changed_paths.contains(comment.file_path.as_str()));
-            match store.mark_comment_status(comment.id.as_str(), next_status, stale_reason, now) {
-                Ok(updated) => {
-                    should_reload |= updated;
-                }
-                Err(err) => {
-                    error!("failed to update comment {} status: {err:#}", comment.id);
-                }
+            match next_status {
+                CommentStatus::Stale => stale_ids.push(comment.id.clone()),
+                CommentStatus::Resolved => resolved_ids.push(comment.id.clone()),
+                CommentStatus::Open => {}
+            }
+        }
+
+        if let Err(err) = store.touch_many_comment_seen(&seen_ids, now) {
+            error!("failed to batch update comment last_seen: {err:#}");
+        }
+        match store.mark_many_comment_status(&stale_ids, CommentStatus::Stale, Some("anchor_not_found"), now)
+        {
+            Ok(updated) => {
+                should_reload |= updated > 0;
+            }
+            Err(err) => {
+                error!("failed to batch update stale comment status: {err:#}");
+            }
+        }
+        match store.mark_many_comment_status(&resolved_ids, CommentStatus::Resolved, None, now) {
+            Ok(updated) => {
+                should_reload |= updated > 0;
+            }
+            Err(err) => {
+                error!("failed to batch update resolved comment status: {err:#}");
             }
         }
 
@@ -587,6 +645,7 @@ impl DiffViewer {
     fn find_matching_row_for_comment(&self, comment: &CommentRecord) -> Option<usize> {
         let mut hash_fallback = None;
         let mut fuzzy_fallback = None::<(usize, i32)>;
+        let key = Self::build_fuzzy_comment_key(comment);
 
         for row_ix in 0..self.diff_rows.len() {
             if self.row_file_path(row_ix).as_deref() != Some(comment.file_path.as_str()) {
@@ -601,7 +660,7 @@ impl DiffViewer {
                     hash_fallback = Some(row_ix);
                 }
 
-                let score = Self::fuzzy_anchor_match_score(comment, &anchor);
+                let score = Self::fuzzy_anchor_match_score(&key, &anchor);
                 if score >= COMMENT_FUZZY_MATCH_MIN_SCORE {
                     let should_replace = fuzzy_fallback
                         .as_ref()
@@ -617,41 +676,65 @@ impl DiffViewer {
         hash_fallback.or_else(|| fuzzy_fallback.map(|(row_ix, _)| row_ix))
     }
 
-    fn fuzzy_anchor_match_score(comment: &CommentRecord, anchor: &RowCommentAnchor) -> i32 {
+    fn build_fuzzy_comment_key(comment: &CommentRecord) -> FuzzyCommentKey {
+        FuzzyCommentKey {
+            line_side: comment.line_side,
+            old_line: comment.old_line,
+            new_line: comment.new_line,
+            line_text: Self::normalize_text_for_fuzzy(comment.line_text.as_str()),
+            line_core: Self::normalize_diff_line_body(comment.line_text.as_str()),
+            hunk_header: Self::normalize_text_for_fuzzy(comment.hunk_header.as_deref().unwrap_or("")),
+            context_before_line: Self::normalize_diff_line_body(
+                Self::last_non_empty_line(comment.context_before.as_str()),
+            ),
+            context_after_line: Self::normalize_diff_line_body(
+                Self::first_non_empty_line(comment.context_after.as_str()),
+            ),
+        }
+    }
+
+    fn fuzzy_anchor_match_score(key: &FuzzyCommentKey, anchor: &RowCommentAnchor) -> i32 {
         let mut score = 0i32;
 
-        if comment.line_side == anchor.line_side {
+        if key.line_side == anchor.line_side {
             score += 2;
         } else {
             score -= 1;
         }
 
-        let comment_line = Self::normalize_text_for_fuzzy(comment.line_text.as_str());
         let anchor_line = Self::normalize_text_for_fuzzy(anchor.line_text.as_str());
-        if !comment_line.is_empty() && comment_line == anchor_line {
+        if !key.line_text.is_empty() && key.line_text == anchor_line {
             score += 6;
         } else {
-            let comment_core = Self::normalize_diff_line_body(comment.line_text.as_str());
             let anchor_core = Self::normalize_diff_line_body(anchor.line_text.as_str());
-            if !comment_core.is_empty() && comment_core == anchor_core {
+            if !key.line_core.is_empty() && key.line_core == anchor_core {
                 score += 5;
-            } else if Self::has_substring_overlap(comment_core.as_str(), anchor_core.as_str()) {
+            } else if Self::has_substring_overlap(key.line_core.as_str(), anchor_core.as_str()) {
                 score += 3;
             }
         }
 
-        let comment_hunk = Self::normalize_text_for_fuzzy(comment.hunk_header.as_deref().unwrap_or(""));
         let anchor_hunk = Self::normalize_text_for_fuzzy(anchor.hunk_header.as_deref().unwrap_or(""));
-        if !comment_hunk.is_empty() && comment_hunk == anchor_hunk {
+        if !key.hunk_header.is_empty() && key.hunk_header == anchor_hunk {
             score += 2;
         }
 
-        score +=
-            Self::context_overlap_score(comment.context_before.as_str(), anchor.context_before.as_str());
-        score +=
-            Self::context_overlap_score(comment.context_after.as_str(), anchor.context_after.as_str());
-        score += Self::line_distance_score(comment.old_line, anchor.old_line);
-        score += Self::line_distance_score(comment.new_line, anchor.new_line);
+        let anchor_before = Self::normalize_diff_line_body(
+            Self::last_non_empty_line(anchor.context_before.as_str()),
+        );
+        let anchor_after = Self::normalize_diff_line_body(
+            Self::first_non_empty_line(anchor.context_after.as_str()),
+        );
+        score += Self::context_line_score(
+            key.context_before_line.as_str(),
+            anchor_before.as_str(),
+        );
+        score += Self::context_line_score(
+            key.context_after_line.as_str(),
+            anchor_after.as_str(),
+        );
+        score += Self::line_distance_score(key.old_line, anchor.old_line);
+        score += Self::line_distance_score(key.new_line, anchor.new_line);
 
         score
     }
@@ -680,30 +763,35 @@ impl DiffViewer {
             .join(" ")
     }
 
+    fn first_non_empty_line(text: &str) -> &str {
+        text.lines()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or("")
+    }
+
+    fn last_non_empty_line(text: &str) -> &str {
+        text.lines()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or("")
+    }
+
     fn has_substring_overlap(lhs: &str, rhs: &str) -> bool {
         let min_len = lhs.len().min(rhs.len());
         min_len >= 12 && (lhs.contains(rhs) || rhs.contains(lhs))
     }
 
-    fn context_overlap_score(lhs: &str, rhs: &str) -> i32 {
-        let lhs_lines = lhs
-            .lines()
-            .map(Self::normalize_diff_line_body)
-            .filter(|line| line.len() >= 3)
-            .collect::<BTreeSet<_>>();
-        let rhs_lines = rhs
-            .lines()
-            .map(Self::normalize_diff_line_body)
-            .filter(|line| line.len() >= 3)
-            .collect::<BTreeSet<_>>();
-
-        let overlap = lhs_lines.intersection(&rhs_lines).count();
-        match overlap {
-            0 => 0,
-            1 => 1,
-            2 => 2,
-            _ => 3,
+    fn context_line_score(lhs: &str, rhs: &str) -> i32 {
+        if lhs.is_empty() || rhs.is_empty() {
+            return 0;
         }
+        if lhs == rhs {
+            return 2;
+        }
+        if Self::has_substring_overlap(lhs, rhs) {
+            return 1;
+        }
+        0
     }
 
     fn line_distance_score(lhs: Option<u32>, rhs: Option<u32>) -> i32 {

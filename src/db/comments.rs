@@ -297,6 +297,46 @@ impl DatabaseStore {
         Ok(rows_updated > 0)
     }
 
+    pub fn mark_many_comment_status(
+        &self,
+        ids: &[String],
+        status: CommentStatus,
+        stale_reason: Option<&str>,
+        updated_at_unix_ms: i64,
+    ) -> Result<usize> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+
+        let stale_reason_value = match status {
+            CommentStatus::Stale => stale_reason,
+            _ => None,
+        };
+
+        let mut conn = self.open_connection()?;
+        let tx = conn
+            .transaction()
+            .context("failed to start sqlite transaction for status batch update")?;
+        let mut stmt = tx
+            .prepare(sql::comments::UPDATE_STATUS)
+            .context("failed to prepare status batch update statement")?;
+        let mut updated = 0usize;
+        for id in ids {
+            updated += stmt
+                .execute(params![
+                    id,
+                    status.as_str(),
+                    stale_reason_value,
+                    updated_at_unix_ms,
+                ])
+                .with_context(|| format!("failed to batch update status for comment {id}"))?;
+        }
+        drop(stmt);
+        tx.commit()
+            .context("failed to commit status batch update transaction")?;
+        Ok(updated)
+    }
+
     pub fn touch_comment_seen(&self, id: &str, seen_at_unix_ms: i64) -> Result<bool> {
         let conn = self.open_connection()?;
         let rows_updated = conn
@@ -305,12 +345,60 @@ impl DatabaseStore {
         Ok(rows_updated > 0)
     }
 
+    pub fn touch_many_comment_seen(&self, ids: &[String], seen_at_unix_ms: i64) -> Result<usize> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+
+        let mut conn = self.open_connection()?;
+        let tx = conn
+            .transaction()
+            .context("failed to start sqlite transaction for last_seen batch update")?;
+        let mut stmt = tx
+            .prepare(sql::comments::TOUCH_SEEN)
+            .context("failed to prepare last_seen batch update statement")?;
+        let mut updated = 0usize;
+        for id in ids {
+            updated += stmt
+                .execute(params![id, seen_at_unix_ms])
+                .with_context(|| format!("failed to batch update last_seen for comment {id}"))?;
+        }
+        drop(stmt);
+        tx.commit()
+            .context("failed to commit last_seen batch update transaction")?;
+        Ok(updated)
+    }
+
     pub fn delete_comment(&self, id: &str) -> Result<bool> {
         let conn = self.open_connection()?;
         let rows_deleted = conn
             .execute(sql::comments::DELETE_BY_ID, params![id])
             .with_context(|| format!("failed to delete comment {id}"))?;
         Ok(rows_deleted > 0)
+    }
+
+    pub fn delete_many_comments(&self, ids: &[String]) -> Result<usize> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+
+        let mut conn = self.open_connection()?;
+        let tx = conn
+            .transaction()
+            .context("failed to start sqlite transaction for comment batch delete")?;
+        let mut stmt = tx
+            .prepare(sql::comments::DELETE_BY_ID)
+            .context("failed to prepare comment batch delete statement")?;
+        let mut deleted = 0usize;
+        for id in ids {
+            deleted += stmt
+                .execute(params![id])
+                .with_context(|| format!("failed to batch delete comment {id}"))?;
+        }
+        drop(stmt);
+        tx.commit()
+            .context("failed to commit comment batch delete transaction")?;
+        Ok(deleted)
     }
 
     pub fn prune_non_open_comments(&self, cutoff_unix_ms: i64) -> Result<usize> {

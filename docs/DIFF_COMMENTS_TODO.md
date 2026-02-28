@@ -109,19 +109,15 @@ Copy action emits structured plain text:
 
 ```text
 [Hunk Comment]
-Repo: <repo_root>
-Bookmark: <bookmark_name>
 File: <file_path>
 Lines: old <old_line or -> | new <new_line or ->
-Status: <status>
-
 Comment:
 <comment_text>
 
-Diff Context:
-<context_before with +/-/space prefixes>
+Snippet:
+<last relevant line before>
 <anchored line>
-<context_after with +/-/space prefixes>
+<first relevant line after>
 ```
 
 `Copy All Open` concatenates multiple blocks separated by `\n\n---\n\n`.

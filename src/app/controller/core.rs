@@ -170,6 +170,8 @@ impl DiffViewer {
             comments_preview_open: false,
             comments_show_non_open: false,
             comment_miss_streaks: BTreeMap::new(),
+            comment_row_matches: BTreeMap::new(),
+            comment_open_row_counts: Vec::new(),
             hovered_comment_row: None,
             active_comment_editor_row: None,
             comment_input_state,
@@ -568,6 +570,7 @@ impl DiffViewer {
         self.overall_line_stats = LineStats::default();
         self.comments_cache.clear();
         self.comment_miss_streaks.clear();
+        self.reset_comment_row_match_cache();
         self.clear_comment_ui_state();
         self.file_row_ranges.clear();
         self.file_line_stats.clear();
@@ -620,6 +623,7 @@ impl DiffViewer {
             self.cancel_patch_reload();
             self.comments_cache.clear();
             self.comment_miss_streaks.clear();
+            self.reset_comment_row_match_cache();
             self.clear_comment_ui_state();
             self.diff_rows.clear();
             self.diff_row_metadata.clear();
@@ -951,6 +955,7 @@ impl DiffViewer {
         });
         self.last_visible_row_start = None;
         self.recompute_diff_visible_header_lookup();
+        self.rebuild_comment_row_match_cache();
 
         if self.scroll_selected_after_reload {
             self.scroll_selected_file_to_top();
@@ -982,6 +987,7 @@ impl DiffViewer {
         self.diff_visible_hunk_header_lookup.clear();
         self.scroll_selected_after_reload = false;
         self.clamp_comment_rows_to_diff();
+        self.rebuild_comment_row_match_cache();
     }
 
     fn recompute_diff_visible_header_lookup(&mut self) {
