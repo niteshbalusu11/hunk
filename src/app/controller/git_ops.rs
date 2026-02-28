@@ -86,7 +86,10 @@ impl DiffViewer {
             .unwrap_or(self.branch_name.as_str());
         self.working_copy_recovery_candidates
             .iter()
-            .find(|candidate| candidate.source_bookmark == active_bookmark)
+            .find(|candidate| {
+                candidate.source_bookmark == active_bookmark
+                    || candidate.switched_to_bookmark == active_bookmark
+            })
             .cloned()
     }
 
