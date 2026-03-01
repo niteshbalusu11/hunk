@@ -205,6 +205,7 @@ impl DiffViewer {
             cx.notify();
             return;
         }
+        self.pending_bookmark_switch = None;
         let move_changes =
             move_changes_to_new_bookmark && !self.files.is_empty() && !self.branch_name.is_empty();
         let recovery_candidate = if move_changes {
@@ -226,7 +227,7 @@ impl DiffViewer {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.activate_or_create_bookmark(branch_name, false, cx);
+        self.request_activate_or_create_bookmark_with_dirty_guard(branch_name, cx);
     }
 
     pub(super) fn checkout_bookmark_with_change_transfer(
@@ -234,6 +235,7 @@ impl DiffViewer {
         branch_name: String,
         cx: &mut Context<Self>,
     ) {
+        self.pending_bookmark_switch = None;
         self.activate_or_create_bookmark(branch_name, true, cx);
     }
 
@@ -345,9 +347,9 @@ impl DiffViewer {
 
         let sanitized = sanitize_bookmark_name(&raw_name);
         self.branch_input_state.update(cx, |state, cx| {
-            state.set_value(sanitized.clone(), window, cx);
+            state.set_value("", window, cx);
         });
-        self.activate_or_create_bookmark(sanitized, false, cx);
+        self.request_activate_or_create_bookmark_with_dirty_guard(sanitized, cx);
     }
 
     pub(super) fn rename_current_bookmark_from_input(
@@ -556,8 +558,8 @@ impl DiffViewer {
     }
 
     pub(super) fn open_current_bookmark_review_url(&mut self, cx: &mut Context<Self>) {
-        if !self.can_run_active_bookmark_actions() {
-            let message = "Activate a bookmark before building a review URL.".to_string();
+        if let Some(reason) = self.active_review_action_blocker() {
+            let message = format!("Open PR/MR unavailable: {reason}");
             self.git_status_message = Some(message.clone());
             Self::push_warning_notification(message, cx);
             cx.notify();
@@ -571,8 +573,8 @@ impl DiffViewer {
     }
 
     pub(super) fn copy_current_bookmark_review_url(&mut self, cx: &mut Context<Self>) {
-        if !self.can_run_active_bookmark_actions() {
-            let message = "Activate a bookmark before building a review URL.".to_string();
+        if let Some(reason) = self.active_review_action_blocker() {
+            let message = format!("Copy review URL unavailable: {reason}");
             self.git_status_message = Some(message.clone());
             Self::push_warning_notification(message, cx);
             cx.notify();
@@ -586,22 +588,28 @@ impl DiffViewer {
     }
 
     pub(super) fn open_selected_graph_bookmark_review_url(&mut self, cx: &mut Context<Self>) {
-        let Some(bookmark_name) = self.selected_local_graph_bookmark_name() else {
-            let message = "Select a local bookmark before opening PR/MR.".to_string();
+        if let Some(reason) = self.selected_graph_review_action_blocker() {
+            let message = format!("Open PR/MR unavailable: {reason}");
             self.git_status_message = Some(message.clone());
             Self::push_warning_notification(message, cx);
             cx.notify();
+            return;
+        };
+        let Some(bookmark_name) = self.selected_local_graph_bookmark_name() else {
             return;
         };
         self.run_review_url_action_for_bookmark(bookmark_name, ReviewUrlAction::Open, cx);
     }
 
     pub(super) fn copy_selected_graph_bookmark_review_url(&mut self, cx: &mut Context<Self>) {
-        let Some(bookmark_name) = self.selected_local_graph_bookmark_name() else {
-            let message = "Select a local bookmark before building a review URL.".to_string();
+        if let Some(reason) = self.selected_graph_review_action_blocker() {
+            let message = format!("Copy review URL unavailable: {reason}");
             self.git_status_message = Some(message.clone());
             Self::push_warning_notification(message, cx);
             cx.notify();
+            return;
+        };
+        let Some(bookmark_name) = self.selected_local_graph_bookmark_name() else {
             return;
         };
         self.run_review_url_action_for_bookmark(bookmark_name, ReviewUrlAction::Copy, cx);

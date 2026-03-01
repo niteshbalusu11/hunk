@@ -29,6 +29,25 @@ impl DiffViewer {
         cx.notify();
     }
 
+    pub(super) fn activate_graph_bookmark(
+        &mut self,
+        node_id: String,
+        name: String,
+        remote: Option<String>,
+        scope: GraphBookmarkScope,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_graph_bookmark(node_id, name.clone(), remote, scope, cx);
+        if scope != GraphBookmarkScope::Local {
+            let message = "Only local bookmarks can be activated for workspace edits.".to_string();
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
+            cx.notify();
+            return;
+        }
+        self.request_activate_or_create_bookmark_with_dirty_guard(name, cx);
+    }
+
     pub(super) fn select_active_graph_bookmark(&mut self, cx: &mut Context<Self>) {
         let Some(active_bookmark) = self.graph_active_bookmark.clone() else {
             return;
@@ -196,6 +215,10 @@ impl DiffViewer {
         if !self.graph_nodes.iter().any(|node| node.id == source_node_id) {
             return;
         }
+        info!(
+            "graph drag started for local bookmark '{}' from {}",
+            name, source_node_id
+        );
 
         self.graph_selected_node_id = Some(source_node_id.clone());
         self.graph_selected_bookmark = Some(GraphBookmarkSelection {
@@ -247,6 +270,10 @@ impl DiffViewer {
                 self.arm_move_graph_bookmark_to_target(drag_state.bookmark, node_id, cx);
             }
             Err(reason) => {
+                info!(
+                    "graph drag rejected for bookmark '{}': {}",
+                    drag_state.bookmark.name, reason
+                );
                 self.git_status_message = Some(reason.clone());
                 Self::push_warning_notification(reason, cx);
                 cx.notify();
@@ -258,6 +285,7 @@ impl DiffViewer {
         if self.graph_drag_state.is_none() {
             return;
         }
+        info!("graph drag canceled before drop");
         self.graph_drag_state = None;
         cx.notify();
     }
@@ -298,6 +326,24 @@ impl DiffViewer {
         };
         self.validate_graph_bookmark_drop(&drag_state.bookmark, node_id)
             .is_ok()
+    }
+
+    pub(super) fn graph_drag_drop_hint(&self) -> Option<String> {
+        let drag_state = self.graph_drag_state.as_ref()?;
+        let Some(target_node_id) = drag_state.hovered_node_id.as_deref() else {
+            return Some(format!(
+                "Drag '{}' onto a revision to move its bookmark pointer.",
+                drag_state.bookmark.name
+            ));
+        };
+        match self.validate_graph_bookmark_drop(&drag_state.bookmark, target_node_id) {
+            Ok(()) => Some(format!(
+                "Drop to move '{}' to revision {}.",
+                drag_state.bookmark.name,
+                target_node_id.chars().take(12).collect::<String>()
+            )),
+            Err(reason) => Some(format!("Cannot drop here: {reason}")),
+        }
     }
 
     pub(super) fn create_graph_bookmark_from_selected_revision(
