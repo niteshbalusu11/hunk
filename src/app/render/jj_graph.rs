@@ -258,6 +258,10 @@ impl DiffViewer {
         let nodes_len = self.graph_nodes.len();
         let view = cx.entity();
         let lane_rows = Rc::new(build_graph_lane_rows(&self.graph_nodes, &self.graph_edges));
+        let working_copy_color = self.graph_working_copy_color(is_dark);
+        let active_target_color = self.graph_active_target_color(is_dark);
+        let merge_color = self.graph_merge_color(is_dark);
+        let legend_text_color = cx.theme().muted_foreground.opacity(if is_dark { 0.94 } else { 0.88 });
 
         v_flex()
             .size_full()
@@ -291,14 +295,81 @@ impl DiffViewer {
                             .child(
                                 div()
                                     .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
+                                    .text_color(legend_text_color)
                                     .child("Tree mode graph · single-select"),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(legend_text_color)
+                                    .child("Legend:"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_semibold()
+                                    .font_family(cx.theme().mono_font_family.clone())
+                                    .text_color(cx.theme().foreground)
+                                    .child("○"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(legend_text_color)
+                                    .child("commit ·"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_semibold()
+                                    .font_family(cx.theme().mono_font_family.clone())
+                                    .text_color(merge_color)
+                                    .child("◆"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(legend_text_color)
+                                    .child("merge ·"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_semibold()
+                                    .font_family(cx.theme().mono_font_family.clone())
+                                    .text_color(working_copy_color)
+                                    .child("@"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(legend_text_color)
+                                    .child("working-copy parent ·"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_semibold()
+                                    .font_family(cx.theme().mono_font_family.clone())
+                                    .text_color(active_target_color)
+                                    .child("*"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(legend_text_color)
+                                    .child("active bookmark target"),
                             ),
                     )
                     .child(
                         div()
                             .text_xs()
-                            .text_color(cx.theme().muted_foreground)
+                            .text_color(legend_text_color)
                             .child(format!(
                                 "{} nodes{}",
                                 nodes_len,
@@ -364,13 +435,13 @@ impl DiffViewer {
                     .child(
                         div()
                             .text_xs()
-                            .text_color(cx.theme().muted_foreground)
+                            .text_color(legend_text_color)
                             .child(format!("{} edges", self.graph_edges.len())),
                     )
                     .child(
                         div()
                             .text_xs()
-                            .text_color(cx.theme().muted_foreground)
+                            .text_color(legend_text_color)
                             .child(format!(
                                 "active: {}",
                                 self.graph_active_bookmark.as_deref().unwrap_or("detached")
@@ -380,7 +451,7 @@ impl DiffViewer {
                         this.child(
                             div()
                                 .text_xs()
-                                .text_color(cx.theme().muted_foreground)
+                                .text_color(legend_text_color)
                                 .child(format!("selected: {}", selected.name)),
                         )
                     })
@@ -392,34 +463,61 @@ impl DiffViewer {
                                 div()
                                     .text_xs()
                                     .font_family(cx.theme().mono_font_family.clone())
-                                    .text_color(cx.theme().warning)
+                                    .font_semibold()
+                                    .text_color(working_copy_color)
                                     .child("@"),
                             )
                             .child(
                                 div()
                                     .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
+                                    .text_color(legend_text_color)
                                     .child("working-copy parent"),
                             )
                             .child(
                                 div()
                                     .text_xs()
                                     .font_family(cx.theme().mono_font_family.clone())
-                                    .text_color(cx.theme().success)
+                                    .font_semibold()
+                                    .text_color(active_target_color)
                                     .child("*"),
                             )
                             .child(
                                 div()
                                     .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
+                                    .text_color(legend_text_color)
                                     .child("active bookmark target"),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_family(cx.theme().mono_font_family.clone())
+                                    .font_semibold()
+                                    .text_color(merge_color)
+                                    .child("◆"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(legend_text_color)
+                                    .child("merge commit"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(legend_text_color)
+                                    .child("selected row = active focus"),
                             ),
                     )
                     .when(self.graph_has_more, |this| {
                         this.child(
                             div()
                                 .text_xs()
-                                .text_color(cx.theme().muted_foreground)
+                                .text_color(legend_text_color)
                                 .child("More history available in backend windowing."),
                         )
                     })
@@ -458,27 +556,29 @@ impl DiffViewer {
         let row_bg = if is_selected {
             cx.theme().accent.opacity(if is_dark { 0.22 } else { 0.14 })
         } else {
-            cx.theme().background.opacity(if is_dark { 0.04 } else { 0.08 })
+            cx.theme().background.opacity(0.0)
         };
         let row_border = if is_selected {
             cx.theme().accent.opacity(if is_dark { 0.72 } else { 0.58 })
         } else {
-            cx.theme().border.opacity(if is_dark { 0.22 } else { 0.30 })
+            cx.theme().border.opacity(0.0)
         };
         let parent_count = self
             .graph_edges
             .iter()
             .filter(|edge| edge.from == node.id)
             .count();
+        let lane_count = lane_row.map(|row| row.lane_count.max(1)).unwrap_or(1);
+        let gutter_width = self.tree_lane_gutter_width(lane_count);
         let short_id = node.id.chars().take(12).collect::<String>();
 
-        let row = h_flex()
+        let row = div()
             .id(("jj-graph-row", row_ix))
+            .relative()
             .w_full()
-            .items_start()
-            .gap_2()
-            .px_2()
-            .py_1()
+            .py_0p5()
+            .pl(px(gutter_width + 10.0))
+            .pr_2()
             .rounded(px(6.0))
             .border_1()
             .border_color(row_border)
@@ -492,7 +592,21 @@ impl DiffViewer {
                 }
             })
             .child(
-                self.render_jj_graph_lane_gutter(node, lane_row, cx),
+                div()
+                    .absolute()
+                    .left(px(8.0))
+                    .top_0()
+                    .bottom_0()
+                    .w(px(gutter_width))
+                    .child(
+                        self.render_jj_graph_lane_gutter(
+                            node,
+                            lane_row,
+                            parent_count > 1,
+                            lane_count,
+                            cx,
+                        ),
+                    ),
             )
             .child(
                 v_flex()
@@ -553,6 +667,8 @@ impl DiffViewer {
         &self,
         node: &GraphNode,
         lane_row: Option<&GraphLaneRow>,
+        is_merge_commit: bool,
+        lane_count: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let is_dark = cx.theme().mode.is_dark();
@@ -564,7 +680,14 @@ impl DiffViewer {
                 } else if node.is_active_bookmark_target {
                     "*"
                 } else {
-                    "o"
+                    "○"
+                };
+                let marker_color = if node.is_working_copy_parent {
+                    self.graph_working_copy_color(is_dark)
+                } else if node.is_active_bookmark_target {
+                    self.graph_active_target_color(is_dark)
+                } else {
+                    cx.theme().foreground.opacity(if is_dark { 0.92 } else { 0.84 })
                 };
                 return div()
                     .w(px(18.0))
@@ -572,95 +695,190 @@ impl DiffViewer {
                     .text_xs()
                     .font_semibold()
                     .font_family(cx.theme().mono_font_family.clone())
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(marker_color)
                     .child(marker)
                     .into_any_element();
             }
         };
 
-        let lane_count = lane_row.lane_count.max(1);
-        let lane_color = if self.graph_node_is_selected(node.id.as_str()) {
-            cx.theme().accent
+        let selected = self.graph_node_is_selected(node.id.as_str());
+        let connector_color = if selected {
+            cx.theme().accent.opacity(if is_dark { 1.0 } else { 0.88 })
         } else {
-            cx.theme().muted_foreground.opacity(if is_dark { 0.88 } else { 0.76 })
+            cx.theme().muted_foreground.opacity(if is_dark { 0.94 } else { 0.76 })
         };
         let node_color = if node.is_working_copy_parent {
-            cx.theme().warning
+            self.graph_working_copy_color(is_dark)
         } else if node.is_active_bookmark_target {
-            cx.theme().success
+            self.graph_active_target_color(is_dark)
+        } else if is_merge_commit {
+            self.graph_merge_color(is_dark)
         } else {
-            cx.theme().foreground
+            cx.theme().foreground.opacity(if is_dark { 0.92 } else { 0.84 })
+        };
+        let node_marker = if node.is_working_copy_parent {
+            Some("@")
+        } else if node.is_active_bookmark_target {
+            Some("*")
+        } else if is_merge_commit {
+            Some("◆")
+        } else {
+            None
         };
 
-        h_flex()
-            .items_center()
-            .gap(px(2.0))
-            .min_h(px(24.0))
-            .children((0..lane_count).map(|lane_ix| {
-                let top_vertical = lane_row.top_vertical.get(lane_ix).copied().unwrap_or(false);
-                let bottom_vertical = lane_row.bottom_vertical.get(lane_ix).copied().unwrap_or(false);
-                let horizontal = lane_row.horizontal.get(lane_ix).copied().unwrap_or(false);
-                let is_node_lane = lane_row.node_lane == lane_ix;
+        let lane_spacing = 14.0_f32;
+        let node_center_y = 9.0_f32;
+        let node_size = 12.0_f32;
+        let node_lane_x = lane_row.node_lane as f32 * lane_spacing + 7.0;
+        let mut gutter = div()
+            .relative()
+            .h_full()
+            .w(px(self.tree_lane_gutter_width(lane_count)))
+            .min_h(px(26.0));
 
+        for lane_ix in 0..lane_count {
+            let top_vertical = lane_row.top_vertical.get(lane_ix).copied().unwrap_or(false);
+            let bottom_vertical = lane_row.bottom_vertical.get(lane_ix).copied().unwrap_or(false);
+            let has_vertical = top_vertical || bottom_vertical;
+            if !has_vertical {
+                continue;
+            }
+            let lane_x = lane_ix as f32 * lane_spacing + 7.0;
+            gutter = gutter.child(
                 div()
-                    .relative()
-                    .size(px(12.0))
-                    .child(
-                        div()
-                            .absolute()
-                            .left(px(5.0))
-                            .top_0()
-                            .w(px(1.0))
-                            .h(px(6.0))
-                            .bg(if top_vertical {
-                                lane_color
-                            } else {
-                                lane_color.opacity(0.0)
-                            }),
-                    )
-                    .child(
-                        div()
-                            .absolute()
-                            .left_0()
-                            .top(px(6.0))
-                            .w(px(12.0))
-                            .h(px(1.0))
-                            .bg(if horizontal {
-                                lane_color
-                            } else {
-                                lane_color.opacity(0.0)
-                            }),
-                    )
-                    .child(
-                        div()
-                            .absolute()
-                            .left(px(5.0))
-                            .top(px(6.0))
-                            .w(px(1.0))
-                            .h(px(6.0))
-                            .bg(if bottom_vertical {
-                                lane_color
-                            } else {
-                                lane_color.opacity(0.0)
-                            }),
-                    )
-                    .child(
-                        div()
-                            .absolute()
-                            .left(px(2.0))
-                            .top(px(3.0))
-                            .size(px(7.0))
-                            .rounded_full()
-                            .border_1()
-                            .border_color(node_color.opacity(if is_dark { 0.96 } else { 0.82 }))
-                            .bg(if is_node_lane {
-                                node_color
-                            } else {
-                                node_color.opacity(0.0)
-                            }),
-                    )
-            }))
-            .into_any_element()
+                    .absolute()
+                    .left(px(lane_x))
+                    .top(px(-8.0))
+                    .w(px(2.0))
+                    .bottom(px(-8.0))
+                    .bg(connector_color),
+            );
+        }
+
+        for secondary_lane in &lane_row.secondary_parent_lanes {
+            let start_lane = (*secondary_lane).min(lane_row.node_lane);
+            let end_lane = (*secondary_lane).max(lane_row.node_lane);
+            let left = start_lane as f32 * lane_spacing + 7.0;
+            let width = (end_lane.saturating_sub(start_lane)) as f32 * lane_spacing + 2.0;
+            gutter = gutter.child(
+                div()
+                    .absolute()
+                    .left(px(left))
+                    .top(px(node_center_y))
+                    .w(px(width))
+                    .h(px(2.0))
+                    .bg(connector_color),
+            );
+        }
+
+        gutter = gutter.child(
+            div()
+                .absolute()
+                .left(px(node_lane_x - (node_size * 0.5)))
+                .top(px(node_center_y - (node_size * 0.5)))
+                .size(px(node_size))
+                .rounded(if is_merge_commit { px(2.0) } else { px(999.0) })
+                .border_2()
+                .border_color(node_color.opacity(if is_dark { 1.0 } else { 0.92 }))
+                .bg(node_color),
+        );
+
+        if let Some(marker) = node_marker {
+            gutter = gutter
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(node_lane_x - (node_size * 0.5)))
+                        .top(px(node_center_y - (node_size * 0.5)))
+                        .size(px(node_size))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_xs()
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .font_semibold()
+                        .text_color(cx.theme().background)
+                        .child(marker),
+                );
+        }
+
+        gutter.into_any_element()
+    }
+
+    fn tree_lane_gutter_width(&self, lane_count: usize) -> f32 {
+        lane_count.saturating_mul(14).saturating_add(2) as f32
+    }
+
+    fn graph_working_copy_color(&self, is_dark: bool) -> gpui::Hsla {
+        if is_dark {
+            gpui::rgb(0xfbbf24).into()
+        } else {
+            gpui::rgb(0xb45309).into()
+        }
+    }
+
+    fn graph_active_target_color(&self, is_dark: bool) -> gpui::Hsla {
+        if is_dark {
+            gpui::rgb(0x4ade80).into()
+        } else {
+            gpui::rgb(0x047857).into()
+        }
+    }
+
+    fn graph_merge_color(&self, is_dark: bool) -> gpui::Hsla {
+        if is_dark {
+            gpui::rgb(0x60a5fa).into()
+        } else {
+            gpui::rgb(0x1d4ed8).into()
+        }
+    }
+
+    fn graph_bookmark_base_color(
+        &self,
+        bookmark: &GraphBookmarkRef,
+        is_dark: bool,
+    ) -> gpui::Hsla {
+        if bookmark.scope == GraphBookmarkScope::Remote {
+            if is_dark {
+                gpui::rgb(0xa78bfa).into()
+            } else {
+                gpui::rgb(0x6d28d9).into()
+            }
+        } else if bookmark.conflicted {
+            if is_dark {
+                gpui::rgb(0xf87171).into()
+            } else {
+                gpui::rgb(0xb91c1c).into()
+            }
+        } else if bookmark.needs_push {
+            self.graph_working_copy_color(is_dark)
+        } else if bookmark.tracked {
+            self.graph_active_target_color(is_dark)
+        } else {
+            self.graph_merge_color(is_dark)
+        }
+    }
+
+    fn graph_bookmark_chip_colors(
+        &self,
+        bookmark: &GraphBookmarkRef,
+        is_dark: bool,
+        selected: bool,
+        cx: &mut Context<Self>,
+    ) -> (gpui::Hsla, gpui::Hsla, gpui::Hsla) {
+        let base = self.graph_bookmark_base_color(bookmark, is_dark);
+        let background = if selected {
+            base.opacity(if is_dark { 0.44 } else { 0.22 })
+        } else {
+            base.opacity(if is_dark { 0.28 } else { 0.12 })
+        };
+        let border = if selected {
+            base.opacity(if is_dark { 0.98 } else { 0.76 })
+        } else {
+            base.opacity(if is_dark { 0.72 } else { 0.48 })
+        };
+        let text = cx.theme().foreground;
+        (background, border, text)
     }
 
     fn render_jj_graph_bookmark_chip(
@@ -744,28 +962,13 @@ impl DiffViewer {
                 });
             });
 
-        if selected {
-            button = button.primary();
-        } else {
-            let chip_bg = match bookmark.scope {
-                GraphBookmarkScope::Local if bookmark.conflicted => {
-                    cx.theme().danger.opacity(if is_dark { 0.28 } else { 0.18 })
-                }
-                GraphBookmarkScope::Local if bookmark.needs_push => {
-                    cx.theme().warning.opacity(if is_dark { 0.30 } else { 0.18 })
-                }
-                GraphBookmarkScope::Local if bookmark.tracked => {
-                    cx.theme().success.opacity(if is_dark { 0.28 } else { 0.16 })
-                }
-                GraphBookmarkScope::Local => {
-                    cx.theme().accent.opacity(if is_dark { 0.16 } else { 0.10 })
-                }
-                GraphBookmarkScope::Remote => {
-                    cx.theme().secondary.opacity(if is_dark { 0.34 } else { 0.54 })
-                }
-            };
-            button = button.outline().bg(chip_bg);
-        }
+        let (chip_bg, chip_border, chip_text) =
+            self.graph_bookmark_chip_colors(bookmark, is_dark, selected, cx);
+        button = button
+            .outline()
+            .bg(chip_bg)
+            .border_color(chip_border)
+            .text_color(chip_text);
 
         let chip_wrapper = |child: AnyElement| {
             let view = cx.entity();
