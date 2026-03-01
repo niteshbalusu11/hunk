@@ -32,6 +32,7 @@ fn change_status_label_color(
 include!("toolbar.rs");
 include!("tree.rs");
 include!("commit.rs");
+include!("commit_bookmark_picker.rs");
 include!("jj_graph.rs");
 include!("jj_graph_inspector.rs");
 include!("jj_graph_focus_strip.rs");

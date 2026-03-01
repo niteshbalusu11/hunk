@@ -4,6 +4,7 @@
 - Proposed
 - Owner: Hunk
 - Last Updated: 2026-02-28
+- Follow-up: `docs/JJ_NATIVE_MODE_SPEC.md`
 
 ## Goal
 Redesign the JJ Workspace into an interactive graph-first workflow inspired by `jj log`, where bookmarks and revisions are visual, clickable, and editable.

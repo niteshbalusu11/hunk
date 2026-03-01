@@ -8,8 +8,10 @@ impl DiffViewer {
         let show_push = branch_syncable && self.branch_has_upstream;
         let sync_disabled = !self.can_sync_current_bookmark();
         let push_or_publish_disabled = !self.can_push_or_publish_current_bookmark();
-        let review_url_disabled = self.git_action_loading || !branch_syncable;
+        let active_review_blocker = self.active_review_action_blocker();
+        let review_url_disabled = active_review_blocker.is_some();
         let recovery_candidate = self.latest_working_copy_recovery_candidate_for_active_bookmark();
+        let pending_switch = self.pending_bookmark_switch();
         let action_label = if show_publish {
             "Publish Bookmark"
         } else {
@@ -118,6 +120,94 @@ impl DiffViewer {
                         .child(message.clone()),
                 )
             })
+            .when_some(pending_switch, |this, pending| {
+                this.child(
+                    v_flex()
+                        .w_full()
+                        .gap_1()
+                        .px_2()
+                        .py_1()
+                        .rounded(px(8.0))
+                        .border_1()
+                        .border_color(cx.theme().warning.opacity(if is_dark { 0.90 } else { 0.72 }))
+                        .bg(cx.theme().warning.opacity(if is_dark { 0.16 } else { 0.10 }))
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_semibold()
+                                .text_color(cx.theme().foreground)
+                                .child("Switch Bookmark With Local Changes"),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().foreground)
+                                .whitespace_normal()
+                                .child(format!(
+                                    "{} files in working copy while switching {} -> {} at {}.",
+                                    pending.changed_file_count,
+                                    pending.source_bookmark,
+                                    pending.target_bookmark,
+                                    relative_time_label(Some(pending.unix_time))
+                                )),
+                        )
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .items_center()
+                                .gap_1()
+                                .flex_wrap()
+                                .child({
+                                    let view = view.clone();
+                                    Button::new("confirm-switch-move")
+                                        .primary()
+                                        .compact()
+                                        .with_size(gpui_component::Size::Small)
+                                        .rounded(px(7.0))
+                                        .label("Move Changes to Target")
+                                        .tooltip("Switch and carry current working-copy changes into the target bookmark.")
+                                        .disabled(self.git_action_loading)
+                                        .on_click(move |_, _, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.confirm_pending_bookmark_switch_move_changes(cx);
+                                            });
+                                        })
+                                })
+                                .child({
+                                    let view = view.clone();
+                                    Button::new("confirm-switch-snapshot")
+                                        .outline()
+                                        .compact()
+                                        .with_size(gpui_component::Size::Small)
+                                        .rounded(px(7.0))
+                                        .label("Snapshot Here, Then Switch")
+                                        .tooltip("Keep current changes captured on the source bookmark, then switch to the target bookmark.")
+                                        .disabled(self.git_action_loading)
+                                        .on_click(move |_, _, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.confirm_pending_bookmark_switch_snapshot(cx);
+                                            });
+                                        })
+                                })
+                                .child({
+                                    let view = view.clone();
+                                    Button::new("cancel-pending-switch")
+                                        .outline()
+                                        .compact()
+                                        .with_size(gpui_component::Size::Small)
+                                        .rounded(px(7.0))
+                                        .label("Cancel")
+                                        .tooltip("Cancel this bookmark switch and keep the current active bookmark.")
+                                        .disabled(self.git_action_loading)
+                                        .on_click(move |_, _, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.cancel_pending_bookmark_switch(cx);
+                                            });
+                                        })
+                                }),
+                        ),
+                )
+            })
             .child(
                 h_flex()
                     .w_full()
@@ -215,13 +305,17 @@ impl DiffViewer {
                     })
                     .child({
                         let view = view.clone();
+                        let blocker = active_review_blocker.clone();
                         Button::new("open-review-url")
                             .primary()
                             .compact()
                             .with_size(gpui_component::Size::Small)
                             .rounded(px(7.0))
                             .label("Open PR/MR")
-                            .tooltip("Open a prefilled pull/merge request page for the active bookmark.")
+                            .tooltip(blocker.clone().unwrap_or_else(|| {
+                                "Open a prefilled pull/merge request page for the active bookmark."
+                                    .to_string()
+                            }))
                             .disabled(review_url_disabled)
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
@@ -231,28 +325,39 @@ impl DiffViewer {
                     })
                     .child({
                         let view = view.clone();
+                        let blocker = active_review_blocker.clone();
                         Button::new("copy-review-url")
                             .outline()
                             .compact()
                             .with_size(gpui_component::Size::Small)
                             .rounded(px(7.0))
                             .label("Copy Review URL")
-                            .tooltip("Copy a prefilled pull/merge request URL for the active bookmark.")
+                            .tooltip(blocker.unwrap_or_else(|| {
+                                "Copy a prefilled pull/merge request URL for the active bookmark."
+                                    .to_string()
+                            }))
                             .disabled(review_url_disabled)
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
                                     this.copy_current_bookmark_review_url(cx);
                                 });
                             })
+                    })
+                    .when_some(active_review_blocker, |this, reason| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .whitespace_normal()
+                                .child(format!("PR/MR unavailable: {reason}")),
+                        )
                     }),
             )
             .when_some(recovery_candidate.as_ref(), |this, candidate| {
                 this.child(
-                    h_flex()
+                    v_flex()
                         .w_full()
-                        .items_center()
-                        .justify_between()
-                        .gap_2()
+                        .gap_1()
                         .px_2()
                         .py_1()
                         .rounded(px(8.0))
@@ -265,8 +370,7 @@ impl DiffViewer {
                         })))
                         .child(
                             div()
-                                .flex_1()
-                                .min_w_0()
+                                .w_full()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
                                 .whitespace_normal()
@@ -278,22 +382,45 @@ impl DiffViewer {
                                     relative_time_label(Some(candidate.unix_time))
                                 )),
                         )
-                        .child({
-                            let view = view.clone();
-                            Button::new("recover-working-copy")
-                                .outline()
-                                .compact()
-                                .with_size(gpui_component::Size::Small)
-                                .rounded(px(7.0))
-                                .label("Recover Previous Working Copy")
-                                .tooltip("Restore files from the last captured pre-switch working-copy revision")
-                                .disabled(self.git_action_loading)
-                                .on_click(move |_, _, cx| {
-                                    view.update(cx, |this, cx| {
-                                        this.recover_latest_working_copy_for_active_bookmark(cx);
-                                    });
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .items_center()
+                                .gap_1()
+                                .flex_wrap()
+                                .child({
+                                    let view = view.clone();
+                                    Button::new("recover-working-copy")
+                                        .outline()
+                                        .compact()
+                                        .with_size(gpui_component::Size::Small)
+                                        .rounded(px(7.0))
+                                        .label("Restore Captured Changes")
+                                        .tooltip("Restore files from the captured pre-switch working-copy revision.")
+                                        .disabled(self.git_action_loading)
+                                        .on_click(move |_, _, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.recover_latest_working_copy_for_active_bookmark(cx);
+                                            });
+                                        })
                                 })
-                        }),
+                                .child({
+                                    let view = view.clone();
+                                    Button::new("discard-working-copy-recovery")
+                                        .outline()
+                                        .compact()
+                                        .with_size(gpui_component::Size::Small)
+                                        .rounded(px(7.0))
+                                        .label("Discard Recovery Record")
+                                        .tooltip("Discard this captured recovery record without restoring files.")
+                                        .disabled(self.git_action_loading)
+                                        .on_click(move |_, _, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.discard_latest_working_copy_recovery_candidate_for_active_bookmark(cx);
+                                            });
+                                        })
+                                }),
+                        ),
                 )
             })
             .when(self.branch_picker_open, |this| {
@@ -369,7 +496,7 @@ impl DiffViewer {
                         Button::new("describe-tip-revision")
                             .outline()
                             .rounded(px(7.0))
-                            .label("Edit Tip Revision")
+                            .label("Edit Working Revision")
                             .tooltip("Rewrite the tip revision description for the active bookmark.")
                             .disabled(describe_tip_disabled)
                             .on_click(move |_, _, cx| {
@@ -636,265 +763,6 @@ impl DiffViewer {
                         self.render_workspace_change_row(row_ix, file, cx)
                     }))
                     .into_any_element()
-            })
-            .into_any_element()
-    }
-
-    fn render_workspace_change_row(
-        &self,
-        row_id: usize,
-        file: &ChangedFile,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let view = cx.entity();
-        let included_in_commit = !self.commit_excluded_files.contains(file.path.as_str());
-        let is_selected = self.selected_path.as_deref() == Some(file.path.as_str());
-        let is_dark = cx.theme().mode.is_dark();
-        let (status_label, status_color) = change_status_label_color(file.status, cx);
-        let tracking_label = if file.is_tracked() { "tracked" } else { "untracked" };
-        let tracking_color = if file.is_tracked() {
-            cx.theme().secondary.opacity(if is_dark { 0.36 } else { 0.56 })
-        } else {
-            cx.theme().warning.opacity(if is_dark { 0.30 } else { 0.20 })
-        };
-        let row_bg = if is_selected {
-            cx.theme().accent.opacity(if is_dark { 0.22 } else { 0.14 })
-        } else {
-            cx.theme().background.opacity(0.0)
-        };
-        let path = file.path.clone();
-
-        h_flex()
-            .id(("workspace-change-row", row_id))
-            .w_full()
-            .items_center()
-            .gap_1()
-            .px_1()
-            .py_0p5()
-            .rounded(px(6.0))
-            .bg(row_bg)
-            .child({
-                let view = view.clone();
-                let path = path.clone();
-                let include = included_in_commit;
-                Button::new(("workspace-commit-include-toggle", row_id))
-                    .outline()
-                    .compact()
-                    .rounded(px(5.0))
-                    .min_w(px(22.0))
-                    .h(px(20.0))
-                    .label(if include { "x" } else { "" })
-                    .tooltip(if include {
-                        "Included in next revision"
-                    } else {
-                        "Excluded from next revision"
-                    })
-                    .on_click(move |_, _, cx| {
-                        cx.stop_propagation();
-                        view.update(cx, |this, cx| {
-                            this.toggle_commit_file_included(path.clone(), !include, cx);
-                        });
-                    })
-            })
-            .child(
-                div()
-                    .px_1()
-                    .py_0p5()
-                    .rounded(px(4.0))
-                    .text_xs()
-                    .font_semibold()
-                    .bg(status_color.opacity(if is_dark { 0.24 } else { 0.16 }))
-                    .text_color(cx.theme().foreground)
-                    .child(status_label),
-            )
-            .child(
-                div()
-                    .px_1()
-                    .py_0p5()
-                    .rounded(px(4.0))
-                    .text_xs()
-                    .font_semibold()
-                    .bg(tracking_color)
-                    .text_color(cx.theme().foreground)
-                    .child(tracking_label),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_xs()
-                    .text_color(cx.theme().foreground)
-                    .child(path.clone()),
-            )
-            .on_click(move |_, _, cx| {
-                view.update(cx, |this, cx| {
-                    this.select_file(path.clone(), cx);
-                });
-            })
-            .into_any_element()
-    }
-
-    fn render_branch_picker_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let view = cx.entity();
-        let is_dark = cx.theme().mode.is_dark();
-        let bookmark_input_empty = self.branch_input_state.read(cx).value().trim().is_empty();
-        let rename_disabled =
-            self.git_action_loading || bookmark_input_empty || !self.can_run_active_bookmark_actions();
-        let create_or_activate_disabled = self.git_action_loading || bookmark_input_empty;
-
-        v_flex()
-            .w_full()
-            .gap_1()
-            .p_2()
-            .rounded(px(8.0))
-            .border_1()
-            .border_color(cx.theme().border.opacity(if is_dark { 0.94 } else { 0.74 }))
-            .bg(cx.theme().background.blend(cx.theme().secondary.opacity(if is_dark {
-                0.32
-            } else {
-                0.20
-            })))
-            .child(
-                div()
-                    .text_xs()
-                    .font_semibold()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Bookmarks"),
-            )
-            .child(
-                div()
-                    .max_h(px(144.0))
-                    .overflow_y_scrollbar()
-                    .child(
-                        v_flex().w_full().gap_1().children(
-                            self.branches
-                                .iter()
-                                .enumerate()
-                                .map(|(ix, branch)| {
-                                    let view = view.clone();
-                                    let branch_name = branch.name.clone();
-                                    let activate_view = view.clone();
-                                    let activate_branch_name = branch_name.clone();
-                                    let move_disabled = self.git_action_loading
-                                        || self.files.is_empty()
-                                        || branch.is_current;
-
-                                    h_flex()
-                                        .id(("branch-row", ix))
-                                        .w_full()
-                                        .min_w_0()
-                                        .items_center()
-                                        .gap_1()
-                                        .px_2()
-                                        .py_0p5()
-                                        .rounded(px(6.0))
-                                        .bg(if branch.is_current {
-                                            cx.theme().accent.opacity(if is_dark { 0.28 } else { 0.18 })
-                                        } else {
-                                            cx.theme().background.opacity(0.0)
-                                        })
-                                        .on_click(move |_, window, cx| {
-                                            activate_view.update(cx, |this, cx| {
-                                                this.checkout_bookmark(
-                                                    activate_branch_name.clone(),
-                                                    window,
-                                                    cx,
-                                                );
-                                            });
-                                        })
-                                        .child(
-                                            div()
-                                                .flex_1()
-                                                .min_w_0()
-                                                .truncate()
-                                                .text_xs()
-                                                .font_medium()
-                                                .text_color(cx.theme().foreground)
-                                                .child(branch.name.clone()),
-                                        )
-                                        .child(
-                                            div()
-                                                .flex_none()
-                                                .pl_2()
-                                                .whitespace_nowrap()
-                                                .text_xs()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .child(relative_time_label(branch.tip_unix_time)),
-                                        )
-                                        .child({
-                                            let move_view = view.clone();
-                                            let move_branch_name = branch_name.clone();
-                                            Button::new(("bookmark-row-move", ix))
-                                                .outline()
-                                                .compact()
-                                                .rounded(px(6.0))
-                                                .label("Move")
-                                                .disabled(move_disabled)
-                                                .tooltip("Switch to this bookmark and carry current working-copy changes.")
-                                                .on_click(move |_, _, cx| {
-                                                    cx.stop_propagation();
-                                                    move_view.update(cx, |this, cx| {
-                                                        this.checkout_bookmark_with_change_transfer(
-                                                            move_branch_name.clone(),
-                                                            cx,
-                                                        );
-                                                    });
-                                                })
-                                        })
-                                        .into_any_element()
-                                }),
-                        ),
-                    ),
-            )
-            .child(
-                Input::new(&self.branch_input_state)
-                    .rounded(px(8.0))
-                    .border_1()
-                    .border_color(cx.theme().border.opacity(if is_dark { 0.92 } else { 0.76 }))
-                    .bg(cx.theme().background.blend(cx.theme().muted.opacity(if is_dark {
-                        0.22
-                    } else {
-                        0.14
-                    })))
-                    .disabled(self.git_action_loading),
-            )
-            .child({
-                let view = view.clone();
-                h_flex()
-                    .w_full()
-                    .items_center()
-                    .gap_1()
-                    .flex_wrap()
-                    .child(
-                        Button::new("create-or-switch-bookmark")
-                            .primary()
-                            .rounded(px(7.0))
-                            .label("Create / Activate")
-                            .tooltip("Create a bookmark from the entered name or activate it if it already exists.")
-                            .disabled(create_or_activate_disabled)
-                            .on_click({
-                                let view = view.clone();
-                                move |_, window, cx| {
-                                    view.update(cx, |this, cx| {
-                                        this.create_or_switch_bookmark_from_input(window, cx);
-                                    });
-                                }
-                            }),
-                    )
-                    .child(
-                        Button::new("rename-active-bookmark")
-                            .outline()
-                            .rounded(px(7.0))
-                            .label("Rename Active")
-                            .tooltip("Rename the currently active bookmark to the entered name.")
-                            .disabled(rename_disabled)
-                            .on_click(move |_, window, cx| {
-                                view.update(cx, |this, cx| {
-                                    this.rename_current_bookmark_from_input(window, cx);
-                                });
-                            }),
-                    )
             })
             .into_any_element()
     }

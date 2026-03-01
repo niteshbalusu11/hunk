@@ -7,6 +7,8 @@ impl DiffViewer {
         let selected_bookmark_selection = self.graph_selected_bookmark.as_ref();
         let selected_bookmark_is_local = selected_bookmark_selection
             .is_some_and(|bookmark| bookmark.scope == GraphBookmarkScope::Local);
+        let selected_review_blocker = self.selected_graph_review_action_blocker();
+        let selected_review_disabled = selected_review_blocker.is_some();
         let has_selected_node = self.graph_selected_node_id.is_some();
         let selected_node_is_working_copy = selected_node
             .is_some_and(|node| self.graph_working_copy_commit_id.as_deref() == Some(node.id.as_str()));
@@ -322,14 +324,18 @@ impl DiffViewer {
                             .flex_wrap()
                             .child({
                                 let view = view.clone();
+                                let blocker = selected_review_blocker.clone();
                                 Button::new("jj-graph-inspector-open-review-url")
                                     .primary()
                                     .compact()
                                     .with_size(gpui_component::Size::Small)
                                     .rounded(px(7.0))
                                     .label("Open PR/MR")
-                                    .tooltip("Open a prefilled pull/merge request for the selected local bookmark.")
-                                    .disabled(self.git_action_loading || !selected_bookmark_is_local)
+                                    .tooltip(blocker.clone().unwrap_or_else(|| {
+                                        "Open a prefilled pull/merge request for the selected local bookmark."
+                                            .to_string()
+                                    }))
+                                    .disabled(selected_review_disabled)
                                     .on_click(move |_, _, cx| {
                                         view.update(cx, |this, cx| {
                                             this.open_selected_graph_bookmark_review_url(cx);
@@ -338,19 +344,32 @@ impl DiffViewer {
                             })
                             .child({
                                 let view = view.clone();
+                                let blocker = selected_review_blocker.clone();
                                 Button::new("jj-graph-inspector-copy-review-url")
                                     .outline()
                                     .compact()
                                     .with_size(gpui_component::Size::Small)
                                     .rounded(px(7.0))
                                     .label("Copy Review URL")
-                                    .tooltip("Copy a prefilled pull/merge request URL for the selected local bookmark.")
-                                    .disabled(self.git_action_loading || !selected_bookmark_is_local)
+                                    .tooltip(blocker.unwrap_or_else(|| {
+                                        "Copy a prefilled pull/merge request URL for the selected local bookmark."
+                                            .to_string()
+                                    }))
+                                    .disabled(selected_review_disabled)
                                     .on_click(move |_, _, cx| {
                                         view.update(cx, |this, cx| {
                                             this.copy_selected_graph_bookmark_review_url(cx);
                                         });
                                     })
+                            })
+                            .when_some(selected_review_blocker, |this, reason| {
+                                this.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .whitespace_normal()
+                                        .child(format!("PR/MR unavailable: {reason}")),
+                                )
                             }),
                     )
                     .child(

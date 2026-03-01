@@ -57,11 +57,37 @@ impl DiffViewer {
             .w_full()
             .gap_1()
             .child(
-                div()
-                    .text_xs()
-                    .font_semibold()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Right Panel Mode"),
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Right Panel Mode"),
+                    )
+                    .child({
+                        let view = view.clone();
+                        let mut button = Button::new("jj-workspace-terms-toggle")
+                            .outline()
+                            .compact()
+                            .with_size(gpui_component::Size::Small)
+                            .rounded(px(7.0))
+                            .label("JJ Terms")
+                            .tooltip("Show a quick glossary of JJ terms used in this workspace.")
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.toggle_jj_terms_glossary(cx);
+                                });
+                            });
+                        if self.show_jj_terms_glossary {
+                            button = button.primary();
+                        }
+                        button
+                    }),
             )
             .child(
                 h_flex()
@@ -119,6 +145,9 @@ impl DiffViewer {
                             }),
                     ),
             )
+            .when(self.show_jj_terms_glossary, |this| {
+                this.child(self.render_jj_terms_glossary_card(cx))
+            })
             .into_any_element()
     }
 
@@ -127,10 +156,22 @@ impl DiffViewer {
             .w_full()
             .gap_2()
             .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Use this mode for working-copy changes, commit actions, and active bookmark operations."),
+                v_flex()
+                    .w_full()
+                    .gap_0p5()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .text_color(cx.theme().foreground)
+                            .child("Active Workflow Mode"),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Use this mode for working-copy changes, commit actions, and active bookmark operations."),
+                    ),
             )
             .child(self.render_jj_graph_operations_panel(cx))
             .into_any_element()
@@ -169,11 +210,43 @@ impl DiffViewer {
             .w_full()
             .gap_2()
             .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Use this mode to inspect and edit the selected bookmark without mixing active working-copy actions."),
+                v_flex()
+                    .w_full()
+                    .gap_0p5()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .text_color(cx.theme().foreground)
+                            .child("Selected Bookmark Mode"),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Inspect a bookmark chain here, then activate it only when you want to make it your active working context."),
+                    ),
             )
+            .child({
+                let view = cx.entity();
+                let selected_local = self
+                    .graph_selected_bookmark
+                    .as_ref()
+                    .is_some_and(|bookmark| bookmark.scope == GraphBookmarkScope::Local);
+                Button::new("jj-graph-activate-selected-bookmark")
+                    .primary()
+                    .compact()
+                    .with_size(gpui_component::Size::Small)
+                    .rounded(px(7.0))
+                    .label("Activate This Bookmark")
+                    .tooltip("Switch active work to the selected local bookmark. If there are local changes, you will be asked how to switch.")
+                    .disabled(self.git_action_loading || !selected_local)
+                    .on_click(move |_, _, cx| {
+                        view.update(cx, |this, cx| {
+                            this.request_activate_selected_graph_bookmark(cx);
+                        });
+                    })
+            })
             .child(self.render_jj_graph_inspector(cx))
             .child(self.render_jj_graph_focus_strip(cx))
             .into_any_element()
@@ -307,6 +380,15 @@ impl DiffViewer {
                                 .child(preview),
                         )
                     })
+                    .when_some(self.graph_drag_drop_hint(), |this, hint| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .whitespace_normal()
+                                .child(hint),
+                        )
+                    })
                     .when(self.graph_has_more, |this| {
                         this.child(
                             div()
@@ -330,8 +412,52 @@ impl DiffViewer {
                                     this.select_active_graph_bookmark(cx);
                                 });
                             })
+                    })
+                    .child({
+                        let view = view.clone();
+                        let mut button = Button::new("jj-graph-drag-help")
+                            .outline()
+                            .compact()
+                            .with_size(gpui_component::Size::Small)
+                            .rounded(px(7.0))
+                            .label("Drag & Drop Help")
+                            .tooltip("Show how drag-and-drop actions map to JJ graph operations.")
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.toggle_graph_drag_help(cx);
+                                });
+                            });
+                        if self.graph_drag_help_open {
+                            button = button.primary();
+                        }
+                        button
                     }),
             )
+            .when(self.graph_drag_help_open, |this| {
+                this.child(
+                    div()
+                        .w_full()
+                        .mt_1()
+                        .px_2()
+                        .py_1()
+                        .rounded(px(8.0))
+                        .border_1()
+                        .border_color(cx.theme().border.opacity(if is_dark { 0.90 } else { 0.74 }))
+                        .bg(cx.theme().background.blend(cx.theme().secondary.opacity(if is_dark {
+                            0.22
+                        } else {
+                            0.30
+                        })))
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .whitespace_normal()
+                        .child(
+                            "Drag local bookmark chips onto revision rows to retarget bookmarks. \
+                             Green highlight means the drop is valid. Red means invalid. \
+                             Use Selected Bookmark mode for activation, rename, publish, and PR actions.",
+                        ),
+                )
+            })
             .into_any_element()
     }
 
@@ -509,6 +635,10 @@ impl DiffViewer {
         let drag_name = name.clone();
         let drag_remote = remote.clone();
         let drag_scope = scope;
+        let activate_node_id = node_id.clone();
+        let activate_name = bookmark.name.clone();
+        let activate_remote = bookmark.remote.clone();
+        let activate_scope = bookmark.scope;
         let selected = self.graph_selected_bookmark.as_ref().is_some_and(|selected| {
             selected.name == bookmark.name
                 && selected.remote == bookmark.remote
@@ -602,9 +732,22 @@ impl DiffViewer {
                     let drag_node_id = drag_node_id.clone();
                     let drag_name = drag_name.clone();
                     let drag_remote = drag_remote.clone();
-                    move |_, _, cx| {
+                    let activate_node_id = activate_node_id.clone();
+                    let activate_name = activate_name.clone();
+                    let activate_remote = activate_remote.clone();
+                    move |event, _, cx| {
                         cx.stop_propagation();
                         view.update(cx, |this, cx| {
+                            if event.click_count >= 2 {
+                                this.activate_graph_bookmark(
+                                    activate_node_id.clone(),
+                                    activate_name.clone(),
+                                    activate_remote.clone(),
+                                    activate_scope,
+                                    cx,
+                                );
+                                return;
+                            }
                             this.start_graph_bookmark_drag(
                                 drag_node_id.clone(),
                                 drag_name.clone(),
@@ -667,5 +810,65 @@ impl DiffViewer {
         } else {
             Duration::from_millis(millis)
         }
+    }
+
+    fn render_jj_terms_glossary_card(&self, cx: &mut Context<Self>) -> AnyElement {
+        let is_dark = cx.theme().mode.is_dark();
+        v_flex()
+            .w_full()
+            .gap_0p5()
+            .px_2()
+            .py_1()
+            .rounded(px(8.0))
+            .border_1()
+            .border_color(cx.theme().border.opacity(if is_dark { 0.90 } else { 0.74 }))
+            .bg(cx.theme().background.blend(cx.theme().muted.opacity(if is_dark {
+                0.22
+            } else {
+                0.30
+            })))
+            .child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(cx.theme().foreground)
+                    .child("JJ Terms"),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .whitespace_normal()
+                    .child("Working copy (`@`): your mutable local changes."),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .whitespace_normal()
+                    .child("Revision: an immutable committed node in the graph."),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .whitespace_normal()
+                    .child("Bookmark: a movable pointer to a revision."),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .whitespace_normal()
+                    .child("Publish: create remote tracking for a local bookmark."),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .whitespace_normal()
+                    .child("Sync: fetch remote bookmark updates into local history."),
+            )
+            .into_any_element()
     }
 }

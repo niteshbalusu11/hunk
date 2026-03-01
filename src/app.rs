@@ -105,6 +105,14 @@ struct WorkingCopyRecoveryCandidate {
     unix_time: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingBookmarkSwitch {
+    source_bookmark: String,
+    target_bookmark: String,
+    changed_file_count: usize,
+    unix_time: i64,
+}
+
 mod controller;
 mod data;
 mod data_segments;
@@ -724,6 +732,9 @@ struct DiffViewer {
     graph_pending_confirmation: Option<GraphPendingConfirmation>,
     graph_drag_state: Option<GraphBookmarkDragState>,
     graph_right_panel_mode: GraphRightPanelMode,
+    graph_drag_help_open: bool,
+    pending_bookmark_switch: Option<PendingBookmarkSwitch>,
+    show_jj_terms_glossary: bool,
     workspace_view_mode: WorkspaceViewMode,
     files: Vec<ChangedFile>,
     file_status_by_path: BTreeMap<String, FileStatus>,

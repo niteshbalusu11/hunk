@@ -200,6 +200,9 @@ impl DiffViewer {
             graph_pending_confirmation: None,
             graph_drag_state: None,
             graph_right_panel_mode: GraphRightPanelMode::ActiveWorkflow,
+            graph_drag_help_open: false,
+            pending_bookmark_switch: None,
+            show_jj_terms_glossary: false,
             workspace_view_mode: WorkspaceViewMode::JjWorkspace,
             files: Vec::new(),
             file_status_by_path: BTreeMap::new(),
@@ -540,6 +543,7 @@ impl DiffViewer {
         self.graph_list_state.reset(self.graph_nodes.len());
         self.graph_pending_confirmation = None;
         self.graph_drag_state = None;
+        self.pending_bookmark_switch = None;
         self.reconcile_graph_selection_after_snapshot();
         self.files = files;
         self.file_status_by_path = self
@@ -629,6 +633,9 @@ impl DiffViewer {
         self.graph_pending_confirmation = None;
         self.graph_drag_state = None;
         self.graph_right_panel_mode = GraphRightPanelMode::ActiveWorkflow;
+        self.graph_drag_help_open = false;
+        self.pending_bookmark_switch = None;
+        self.show_jj_terms_glossary = false;
         self.files.clear();
         self.file_status_by_path.clear();
         self.working_copy_recovery_candidates.clear();
