@@ -11,6 +11,7 @@ use gpui_component::input::Input;
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 use gpui_component::{Icon, IconName};
+use hunk::jj_graph_tree::{GraphLaneRow, build_graph_lane_rows};
 use hunk::markdown_preview::{MarkdownCodeTokenKind, MarkdownInlineSpan, MarkdownPreviewBlock};
 
 fn change_status_label_color(

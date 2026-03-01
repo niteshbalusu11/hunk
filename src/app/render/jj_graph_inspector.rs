@@ -294,8 +294,8 @@ impl DiffViewer {
                                     .with_size(gpui_component::Size::Small)
                                     .rounded(px(7.0))
                                     .dropdown_caret(true)
-                                    .label("Move Menu")
-                                    .tooltip("Open retarget actions for the selected local bookmark.")
+                                    .label("Move Bookmark")
+                                    .tooltip("Retarget the selected local bookmark to the selected revision.")
                                     .disabled(
                                         self.git_action_loading
                                             || !selected_bookmark_is_local
