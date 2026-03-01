@@ -4,8 +4,8 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use hunk::jj::{
-    checkout_or_create_bookmark, commit_selected_paths, commit_staged, load_snapshot, stage_all,
-    unstage_all,
+    checkout_or_create_bookmark, commit_selected_paths, commit_staged, load_snapshot,
+    restore_working_copy_paths, stage_all, unstage_all,
 };
 
 #[test]
@@ -157,6 +157,72 @@ fn commit_selected_paths_deduplicates_file_list() {
     assert!(
         snapshot.files.iter().all(|file| file.path != "alpha.txt"),
         "selected file should be committed"
+    );
+}
+
+#[test]
+fn restore_working_copy_paths_reverts_modified_and_untracked_files() {
+    let fixture = TempRepo::new("restore-working-copy-paths");
+    let tracked = fixture.path().join("tracked.txt");
+    let scratch = fixture.path().join("scratch.txt");
+
+    write_file(tracked.clone(), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+
+    write_file(tracked.clone(), "line one\nline two\n");
+    write_file(scratch.clone(), "temporary\n");
+
+    restore_working_copy_paths(
+        fixture.path(),
+        &["tracked.txt".to_string(), "scratch.txt".to_string()],
+    )
+    .expect("restoring selected files should succeed");
+
+    let snapshot = load_snapshot(fixture.path()).expect("snapshot should load after restore");
+    assert!(
+        snapshot.files.is_empty(),
+        "working copy should be clean after restoring all changed files"
+    );
+    assert_eq!(
+        fs::read_to_string(tracked).expect("tracked file should remain on disk"),
+        "line one\n",
+        "tracked file content should be restored to the parent revision"
+    );
+    assert!(
+        !scratch.exists(),
+        "untracked file should be removed after restore"
+    );
+}
+
+#[test]
+fn restore_working_copy_paths_only_reverts_requested_file() {
+    let fixture = TempRepo::new("restore-single-working-copy-path");
+    let alpha = fixture.path().join("alpha.txt");
+    let beta = fixture.path().join("beta.txt");
+
+    write_file(alpha.clone(), "alpha one\n");
+    write_file(beta.clone(), "beta one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+
+    write_file(alpha.clone(), "alpha one\nalpha two\n");
+    write_file(beta.clone(), "beta one\nbeta two\n");
+
+    restore_working_copy_paths(fixture.path(), &["alpha.txt".to_string()])
+        .expect("restoring a single file should succeed");
+
+    let snapshot = load_snapshot(fixture.path()).expect("snapshot should load after restore");
+    assert!(
+        snapshot.files.iter().any(|file| file.path == "beta.txt"),
+        "non-restored file should remain modified"
+    );
+    assert!(
+        snapshot.files.iter().all(|file| file.path != "alpha.txt"),
+        "restored file should no longer appear in changed files"
+    );
+    assert_eq!(
+        fs::read_to_string(alpha).expect("alpha file should remain on disk"),
+        "alpha one\n",
+        "restored file should match the parent revision content"
     );
 }
 

@@ -836,6 +836,36 @@ impl DiffViewer {
         cx.notify();
     }
 
+    pub(super) fn undo_working_copy_file(
+        &mut self,
+        file_path: String,
+        is_tracked: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let file_path = file_path.trim().to_string();
+        if file_path.is_empty() {
+            self.git_status_message = Some("File path is required.".to_string());
+            cx.notify();
+            return;
+        }
+
+        if self.editor_path.as_deref() == Some(file_path.as_str())
+            && self.prevent_unsaved_editor_discard(Some(file_path.as_str()), cx)
+        {
+            return;
+        }
+
+        self.run_git_action("Undo file changes", cx, move |repo_root| {
+            restore_working_copy_paths(&repo_root, std::slice::from_ref(&file_path))?;
+            let message = if is_tracked {
+                format!("Restored {}", file_path)
+            } else {
+                format!("Removed untracked {}", file_path)
+            };
+            Ok(message)
+        });
+    }
+
     pub(super) fn recover_latest_working_copy_for_active_bookmark(&mut self, cx: &mut Context<Self>) {
         let Some(candidate) = self.latest_working_copy_recovery_candidate_for_active_bookmark() else {
             let message = "No recoverable working-copy changes were captured for this bookmark."

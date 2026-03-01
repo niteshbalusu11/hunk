@@ -574,6 +574,41 @@ pub fn restore_working_copy_from_revision(
     restore_wc_from_revision(&mut context, source_revision_id)
 }
 
+pub fn restore_working_copy_paths(repo_root: &Path, paths: &[String]) -> Result<usize> {
+    let mut normalized_paths = BTreeSet::new();
+    for path in paths {
+        let normalized = normalize_path(path);
+        if normalized.is_empty() {
+            continue;
+        }
+        normalized_paths.insert(normalized);
+    }
+    if normalized_paths.is_empty() {
+        return Err(anyhow!("no files selected to restore"));
+    }
+
+    let mut command = std::process::Command::new("jj");
+    command.arg("restore").arg("--");
+    for path in &normalized_paths {
+        command.arg(path);
+    }
+
+    let output = command
+        .current_dir(repo_root)
+        .output()
+        .map_err(|err| anyhow!("failed to run jj restore: {err}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let message = stderr.trim();
+        if message.is_empty() {
+            return Err(anyhow!("failed to restore working-copy paths"));
+        }
+        return Err(anyhow!("failed to restore working-copy paths: {message}"));
+    }
+
+    Ok(normalized_paths.len())
+}
+
 pub fn create_bookmark_at_revision(
     repo_root: &Path,
     bookmark_name: &str,

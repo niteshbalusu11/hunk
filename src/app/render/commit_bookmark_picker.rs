@@ -10,11 +10,17 @@ impl DiffViewer {
         let is_selected = self.selected_path.as_deref() == Some(file.path.as_str());
         let is_dark = cx.theme().mode.is_dark();
         let (status_label, status_color) = change_status_label_color(file.status, cx);
-        let tracking_label = if file.is_tracked() { "tracked" } else { "untracked" };
-        let tracking_color = if file.is_tracked() {
+        let is_tracked = file.is_tracked();
+        let tracking_label = if is_tracked { "tracked" } else { "untracked" };
+        let tracking_color = if is_tracked {
             cx.theme().secondary.opacity(if is_dark { 0.36 } else { 0.56 })
         } else {
             cx.theme().warning.opacity(if is_dark { 0.30 } else { 0.20 })
+        };
+        let undo_tooltip = if is_tracked {
+            "Restore this file to the parent revision."
+        } else {
+            "Delete this untracked file from the working copy."
         };
         let row_bg = if is_selected {
             cx.theme().accent.opacity(if is_dark { 0.22 } else { 0.14 })
@@ -86,6 +92,23 @@ impl DiffViewer {
                     .text_color(cx.theme().foreground)
                     .child(path.clone()),
             )
+            .child({
+                let view = view.clone();
+                let path = path.clone();
+                Button::new(("workspace-change-undo", row_id))
+                    .outline()
+                    .compact()
+                    .rounded(px(5.0))
+                    .label("Undo")
+                    .tooltip(undo_tooltip)
+                    .disabled(self.git_action_loading)
+                    .on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        view.update(cx, |this, cx| {
+                            this.undo_working_copy_file(path.clone(), is_tracked, cx);
+                        });
+                    })
+            })
             .on_click(move |_, _, cx| {
                 view.update(cx, |this, cx| {
                     this.select_file(path.clone(), cx);
