@@ -198,9 +198,7 @@ impl DiffViewer {
             graph_list_state: ListState::new(0, ListAlignment::Top, px(30.0)),
             graph_action_input_state,
             graph_pending_confirmation: None,
-            graph_drag_state: None,
             graph_right_panel_mode: GraphRightPanelMode::ActiveWorkflow,
-            graph_drag_help_open: false,
             pending_bookmark_switch: None,
             show_jj_terms_glossary: false,
             workspace_view_mode: WorkspaceViewMode::JjWorkspace,
@@ -542,7 +540,6 @@ impl DiffViewer {
         self.graph_working_copy_parent_commit_id = working_copy_parent_commit_id;
         self.graph_list_state.reset(self.graph_nodes.len());
         self.graph_pending_confirmation = None;
-        self.graph_drag_state = None;
         self.pending_bookmark_switch = None;
         self.reconcile_graph_selection_after_snapshot();
         self.files = files;
@@ -631,9 +628,7 @@ impl DiffViewer {
         self.graph_selected_bookmark = None;
         self.graph_list_state.reset(0);
         self.graph_pending_confirmation = None;
-        self.graph_drag_state = None;
         self.graph_right_panel_mode = GraphRightPanelMode::ActiveWorkflow;
-        self.graph_drag_help_open = false;
         self.pending_bookmark_switch = None;
         self.show_jj_terms_glossary = false;
         self.files.clear();

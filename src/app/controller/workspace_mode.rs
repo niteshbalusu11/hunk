@@ -4,11 +4,6 @@ impl DiffViewer {
         cx.notify();
     }
 
-    pub(super) fn toggle_graph_drag_help(&mut self, cx: &mut Context<Self>) {
-        self.graph_drag_help_open = !self.graph_drag_help_open;
-        cx.notify();
-    }
-
     pub(super) fn pending_bookmark_switch(&self) -> Option<&PendingBookmarkSwitch> {
         self.pending_bookmark_switch.as_ref()
     }
