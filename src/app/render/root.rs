@@ -157,9 +157,10 @@ impl DiffViewer {
                                 } else {
                                     "Hide file tree (Cmd/Ctrl+B)"
                                 })
-                                .on_click(move |_, _, cx| {
+                                .on_click(move |_, window, cx| {
                                     view.update(cx, |this, cx| {
                                         this.toggle_sidebar_tree(cx);
+                                        this.focus_handle.focus(window);
                                     });
                                 });
                             if self.sidebar_collapsed {
@@ -178,10 +179,11 @@ impl DiffViewer {
                             .label("Files")
                             .min_w(px(52.0))
                             .h(px(28.0))
-                            .tooltip("Switch to file view")
-                            .on_click(move |_, _, cx| {
+                            .tooltip("Switch to file view (Cmd/Ctrl+1)")
+                            .on_click(move |_, window, cx| {
                                 view.update(cx, |this, cx| {
                                     this.set_workspace_view_mode(WorkspaceViewMode::Files, cx);
+                                    this.focus_handle.focus(window);
                                 });
                             });
                         if files_selected {
@@ -199,10 +201,11 @@ impl DiffViewer {
                             .label("Review")
                             .min_w(px(56.0))
                             .h(px(28.0))
-                            .tooltip("Switch to review mode")
-                            .on_click(move |_, _, cx| {
+                            .tooltip("Switch to review mode (Cmd/Ctrl+2)")
+                            .on_click(move |_, window, cx| {
                                 view.update(cx, |this, cx| {
                                     this.set_workspace_view_mode(WorkspaceViewMode::Diff, cx);
+                                    this.focus_handle.focus(window);
                                 });
                             });
                         if diff_selected {
@@ -220,13 +223,14 @@ impl DiffViewer {
                             .label("Graph")
                             .min_w(px(52.0))
                             .h(px(28.0))
-                            .tooltip("Switch to JJ graph workspace")
-                            .on_click(move |_, _, cx| {
+                            .tooltip("Switch to JJ graph workspace (Cmd/Ctrl+3)")
+                            .on_click(move |_, window, cx| {
                                 view.update(cx, |this, cx| {
                                     this.set_workspace_view_mode(
                                         WorkspaceViewMode::JjWorkspace,
                                         cx,
                                     );
+                                    this.focus_handle.focus(window);
                                 });
                             });
                         if jj_selected {
@@ -290,6 +294,9 @@ impl Render for DiffViewer {
             .on_action(cx.listener(Self::next_bookmark_revision_action))
             .on_action(cx.listener(Self::previous_bookmark_revision_action))
             .on_action(cx.listener(Self::toggle_sidebar_tree_action))
+            .on_action(cx.listener(Self::switch_to_files_view_action))
+            .on_action(cx.listener(Self::switch_to_review_view_action))
+            .on_action(cx.listener(Self::switch_to_graph_view_action))
             .on_action(cx.listener(Self::open_project_action))
             .on_action(cx.listener(Self::save_current_file_action))
             .on_action(cx.listener(Self::open_settings_action))

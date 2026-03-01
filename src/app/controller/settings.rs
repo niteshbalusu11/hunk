@@ -47,6 +47,9 @@ fn validate_keyboard_shortcuts(shortcuts: &KeyboardShortcuts) -> Result<(), Stri
         &shortcuts.previous_bookmark_revision,
     )?;
     validate_shortcut_list("Toggle File Tree", &shortcuts.toggle_sidebar_tree)?;
+    validate_shortcut_list("Switch to Files View", &shortcuts.switch_to_files_view)?;
+    validate_shortcut_list("Switch to Review View", &shortcuts.switch_to_review_view)?;
+    validate_shortcut_list("Switch to Graph View", &shortcuts.switch_to_graph_view)?;
     validate_shortcut_list("Open Project", &shortcuts.open_project)?;
     validate_shortcut_list("Save Current File", &shortcuts.save_current_file)?;
     validate_shortcut_list("Open Settings", &shortcuts.open_settings)?;
@@ -62,7 +65,7 @@ impl DiffViewer {
         cx: &mut Context<Self>,
     ) {
         if self.settings_draft.is_some() {
-            self.close_settings(cx);
+            self.close_settings_and_refocus(window, cx);
         } else {
             self.open_settings(window, cx);
         }
@@ -152,6 +155,24 @@ impl DiffViewer {
                 window,
                 cx,
             ),
+            switch_to_files_view: settings_shortcut_input(
+                &self.config.keyboard_shortcuts.switch_to_files_view,
+                "Comma-separated shortcuts, e.g. cmd-1, ctrl-1",
+                window,
+                cx,
+            ),
+            switch_to_review_view: settings_shortcut_input(
+                &self.config.keyboard_shortcuts.switch_to_review_view,
+                "Comma-separated shortcuts, e.g. cmd-2, ctrl-2",
+                window,
+                cx,
+            ),
+            switch_to_graph_view: settings_shortcut_input(
+                &self.config.keyboard_shortcuts.switch_to_graph_view,
+                "Comma-separated shortcuts, e.g. cmd-3, ctrl-3",
+                window,
+                cx,
+            ),
             open_project: settings_shortcut_input(
                 &self.config.keyboard_shortcuts.open_project,
                 "Comma-separated shortcuts, e.g. cmd-shift-o, ctrl-shift-o",
@@ -196,6 +217,15 @@ impl DiffViewer {
         }
         self.settings_draft = None;
         cx.notify();
+    }
+
+    pub(super) fn close_settings_and_refocus(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_settings(cx);
+        self.focus_handle.focus(window);
     }
 
     pub(super) fn select_settings_category(
@@ -317,6 +347,18 @@ impl DiffViewer {
                 ),
                 toggle_sidebar_tree: read_shortcut_input(
                     &settings.shortcuts.toggle_sidebar_tree,
+                    cx,
+                ),
+                switch_to_files_view: read_shortcut_input(
+                    &settings.shortcuts.switch_to_files_view,
+                    cx,
+                ),
+                switch_to_review_view: read_shortcut_input(
+                    &settings.shortcuts.switch_to_review_view,
+                    cx,
+                ),
+                switch_to_graph_view: read_shortcut_input(
+                    &settings.shortcuts.switch_to_graph_view,
                     cx,
                 ),
                 open_project: read_shortcut_input(&settings.shortcuts.open_project, cx),

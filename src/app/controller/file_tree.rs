@@ -16,6 +16,36 @@ impl DiffViewer {
         cx.notify();
     }
 
+    pub(super) fn switch_to_files_view_action(
+        &mut self,
+        _: &SwitchToFilesView,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.focus_handle.focus(window);
+        self.set_workspace_view_mode(WorkspaceViewMode::Files, cx);
+    }
+
+    pub(super) fn switch_to_review_view_action(
+        &mut self,
+        _: &SwitchToReviewView,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.focus_handle.focus(window);
+        self.set_workspace_view_mode(WorkspaceViewMode::Diff, cx);
+    }
+
+    pub(super) fn switch_to_graph_view_action(
+        &mut self,
+        _: &SwitchToGraphView,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.focus_handle.focus(window);
+        self.set_workspace_view_mode(WorkspaceViewMode::JjWorkspace, cx);
+    }
+
     pub(super) fn set_workspace_view_mode(&mut self, mode: WorkspaceViewMode, cx: &mut Context<Self>) {
         if self.workspace_view_mode == mode {
             if !self.sidebar_collapsed

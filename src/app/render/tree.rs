@@ -251,13 +251,15 @@ impl DiffViewer {
                 let view = view.clone();
                 let path = row.path.clone();
                 let kind = row.kind;
-                move |_, _, cx| {
+                move |_, window, cx| {
                     view.update(cx, |this, cx| match kind {
                         RepoTreeNodeKind::Directory => {
                             this.toggle_repo_tree_directory(path.clone(), cx);
+                            this.focus_handle.focus(window);
                         }
                         RepoTreeNodeKind::File => {
                             this.select_repo_tree_file(path.clone(), cx);
+                            this.focus_handle.focus(window);
                         }
                     });
                 }

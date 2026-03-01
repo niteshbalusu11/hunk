@@ -128,6 +128,9 @@ actions!(
         NextBookmarkRevision,
         PreviousBookmarkRevision,
         ToggleSidebarTree,
+        SwitchToFilesView,
+        SwitchToReviewView,
+        SwitchToGraphView,
         OpenProject,
         SaveCurrentFile,
         OpenSettings,
@@ -414,6 +417,24 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
     );
     bindings.extend(
         shortcuts
+            .switch_to_files_view
+            .iter()
+            .map(|shortcut| KeyBinding::new(shortcut.as_str(), SwitchToFilesView, None)),
+    );
+    bindings.extend(
+        shortcuts
+            .switch_to_review_view
+            .iter()
+            .map(|shortcut| KeyBinding::new(shortcut.as_str(), SwitchToReviewView, None)),
+    );
+    bindings.extend(
+        shortcuts
+            .switch_to_graph_view
+            .iter()
+            .map(|shortcut| KeyBinding::new(shortcut.as_str(), SwitchToGraphView, None)),
+    );
+    bindings.extend(
+        shortcuts
             .open_project
             .iter()
             .map(|shortcut| KeyBinding::new(shortcut.as_str(), OpenProject, None)),
@@ -525,6 +546,9 @@ struct SettingsShortcutInputs {
     next_bookmark_revision: Entity<InputState>,
     previous_bookmark_revision: Entity<InputState>,
     toggle_sidebar_tree: Entity<InputState>,
+    switch_to_files_view: Entity<InputState>,
+    switch_to_review_view: Entity<InputState>,
+    switch_to_graph_view: Entity<InputState>,
     open_project: Entity<InputState>,
     save_current_file: Entity<InputState>,
     open_settings: Entity<InputState>,
@@ -611,6 +635,24 @@ impl SettingsShortcutInputs {
                 label: "Toggle File Tree",
                 hint: "Collapses or expands the left file tree pane.",
                 input_state: self.toggle_sidebar_tree.clone(),
+            },
+            SettingsShortcutRow {
+                id: "switch-to-files-view",
+                label: "Switch to Files View",
+                hint: "Switches the workspace to file editing view.",
+                input_state: self.switch_to_files_view.clone(),
+            },
+            SettingsShortcutRow {
+                id: "switch-to-review-view",
+                label: "Switch to Review View",
+                hint: "Switches the workspace to side-by-side diff review.",
+                input_state: self.switch_to_review_view.clone(),
+            },
+            SettingsShortcutRow {
+                id: "switch-to-graph-view",
+                label: "Switch to Graph View",
+                hint: "Switches the workspace to the JJ graph view.",
+                input_state: self.switch_to_graph_view.clone(),
             },
             SettingsShortcutRow {
                 id: "open-project",

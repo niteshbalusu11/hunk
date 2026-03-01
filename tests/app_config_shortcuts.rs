@@ -55,6 +55,18 @@ fn app_config_defaults_include_existing_keyboard_shortcuts() {
         strings(&["cmd-b", "ctrl-b"])
     );
     assert_eq!(
+        config.keyboard_shortcuts.switch_to_files_view,
+        strings(&["cmd-1", "ctrl-1"])
+    );
+    assert_eq!(
+        config.keyboard_shortcuts.switch_to_review_view,
+        strings(&["cmd-2", "ctrl-2"])
+    );
+    assert_eq!(
+        config.keyboard_shortcuts.switch_to_graph_view,
+        strings(&["cmd-3", "ctrl-3"])
+    );
+    assert_eq!(
         config.keyboard_shortcuts.open_project,
         strings(&["cmd-shift-o", "ctrl-shift-o"])
     );
@@ -124,6 +136,18 @@ next_hunk = ["f8"]
         strings(&["cmd-b", "ctrl-b"])
     );
     assert_eq!(
+        config.keyboard_shortcuts.switch_to_files_view,
+        strings(&["cmd-1", "ctrl-1"])
+    );
+    assert_eq!(
+        config.keyboard_shortcuts.switch_to_review_view,
+        strings(&["cmd-2", "ctrl-2"])
+    );
+    assert_eq!(
+        config.keyboard_shortcuts.switch_to_graph_view,
+        strings(&["cmd-3", "ctrl-3"])
+    );
+    assert_eq!(
         config.keyboard_shortcuts.open_settings,
         strings(&["cmd-,", "ctrl-,"])
     );
@@ -145,6 +169,18 @@ quit_app = []
     assert_eq!(
         config.keyboard_shortcuts.toggle_sidebar_tree,
         strings(&["cmd-b", "ctrl-b"])
+    );
+    assert_eq!(
+        config.keyboard_shortcuts.switch_to_files_view,
+        strings(&["cmd-1", "ctrl-1"])
+    );
+    assert_eq!(
+        config.keyboard_shortcuts.switch_to_review_view,
+        strings(&["cmd-2", "ctrl-2"])
+    );
+    assert_eq!(
+        config.keyboard_shortcuts.switch_to_graph_view,
+        strings(&["cmd-3", "ctrl-3"])
     );
     assert_eq!(
         config.keyboard_shortcuts.open_settings,

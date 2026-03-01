@@ -109,9 +109,9 @@ impl DiffViewer {
                                             .compact()
                                             .rounded(px(8.0))
                                             .label("Close")
-                                            .on_click(move |_, _, cx| {
+                                            .on_click(move |_, window, cx| {
                                                 view.update(cx, |this, cx| {
-                                                    this.close_settings(cx);
+                                                    this.close_settings_and_refocus(window, cx);
                                                 });
                                             })
                                     }),
@@ -240,9 +240,11 @@ impl DiffViewer {
                                                     .outline()
                                                     .rounded(px(8.0))
                                                     .label("Cancel")
-                                                    .on_click(move |_, _, cx| {
+                                                    .on_click(move |_, window, cx| {
                                                         view.update(cx, |this, cx| {
-                                                            this.close_settings(cx);
+                                                            this.close_settings_and_refocus(
+                                                                window, cx,
+                                                            );
                                                         });
                                                     })
                                             })
