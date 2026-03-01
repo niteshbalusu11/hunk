@@ -257,6 +257,7 @@ impl DiffViewer {
         let is_dark = cx.theme().mode.is_dark();
         let nodes_len = self.graph_nodes.len();
         let view = cx.entity();
+        let lane_rows = Rc::new(build_graph_lane_rows(&self.graph_nodes, &self.graph_edges));
 
         v_flex()
             .size_full()
@@ -291,7 +292,7 @@ impl DiffViewer {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("Read-only graph window (single-select)"),
+                                    .child("Tree mode graph · single-select"),
                             ),
                     )
                     .child(
@@ -322,11 +323,13 @@ impl DiffViewer {
                 }
 
                 let list = list(graph_list_state.clone(), {
+                    let lane_rows = lane_rows.clone();
                     cx.processor(move |this, ix: usize, _window, cx| {
                         let Some(node) = this.graph_nodes.get(ix) else {
                             return div().into_any_element();
                         };
-                        this.render_jj_graph_row(ix, node, cx)
+                        let lane_row = lane_rows.get(ix);
+                        this.render_jj_graph_row(ix, node, lane_row, cx)
                     })
                 })
                 .flex_grow()
@@ -364,6 +367,54 @@ impl DiffViewer {
                             .text_color(cx.theme().muted_foreground)
                             .child(format!("{} edges", self.graph_edges.len())),
                     )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!(
+                                "active: {}",
+                                self.graph_active_bookmark.as_deref().unwrap_or("detached")
+                            )),
+                    )
+                    .when_some(self.graph_selected_bookmark.as_ref(), |this, selected| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(format!("selected: {}", selected.name)),
+                        )
+                    })
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_family(cx.theme().mono_font_family.clone())
+                                    .text_color(cx.theme().warning)
+                                    .child("@"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("working-copy parent"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_family(cx.theme().mono_font_family.clone())
+                                    .text_color(cx.theme().success)
+                                    .child("*"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("active bookmark target"),
+                            ),
+                    )
                     .when(self.graph_has_more, |this| {
                         this.child(
                             div()
@@ -392,22 +443,27 @@ impl DiffViewer {
             .into_any_element()
     }
 
-    fn render_jj_graph_row(&self, row_ix: usize, node: &GraphNode, cx: &mut Context<Self>) -> AnyElement {
+    fn render_jj_graph_row(
+        &self,
+        row_ix: usize,
+        node: &GraphNode,
+        lane_row: Option<&GraphLaneRow>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let lane_row = lane_row.filter(|lane_row| lane_row.node_id == node.id);
         let view = cx.entity();
         let node_id = node.id.clone();
         let is_dark = cx.theme().mode.is_dark();
-        let row_bg = if self.graph_node_is_selected(node.id.as_str()) {
+        let is_selected = self.graph_node_is_selected(node.id.as_str());
+        let row_bg = if is_selected {
             cx.theme().accent.opacity(if is_dark { 0.22 } else { 0.14 })
         } else {
-            cx.theme().background.opacity(0.0)
+            cx.theme().background.opacity(if is_dark { 0.04 } else { 0.08 })
         };
-        let row_border = cx.theme().border.opacity(0.0);
-        let marker = if node.is_working_copy_parent {
-            "@"
-        } else if node.is_active_bookmark_target {
-            "*"
+        let row_border = if is_selected {
+            cx.theme().accent.opacity(if is_dark { 0.72 } else { 0.58 })
         } else {
-            "o"
+            cx.theme().border.opacity(if is_dark { 0.22 } else { 0.30 })
         };
         let parent_count = self
             .graph_edges
@@ -436,14 +492,7 @@ impl DiffViewer {
                 }
             })
             .child(
-                div()
-                    .w(px(18.0))
-                    .pt_0p5()
-                    .text_xs()
-                    .font_semibold()
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .text_color(cx.theme().muted_foreground)
-                    .child(marker),
+                self.render_jj_graph_lane_gutter(node, lane_row, cx),
             )
             .child(
                 v_flex()
@@ -498,6 +547,120 @@ impl DiffViewer {
                     ),
             );
         row.into_any_element()
+    }
+
+    fn render_jj_graph_lane_gutter(
+        &self,
+        node: &GraphNode,
+        lane_row: Option<&GraphLaneRow>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let is_dark = cx.theme().mode.is_dark();
+        let lane_row = match lane_row {
+            Some(lane_row) if lane_row.lane_count > 0 => lane_row,
+            _ => {
+                let marker = if node.is_working_copy_parent {
+                    "@"
+                } else if node.is_active_bookmark_target {
+                    "*"
+                } else {
+                    "o"
+                };
+                return div()
+                    .w(px(18.0))
+                    .pt_0p5()
+                    .text_xs()
+                    .font_semibold()
+                    .font_family(cx.theme().mono_font_family.clone())
+                    .text_color(cx.theme().muted_foreground)
+                    .child(marker)
+                    .into_any_element();
+            }
+        };
+
+        let lane_count = lane_row.lane_count.max(1);
+        let lane_color = if self.graph_node_is_selected(node.id.as_str()) {
+            cx.theme().accent
+        } else {
+            cx.theme().muted_foreground.opacity(if is_dark { 0.88 } else { 0.76 })
+        };
+        let node_color = if node.is_working_copy_parent {
+            cx.theme().warning
+        } else if node.is_active_bookmark_target {
+            cx.theme().success
+        } else {
+            cx.theme().foreground
+        };
+
+        h_flex()
+            .items_center()
+            .gap(px(2.0))
+            .min_h(px(24.0))
+            .children((0..lane_count).map(|lane_ix| {
+                let top_vertical = lane_row.top_vertical.get(lane_ix).copied().unwrap_or(false);
+                let bottom_vertical = lane_row.bottom_vertical.get(lane_ix).copied().unwrap_or(false);
+                let horizontal = lane_row.horizontal.get(lane_ix).copied().unwrap_or(false);
+                let is_node_lane = lane_row.node_lane == lane_ix;
+
+                div()
+                    .relative()
+                    .size(px(12.0))
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px(5.0))
+                            .top_0()
+                            .w(px(1.0))
+                            .h(px(6.0))
+                            .bg(if top_vertical {
+                                lane_color
+                            } else {
+                                lane_color.opacity(0.0)
+                            }),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .top(px(6.0))
+                            .w(px(12.0))
+                            .h(px(1.0))
+                            .bg(if horizontal {
+                                lane_color
+                            } else {
+                                lane_color.opacity(0.0)
+                            }),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px(5.0))
+                            .top(px(6.0))
+                            .w(px(1.0))
+                            .h(px(6.0))
+                            .bg(if bottom_vertical {
+                                lane_color
+                            } else {
+                                lane_color.opacity(0.0)
+                            }),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px(2.0))
+                            .top(px(3.0))
+                            .size(px(7.0))
+                            .rounded_full()
+                            .border_1()
+                            .border_color(node_color.opacity(if is_dark { 0.96 } else { 0.82 }))
+                            .bg(if is_node_lane {
+                                node_color
+                            } else {
+                                node_color.opacity(0.0)
+                            }),
+                    )
+            }))
+            .into_any_element()
     }
 
     fn render_jj_graph_bookmark_chip(
