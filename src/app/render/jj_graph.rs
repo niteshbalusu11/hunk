@@ -271,14 +271,6 @@ impl DiffViewer {
             } else {
                 0.24
             })))
-            .on_mouse_up(MouseButton::Left, {
-                let view = view.clone();
-                move |_, _, cx| {
-                    view.update(cx, |this, cx| {
-                        this.cancel_graph_bookmark_drag(cx);
-                    });
-                }
-            })
             .child(
                 h_flex()
                     .w_full()
@@ -372,23 +364,6 @@ impl DiffViewer {
                             .text_color(cx.theme().muted_foreground)
                             .child(format!("{} edges", self.graph_edges.len())),
                     )
-                    .when_some(self.graph_drag_preview_label(), |this, preview| {
-                        this.child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(preview),
-                        )
-                    })
-                    .when_some(self.graph_drag_drop_hint(), |this, hint| {
-                        this.child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .whitespace_normal()
-                                .child(hint),
-                        )
-                    })
                     .when(self.graph_has_more, |this| {
                         this.child(
                             div()
@@ -412,80 +387,21 @@ impl DiffViewer {
                                     this.select_active_graph_bookmark(cx);
                                 });
                             })
-                    })
-                    .child({
-                        let view = view.clone();
-                        let mut button = Button::new("jj-graph-drag-help")
-                            .outline()
-                            .compact()
-                            .with_size(gpui_component::Size::Small)
-                            .rounded(px(7.0))
-                            .label("Drag & Drop Help")
-                            .tooltip("Show how drag-and-drop actions map to JJ graph operations.")
-                            .on_click(move |_, _, cx| {
-                                view.update(cx, |this, cx| {
-                                    this.toggle_graph_drag_help(cx);
-                                });
-                            });
-                        if self.graph_drag_help_open {
-                            button = button.primary();
-                        }
-                        button
                     }),
             )
-            .when(self.graph_drag_help_open, |this| {
-                this.child(
-                    div()
-                        .w_full()
-                        .mt_1()
-                        .px_2()
-                        .py_1()
-                        .rounded(px(8.0))
-                        .border_1()
-                        .border_color(cx.theme().border.opacity(if is_dark { 0.90 } else { 0.74 }))
-                        .bg(cx.theme().background.blend(cx.theme().secondary.opacity(if is_dark {
-                            0.22
-                        } else {
-                            0.30
-                        })))
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .whitespace_normal()
-                        .child(
-                            "Drag local bookmark chips onto revision rows to retarget bookmarks. \
-                             Green highlight means the drop is valid. Red means invalid. \
-                             Use Selected Bookmark mode for activation, rename, publish, and PR actions.",
-                        ),
-                )
-            })
             .into_any_element()
     }
 
     fn render_jj_graph_row(&self, row_ix: usize, node: &GraphNode, cx: &mut Context<Self>) -> AnyElement {
         let view = cx.entity();
-        let is_dark = cx.theme().mode.is_dark();
         let node_id = node.id.clone();
-        let drag_hovered = self.graph_drag_hovered_node_id() == Some(node.id.as_str());
-        let drag_can_drop = self.graph_drag_can_drop_on_node(node.id.as_str());
-        let drag_active = self.graph_drag_is_active();
-        let row_bg = if drag_hovered && drag_can_drop {
-            cx.theme().success.opacity(if is_dark { 0.24 } else { 0.14 })
-        } else if drag_hovered {
-            cx.theme().danger.opacity(if is_dark { 0.24 } else { 0.14 })
-        } else if self.graph_node_is_selected(node.id.as_str()) {
+        let is_dark = cx.theme().mode.is_dark();
+        let row_bg = if self.graph_node_is_selected(node.id.as_str()) {
             cx.theme().accent.opacity(if is_dark { 0.22 } else { 0.14 })
-        } else if drag_active && drag_can_drop {
-            cx.theme().secondary.opacity(if is_dark { 0.28 } else { 0.42 })
         } else {
             cx.theme().background.opacity(0.0)
         };
-        let row_border = if drag_hovered && drag_can_drop {
-            cx.theme().success.opacity(if is_dark { 0.92 } else { 0.72 })
-        } else if drag_hovered {
-            cx.theme().danger.opacity(if is_dark { 0.92 } else { 0.72 })
-        } else {
-            cx.theme().border.opacity(0.0)
-        };
+        let row_border = cx.theme().border.opacity(0.0);
         let marker = if node.is_working_copy_parent {
             "@"
         } else if node.is_active_bookmark_target {
@@ -516,24 +432,6 @@ impl DiffViewer {
                 move |_, _, cx| {
                     view.update(cx, |this, cx| {
                         this.select_graph_node(node_id.clone(), cx);
-                    });
-                }
-            })
-            .on_mouse_move({
-                let view = view.clone();
-                let node_id = node.id.clone();
-                move |_, _, cx| {
-                    view.update(cx, |this, cx| {
-                        this.hover_graph_bookmark_drag_target(node_id.clone(), cx);
-                    });
-                }
-            })
-            .on_mouse_up(MouseButton::Left, {
-                let view = view.clone();
-                let node_id = node.id.clone();
-                move |_, _, cx| {
-                    view.update(cx, |this, cx| {
-                        this.finish_graph_bookmark_drag_on_node(node_id.clone(), cx);
                     });
                 }
             })
@@ -599,22 +497,7 @@ impl DiffViewer {
                         ),
                     ),
             );
-
-        if drag_hovered && drag_can_drop && !self.reduced_motion_enabled() {
-            row.with_animation(
-                ("jj-graph-row-drag-pulse", row_ix),
-                Animation::new(self.animation_duration_ms(900))
-                    .with_easing(cubic_bezier(0.32, 0.72, 0.0, 1.0))
-                    .repeat(),
-                |this, delta| {
-                    let pulse = (delta * std::f32::consts::TAU).sin().abs();
-                    this.opacity(0.92 + (pulse * 0.08))
-                },
-            )
-            .into_any_element()
-        } else {
-            row.into_any_element()
-        }
+        row.into_any_element()
     }
 
     fn render_jj_graph_bookmark_chip(
@@ -631,10 +514,6 @@ impl DiffViewer {
         let name = bookmark.name.clone();
         let remote = bookmark.remote.clone();
         let scope = bookmark.scope;
-        let drag_node_id = node_id.clone();
-        let drag_name = name.clone();
-        let drag_remote = remote.clone();
-        let drag_scope = scope;
         let activate_node_id = node_id.clone();
         let activate_name = bookmark.name.clone();
         let activate_remote = bookmark.remote.clone();
@@ -725,13 +604,10 @@ impl DiffViewer {
             button = button.outline().bg(chip_bg);
         }
 
-        let drag_wrapper = |child: AnyElement| {
+        let chip_wrapper = |child: AnyElement| {
             let view = cx.entity();
             div()
                 .on_mouse_down(MouseButton::Left, {
-                    let drag_node_id = drag_node_id.clone();
-                    let drag_name = drag_name.clone();
-                    let drag_remote = drag_remote.clone();
                     let activate_node_id = activate_node_id.clone();
                     let activate_name = activate_name.clone();
                     let activate_remote = activate_remote.clone();
@@ -746,15 +622,7 @@ impl DiffViewer {
                                     activate_scope,
                                     cx,
                                 );
-                                return;
                             }
-                            this.start_graph_bookmark_drag(
-                                drag_node_id.clone(),
-                                drag_name.clone(),
-                                drag_remote.clone(),
-                                drag_scope,
-                                cx,
-                            );
                         });
                     }
                 })
@@ -767,7 +635,7 @@ impl DiffViewer {
             return h_flex()
                 .items_center()
                 .gap_1()
-                .child(drag_wrapper(button.into_any_element()))
+                .child(chip_wrapper(button.into_any_element()))
                 .child(
                     Input::new(&self.graph_action_input_state)
                         .h(px(22.0))
@@ -797,7 +665,7 @@ impl DiffViewer {
                 .into_any_element();
         }
 
-        drag_wrapper(button.into_any_element())
+        chip_wrapper(button.into_any_element())
     }
 
     fn reduced_motion_enabled(&self) -> bool {

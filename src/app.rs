@@ -83,13 +83,6 @@ enum GraphPendingConfirmation {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct GraphBookmarkDragState {
-    bookmark: GraphBookmarkSelection,
-    source_node_id: String,
-    hovered_node_id: Option<String>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GraphRightPanelMode {
     ActiveWorkflow,
@@ -730,9 +723,7 @@ struct DiffViewer {
     graph_list_state: ListState,
     graph_action_input_state: Entity<InputState>,
     graph_pending_confirmation: Option<GraphPendingConfirmation>,
-    graph_drag_state: Option<GraphBookmarkDragState>,
     graph_right_panel_mode: GraphRightPanelMode,
-    graph_drag_help_open: bool,
     pending_bookmark_switch: Option<PendingBookmarkSwitch>,
     show_jj_terms_glossary: bool,
     workspace_view_mode: WorkspaceViewMode,

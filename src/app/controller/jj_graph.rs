@@ -1,7 +1,6 @@
 impl DiffViewer {
     pub(super) fn select_graph_node(&mut self, node_id: String, cx: &mut Context<Self>) {
         self.graph_pending_confirmation = None;
-        self.graph_drag_state = None;
         self.set_graph_selected_node(node_id, false, cx);
     }
 
@@ -23,7 +22,6 @@ impl DiffViewer {
             scope,
         });
         self.graph_pending_confirmation = None;
-        self.graph_drag_state = None;
         self.graph_right_panel_mode = GraphRightPanelMode::SelectedBookmark;
         self.scroll_graph_node_into_view(node_id.as_str());
         cx.notify();
@@ -72,7 +70,6 @@ impl DiffViewer {
             scope: bookmark_scope,
         });
         self.graph_pending_confirmation = None;
-        self.graph_drag_state = None;
         self.graph_right_panel_mode = GraphRightPanelMode::SelectedBookmark;
         self.scroll_graph_node_into_view(node_id.as_str());
         cx.notify();
@@ -84,7 +81,6 @@ impl DiffViewer {
         }
         self.graph_selected_bookmark = None;
         self.graph_pending_confirmation = None;
-        self.graph_drag_state = None;
         self.graph_right_panel_mode = GraphRightPanelMode::ActiveWorkflow;
         cx.notify();
     }
@@ -199,151 +195,6 @@ impl DiffViewer {
             .unwrap_or(0) as isize;
         let target_ix = (base_ix + delta).clamp(0, max_ix) as usize;
         self.set_graph_selected_node(focused_ids[target_ix].clone(), true, cx);
-    }
-
-    pub(super) fn start_graph_bookmark_drag(
-        &mut self,
-        source_node_id: String,
-        name: String,
-        remote: Option<String>,
-        scope: GraphBookmarkScope,
-        cx: &mut Context<Self>,
-    ) {
-        if scope != GraphBookmarkScope::Local {
-            return;
-        }
-        if !self.graph_nodes.iter().any(|node| node.id == source_node_id) {
-            return;
-        }
-        info!(
-            "graph drag started for local bookmark '{}' from {}",
-            name, source_node_id
-        );
-
-        self.graph_selected_node_id = Some(source_node_id.clone());
-        self.graph_selected_bookmark = Some(GraphBookmarkSelection {
-            name,
-            remote,
-            scope,
-        });
-        self.graph_pending_confirmation = None;
-        self.graph_right_panel_mode = GraphRightPanelMode::SelectedBookmark;
-        self.graph_drag_state = self.graph_selected_bookmark.clone().map(|bookmark| {
-            GraphBookmarkDragState {
-                bookmark,
-                source_node_id,
-                hovered_node_id: None,
-            }
-        });
-        cx.notify();
-    }
-
-    pub(super) fn hover_graph_bookmark_drag_target(&mut self, node_id: String, cx: &mut Context<Self>) {
-        let Some(drag_state) = self.graph_drag_state.as_mut() else {
-            return;
-        };
-        if !self.graph_nodes.iter().any(|node| node.id == node_id) {
-            return;
-        }
-        if drag_state.hovered_node_id.as_deref() == Some(node_id.as_str()) {
-            return;
-        }
-        drag_state.hovered_node_id = Some(node_id);
-        cx.notify();
-    }
-
-    pub(super) fn finish_graph_bookmark_drag_on_node(
-        &mut self,
-        node_id: String,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(mut drag_state) = self.graph_drag_state.take() else {
-            return;
-        };
-        drag_state.hovered_node_id = Some(node_id.clone());
-
-        match self.validate_graph_bookmark_drop(&drag_state.bookmark, node_id.as_str()) {
-            Ok(()) => {
-                self.graph_selected_bookmark = Some(drag_state.bookmark.clone());
-                self.graph_selected_node_id = Some(node_id.clone());
-                self.scroll_graph_node_into_view(node_id.as_str());
-                self.arm_move_graph_bookmark_to_target(drag_state.bookmark, node_id, cx);
-            }
-            Err(reason) => {
-                info!(
-                    "graph drag rejected for bookmark '{}': {}",
-                    drag_state.bookmark.name, reason
-                );
-                self.git_status_message = Some(reason.clone());
-                Self::push_warning_notification(reason, cx);
-                cx.notify();
-            }
-        }
-    }
-
-    pub(super) fn cancel_graph_bookmark_drag(&mut self, cx: &mut Context<Self>) {
-        if self.graph_drag_state.is_none() {
-            return;
-        }
-        info!("graph drag canceled before drop");
-        self.graph_drag_state = None;
-        cx.notify();
-    }
-
-    pub(super) fn graph_drag_is_active(&self) -> bool {
-        self.graph_drag_state.is_some()
-    }
-
-    pub(super) fn graph_drag_hovered_node_id(&self) -> Option<&str> {
-        self.graph_drag_state
-            .as_ref()
-            .and_then(|drag_state| drag_state.hovered_node_id.as_deref())
-    }
-
-    pub(super) fn graph_drag_preview_label(&self) -> Option<String> {
-        let drag_state = self.graph_drag_state.as_ref()?;
-        let bookmark = &drag_state.bookmark;
-        let bookmark_label = match bookmark.scope {
-            GraphBookmarkScope::Local => bookmark.name.clone(),
-            GraphBookmarkScope::Remote => format!(
-                "{}@{}",
-                bookmark.name,
-                bookmark.remote.as_deref().unwrap_or("remote")
-            ),
-        };
-        let source = drag_state.source_node_id.chars().take(12).collect::<String>();
-        let target = drag_state
-            .hovered_node_id
-            .as_deref()
-            .map(|node_id| node_id.chars().take(12).collect::<String>())
-            .unwrap_or_else(|| "...".to_string());
-        Some(format!("Dragging {bookmark_label}: {source} -> {target}"))
-    }
-
-    pub(super) fn graph_drag_can_drop_on_node(&self, node_id: &str) -> bool {
-        let Some(drag_state) = self.graph_drag_state.as_ref() else {
-            return false;
-        };
-        self.validate_graph_bookmark_drop(&drag_state.bookmark, node_id)
-            .is_ok()
-    }
-
-    pub(super) fn graph_drag_drop_hint(&self) -> Option<String> {
-        let drag_state = self.graph_drag_state.as_ref()?;
-        let Some(target_node_id) = drag_state.hovered_node_id.as_deref() else {
-            return Some(format!(
-                "Drag '{}' onto a revision to move its bookmark pointer.",
-                drag_state.bookmark.name
-            ));
-        };
-        match self.validate_graph_bookmark_drop(&drag_state.bookmark, target_node_id) {
-            Ok(()) => Some(format!(
-                "Drop to move '{}' to revision {}.",
-                drag_state.bookmark.name,
-                target_node_id.chars().take(12).collect::<String>()
-            )),
-            Err(reason) => Some(format!("Cannot drop here: {reason}")),
-        }
     }
 
     pub(super) fn create_graph_bookmark_from_selected_revision(
@@ -537,7 +388,7 @@ impl DiffViewer {
                 self.run_git_action("Move bookmark target", cx, move |repo_root| {
                     move_bookmark_to_revision(&repo_root, &bookmark_name, &target_node_id)?;
                     Ok(format!(
-                        "Moved bookmark {} to {}. Undo: drag it back or use jj bookmark set.",
+                        "Moved bookmark {} to {}. Undo with jj undo or move it again.",
                         bookmark_name,
                         target_node_id.chars().take(12).collect::<String>()
                     ))
@@ -567,7 +418,7 @@ impl DiffViewer {
                     target_node_id: target_node_id.clone(),
                 });
                 self.git_status_message = Some(format!(
-                    "Drop prepared: confirm move to retarget bookmark to {}.",
+                    "Move prepared: confirm retarget bookmark to {}.",
                     target_node_id.chars().take(12).collect::<String>()
                 ));
                 cx.notify();
@@ -587,7 +438,7 @@ impl DiffViewer {
     ) -> Result<(), String> {
         if self.graph_node_is_working_copy_commit(target_node_id) {
             return Err(
-                "Cannot move bookmark to mutable working-copy revision. Drop onto a committed revision instead."
+                "Cannot move bookmark to mutable working-copy revision. Select a committed revision instead."
                     .to_string(),
             );
         }
@@ -710,20 +561,6 @@ impl DiffViewer {
                             && self.graph_nodes.iter().any(|node| node.id == *target_node_id)
                     }
                 });
-
-        self.graph_drag_state = self.graph_drag_state.take().filter(|drag_state| {
-            drag_state.bookmark.scope == GraphBookmarkScope::Local
-                && self.graph_bookmark_exists(&drag_state.bookmark)
-                && self
-                    .graph_nodes
-                    .iter()
-                    .any(|node| node.id == drag_state.source_node_id)
-                && drag_state
-                    .hovered_node_id
-                    .as_ref()
-                    .map(|hovered| self.graph_nodes.iter().any(|node| node.id == *hovered))
-                    .unwrap_or(true)
-        });
 
         if self.graph_selected_bookmark.is_some() {
             let focused_ids = self.graph_focused_revision_ids();
