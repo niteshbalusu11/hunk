@@ -651,7 +651,7 @@ impl DiffViewer {
                             .compact()
                             .with_size(gpui_component::Size::Small)
                             .rounded(px(7.0))
-                            .label("Redo")
+                            .label("Redo Op")
                             .tooltip("Redo the most recently undone JJ operation.")
                             .bg(cx.theme().accent.opacity(if is_dark { 0.28 } else { 0.16 }))
                             .border_color(
