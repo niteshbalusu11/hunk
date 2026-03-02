@@ -10,7 +10,7 @@ impl DiffViewer {
 
     pub(super) fn toggle_sidebar_tree(&mut self, cx: &mut Context<Self>) {
         self.sidebar_collapsed = !self.sidebar_collapsed;
-        if !self.sidebar_collapsed && self.repo_tree_nodes.is_empty() && !self.repo_tree_loading {
+        if !self.sidebar_collapsed && self.repo_tree.nodes.is_empty() && !self.repo_tree.loading {
             self.request_repo_tree_reload(cx);
         }
         cx.notify();
@@ -47,39 +47,62 @@ impl DiffViewer {
     }
 
     pub(super) fn set_workspace_view_mode(&mut self, mode: WorkspaceViewMode, cx: &mut Context<Self>) {
-        if self.workspace_view_mode == mode {
+        let previous_mode = self.workspace_view_mode;
+        if previous_mode == mode {
             if !self.sidebar_collapsed
                 && mode != WorkspaceViewMode::JjWorkspace
-                && self.repo_tree_nodes.is_empty()
-                && !self.repo_tree_loading
+                && self.repo_tree.nodes.is_empty()
+                && !self.repo_tree.loading
             {
                 self.request_repo_tree_reload(cx);
             }
             return;
         }
 
+        if previous_mode == WorkspaceViewMode::Files {
+            self.capture_sidebar_repo_scroll_anchor();
+            if self.repo_tree.full_cache.is_some() {
+                self.sync_full_repo_tree_cache_from_current();
+            }
+        }
+
         self.workspace_view_mode = mode;
 
         if mode == WorkspaceViewMode::Files {
-            let target_path = self.selected_path.clone().or_else(|| {
+            if previous_mode == WorkspaceViewMode::Diff || self.repo_tree.changed_only {
+                if !self.restore_full_repo_tree_from_cache() && !self.repo_tree.loading {
+                    self.request_repo_tree_reload(cx);
+                }
+            } else if self.repo_tree.nodes.is_empty() && !self.repo_tree.loading {
+                self.request_repo_tree_reload(cx);
+            }
+
+            let target_path = self.editor_path.clone().or_else(|| self.selected_path.clone()).or_else(|| {
                 self.files
                     .iter()
                     .find(|file| file.status != FileStatus::Deleted)
                     .map(|file| file.path.clone())
             });
             if let Some(path) = target_path {
-                if self.prevent_unsaved_editor_discard(Some(path.as_str()), cx) {
-                    self.request_repo_tree_reload(cx);
+                let editor_already_open = self.editor_path.as_deref() == Some(path.as_str())
+                    && !self.editor_loading
+                    && self.editor_error.is_none();
+                if !editor_already_open
+                    && self.prevent_unsaved_editor_discard(Some(path.as_str()), cx)
+                {
                     return;
                 }
                 self.selected_path = Some(path.clone());
                 self.selected_status = self.status_for_path(path.as_str());
-                self.request_file_editor_reload(path, cx);
+                if !editor_already_open {
+                    self.request_file_editor_reload(path, cx);
+                }
             } else {
                 if self.prevent_unsaved_editor_discard(None, cx) {
-                    self.request_repo_tree_reload(cx);
                     return;
                 }
+                self.selected_path = None;
+                self.selected_status = None;
                 self.clear_editor_state(cx);
             }
         } else if mode == WorkspaceViewMode::Diff {
@@ -94,19 +117,16 @@ impl DiffViewer {
                     .as_deref()
                     .and_then(|selected| self.status_for_path(selected));
             }
-        }
-
-        if mode != WorkspaceViewMode::JjWorkspace {
             self.request_repo_tree_reload(cx);
         }
         cx.notify();
     }
 
     pub(super) fn toggle_repo_tree_directory(&mut self, path: String, cx: &mut Context<Self>) {
-        if self.repo_tree_expanded_dirs.contains(path.as_str()) {
-            self.repo_tree_expanded_dirs.remove(path.as_str());
+        if self.repo_tree.expanded_dirs.contains(path.as_str()) {
+            self.repo_tree.expanded_dirs.remove(path.as_str());
         } else {
-            self.repo_tree_expanded_dirs.insert(path);
+            self.repo_tree.expanded_dirs.insert(path);
         }
         self.rebuild_repo_tree_rows();
         cx.notify();
@@ -134,46 +154,50 @@ impl DiffViewer {
 
     pub(super) fn request_repo_tree_reload(&mut self, cx: &mut Context<Self>) {
         let Some(repo_root) = self.repo_root.clone() else {
-            self.repo_tree_nodes.clear();
-            self.repo_tree_rows.clear();
-            self.repo_tree_file_count = 0;
-            self.repo_tree_folder_count = 0;
-            self.repo_tree_expanded_dirs.clear();
-            self.sidebar_repo_scroll_anchor_path = None;
-            self.sidebar_repo_row_count = 0;
-            self.sidebar_repo_list_state.reset(0);
-            self.repo_tree_loading = false;
-            self.repo_tree_reload_pending = false;
-            self.repo_tree_error = None;
-            self.repo_tree_last_reload = Instant::now();
+            self.repo_tree.nodes.clear();
+            self.repo_tree.rows.clear();
+            self.repo_tree.file_count = 0;
+            self.repo_tree.folder_count = 0;
+            self.repo_tree.expanded_dirs.clear();
+            self.repo_tree.scroll_anchor_path = None;
+            self.repo_tree.row_count = 0;
+            self.repo_tree.list_state.reset(0);
+            self.clear_full_repo_tree_cache();
+            self.repo_tree.loading = false;
+            self.repo_tree.reload_pending = false;
+            self.repo_tree.error = None;
+            self.repo_tree.changed_only = false;
+            self.repo_tree.last_reload = Instant::now();
             cx.notify();
             return;
         };
 
         if self.workspace_view_mode == WorkspaceViewMode::Diff {
             self.next_repo_tree_epoch();
-            self.repo_tree_task = Task::ready(());
-            self.repo_tree_loading = false;
-            self.repo_tree_reload_pending = false;
-            self.repo_tree_error = None;
-            self.repo_tree_last_reload = std::time::Instant::now();
+            self.repo_tree.task = Task::ready(());
+            self.repo_tree.loading = false;
+            self.repo_tree.reload_pending = false;
+            self.repo_tree.error = None;
+            self.repo_tree.changed_only = true;
+            self.repo_tree.last_reload = std::time::Instant::now();
             self.rebuild_repo_tree_for_changed_files();
             cx.notify();
             return;
         }
 
-        if self.repo_tree_loading {
-            self.repo_tree_reload_pending = true;
+        if self.repo_tree.loading {
+            self.repo_tree.reload_pending = true;
             return;
         }
 
         let epoch = self.next_repo_tree_epoch();
-        self.repo_tree_loading = true;
-        self.repo_tree_reload_pending = false;
-        self.repo_tree_error = None;
-        self.repo_tree_last_reload = std::time::Instant::now();
+        self.repo_tree.loading = true;
+        self.repo_tree.reload_pending = false;
+        self.repo_tree.error = None;
+        self.repo_tree.changed_only = false;
+        self.repo_tree.last_reload = std::time::Instant::now();
 
-        self.repo_tree_task = cx.spawn(async move |this, cx| {
+        self.repo_tree.task = cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move { load_repo_tree(&repo_root) })
@@ -181,7 +205,7 @@ impl DiffViewer {
 
             if let Some(this) = this.upgrade() {
                 this.update(cx, |this, cx| {
-                    if epoch != this.repo_tree_epoch {
+                    if epoch != this.repo_tree.epoch {
                         return;
                     }
 
@@ -193,22 +217,60 @@ impl DiffViewer {
     }
 
     fn next_repo_tree_epoch(&mut self) -> usize {
-        self.repo_tree_epoch = self.repo_tree_epoch.saturating_add(1);
-        self.repo_tree_epoch
+        self.repo_tree.epoch = self.repo_tree.epoch.saturating_add(1);
+        self.repo_tree.epoch
     }
 
     fn rebuild_repo_tree_rows(&mut self) {
         self.capture_sidebar_repo_scroll_anchor();
-        self.repo_tree_rows = flatten_repo_tree_rows(&self.repo_tree_nodes, &self.repo_tree_expanded_dirs);
+        self.repo_tree.rows = flatten_repo_tree_rows(&self.repo_tree.nodes, &self.repo_tree.expanded_dirs);
     }
 
     fn rebuild_repo_tree_for_changed_files(&mut self) {
-        self.repo_tree_nodes = build_changed_files_tree(&self.files);
-        self.repo_tree_file_count = count_repo_tree_kind(&self.repo_tree_nodes, RepoTreeNodeKind::File);
-        self.repo_tree_folder_count =
-            count_repo_tree_kind(&self.repo_tree_nodes, RepoTreeNodeKind::Directory);
-        self.repo_tree_expanded_dirs.clear();
+        self.repo_tree.nodes = build_changed_files_tree(&self.files);
+        self.repo_tree.file_count = count_repo_tree_kind(&self.repo_tree.nodes, RepoTreeNodeKind::File);
+        self.repo_tree.folder_count =
+            count_repo_tree_kind(&self.repo_tree.nodes, RepoTreeNodeKind::Directory);
+        self.repo_tree.expanded_dirs.clear();
         self.rebuild_repo_tree_rows();
+    }
+
+    fn sync_full_repo_tree_cache_from_current(&mut self) {
+        self.repo_tree.full_cache = Some(RepoTreeCacheState {
+            nodes: self.repo_tree.nodes.clone(),
+            file_count: self.repo_tree.file_count,
+            folder_count: self.repo_tree.folder_count,
+            expanded_dirs: self.repo_tree.expanded_dirs.clone(),
+            error: self.repo_tree.error.clone(),
+            scroll_anchor_path: self.repo_tree.scroll_anchor_path.clone(),
+            fingerprint: self.last_snapshot_fingerprint.clone(),
+        });
+    }
+
+    fn restore_full_repo_tree_from_cache(&mut self) -> bool {
+        let Some(cache) = self.repo_tree.full_cache.as_ref() else {
+            return false;
+        };
+        if cache.fingerprint != self.last_snapshot_fingerprint {
+            return false;
+        }
+
+        self.repo_tree.nodes = cache.nodes.clone();
+        self.repo_tree.file_count = cache.file_count;
+        self.repo_tree.folder_count = cache.folder_count;
+        self.repo_tree.expanded_dirs = cache.expanded_dirs.clone();
+        self.repo_tree.error = cache.error.clone();
+        self.repo_tree.rows = flatten_repo_tree_rows(&self.repo_tree.nodes, &self.repo_tree.expanded_dirs);
+        self.repo_tree.scroll_anchor_path = cache.scroll_anchor_path.clone();
+        self.repo_tree.row_count = 0;
+        self.repo_tree.loading = false;
+        self.repo_tree.reload_pending = false;
+        self.repo_tree.changed_only = false;
+        true
+    }
+
+    pub(super) fn clear_full_repo_tree_cache(&mut self) {
+        self.repo_tree.full_cache = None;
     }
 }
 
@@ -217,42 +279,47 @@ fn apply_repo_tree_reload(
     result: anyhow::Result<Vec<hunk::jj::RepoTreeEntry>>,
     cx: &mut Context<DiffViewer>,
 ) {
-    this.repo_tree_loading = false;
+    this.repo_tree.loading = false;
     match result {
         Ok(entries) => {
             let (file_count, folder_count) = count_non_ignored_repo_tree_entries(&entries);
-            this.repo_tree_nodes = build_repo_tree(&entries);
-            this.repo_tree_file_count = file_count;
-            this.repo_tree_folder_count = folder_count;
-            this.repo_tree_error = None;
-            this.repo_tree_expanded_dirs
-                .retain(|path| repo_tree_has_directory(&this.repo_tree_nodes, path.as_str()));
+            this.repo_tree.nodes = build_repo_tree(&entries);
+            this.repo_tree.file_count = file_count;
+            this.repo_tree.folder_count = folder_count;
+            this.repo_tree.error = None;
+            this.repo_tree.changed_only = false;
+            this.repo_tree.expanded_dirs
+                .retain(|path| repo_tree_has_directory(&this.repo_tree.nodes, path.as_str()));
             this.rebuild_repo_tree_rows();
             if let Some(path) = this.selected_path.clone()
                 && this.workspace_view_mode == WorkspaceViewMode::Files
-                && !repo_tree_contains_path(&this.repo_tree_nodes, path.as_str())
+                && !repo_tree_contains_path(&this.repo_tree.nodes, path.as_str())
                 && !this.prevent_unsaved_editor_discard(None, cx)
             {
                 this.clear_editor_state(cx);
                 this.selected_path = None;
                 this.selected_status = None;
             }
+            if this.workspace_view_mode != WorkspaceViewMode::Diff {
+                this.sync_full_repo_tree_cache_from_current();
+            }
         }
         Err(err) => {
-            this.repo_tree_error = Some(format!("Failed to load repository tree: {err:#}"));
-            this.repo_tree_nodes.clear();
-            this.repo_tree_rows.clear();
-            this.repo_tree_file_count = 0;
-            this.repo_tree_folder_count = 0;
-            this.repo_tree_expanded_dirs.clear();
-            this.sidebar_repo_scroll_anchor_path = None;
-            this.sidebar_repo_row_count = 0;
-            this.sidebar_repo_list_state.reset(0);
+            this.repo_tree.error = Some(format!("Failed to load repository tree: {err:#}"));
+            this.repo_tree.nodes.clear();
+            this.repo_tree.rows.clear();
+            this.repo_tree.file_count = 0;
+            this.repo_tree.folder_count = 0;
+            this.repo_tree.expanded_dirs.clear();
+            this.repo_tree.changed_only = false;
+            this.repo_tree.scroll_anchor_path = None;
+            this.repo_tree.row_count = 0;
+            this.repo_tree.list_state.reset(0);
         }
     }
 
-    if this.repo_tree_reload_pending {
-        this.repo_tree_reload_pending = false;
+    if this.repo_tree.reload_pending {
+        this.repo_tree.reload_pending = false;
         this.request_repo_tree_reload(cx);
         return;
     }

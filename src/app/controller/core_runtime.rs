@@ -87,13 +87,43 @@ impl DiffViewer {
             return false;
         };
 
-        relative_path
-            .components()
-            .any(|component| component.as_os_str() == ".jj" || component.as_os_str() == ".git")
+        relative_path.components().any(|component| {
+            let component = component.as_os_str();
+            if component == ".jj" || component == ".git" {
+                return true;
+            }
+
+            component
+                .to_str()
+                .is_some_and(Self::is_hunk_temp_save_component)
+        })
+    }
+
+    fn is_hunk_temp_save_component(name: &str) -> bool {
+        let Some((_, suffix)) = name.rsplit_once(".hunk-tmp.") else {
+            return false;
+        };
+        let mut parts = suffix.split('.');
+        let Some(pid) = parts.next() else {
+            return false;
+        };
+        let Some(nonce) = parts.next() else {
+            return false;
+        };
+        if parts.next().is_some() {
+            return false;
+        }
+
+        !pid.is_empty()
+            && !nonce.is_empty()
+            && pid.bytes().all(|byte| byte.is_ascii_digit())
+            && nonce.bytes().all(|byte| byte.is_ascii_digit())
     }
 
     fn start_repo_watch(&mut self, cx: &mut Context<Self>) {
         self.repo_watch_task = Task::ready(());
+        self.repo_watch_refresh_task = Task::ready(());
+        self.repo_watch_refresh_epoch = 0;
 
         let Some(repo_root) = self.repo_root.clone().or_else(|| self.project_path.clone()) else {
             return;
@@ -119,7 +149,6 @@ impl DiffViewer {
         }
 
         self.repo_watch_task = cx.spawn(async move |this, cx| {
-            let mut last_event_at = Instant::now() - Self::REPO_WATCH_DEBOUNCE;
             while let Some(event) = event_rx.next().await {
                 let Ok(event) = event else {
                     continue;
@@ -133,21 +162,35 @@ impl DiffViewer {
                     continue;
                 }
 
-                let now = Instant::now();
-                if now.duration_since(last_event_at) < Self::REPO_WATCH_DEBOUNCE {
-                    continue;
-                }
-                last_event_at = now;
-
                 if let Some(this) = this.upgrade() {
                     this.update(cx, |this, cx| {
-                        this.request_snapshot_refresh_internal(true, cx);
-                        this.request_repo_tree_reload(cx);
+                        this.schedule_repo_watch_refresh(cx);
                     })
                     .ok();
                 }
             }
             drop(watcher);
+        });
+    }
+
+    fn next_repo_watch_refresh_epoch(&mut self) -> usize {
+        self.repo_watch_refresh_epoch = self.repo_watch_refresh_epoch.saturating_add(1);
+        self.repo_watch_refresh_epoch
+    }
+
+    fn schedule_repo_watch_refresh(&mut self, cx: &mut Context<Self>) {
+        let epoch = self.next_repo_watch_refresh_epoch();
+        self.repo_watch_refresh_task = cx.spawn(async move |this, cx| {
+            Timer::after(Self::REPO_WATCH_DEBOUNCE).await;
+            if let Some(this) = this.upgrade() {
+                this.update(cx, |this, cx| {
+                    if epoch != this.repo_watch_refresh_epoch {
+                        return;
+                    }
+                    this.request_snapshot_refresh_internal(true, cx);
+                })
+                .ok();
+            }
         });
     }
 
@@ -238,5 +281,58 @@ impl DiffViewer {
 
     fn recently_scrolling(&self) -> bool {
         self.last_scroll_activity_at.elapsed() < AUTO_REFRESH_SCROLL_DEBOUNCE
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DiffViewer;
+    use std::path::PathBuf;
+
+    fn fixture_repo_root() -> PathBuf {
+        std::env::temp_dir().join("hunk-watch-path-tests")
+    }
+
+    #[test]
+    fn ignores_internal_vcs_paths_for_repo_watch() {
+        let repo_root = fixture_repo_root();
+        assert!(DiffViewer::should_ignore_repo_watch_path(
+            repo_root.join(".jj/working_copy").as_path(),
+            repo_root.as_path()
+        ));
+        assert!(DiffViewer::should_ignore_repo_watch_path(
+            repo_root.join(".git/index").as_path(),
+            repo_root.as_path()
+        ));
+    }
+
+    #[test]
+    fn ignores_hunk_temp_save_paths_for_repo_watch() {
+        let repo_root = fixture_repo_root();
+        assert!(DiffViewer::should_ignore_repo_watch_path(
+            repo_root.join("src/lib.rs.hunk-tmp.123.456").as_path(),
+            repo_root.as_path()
+        ));
+        assert!(DiffViewer::should_ignore_repo_watch_path(
+            repo_root.join(".hunk-tmp.1.2").as_path(),
+            repo_root.as_path()
+        ));
+    }
+
+    #[test]
+    fn keeps_regular_workspace_paths_for_repo_watch() {
+        let repo_root = fixture_repo_root();
+        assert!(!DiffViewer::should_ignore_repo_watch_path(
+            repo_root.join("src/lib.rs").as_path(),
+            repo_root.as_path()
+        ));
+        assert!(!DiffViewer::should_ignore_repo_watch_path(
+            repo_root.join("x.md").as_path(),
+            repo_root.as_path()
+        ));
+        assert!(!DiffViewer::should_ignore_repo_watch_path(
+            repo_root.join("src/notes.hunk-tmp.md").as_path(),
+            repo_root.as_path()
+        ));
     }
 }

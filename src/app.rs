@@ -729,6 +729,62 @@ fn parse_shortcut_lines(value: &str) -> Vec<String> {
     shortcuts
 }
 
+struct RepoTreeCacheState {
+    nodes: Vec<RepoTreeNode>,
+    file_count: usize,
+    folder_count: usize,
+    expanded_dirs: BTreeSet<String>,
+    error: Option<String>,
+    scroll_anchor_path: Option<String>,
+    fingerprint: Option<RepoSnapshotFingerprint>,
+}
+
+struct RepoTreeState {
+    list_state: ListState,
+    row_count: usize,
+    nodes: Vec<RepoTreeNode>,
+    rows: Vec<RepoTreeRow>,
+    file_count: usize,
+    folder_count: usize,
+    expanded_dirs: BTreeSet<String>,
+    scroll_anchor_path: Option<String>,
+    full_cache: Option<RepoTreeCacheState>,
+    epoch: usize,
+    task: Task<()>,
+    loading: bool,
+    reload_pending: bool,
+    error: Option<String>,
+    changed_only: bool,
+    last_reload: Instant,
+}
+
+impl RepoTreeState {
+    fn new() -> Self {
+        Self {
+            list_state: ListState::new(
+                0,
+                ListAlignment::Top,
+                px(SIDEBAR_REPO_LIST_ESTIMATED_ROW_HEIGHT),
+            ),
+            row_count: 0,
+            nodes: Vec::new(),
+            rows: Vec::new(),
+            file_count: 0,
+            folder_count: 0,
+            expanded_dirs: BTreeSet::new(),
+            scroll_anchor_path: None,
+            full_cache: None,
+            epoch: 0,
+            task: Task::ready(()),
+            loading: false,
+            reload_pending: false,
+            error: None,
+            changed_only: false,
+            last_reload: Instant::now(),
+        }
+    }
+}
+
 struct DiffViewer {
     config_store: Option<ConfigStore>,
     config: AppConfig,
@@ -803,6 +859,8 @@ struct DiffViewer {
     auto_refresh_unmodified_streak: u32,
     auto_refresh_task: Task<()>,
     repo_watch_task: Task<()>,
+    repo_watch_refresh_epoch: usize,
+    repo_watch_refresh_task: Task<()>,
     snapshot_epoch: usize,
     snapshot_task: Task<()>,
     snapshot_loading: bool,
@@ -831,20 +889,7 @@ struct DiffViewer {
     repo_discovery_failed: bool,
     error_message: Option<String>,
     sidebar_collapsed: bool,
-    sidebar_repo_list_state: ListState,
-    sidebar_repo_row_count: usize,
-    repo_tree_nodes: Vec<RepoTreeNode>,
-    repo_tree_rows: Vec<RepoTreeRow>,
-    repo_tree_file_count: usize,
-    repo_tree_folder_count: usize,
-    repo_tree_expanded_dirs: BTreeSet<String>,
-    sidebar_repo_scroll_anchor_path: Option<String>,
-    repo_tree_epoch: usize,
-    repo_tree_task: Task<()>,
-    repo_tree_loading: bool,
-    repo_tree_reload_pending: bool,
-    repo_tree_error: Option<String>,
-    repo_tree_last_reload: Instant,
+    repo_tree: RepoTreeState,
     editor_input_state: Entity<InputState>,
     editor_path: Option<String>,
     editor_loading: bool,

@@ -25,12 +25,8 @@ fn load_repo_tree_marks_jj_ignored_entries() {
     assert!(entries.iter().any(|entry| {
         entry.path == "target" && entry.kind == RepoTreeEntryKind::Directory && entry.ignored
     }));
-    assert!(entries.iter().any(|entry| {
-        entry.path == "target/cache.bin" && entry.kind == RepoTreeEntryKind::File && entry.ignored
-    }));
-    assert!(entries.iter().any(|entry| {
-        entry.path == "logs/app.log" && entry.kind == RepoTreeEntryKind::File && entry.ignored
-    }));
+    assert!(entries.iter().all(|entry| entry.path != "target/cache.bin"));
+    assert!(entries.iter().all(|entry| entry.path != "logs/app.log"));
 }
 
 #[test]
@@ -61,6 +57,25 @@ fn load_repo_tree_excludes_internal_vcs_directories() {
     let entries = load_repo_tree(fixture.path()).expect("repo tree should load");
     assert!(entries.iter().all(|entry| !entry.path.starts_with(".git")));
     assert!(entries.iter().all(|entry| !entry.path.starts_with(".jj")));
+}
+
+#[test]
+fn load_repo_tree_includes_short_markdown_filenames() {
+    let fixture = TempRepo::new("repo-tree-short-markdown-names");
+    write_file(fixture.path().join("x.md"), "x\n");
+    write_file(fixture.path().join("xxyy.md"), "xxyy\n");
+    write_file(fixture.path().join("readme2.md"), "readme2\n");
+    run_jj(fixture.path(), ["status"]);
+
+    let entries = load_repo_tree(fixture.path()).expect("repo tree should load");
+    for expected in ["x.md", "xxyy.md", "readme2.md"] {
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.path == expected && entry.kind == RepoTreeEntryKind::File),
+            "missing expected file entry for {expected}"
+        );
+    }
 }
 
 struct TempRepo {

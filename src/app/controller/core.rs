@@ -236,6 +236,8 @@ impl DiffViewer {
             auto_refresh_unmodified_streak: 0,
             auto_refresh_task: Task::ready(()),
             repo_watch_task: Task::ready(()),
+            repo_watch_refresh_epoch: 0,
+            repo_watch_refresh_task: Task::ready(()),
             snapshot_epoch: 0,
             snapshot_task: Task::ready(()),
             snapshot_loading: false,
@@ -264,24 +266,7 @@ impl DiffViewer {
             repo_discovery_failed: false,
             error_message: None,
             sidebar_collapsed: false,
-            sidebar_repo_list_state: ListState::new(
-                0,
-                ListAlignment::Top,
-                px(SIDEBAR_REPO_LIST_ESTIMATED_ROW_HEIGHT),
-            ),
-            sidebar_repo_row_count: 0,
-            repo_tree_nodes: Vec::new(),
-            repo_tree_rows: Vec::new(),
-            repo_tree_file_count: 0,
-            repo_tree_folder_count: 0,
-            repo_tree_expanded_dirs: BTreeSet::new(),
-            sidebar_repo_scroll_anchor_path: None,
-            repo_tree_epoch: 0,
-            repo_tree_task: Task::ready(()),
-            repo_tree_loading: false,
-            repo_tree_reload_pending: false,
-            repo_tree_error: None,
-            repo_tree_last_reload: Instant::now(),
+            repo_tree: RepoTreeState::new(),
             editor_input_state,
             editor_path: None,
             editor_loading: false,
@@ -526,6 +511,7 @@ impl DiffViewer {
 
         let previous_selected_path = self.selected_path.clone();
         let previous_selected_status = self.selected_status;
+        let previous_files = self.files.clone();
 
         self.project_path = Some(root.clone());
         self.set_last_project_path(Some(root.clone()));
@@ -567,15 +553,17 @@ impl DiffViewer {
         if root_changed {
             self.working_copy_recovery_candidates.clear();
             self.commit_excluded_files.clear();
-            self.repo_tree_nodes.clear();
-            self.repo_tree_rows.clear();
-            self.repo_tree_file_count = 0;
-            self.repo_tree_folder_count = 0;
-            self.repo_tree_expanded_dirs.clear();
-            self.sidebar_repo_scroll_anchor_path = None;
-            self.sidebar_repo_row_count = 0;
-            self.sidebar_repo_list_state.reset(0);
-            self.repo_tree_error = None;
+            self.repo_tree.nodes.clear();
+            self.repo_tree.rows.clear();
+            self.repo_tree.file_count = 0;
+            self.repo_tree.folder_count = 0;
+            self.repo_tree.expanded_dirs.clear();
+            self.repo_tree.scroll_anchor_path = None;
+            self.repo_tree.row_count = 0;
+            self.repo_tree.list_state.reset(0);
+            self.repo_tree.error = None;
+            self.repo_tree.changed_only = false;
+            self.clear_full_repo_tree_cache();
             self.clear_editor_state(cx);
         }
         self.collapsed_files
@@ -596,10 +584,12 @@ impl DiffViewer {
 
         let selected_changed = self.selected_path != previous_selected_path
             || self.selected_status != previous_selected_status;
+        let repo_tree_structure_changed =
+            Self::repo_tree_structure_changed(previous_files.as_slice(), self.files.as_slice());
 
         self.refresh_comments_cache_from_store();
 
-        if root_changed || self.workspace_view_mode == WorkspaceViewMode::Diff {
+        if root_changed || self.workspace_view_mode == WorkspaceViewMode::Diff || repo_tree_structure_changed {
             self.request_repo_tree_reload(cx);
         }
 
@@ -673,17 +663,19 @@ impl DiffViewer {
         } else {
             Some(err.to_string())
         };
-        self.repo_tree_nodes.clear();
-        self.repo_tree_rows.clear();
-        self.repo_tree_file_count = 0;
-        self.repo_tree_folder_count = 0;
-        self.repo_tree_expanded_dirs.clear();
-        self.sidebar_repo_scroll_anchor_path = None;
-        self.sidebar_repo_row_count = 0;
-        self.sidebar_repo_list_state.reset(0);
-        self.repo_tree_loading = false;
-        self.repo_tree_reload_pending = false;
-        self.repo_tree_error = None;
+        self.repo_tree.nodes.clear();
+        self.repo_tree.rows.clear();
+        self.repo_tree.file_count = 0;
+        self.repo_tree.folder_count = 0;
+        self.repo_tree.expanded_dirs.clear();
+        self.repo_tree.scroll_anchor_path = None;
+        self.repo_tree.row_count = 0;
+        self.repo_tree.list_state.reset(0);
+        self.repo_tree.loading = false;
+        self.repo_tree.reload_pending = false;
+        self.repo_tree.error = None;
+        self.repo_tree.changed_only = false;
+        self.clear_full_repo_tree_cache();
         self.clear_editor_state(cx);
         cx.notify();
     }
@@ -696,6 +688,29 @@ impl DiffViewer {
                 || message.contains("failed to discover git repository")
                 || message.contains("could not find repository")
         })
+    }
+
+    fn is_repo_tree_structure_status(status: FileStatus) -> bool {
+        matches!(
+            status,
+            FileStatus::Added
+                | FileStatus::Deleted
+                | FileStatus::Renamed
+                | FileStatus::TypeChange
+                | FileStatus::Untracked
+        )
+    }
+
+    fn repo_tree_structure_signature(files: &[ChangedFile]) -> BTreeSet<String> {
+        files
+            .iter()
+            .filter(|file| Self::is_repo_tree_structure_status(file.status))
+            .map(|file| format!("{}\u{1f}{}", file.path, file.status.tag()))
+            .collect()
+    }
+
+    fn repo_tree_structure_changed(previous: &[ChangedFile], next: &[ChangedFile]) -> bool {
+        Self::repo_tree_structure_signature(previous) != Self::repo_tree_structure_signature(next)
     }
 
     fn request_selected_diff_reload(&mut self, cx: &mut Context<Self>) {

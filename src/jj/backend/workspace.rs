@@ -40,6 +40,9 @@ pub(super) fn walk_repo_tree(
                 kind: RepoTreeEntryKind::Directory,
                 ignored,
             });
+            if ignored {
+                continue;
+            }
             walk_repo_tree(root, &child_path, tracked_paths, entries)?;
             continue;
         }

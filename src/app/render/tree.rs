@@ -1,10 +1,17 @@
 impl DiffViewer {
     fn render_tree(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let is_dark = cx.theme().mode.is_dark();
-        let tree_summary = format!(
-            "{} files • {} folders",
-            self.repo_tree_file_count, self.repo_tree_folder_count
-        );
+        let tree_summary = if self.repo_tree.loading && !self.repo_tree.rows.is_empty() {
+            format!(
+                "{} files • {} folders • Refreshing...",
+                self.repo_tree.file_count, self.repo_tree.folder_count
+            )
+        } else {
+            format!(
+                "{} files • {} folders",
+                self.repo_tree.file_count, self.repo_tree.folder_count
+            )
+        };
 
         v_flex()
             .size_full()
@@ -35,7 +42,7 @@ impl DiffViewer {
     }
 
     fn render_repo_tree_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        if self.repo_tree_loading {
+        if self.repo_tree.loading && self.repo_tree.rows.is_empty() {
             return v_flex()
                 .w_full()
                 .px_2()
@@ -49,7 +56,7 @@ impl DiffViewer {
                 .into_any_element();
         }
 
-        if let Some(error) = self.repo_tree_error.as_ref() {
+        if let Some(error) = self.repo_tree.error.as_ref() {
             return v_flex()
                 .w_full()
                 .px_2()
@@ -64,7 +71,7 @@ impl DiffViewer {
                 .into_any_element();
         }
 
-        if self.repo_tree_rows.is_empty() {
+        if self.repo_tree.rows.is_empty() {
             return v_flex()
                 .w_full()
                 .px_2()
@@ -78,12 +85,12 @@ impl DiffViewer {
                 .into_any_element();
         }
 
-        self.sync_sidebar_repo_list_state(self.repo_tree_rows.len());
-        let list_state = self.sidebar_repo_list_state.clone();
+        self.sync_sidebar_repo_list_state(self.repo_tree.rows.len());
+        let list_state = self.repo_tree.list_state.clone();
 
         let list = list(list_state.clone(), {
             cx.processor(move |this, ix: usize, _window, cx| {
-                this.repo_tree_rows
+                this.repo_tree.rows
                     .get(ix)
                     .map(|row| this.render_repo_tree_row(row, cx))
                     .unwrap_or_else(|| div().into_any_element())
@@ -106,16 +113,16 @@ impl DiffViewer {
     }
 
     fn sync_sidebar_repo_list_state(&mut self, row_count: usize) {
-        if self.sidebar_repo_row_count == row_count
-            && self.sidebar_repo_scroll_anchor_path.is_none()
+        if self.repo_tree.row_count == row_count
+            && self.repo_tree.scroll_anchor_path.is_none()
         {
             return;
         }
-        self.sidebar_repo_row_count = row_count;
-        let anchor_path = self.sidebar_repo_scroll_anchor_path.take();
+        self.repo_tree.row_count = row_count;
+        let anchor_path = self.repo_tree.scroll_anchor_path.take();
         Self::sync_sidebar_list_state(
-            &self.sidebar_repo_list_state,
-            &self.repo_tree_rows,
+            &self.repo_tree.list_state,
+            &self.repo_tree.rows,
             anchor_path.as_deref(),
         );
     }
@@ -152,8 +159,8 @@ impl DiffViewer {
     }
 
     pub(crate) fn capture_sidebar_repo_scroll_anchor(&mut self) {
-        let top_row_ix = self.sidebar_repo_list_state.logical_scroll_top().item_ix;
-        self.sidebar_repo_scroll_anchor_path = self.repo_tree_rows.get(top_row_ix).map(|row| row.path.clone());
+        let top_row_ix = self.repo_tree.list_state.logical_scroll_top().item_ix;
+        self.repo_tree.scroll_anchor_path = self.repo_tree.rows.get(top_row_ix).map(|row| row.path.clone());
     }
 
     fn render_repo_tree_row(
