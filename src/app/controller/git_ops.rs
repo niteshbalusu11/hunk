@@ -866,6 +866,23 @@ impl DiffViewer {
         });
     }
 
+    pub(super) fn undo_all_working_copy_changes(&mut self, cx: &mut Context<Self>) {
+        if self.files.is_empty() {
+            self.git_status_message = Some("No working-copy changes to undo.".to_string());
+            cx.notify();
+            return;
+        }
+
+        if self.prevent_unsaved_editor_discard(None, cx) {
+            return;
+        }
+
+        self.run_git_action("Undo all working-copy changes", cx, move |repo_root| {
+            restore_all_working_copy_changes(&repo_root)?;
+            Ok("Restored all working-copy changes".to_string())
+        });
+    }
+
     pub(super) fn recover_latest_working_copy_for_active_bookmark(&mut self, cx: &mut Context<Self>) {
         let Some(candidate) = self.latest_working_copy_recovery_candidate_for_active_bookmark() else {
             let message = "No recoverable working-copy changes were captured for this bookmark."

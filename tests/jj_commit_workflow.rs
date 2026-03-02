@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use hunk::jj::{
     checkout_or_create_bookmark, commit_selected_paths, commit_staged, load_snapshot,
-    restore_working_copy_paths, stage_all, unstage_all,
+    restore_all_working_copy_changes, restore_working_copy_paths, stage_all, unstage_all,
 };
 
 #[test]
@@ -223,6 +223,37 @@ fn restore_working_copy_paths_only_reverts_requested_file() {
         fs::read_to_string(alpha).expect("alpha file should remain on disk"),
         "alpha one\n",
         "restored file should match the parent revision content"
+    );
+}
+
+#[test]
+fn restore_all_working_copy_changes_reverts_everything() {
+    let fixture = TempRepo::new("restore-all-working-copy-changes");
+    let tracked = fixture.path().join("tracked.txt");
+    let scratch = fixture.path().join("scratch.txt");
+
+    write_file(tracked.clone(), "line one\n");
+    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
+
+    write_file(tracked.clone(), "line one\nline two\n");
+    write_file(scratch.clone(), "temporary\n");
+
+    restore_all_working_copy_changes(fixture.path())
+        .expect("restoring all working-copy changes should succeed");
+
+    let snapshot = load_snapshot(fixture.path()).expect("snapshot should load after restore");
+    assert!(
+        snapshot.files.is_empty(),
+        "working copy should be clean after restoring all changes"
+    );
+    assert_eq!(
+        fs::read_to_string(tracked).expect("tracked file should remain on disk"),
+        "line one\n",
+        "tracked file should return to parent content"
+    );
+    assert!(
+        !scratch.exists(),
+        "untracked files should be removed when restoring all changes"
     );
 }
 

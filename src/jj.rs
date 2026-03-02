@@ -609,6 +609,24 @@ pub fn restore_working_copy_paths(repo_root: &Path, paths: &[String]) -> Result<
     Ok(normalized_paths.len())
 }
 
+pub fn restore_all_working_copy_changes(repo_root: &Path) -> Result<()> {
+    let output = std::process::Command::new("jj")
+        .arg("restore")
+        .current_dir(repo_root)
+        .output()
+        .map_err(|err| anyhow!("failed to run jj restore: {err}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let message = stderr.trim();
+        if message.is_empty() {
+            return Err(anyhow!("failed to restore working-copy changes"));
+        }
+        return Err(anyhow!("failed to restore working-copy changes: {message}"));
+    }
+
+    Ok(())
+}
+
 pub fn create_bookmark_at_revision(
     repo_root: &Path,
     bookmark_name: &str,

@@ -536,6 +536,7 @@ impl DiffViewer {
             !self.git_action_loading && actions_enabled && revisions.len() >= 2;
         let can_reorder_tip =
             !self.git_action_loading && actions_enabled && revisions.len() >= 2;
+        let can_undo_all_working_copy = !self.git_action_loading && !self.files.is_empty();
 
         v_flex()
             .w_full()
@@ -619,6 +620,25 @@ impl DiffViewer {
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
                                     this.abandon_current_bookmark_tip(cx);
+                                });
+                            })
+                    })
+                    .child({
+                        let view = view.clone();
+                        Button::new("undo-all-working-copy-changes")
+                            .outline()
+                            .compact()
+                            .with_size(gpui_component::Size::Small)
+                            .rounded(px(7.0))
+                            .label("Undo All")
+                            .tooltip("Discard all working-copy changes using jj restore.")
+                            .bg(cx.theme().warning.opacity(if is_dark { 0.24 } else { 0.14 }))
+                            .border_color(cx.theme().warning.opacity(if is_dark { 0.82 } else { 0.60 }))
+                            .text_color(cx.theme().foreground)
+                            .disabled(!can_undo_all_working_copy)
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.undo_all_working_copy_changes(cx);
                                 });
                             })
                     }),
