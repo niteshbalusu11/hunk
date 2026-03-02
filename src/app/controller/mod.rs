@@ -24,6 +24,7 @@ use hunk::jj::{
     restore_all_working_copy_changes, restore_working_copy_from_revision,
     restore_working_copy_paths, review_url_for_bookmark_with_provider_map, sanitize_bookmark_name,
     squash_bookmark_head_into_parent, sync_current_bookmark,
+    undo_last_operation as undo_last_jj_operation,
 };
 
 include!("core.rs");

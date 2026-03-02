@@ -15,7 +15,7 @@ mod backend;
 
 use backend::{
     abandon_bookmark_head as abandon_local_bookmark_head, bookmark_remote_sync_state,
-    bookmark_review_url, build_graph_snapshot_from_context, can_redo_operation,
+    bookmark_review_url, build_graph_snapshot_from_context, can_redo_operation, can_undo_operation,
     checkout_existing_bookmark, checkout_existing_bookmark_with_change_transfer,
     collect_materialized_diff_entries_for_paths, commit_working_copy_changes,
     commit_working_copy_selected_paths, conflict_materialize_options,
@@ -34,7 +34,8 @@ use backend::{
     restore_working_copy_selected_paths as restore_wc_selected_paths,
     set_local_bookmark_target_revision,
     squash_bookmark_head_into_parent as squash_local_bookmark_head_into_parent,
-    sync_bookmark_from_remote, walk_repo_tree,
+    sync_bookmark_from_remote, undo_last_operation as undo_last_operation_in_context,
+    walk_repo_tree,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,6 +112,7 @@ pub struct RepoSnapshot {
     pub branch_name: String,
     pub branch_has_upstream: bool,
     pub branch_ahead_count: usize,
+    pub can_undo_operation: bool,
     pub can_redo_operation: bool,
     pub branches: Vec<LocalBranch>,
     pub bookmark_revisions: Vec<BookmarkRevision>,
@@ -342,6 +344,7 @@ pub fn load_snapshot(cwd: &Path) -> Result<RepoSnapshot> {
     } else {
         bookmark_remote_sync_state(&context, branch_name.as_str())
     };
+    let can_undo_operation = can_undo_operation(&context)?;
     let can_redo_operation = can_redo_operation(&context)?;
     let last_commit_subject = last_commit_subject_from_context(&context)?;
 
@@ -350,6 +353,7 @@ pub fn load_snapshot(cwd: &Path) -> Result<RepoSnapshot> {
         branch_name,
         branch_has_upstream,
         branch_ahead_count,
+        can_undo_operation,
         can_redo_operation,
         branches,
         bookmark_revisions,
@@ -602,6 +606,16 @@ pub fn restore_working_copy_paths(repo_root: &Path, paths: &[String]) -> Result<
 pub fn restore_all_working_copy_changes(repo_root: &Path) -> Result<()> {
     let mut context = load_repo_context_at_root(repo_root, true)?;
     restore_all_wc_changes(&mut context)
+}
+
+pub fn can_undo_last_operation(repo_root: &Path) -> Result<bool> {
+    let context = load_repo_context_at_root(repo_root, false)?;
+    can_undo_operation(&context)
+}
+
+pub fn undo_last_operation(repo_root: &Path) -> Result<()> {
+    let mut context = load_repo_context_at_root(repo_root, true)?;
+    undo_last_operation_in_context(&mut context)
 }
 
 pub fn can_redo_last_operation(repo_root: &Path) -> Result<bool> {

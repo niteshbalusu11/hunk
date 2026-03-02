@@ -537,6 +537,7 @@ impl DiffViewer {
         let can_reorder_tip =
             !self.git_action_loading && actions_enabled && revisions.len() >= 2;
         let can_undo_all_working_copy = !self.git_action_loading && !self.files.is_empty();
+        let can_undo_operation = !self.git_action_loading && self.can_undo_operation;
         let can_redo_operation = !self.git_action_loading && self.can_redo_operation;
 
         v_flex()
@@ -626,20 +627,20 @@ impl DiffViewer {
                     })
                     .child({
                         let view = view.clone();
-                        Button::new("undo-all-working-copy-changes")
+                        Button::new("undo-last-operation")
                             .outline()
                             .compact()
                             .with_size(gpui_component::Size::Small)
                             .rounded(px(7.0))
-                            .label("Undo All")
-                            .tooltip("Discard all working-copy changes using jj restore.")
+                            .label("Undo Op")
+                            .tooltip("Undo the latest JJ operation in operation history.")
                             .bg(cx.theme().warning.opacity(if is_dark { 0.24 } else { 0.14 }))
                             .border_color(cx.theme().warning.opacity(if is_dark { 0.82 } else { 0.60 }))
                             .text_color(cx.theme().foreground)
-                            .disabled(!can_undo_all_working_copy)
+                            .disabled(!can_undo_operation)
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
-                                    this.undo_all_working_copy_changes(cx);
+                                    this.undo_last_operation(cx);
                                 });
                             })
                     })
@@ -661,6 +662,25 @@ impl DiffViewer {
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
                                     this.redo_last_operation(cx);
+                                });
+                            })
+                    })
+                    .child({
+                        let view = view.clone();
+                        Button::new("undo-all-working-copy-changes")
+                            .outline()
+                            .compact()
+                            .with_size(gpui_component::Size::Small)
+                            .rounded(px(7.0))
+                            .label("Undo All")
+                            .tooltip("Discard all working-copy changes using jj restore.")
+                            .bg(cx.theme().danger.opacity(if is_dark { 0.24 } else { 0.14 }))
+                            .border_color(cx.theme().danger.opacity(if is_dark { 0.82 } else { 0.60 }))
+                            .text_color(cx.theme().foreground)
+                            .disabled(!can_undo_all_working_copy)
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.undo_all_working_copy_changes(cx);
                                 });
                             })
                     }),

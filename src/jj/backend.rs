@@ -193,6 +193,26 @@ mod parity_tests {
     }
 
     #[test]
+    fn undo_last_operation_with_jj_lib_matches_cli_undo() {
+        let jjlib_fixture = TempRepo::new("unit-undo-parity-jjlib");
+        let cli_fixture = TempRepo::new("unit-undo-parity-cli");
+
+        seed_linear_bookmark_history(jjlib_fixture.path(), "main");
+        seed_linear_bookmark_history(cli_fixture.path(), "main");
+
+        let mut context = load_repo_context_at_root(jjlib_fixture.path(), false)
+            .expect("jj-lib context should load before undo");
+        undo_last_operation(&mut context).expect("jj-lib undo should succeed");
+        run_jj(cli_fixture.path(), ["undo"]);
+
+        let jjlib_snapshot =
+            load_snapshot(jjlib_fixture.path()).expect("jj-lib snapshot should load after undo");
+        let cli_snapshot =
+            load_snapshot(cli_fixture.path()).expect("cli snapshot should load after undo");
+        assert_snapshot_equivalent(&jjlib_snapshot, &cli_snapshot);
+    }
+
+    #[test]
     fn redo_last_operation_with_jj_lib_matches_cli_redo() {
         let jjlib_fixture = TempRepo::new("unit-redo-parity-jjlib");
         let cli_fixture = TempRepo::new("unit-redo-parity-cli");

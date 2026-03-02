@@ -184,6 +184,7 @@ impl DiffViewer {
             branch_name: "unknown".to_string(),
             branch_has_upstream: false,
             branch_ahead_count: 0,
+            can_undo_operation: false,
             can_redo_operation: false,
             branches: Vec::new(),
             bookmark_revisions: Vec::new(),
@@ -501,6 +502,7 @@ impl DiffViewer {
             branch_name,
             branch_has_upstream,
             branch_ahead_count,
+            can_undo_operation,
             can_redo_operation,
             branches,
             bookmark_revisions,
@@ -531,6 +533,7 @@ impl DiffViewer {
         self.branch_name = branch_name;
         self.branch_has_upstream = branch_has_upstream;
         self.branch_ahead_count = branch_ahead_count;
+        self.can_undo_operation = can_undo_operation;
         self.can_redo_operation = can_redo_operation;
         self.branches = branches;
         self.bookmark_revisions = bookmark_revisions;
@@ -618,6 +621,7 @@ impl DiffViewer {
         self.branch_name = "unknown".to_string();
         self.branch_has_upstream = false;
         self.branch_ahead_count = 0;
+        self.can_undo_operation = false;
         self.can_redo_operation = false;
         self.branches.clear();
         self.bookmark_revisions.clear();

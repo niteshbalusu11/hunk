@@ -4,9 +4,27 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use hunk::jj::{
-    can_redo_last_operation, checkout_or_create_bookmark, commit_staged, load_snapshot,
-    redo_last_operation,
+    can_redo_last_operation, can_undo_last_operation, checkout_or_create_bookmark, commit_staged,
+    load_snapshot, redo_last_operation, undo_last_operation,
 };
+
+#[test]
+fn undo_last_operation_matches_cli_undo() {
+    let jjlib_fixture = TempRepo::new("undo-parity-jjlib");
+    let cli_fixture = TempRepo::new("undo-parity-cli");
+
+    seed_linear_bookmark_history(jjlib_fixture.path(), "main");
+    seed_linear_bookmark_history(cli_fixture.path(), "main");
+
+    undo_last_operation(jjlib_fixture.path()).expect("jj-lib undo should succeed");
+    run_jj(cli_fixture.path(), ["undo"]);
+
+    let jjlib_snapshot =
+        load_snapshot(jjlib_fixture.path()).expect("jj-lib snapshot should load after undo");
+    let cli_snapshot =
+        load_snapshot(cli_fixture.path()).expect("cli snapshot should load after undo");
+    assert_snapshot_equivalent(&jjlib_snapshot, &cli_snapshot);
+}
 
 #[test]
 fn redo_last_operation_matches_cli_redo() {
@@ -27,6 +45,17 @@ fn redo_last_operation_matches_cli_redo() {
     let cli_snapshot =
         load_snapshot(cli_fixture.path()).expect("cli snapshot should load after redo");
     assert_snapshot_equivalent(&jjlib_snapshot, &cli_snapshot);
+}
+
+#[test]
+fn can_undo_operation_available_after_history_change() {
+    let fixture = TempRepo::new("undo-availability");
+    seed_linear_bookmark_history(fixture.path(), "main");
+
+    assert!(
+        can_undo_last_operation(fixture.path()).expect("undo availability should load"),
+        "undo should be available after creating history operations"
+    );
 }
 
 #[test]
