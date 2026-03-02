@@ -36,6 +36,7 @@ use hunk::jj::{
     BookmarkRevision, ChangedFile, FileStatus, GraphBookmarkRef, GraphBookmarkScope, GraphEdge,
     GraphNode, LineStats, LocalBranch, RepoSnapshotFingerprint,
 };
+use hunk::jj_graph_tree::GraphLaneRow;
 use hunk::markdown_preview::MarkdownPreviewBlock;
 use hunk::state::{AppState, AppStateStore};
 
@@ -813,6 +814,7 @@ struct DiffViewer {
     bookmark_revisions: Vec<BookmarkRevision>,
     graph_nodes: Vec<GraphNode>,
     graph_edges: Vec<GraphEdge>,
+    graph_lane_rows: Vec<GraphLaneRow>,
     graph_has_more: bool,
     graph_next_offset: Option<usize>,
     graph_active_bookmark: Option<String>,

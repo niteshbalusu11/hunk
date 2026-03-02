@@ -16,6 +16,17 @@ struct GraphCommitWindow {
     has_more: bool,
 }
 
+#[derive(Debug)]
+struct GraphSeedCandidate {
+    id: CommitId,
+    priority: u8,
+    name: String,
+    remote: Option<String>,
+}
+
+const GRAPH_MAX_LOCAL_BOOKMARK_SEEDS: usize = 64;
+const GRAPH_MAX_REMOTE_BOOKMARK_SEEDS: usize = 24;
+
 impl PartialEq for PendingCommit {
     fn eq(&self, other: &Self) -> bool {
         self.id_hex == other.id_hex
@@ -62,6 +73,7 @@ pub(super) fn build_graph_snapshot_from_context(
 
     let seed_ids = graph_seed_commit_ids(
         context,
+        active_bookmark.as_deref(),
         working_copy_parent_commit_id.as_deref(),
         options.include_remote_bookmarks,
     )?;
@@ -145,33 +157,96 @@ fn normalized_graph_options(options: GraphSnapshotOptions) -> GraphSnapshotOptio
 
 fn graph_seed_commit_ids(
     context: &RepoContext,
+    active_bookmark: Option<&str>,
     wc_parent_id: Option<&str>,
     include_remote_bookmarks: bool,
 ) -> Result<Vec<CommitId>> {
     let mut seen = BTreeSet::new();
     let mut ids = Vec::new();
     let view = context.repo.view();
+    let current_bookmarks = current_bookmarks_from_context(context)?;
 
-    for (_, target) in view.local_bookmarks() {
+    let mut local_candidates = Vec::new();
+    for (name, target) in view.local_bookmarks() {
         let Some(commit_id) = target.as_normal().cloned() else {
             continue;
         };
-        if seen.insert(commit_id.hex()) {
-            ids.push(commit_id);
+        let bookmark_name = name.as_str().to_string();
+        let priority = if active_bookmark == Some(bookmark_name.as_str()) {
+            3
+        } else if current_bookmarks.contains(bookmark_name.as_str()) {
+            2
+        } else {
+            1
+        };
+        local_candidates.push(GraphSeedCandidate {
+            id: commit_id,
+            priority,
+            name: bookmark_name,
+            remote: None,
+        });
+    }
+    local_candidates.sort_by(|left, right| {
+        right
+            .priority
+            .cmp(&left.priority)
+            .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.id.hex().cmp(&right.id.hex()))
+    });
+    let mut local_seed_count = 0usize;
+    for candidate in local_candidates {
+        if push_unique_graph_seed(&mut ids, &mut seen, candidate.id) {
+            local_seed_count = local_seed_count.saturating_add(1);
+            if local_seed_count >= GRAPH_MAX_LOCAL_BOOKMARK_SEEDS {
+                break;
+            }
         }
     }
 
     if include_remote_bookmarks {
+        let mut remote_candidates = Vec::new();
         for (remote, _) in view.remote_views() {
             if remote == REMOTE_NAME_FOR_LOCAL_GIT_REPO {
                 continue;
             }
-            for (_, targets) in view.local_remote_bookmarks(remote) {
+            let remote_name = remote.as_str().to_string();
+            for (name, targets) in view.local_remote_bookmarks(remote) {
                 let Some(commit_id) = targets.remote_ref.target.as_normal().cloned() else {
                     continue;
                 };
-                if seen.insert(commit_id.hex()) {
-                    ids.push(commit_id);
+                let bookmark_name = name.as_str().to_string();
+                let mut priority = 0_u8;
+                if active_bookmark == Some(bookmark_name.as_str()) {
+                    priority = priority.saturating_add(3);
+                }
+                if current_bookmarks.contains(bookmark_name.as_str()) {
+                    priority = priority.saturating_add(2);
+                }
+                if targets.remote_ref.is_tracked() {
+                    priority = priority.saturating_add(1);
+                }
+                remote_candidates.push(GraphSeedCandidate {
+                    id: commit_id,
+                    priority,
+                    name: bookmark_name,
+                    remote: Some(remote_name.clone()),
+                });
+            }
+        }
+        remote_candidates.sort_by(|left, right| {
+            right
+                .priority
+                .cmp(&left.priority)
+                .then_with(|| left.name.cmp(&right.name))
+                .then_with(|| left.remote.cmp(&right.remote))
+                .then_with(|| left.id.hex().cmp(&right.id.hex()))
+        });
+        let mut remote_seed_count = 0usize;
+        for candidate in remote_candidates {
+            if push_unique_graph_seed(&mut ids, &mut seen, candidate.id) {
+                remote_seed_count = remote_seed_count.saturating_add(1);
+                if remote_seed_count >= GRAPH_MAX_REMOTE_BOOKMARK_SEEDS {
+                    break;
                 }
             }
         }
@@ -181,9 +256,7 @@ fn graph_seed_commit_ids(
         let Some(commit_id) = CommitId::try_from_hex(wc_parent_id) else {
             return Err(anyhow!("invalid working-copy parent id '{wc_parent_id}'"));
         };
-        if seen.insert(commit_id.hex()) {
-            ids.push(commit_id);
-        }
+        push_unique_graph_seed(&mut ids, &mut seen, commit_id);
     }
 
     if ids.is_empty() {
@@ -192,6 +265,18 @@ fn graph_seed_commit_ids(
     }
 
     Ok(ids)
+}
+
+fn push_unique_graph_seed(
+    ids: &mut Vec<CommitId>,
+    seen: &mut BTreeSet<String>,
+    commit_id: CommitId,
+) -> bool {
+    if seen.insert(commit_id.hex()) {
+        ids.push(commit_id);
+        return true;
+    }
+    false
 }
 
 fn load_graph_window_commits(
