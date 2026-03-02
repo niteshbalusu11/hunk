@@ -214,6 +214,7 @@ impl DiffViewer {
             git_action_epoch: 0,
             git_action_task: Task::ready(()),
             git_action_loading: false,
+            git_action_label: None,
             git_status_message: None,
             working_copy_recovery_candidates: Vec::new(),
             collapsed_files: BTreeSet::new(),
@@ -512,6 +513,7 @@ impl DiffViewer {
         let previous_selected_path = self.selected_path.clone();
         let previous_selected_status = self.selected_status;
         let previous_files = self.files.clone();
+        let previous_graph_len = self.graph_nodes.len();
 
         self.project_path = Some(root.clone());
         self.set_last_project_path(Some(root.clone()));
@@ -530,7 +532,9 @@ impl DiffViewer {
         self.graph_active_bookmark = graph_active_bookmark;
         self.graph_working_copy_commit_id = Some(working_copy_commit_id);
         self.graph_working_copy_parent_commit_id = working_copy_parent_commit_id;
-        self.graph_list_state.reset(self.graph_nodes.len());
+        if root_changed || previous_graph_len != self.graph_nodes.len() {
+            self.graph_list_state.reset(self.graph_nodes.len());
+        }
         self.graph_pending_confirmation = None;
         self.pending_bookmark_switch = None;
         self.reconcile_graph_selection_after_snapshot();
@@ -589,15 +593,27 @@ impl DiffViewer {
 
         self.refresh_comments_cache_from_store();
 
-        if root_changed || self.workspace_view_mode == WorkspaceViewMode::Diff || repo_tree_structure_changed {
+        let should_reload_repo_tree = if root_changed {
+            true
+        } else if self.workspace_view_mode == WorkspaceViewMode::JjWorkspace {
+            false
+        } else {
+            self.workspace_view_mode == WorkspaceViewMode::Diff || repo_tree_structure_changed
+        };
+        if should_reload_repo_tree {
             self.request_repo_tree_reload(cx);
         }
 
-        // Always reload visible diff rows after any loaded snapshot.
-        // Fingerprints include more than file lists/counts, and diff text can change while
-        // aggregate line stats and selected path stay the same.
-        self.scroll_selected_after_reload = selected_changed || self.diff_rows.is_empty();
-        self.request_selected_diff_reload(cx);
+        // Avoid expensive diff reload churn while using graph mode.
+        if self.workspace_view_mode == WorkspaceViewMode::JjWorkspace {
+            self.scroll_selected_after_reload = false;
+        } else {
+            // Always reload visible diff rows after any loaded snapshot.
+            // Fingerprints include more than file lists/counts, and diff text can change while
+            // aggregate line stats and selected path stay the same.
+            self.scroll_selected_after_reload = selected_changed || self.diff_rows.is_empty();
+            self.request_selected_diff_reload(cx);
+        }
 
         cx.notify();
     }
@@ -629,6 +645,7 @@ impl DiffViewer {
         self.graph_right_panel_mode = GraphRightPanelMode::ActiveWorkflow;
         self.pending_bookmark_switch = None;
         self.show_jj_terms_glossary = false;
+        self.git_action_label = None;
         self.files.clear();
         self.file_status_by_path.clear();
         self.working_copy_recovery_candidates.clear();

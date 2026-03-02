@@ -301,7 +301,7 @@ pub(super) fn bookmark_remote_sync_state(
     branch_name: &str,
 ) -> (bool, usize) {
     let mut has_upstream = false;
-    let mut needs_push = false;
+    let mut revisions_to_push = 0usize;
 
     for (remote, _) in context.repo.view().remote_views() {
         if remote == REMOTE_NAME_FOR_LOCAL_GIT_REPO {
@@ -324,15 +324,32 @@ pub(super) fn bookmark_remote_sync_state(
         }
 
         has_upstream = true;
-        if matches!(
-            classify_bookmark_push_action(targets),
-            BookmarkPushAction::Update(_)
-        ) {
-            needs_push = true;
+        if let BookmarkPushAction::Update(update) = classify_bookmark_push_action(targets) {
+            let ahead_count = bookmark_push_update_revision_count(context, &update);
+            revisions_to_push = revisions_to_push.max(ahead_count);
         }
     }
 
-    (has_upstream, usize::from(needs_push))
+    (has_upstream, revisions_to_push)
+}
+
+fn bookmark_push_update_revision_count(
+    context: &RepoContext,
+    update: &jj_lib::refs::BookmarkPushUpdate,
+) -> usize {
+    let Some(new_target) = update.new_target.clone() else {
+        return 0;
+    };
+
+    let mut ahead = RevsetExpression::commit(new_target).ancestors();
+    if let Some(old_target) = update.old_target.clone() {
+        ahead = ahead.minus(&RevsetExpression::commit(old_target).ancestors());
+    }
+
+    let Ok(revset) = ahead.evaluate(context.repo.as_ref()) else {
+        return 0;
+    };
+    revset.iter().flatten().count()
 }
 
 pub(super) fn list_local_branches_from_context(

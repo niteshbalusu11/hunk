@@ -837,6 +837,7 @@ struct DiffViewer {
     git_action_epoch: usize,
     git_action_task: Task<()>,
     git_action_loading: bool,
+    git_action_label: Option<String>,
     git_status_message: Option<String>,
     working_copy_recovery_candidates: Vec<WorkingCopyRecoveryCandidate>,
     collapsed_files: BTreeSet<String>,

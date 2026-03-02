@@ -118,6 +118,8 @@ impl DiffViewer {
                     .and_then(|selected| self.status_for_path(selected));
             }
             self.request_repo_tree_reload(cx);
+            self.scroll_selected_after_reload = true;
+            self.request_selected_diff_reload(cx);
         }
         cx.notify();
     }

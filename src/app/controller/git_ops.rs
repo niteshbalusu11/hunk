@@ -98,6 +98,19 @@ impl DiffViewer {
         self.git_action_epoch
     }
 
+    fn begin_git_action(&mut self, action_label: impl Into<String>, cx: &mut Context<Self>) -> usize {
+        let epoch = self.next_git_action_epoch();
+        self.git_action_loading = true;
+        self.git_action_label = Some(action_label.into());
+        cx.notify();
+        epoch
+    }
+
+    fn finish_git_action(&mut self) {
+        self.git_action_loading = false;
+        self.git_action_label = None;
+    }
+
     fn run_git_action<F>(&mut self, action_name: &'static str, cx: &mut Context<Self>, action: F)
     where
         F: FnOnce(std::path::PathBuf) -> anyhow::Result<String> + Send + 'static,
@@ -112,10 +125,7 @@ impl DiffViewer {
             return;
         };
 
-        let epoch = self.next_git_action_epoch();
-        self.git_action_loading = true;
-        self.git_status_message = None;
-        cx.notify();
+        let epoch = self.begin_git_action(action_name, cx);
 
         self.git_action_task = cx.spawn(async move |this, cx| {
             let result = cx.background_executor().spawn(async move { action(repo_root) }).await;
@@ -126,7 +136,7 @@ impl DiffViewer {
                         return;
                     }
 
-                    this.git_action_loading = false;
+                    this.finish_git_action();
                     match result {
                         Ok(message) => {
                             this.git_status_message = if message.is_empty() {
@@ -310,19 +320,19 @@ impl DiffViewer {
             && !self.git_action_loading
     }
 
-    pub(super) fn can_push_or_publish_current_bookmark(&self) -> bool {
-        if !self.can_run_active_bookmark_actions()
-            || !self.tracking_area_clean()
-            || self.git_action_loading
-        {
-            return false;
-        }
+    pub(super) fn can_publish_current_bookmark(&self) -> bool {
+        self.can_run_active_bookmark_actions()
+            && !self.branch_has_upstream
+            && self.tracking_area_clean()
+            && !self.git_action_loading
+    }
 
-        if self.branch_has_upstream {
-            self.branch_ahead_count > 0
-        } else {
-            true
-        }
+    pub(super) fn can_push_current_bookmark_revisions(&self) -> bool {
+        self.can_run_active_bookmark_actions()
+            && self.branch_has_upstream
+            && self.branch_ahead_count > 0
+            && self.tracking_area_clean()
+            && !self.git_action_loading
     }
 
     fn selected_commit_paths(&self) -> Vec<String> {
@@ -479,23 +489,23 @@ impl DiffViewer {
         });
     }
 
-    pub(super) fn push_or_publish_current_bookmark(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn publish_current_bookmark(&mut self, cx: &mut Context<Self>) {
         if !self.can_run_active_bookmark_actions() {
-            let message = "Activate a bookmark before pushing or publishing.".to_string();
+            let message = "Activate a bookmark before publishing.".to_string();
             self.git_status_message = Some(message.clone());
             Self::push_warning_notification(message, cx);
             cx.notify();
             return;
         }
         if !self.tracking_area_clean() {
-            let message = "Commit or discard working-copy changes before pushing.".to_string();
+            let message = "Commit or discard working-copy changes before publishing.".to_string();
             self.git_status_message = Some(message.clone());
             Self::push_warning_notification(message, cx);
             cx.notify();
             return;
         }
-        if self.branch_has_upstream && self.branch_ahead_count == 0 {
-            let message = "Nothing to push.".to_string();
+        if self.branch_has_upstream {
+            let message = "Bookmark is already published.".to_string();
             self.git_status_message = Some(message.clone());
             Self::push_warning_notification(message, cx);
             cx.notify();
@@ -506,20 +516,50 @@ impl DiffViewer {
         }
 
         let branch_name = self.branch_name.clone();
-        let has_upstream = self.branch_has_upstream;
+        self.run_git_action("Publish bookmark", cx, move |repo_root| {
+            push_current_bookmark(&repo_root, &branch_name, false)?;
+            Ok(format!("Published bookmark {}", branch_name))
+        });
+    }
 
-        let action_name = if has_upstream {
-            "Push bookmark"
-        } else {
-            "Publish bookmark"
-        };
-        self.run_git_action(action_name, cx, move |repo_root| {
-            push_current_bookmark(&repo_root, &branch_name, has_upstream)?;
-            if has_upstream {
-                Ok(format!("Pushed bookmark {}", branch_name))
-            } else {
-                Ok(format!("Published bookmark {}", branch_name))
-            }
+    pub(super) fn push_current_bookmark_revisions(&mut self, cx: &mut Context<Self>) {
+        if !self.can_run_active_bookmark_actions() {
+            let message = "Activate a bookmark before pushing revisions.".to_string();
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
+            cx.notify();
+            return;
+        }
+        if !self.branch_has_upstream {
+            let message = "Publish this bookmark before pushing revisions.".to_string();
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
+            cx.notify();
+            return;
+        }
+        if !self.tracking_area_clean() {
+            let message = "Commit or discard working-copy changes before pushing revisions."
+                .to_string();
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
+            cx.notify();
+            return;
+        }
+        if self.branch_ahead_count == 0 {
+            let message = "No revisions to push.".to_string();
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
+            cx.notify();
+            return;
+        }
+        if self.git_action_loading {
+            return;
+        }
+
+        let branch_name = self.branch_name.clone();
+        self.run_git_action("Push revisions", cx, move |repo_root| {
+            push_current_bookmark(&repo_root, &branch_name, true)?;
+            Ok(format!("Pushed revisions for {}", branch_name))
         });
     }
 
@@ -642,10 +682,10 @@ impl DiffViewer {
         let bookmark_for_task = bookmark_name.clone();
         let review_title_for_task = review_title.clone();
 
-        let epoch = self.next_git_action_epoch();
-        self.git_action_loading = true;
-        self.git_status_message = None;
-        cx.notify();
+        let epoch = self.begin_git_action(match action {
+            ReviewUrlAction::Open => "Open PR/MR",
+            ReviewUrlAction::Copy => "Copy PR/MR URL",
+        }, cx);
 
         self.git_action_task = cx.spawn(async move |this, cx| {
             let result = cx.background_executor().spawn(async move {
@@ -663,7 +703,7 @@ impl DiffViewer {
                         return;
                     }
 
-                    this.git_action_loading = false;
+                    this.finish_git_action();
                     match result {
                         Ok(Some(url)) => {
                             let url = with_review_title_prefill(url, review_title_for_task.as_str());
@@ -772,10 +812,7 @@ impl DiffViewer {
         }
         let partial_commit = selected_paths.len() != self.files.len();
 
-        let epoch = self.next_git_action_epoch();
-        self.git_action_loading = true;
-        self.git_status_message = None;
-        cx.notify();
+        let epoch = self.begin_git_action("Create revision", cx);
 
         self.git_action_task = cx.spawn(async move |this, cx| {
             let result = cx.background_executor().spawn(async move {
@@ -794,7 +831,7 @@ impl DiffViewer {
                         return;
                     }
 
-                    this.git_action_loading = false;
+                    this.finish_git_action();
                     match result {
                         Ok(subject) => {
                             this.commit_excluded_files.clear();

@@ -105,6 +105,36 @@ fn sync_prefers_present_untracked_remote_over_origin_fallback() {
     );
 }
 
+#[test]
+fn snapshot_counts_multiple_revisions_ahead_of_upstream() {
+    let fixture = SyncFixture::new("ahead-count");
+
+    checkout_or_create_bookmark(fixture.local_path(), "master")
+        .expect("master bookmark should be created in local repo");
+    let tracked_local = fixture.local_path().join("tracked.txt");
+    write_file(tracked_local.clone(), "line one\n");
+    commit_staged(fixture.local_path(), "initial commit").expect("initial commit should succeed");
+    push_current_bookmark(fixture.local_path(), "master", false)
+        .expect("initial publish should succeed");
+
+    write_file(tracked_local.clone(), "line one\nline two\n");
+    commit_staged(fixture.local_path(), "second local commit")
+        .expect("second commit should succeed");
+    write_file(tracked_local, "line one\nline two\nline three\n");
+    commit_staged(fixture.local_path(), "third local commit").expect("third commit should succeed");
+
+    let snapshot =
+        load_snapshot(fixture.local_path()).expect("snapshot should load for ahead count");
+    assert!(
+        snapshot.branch_has_upstream,
+        "master should still have upstream after local commits"
+    );
+    assert_eq!(
+        snapshot.branch_ahead_count, 2,
+        "ahead count should include all unpushed revisions on bookmark"
+    );
+}
+
 struct SyncFixture {
     root: PathBuf,
     local: PathBuf,

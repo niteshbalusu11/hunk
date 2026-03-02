@@ -1,4 +1,69 @@
 impl DiffViewer {
+    fn render_git_action_status_banner(&self, cx: &mut Context<Self>) -> AnyElement {
+        let is_dark = cx.theme().mode.is_dark();
+        let loading = self.git_action_loading;
+        let headline = if loading {
+            match self.git_action_label.as_deref() {
+                Some(label) => format!("{label}..."),
+                None => "Running workspace action...".to_string(),
+            }
+        } else {
+            self.git_status_message
+                .clone()
+                .unwrap_or_else(|| "Ready.".to_string())
+        };
+        let detail = if loading {
+            self.git_status_message.clone()
+        } else {
+            self.git_action_label.clone()
+        };
+
+        v_flex()
+            .w_full()
+            .min_h(px(52.0))
+            .px_2()
+            .py_1()
+            .gap_0p5()
+            .rounded(px(8.0))
+            .border_1()
+            .border_color(if loading {
+                cx.theme().accent.opacity(if is_dark { 0.90 } else { 0.72 })
+            } else {
+                cx.theme().border.opacity(if is_dark { 0.90 } else { 0.70 })
+            })
+            .bg(if loading {
+                cx.theme().accent.opacity(if is_dark { 0.22 } else { 0.12 })
+            } else {
+                cx.theme().background.blend(cx.theme().muted.opacity(if is_dark {
+                    0.24
+                } else {
+                    0.32
+                }))
+            })
+            .child(
+                div()
+                    .text_xs()
+                    .font_medium()
+                    .text_color(if loading {
+                        cx.theme().foreground
+                    } else {
+                        cx.theme().muted_foreground
+                    })
+                    .whitespace_normal()
+                    .child(headline),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground.opacity(0.9))
+                    .whitespace_normal()
+                    .child(detail.unwrap_or_else(|| {
+                        "Actions update this banner when operations complete.".to_string()
+                    })),
+            )
+            .into_any_element()
+    }
+
     fn render_jj_graph_operations_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
@@ -7,20 +72,28 @@ impl DiffViewer {
         let show_publish = branch_syncable && !self.branch_has_upstream;
         let show_push = branch_syncable && self.branch_has_upstream;
         let sync_disabled = !self.can_sync_current_bookmark();
-        let push_or_publish_disabled = !self.can_push_or_publish_current_bookmark();
+        let publish_disabled = !self.can_publish_current_bookmark();
+        let push_revisions_disabled = !self.can_push_current_bookmark_revisions();
+        let revisions_to_push = self.branch_ahead_count;
         let active_review_blocker = self.active_review_action_blocker();
         let review_url_disabled = active_review_blocker.is_some();
         let recovery_candidate = self.latest_working_copy_recovery_candidate_for_active_bookmark();
         let pending_switch = self.pending_bookmark_switch();
-        let action_label = if show_publish {
-            "Publish Bookmark"
-        } else {
-            "Push Bookmark"
+        let push_revisions_label = match revisions_to_push {
+            0 => "Push Revisions".to_string(),
+            1 => "Push 1 Revision".to_string(),
+            count => format!("Push {count} Revisions"),
         };
-        let action_tooltip = if show_publish {
-            "Publish this local bookmark to remote and start tracking it."
+        let push_revisions_tooltip = if !branch_syncable {
+            "Activate a bookmark before pushing revisions."
+        } else if !self.branch_has_upstream {
+            "Publish this bookmark first, then push grouped revisions."
+        } else if self.branch_ahead_count == 0 {
+            "No local revisions to push."
+        } else if !self.files.is_empty() {
+            "Commit or discard working-copy changes before pushing revisions."
         } else {
-            "Push new local revisions on this bookmark to its tracked remote."
+            "Push all unpushed revisions on this bookmark."
         };
         let active_bookmark_label = self
             .checked_out_bookmark_name()
@@ -29,7 +102,7 @@ impl DiffViewer {
             "Detached".to_string()
         } else if self.branch_has_upstream {
             if self.branch_ahead_count > 0 {
-                "Needs push".to_string()
+                format!("{} to push", self.branch_ahead_count)
             } else {
                 "Up to date".to_string()
             }
@@ -99,27 +172,7 @@ impl DiffViewer {
                             ),
                     ),
             )
-            .when_some(self.git_status_message.as_ref(), |this, message| {
-                this.child(
-                    div()
-                        .w_full()
-                        .px_2()
-                        .py_1()
-                        .rounded(px(8.0))
-                        .border_1()
-                        .border_color(cx.theme().border.opacity(if is_dark { 0.90 } else { 0.70 }))
-                        .bg(cx.theme().background.blend(cx.theme().muted.opacity(if is_dark {
-                            0.24
-                        } else {
-                            0.32
-                        })))
-                        .text_xs()
-                        .font_medium()
-                        .text_color(cx.theme().muted_foreground)
-                        .whitespace_normal()
-                        .child(message.clone()),
-                )
-            })
+            .child(self.render_git_action_status_banner(cx))
             .when_some(pending_switch, |this, pending| {
                 this.child(
                     v_flex()
@@ -285,23 +338,35 @@ impl DiffViewer {
                                 })
                         })
                     })
-                    .when(show_publish || show_push, |this| {
+                    .when(show_publish, |this| {
                         this.child({
                             let view = view.clone();
-                            Button::new("publish-or-push")
+                            Button::new("publish-bookmark")
                                 .primary()
                                 .compact()
                                 .with_size(gpui_component::Size::Small)
                                 .rounded(px(7.0))
-                                .label(action_label)
-                                .tooltip(action_tooltip)
-                                .disabled(push_or_publish_disabled)
+                                .label("Publish Bookmark")
+                                .tooltip("Publish this bookmark to upstream and start tracking it.")
+                                .disabled(publish_disabled)
                                 .on_click(move |_, _, cx| {
                                     view.update(cx, |this, cx| {
-                                        this.push_or_publish_current_bookmark(cx);
+                                        this.publish_current_bookmark(cx);
                                     });
                                 })
                             })
+                    })
+                    .when(show_push, |this| {
+                        this.child(
+                            Button::new("bookmark-published-state")
+                                .outline()
+                                .compact()
+                                .with_size(gpui_component::Size::Small)
+                                .rounded(px(7.0))
+                                .label("Bookmark Published")
+                                .tooltip("This bookmark already tracks upstream. Use Push Revisions below.")
+                                .disabled(true),
+                        )
                     })
                     .child({
                         let view = view.clone();
@@ -488,6 +553,20 @@ impl DiffViewer {
                             .on_click(move |_, window, cx| {
                                 view.update(cx, |this, cx| {
                                     this.commit_from_input(window, cx);
+                                });
+                            })
+                    })
+                    .child({
+                        let view = view.clone();
+                        Button::new("push-bookmark-revisions")
+                            .outline()
+                            .rounded(px(7.0))
+                            .label(push_revisions_label)
+                            .tooltip(push_revisions_tooltip)
+                            .disabled(push_revisions_disabled)
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.push_current_bookmark_revisions(cx);
                                 });
                             })
                     })
