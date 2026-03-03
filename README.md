@@ -6,6 +6,11 @@ A cross-platform Git diff viewer built with `gpui` + `gpui-component`.
 
 Nobody writes code anymore, people just review code. So we need the best diff viewer possible so that vibe engineers can review code and tell AI what to fix.
 
+<img width="3320" height="2032" alt="Hunk (Window) 2026-03-03 09:27 AM" src="https://github.com/user-attachments/assets/8c67f351-dde7-4d44-83ea-0c232a62a147" />
+<img width="3320" height="2032" alt="Hunk (Window) 2026-03-03 09:42 AM" src="https://github.com/user-attachments/assets/5de96595-aa50-4f4c-b62e-170454126f3b" />
+<img width="3320" height="2032" alt="Hunk (Window) 2026-03-03 09:44 AM" src="https://github.com/user-attachments/assets/313b421d-f53d-4b2e-8288-30dcc735e75c" />
+
+
 ## What it includes
 
 - Uses `jj` as the underlying Git implementation
