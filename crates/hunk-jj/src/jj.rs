@@ -139,11 +139,25 @@ pub struct GraphBookmarkRef {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphWorkspaceRef {
+    pub name: String,
+    pub is_current: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphWorkspaceState {
+    pub name: String,
+    pub commit_id: String,
+    pub is_current: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphNode {
     pub id: String,
     pub subject: String,
     pub unix_time: i64,
     pub bookmarks: Vec<GraphBookmarkRef>,
+    pub workspaces: Vec<GraphWorkspaceRef>,
     pub is_working_copy_parent: bool,
     pub is_active_bookmark_target: bool,
 }
@@ -175,6 +189,8 @@ impl Default for GraphSnapshotOptions {
 pub struct GraphSnapshot {
     pub root: PathBuf,
     pub active_bookmark: Option<String>,
+    pub current_workspace_name: String,
+    pub workspaces: Vec<GraphWorkspaceState>,
     pub working_copy_commit_id: String,
     pub working_copy_parent_commit_id: Option<String>,
     pub nodes: Vec<GraphNode>,
@@ -814,6 +830,7 @@ pub fn checkout_or_create_bookmark_with_change_transfer(
                     move_bookmark_to_parent_of_working_copy(&mut context, bookmark.as_str())?;
                 }
             }
+            move_bookmark_to_parent_of_working_copy(&mut context, bookmark_name)?;
         } else {
             move_bookmark_to_parent_of_working_copy(&mut context, bookmark_name)?;
         }
