@@ -36,8 +36,7 @@ use hunk_domain::markdown_preview::MarkdownPreviewBlock;
 use hunk_domain::state::{AppState, AppStateStore};
 use hunk_jj::jj::{
     BookmarkRevision, ChangedFile, FileStatus, GraphBookmarkRef, GraphBookmarkScope, GraphEdge,
-    GraphNode, GraphWorkspaceRef, GraphWorkspaceState, LineStats, LocalBranch,
-    RepoSnapshotFingerprint,
+    GraphNode, LineStats, LocalBranch, RepoSnapshotFingerprint,
 };
 use hunk_jj::jj_graph_tree::GraphLaneRow;
 
@@ -75,11 +74,6 @@ struct GraphBookmarkSelection {
     name: String,
     remote: Option<String>,
     scope: GraphBookmarkScope,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct GraphWorkspaceSelection {
-    name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,30 +125,6 @@ struct PendingBookmarkSwitch {
     target_bookmark: String,
     changed_file_count: usize,
     unix_time: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct PendingWorkspaceSwitch {
-    source_workspace: String,
-    target_workspace: String,
-    target_workspace_root: PathBuf,
-    changed_file_count: usize,
-    unix_time: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct PendingWorkspaceForget {
-    workspace_name: String,
-    workspace_commit_id: String,
-    unix_time: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct WorkspaceExecutionContext {
-    workspace_name: String,
-    workspace_root: PathBuf,
-    active_bookmark: Option<String>,
-    working_copy_commit_id: Option<String>,
 }
 
 mod controller;
@@ -919,23 +889,16 @@ struct DiffViewer {
     graph_has_more: bool,
     graph_next_offset: Option<usize>,
     graph_active_bookmark: Option<String>,
-    workspace_execution_context: Option<WorkspaceExecutionContext>,
-    graph_current_workspace_name: Option<String>,
-    graph_workspaces: Vec<GraphWorkspaceState>,
     graph_working_copy_commit_id: Option<String>,
     graph_working_copy_parent_commit_id: Option<String>,
     graph_selected_node_id: Option<String>,
     graph_selected_bookmark: Option<GraphBookmarkSelection>,
-    graph_selected_workspace: Option<GraphWorkspaceSelection>,
     graph_list_state: ListState,
     graph_right_panel_scroll_handle: ScrollHandle,
     graph_action_input_state: Entity<InputState>,
-    graph_workspace_action_input_state: Entity<InputState>,
     graph_pending_confirmation: Option<GraphPendingConfirmation>,
     graph_right_panel_mode: GraphRightPanelMode,
     pending_bookmark_switch: Option<PendingBookmarkSwitch>,
-    pending_workspace_switch: Option<PendingWorkspaceSwitch>,
-    pending_workspace_forget: Option<PendingWorkspaceForget>,
     show_jj_terms_glossary: bool,
     workspace_view_mode: WorkspaceViewMode,
     files: Vec<ChangedFile>,

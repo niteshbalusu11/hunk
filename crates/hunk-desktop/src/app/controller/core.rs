@@ -160,9 +160,6 @@ impl DiffViewer {
         let graph_action_input_state = cx.new(|cx| {
             InputState::new(window, cx).placeholder("Bookmark name for create/fork/rename")
         });
-        let graph_workspace_action_input_state = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Workspace name for create")
-        });
         let in_app_menu_bar = (!cfg!(target_os = "macos")).then(|| AppMenuBar::new(cx));
 
         let mut view = Self {
@@ -197,23 +194,16 @@ impl DiffViewer {
             graph_has_more: false,
             graph_next_offset: None,
             graph_active_bookmark: None,
-            workspace_execution_context: None,
-            graph_current_workspace_name: None,
-            graph_workspaces: Vec::new(),
             graph_working_copy_commit_id: None,
             graph_working_copy_parent_commit_id: None,
             graph_selected_node_id: None,
             graph_selected_bookmark: None,
-            graph_selected_workspace: None,
             graph_list_state: ListState::new(0, ListAlignment::Top, px(30.0)),
             graph_right_panel_scroll_handle: ScrollHandle::default(),
             graph_action_input_state,
-            graph_workspace_action_input_state,
             graph_pending_confirmation: None,
             graph_right_panel_mode: GraphRightPanelMode::ActiveWorkflow,
             pending_bookmark_switch: None,
-            pending_workspace_switch: None,
-            pending_workspace_forget: None,
             show_jj_terms_glossary: false,
             workspace_view_mode: WorkspaceViewMode::JjWorkspace,
             files: Vec::new(),
@@ -480,7 +470,6 @@ impl DiffViewer {
                 this.update(cx, |this, cx| {
                     this.project_path = Some(selected_path.clone());
                     this.set_last_project_path(Some(selected_path));
-                    this.workspace_execution_context = None;
                     this.git_status_message = None;
                     this.start_repo_watch(cx);
                     this.request_snapshot_refresh_internal(true, cx);
@@ -511,8 +500,6 @@ impl DiffViewer {
         } = snapshot;
         let GraphSnapshot {
             active_bookmark: graph_active_bookmark,
-            current_workspace_name: graph_current_workspace_name,
-            workspaces: graph_workspaces,
             working_copy_commit_id,
             working_copy_parent_commit_id,
             nodes: graph_nodes,
@@ -547,18 +534,13 @@ impl DiffViewer {
         self.graph_has_more = graph_has_more;
         self.graph_next_offset = graph_next_offset;
         self.graph_active_bookmark = graph_active_bookmark;
-        self.graph_current_workspace_name = Some(graph_current_workspace_name);
-        self.graph_workspaces = graph_workspaces;
         self.graph_working_copy_commit_id = Some(working_copy_commit_id);
         self.graph_working_copy_parent_commit_id = working_copy_parent_commit_id;
-        self.sync_workspace_execution_context_from_state();
         if root_changed || previous_graph_len != self.graph_nodes.len() {
             self.graph_list_state.reset(self.graph_nodes.len());
         }
         self.graph_pending_confirmation = None;
         self.pending_bookmark_switch = None;
-        self.pending_workspace_switch = None;
-        self.pending_workspace_forget = None;
         self.reconcile_graph_selection_after_snapshot();
         self.files = files;
         self.file_status_by_path = self
@@ -659,20 +641,14 @@ impl DiffViewer {
         self.graph_has_more = false;
         self.graph_next_offset = None;
         self.graph_active_bookmark = None;
-        self.workspace_execution_context = None;
-        self.graph_current_workspace_name = None;
-        self.graph_workspaces.clear();
         self.graph_working_copy_commit_id = None;
         self.graph_working_copy_parent_commit_id = None;
         self.graph_selected_node_id = None;
         self.graph_selected_bookmark = None;
-        self.graph_selected_workspace = None;
         self.graph_list_state.reset(0);
         self.graph_pending_confirmation = None;
         self.graph_right_panel_mode = GraphRightPanelMode::ActiveWorkflow;
         self.pending_bookmark_switch = None;
-        self.pending_workspace_switch = None;
-        self.pending_workspace_forget = None;
         self.show_jj_terms_glossary = false;
         self.git_action_label = None;
         self.files.clear();

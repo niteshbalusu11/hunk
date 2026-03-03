@@ -214,6 +214,7 @@ impl DiffViewer {
                     ),
             )
             .child(self.render_jj_graph_operations_panel(cx))
+            .child(self.render_jj_graph_inspector(cx))
             .into_any_element()
     }
 
@@ -419,13 +420,6 @@ impl DiffViewer {
                             )),
                     ),
             )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(legend_text_color)
-                    .whitespace_normal()
-                    .child("Chips: `W name@` = workspace ref, `L name` = local bookmark, `R name@remote` = remote bookmark."),
-            )
             .child({
                 if self.graph_nodes.is_empty() {
                     return div()
@@ -502,14 +496,6 @@ impl DiffViewer {
                                 .text_xs()
                                 .text_color(legend_text_color)
                                 .child(format!("selected: {}", selected.name)),
-                        )
-                    })
-                    .when_some(self.graph_selected_workspace.as_ref(), |this, selected| {
-                        this.child(
-                            div()
-                                .text_xs()
-                                .text_color(legend_text_color)
-                                .child(format!("workspace: {}@", selected.name)),
                         )
                     })
                     .child(
@@ -709,33 +695,17 @@ impl DiffViewer {
                             .child(node.subject.clone()),
                     )
                     .child(
-                        {
-                            let mut chips = Vec::new();
-                            for (workspace_ix, workspace) in node.workspaces.iter().enumerate() {
-                                chips.push(self.render_jj_graph_workspace_chip(
-                                    node.id.as_str(),
-                                    row_ix,
-                                    workspace_ix,
-                                    workspace,
-                                    cx,
-                                ));
-                            }
-                            for (bookmark_ix, bookmark) in node.bookmarks.iter().enumerate() {
-                                chips.push(self.render_jj_graph_bookmark_chip(
+                        h_flex().w_full().items_center().gap_1().flex_wrap().children(
+                            node.bookmarks.iter().enumerate().map(|(bookmark_ix, bookmark)| {
+                                self.render_jj_graph_bookmark_chip(
                                     node.id.as_str(),
                                     row_ix,
                                     bookmark_ix,
                                     bookmark,
                                     cx,
-                                ));
-                            }
-                            h_flex()
-                                .w_full()
-                                .items_center()
-                                .gap_1()
-                                .flex_wrap()
-                                .children(chips)
-                        },
+                                )
+                            }),
+                        ),
                     ),
             );
         row.into_any_element()
@@ -997,101 +967,6 @@ impl DiffViewer {
         }
     }
 
-    fn graph_workspace_base_color(
-        &self,
-        workspace: &GraphWorkspaceRef,
-        is_dark: bool,
-    ) -> gpui::Hsla {
-        if workspace.is_current {
-            if is_dark {
-                gpui::rgb(0x22d3ee).into()
-            } else {
-                gpui::rgb(0x0e7490).into()
-            }
-        } else if is_dark {
-            gpui::rgb(0x94a3b8).into()
-        } else {
-            gpui::rgb(0x475569).into()
-        }
-    }
-
-    fn graph_workspace_chip_colors(
-        &self,
-        workspace: &GraphWorkspaceRef,
-        is_dark: bool,
-        selected: bool,
-        cx: &mut Context<Self>,
-    ) -> (gpui::Hsla, gpui::Hsla, gpui::Hsla) {
-        let base = self.graph_workspace_base_color(workspace, is_dark);
-        let background = if selected {
-            base.opacity(if is_dark { 0.42 } else { 0.20 })
-        } else {
-            base.opacity(if is_dark { 0.26 } else { 0.10 })
-        };
-        let border = if selected {
-            base.opacity(if is_dark { 0.98 } else { 0.76 })
-        } else {
-            base.opacity(if is_dark { 0.70 } else { 0.46 })
-        };
-        let text = cx.theme().foreground;
-        (background, border, text)
-    }
-
-    fn graph_workspace_chip_label(workspace: &GraphWorkspaceRef) -> String {
-        if workspace.is_current {
-            format!("W {}@ [current]", workspace.name)
-        } else {
-            format!("W {}@ [workspace]", workspace.name)
-        }
-    }
-
-    fn graph_workspace_chip_tooltip(workspace: &GraphWorkspaceRef) -> String {
-        if workspace.is_current {
-            format!("Current workspace ({})", workspace.name)
-        } else {
-            format!("Workspace reference ({})", workspace.name)
-        }
-    }
-
-    fn render_jj_graph_workspace_chip(
-        &self,
-        node_id: &str,
-        row_ix: usize,
-        workspace_ix: usize,
-        workspace: &GraphWorkspaceRef,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let view = cx.entity();
-        let is_dark = cx.theme().mode.is_dark();
-        let node_id = node_id.to_string();
-        let name = workspace.name.clone();
-        let selected = self
-            .graph_selected_workspace
-            .as_ref()
-            .is_some_and(|selected| selected.name == workspace.name);
-        let (chip_bg, chip_border, chip_text) =
-            self.graph_workspace_chip_colors(workspace, is_dark, selected, cx);
-        let button_id = row_ix.saturating_mul(2_048).saturating_add(workspace_ix);
-
-        Button::new(("jj-graph-workspace-chip", button_id))
-            .compact()
-            .with_size(gpui_component::Size::Small)
-            .rounded(px(6.0))
-            .label(Self::graph_workspace_chip_label(workspace))
-            .tooltip(Self::graph_workspace_chip_tooltip(workspace))
-            .outline()
-            .bg(chip_bg)
-            .border_color(chip_border)
-            .text_color(chip_text)
-            .on_click(move |_, _, cx| {
-                cx.stop_propagation();
-                view.update(cx, |this, cx| {
-                    this.select_graph_workspace(node_id.clone(), name.clone(), cx);
-                });
-            })
-            .into_any_element()
-    }
-
     fn graph_bookmark_base_color(
         &self,
         bookmark: &GraphBookmarkRef,
@@ -1347,13 +1222,6 @@ impl DiffViewer {
                     .text_color(cx.theme().muted_foreground)
                     .whitespace_normal()
                     .child("Bookmark: a movable pointer to a revision."),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .whitespace_normal()
-                    .child("Workspace ref (`name@`): a working-copy context. Selecting it is inspect-only in this phase."),
             )
             .child(
                 div()

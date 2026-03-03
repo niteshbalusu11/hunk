@@ -39,16 +39,6 @@ fn graph_snapshot_exposes_active_bookmark_and_working_copy_context() {
         !snapshot.working_copy_commit_id.is_empty(),
         "working-copy commit id should be populated"
     );
-    assert!(
-        !snapshot.current_workspace_name.trim().is_empty(),
-        "graph snapshot should include current workspace name"
-    );
-    assert!(
-        snapshot.workspaces.iter().any(|workspace| {
-            workspace.name == snapshot.current_workspace_name && workspace.is_current
-        }),
-        "graph snapshot should include current workspace in workspace summary"
-    );
 
     let wc_parent = snapshot
         .working_copy_parent_commit_id
@@ -70,80 +60,6 @@ fn graph_snapshot_exposes_active_bookmark_and_working_copy_context() {
         working_parent_nodes[0].is_active_bookmark_target,
         "active bookmark tip should match working-copy parent on checked-out bookmark"
     );
-}
-
-#[test]
-fn graph_snapshot_attaches_workspace_refs_to_nodes_and_summary() {
-    let fixture = TempRepo::new("graph-workspace-refs");
-
-    write_file(fixture.path().join("tracked.txt"), "line one\n");
-    commit_staged(fixture.path(), "initial commit").expect("initial commit should succeed");
-    checkout_or_create_bookmark(fixture.path(), "main").expect("main bookmark should be created");
-
-    let secondary_workspace_path = fixture.path().with_file_name(format!(
-        "{}-ws2",
-        fixture
-            .path()
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("workspace")
-    ));
-    let secondary_workspace_path_string = secondary_workspace_path.to_string_lossy().to_string();
-    run_jj(
-        fixture.path(),
-        [
-            "workspace",
-            "add",
-            secondary_workspace_path_string.as_str(),
-            "--name",
-            "ws2",
-            "-r",
-            "@",
-        ],
-    );
-
-    let snapshot = load_graph_snapshot(
-        fixture.path(),
-        GraphSnapshotOptions {
-            max_nodes: 96,
-            offset: 0,
-            include_remote_bookmarks: true,
-        },
-    )
-    .expect("graph snapshot should load");
-
-    assert!(
-        snapshot
-            .workspaces
-            .iter()
-            .any(|workspace| workspace.name == "ws2"),
-        "workspace summary should include added workspace"
-    );
-    assert!(
-        snapshot.workspaces.iter().any(|workspace| {
-            workspace.name == snapshot.current_workspace_name && workspace.is_current
-        }),
-        "workspace summary should include current workspace marker"
-    );
-
-    assert!(
-        snapshot.nodes.iter().any(|node| {
-            node.workspaces
-                .iter()
-                .any(|workspace| workspace.name == "ws2")
-        }),
-        "workspace refs should attach to the target revision node for ws2"
-    );
-    assert!(
-        snapshot.nodes.iter().any(|node| {
-            node.workspaces.iter().any(|workspace| {
-                workspace.name == snapshot.current_workspace_name && workspace.is_current
-            })
-        }),
-        "workspace refs should mark the current workspace on its target node"
-    );
-
-    let _ = fs::remove_dir_all(&secondary_workspace_path);
 }
 
 #[test]

@@ -32,7 +32,6 @@ fn node(id: &str, unix_time: i64, bookmarks: Vec<GraphBookmarkRef>) -> GraphNode
         subject: format!("subject-{id}"),
         unix_time,
         bookmarks,
-        workspaces: Vec::new(),
         is_working_copy_parent: false,
         is_active_bookmark_target: false,
     }

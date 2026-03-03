@@ -7,7 +7,6 @@ fn node(id: &str, unix_time: i64) -> GraphNode {
         subject: id.to_string(),
         unix_time,
         bookmarks: Vec::<GraphBookmarkRef>::new(),
-        workspaces: Vec::new(),
         is_working_copy_parent: false,
         is_active_bookmark_target: false,
     }

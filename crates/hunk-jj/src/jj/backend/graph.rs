@@ -26,7 +26,6 @@ struct GraphSeedCandidate {
 
 const GRAPH_MAX_LOCAL_BOOKMARK_SEEDS: usize = 64;
 const GRAPH_MAX_REMOTE_BOOKMARK_SEEDS: usize = 24;
-const GRAPH_MAX_WORKSPACE_SEEDS: usize = 24;
 
 impl PartialEq for PendingCommit {
     fn eq(&self, other: &Self) -> bool {
@@ -55,8 +54,6 @@ pub(super) fn build_graph_snapshot_from_context(
     options: GraphSnapshotOptions,
 ) -> Result<GraphSnapshot> {
     let options = normalized_graph_options(options);
-    let current_workspace_name = context.workspace.workspace_name().as_str().to_string();
-    let workspace_states = graph_workspace_states(context, current_workspace_name.as_str());
     let wc_commit = current_wc_commit(context)?;
     let working_copy_commit_id = wc_commit.id().hex().to_string();
     let working_copy_parent_commit_id = wc_commit.parent_ids().first().map(|id| id.hex());
@@ -78,7 +75,6 @@ pub(super) fn build_graph_snapshot_from_context(
         context,
         active_bookmark.as_deref(),
         working_copy_parent_commit_id.as_deref(),
-        &workspace_states,
         options.include_remote_bookmarks,
     )?;
     let graph_window = load_graph_window_commits(context, &seed_ids, options)?;
@@ -89,7 +85,6 @@ pub(super) fn build_graph_snapshot_from_context(
         active_bookmark.as_deref(),
         options.include_remote_bookmarks,
     )?;
-    let workspace_refs_by_commit = graph_workspaces_by_commit(&workspace_states);
 
     let node_ids = graph_commits
         .iter()
@@ -102,17 +97,11 @@ pub(super) fn build_graph_snapshot_from_context(
             let id = commit.id().hex();
             let mut bookmarks = bookmark_refs_by_commit.get(id.as_str()).cloned().unwrap_or_default();
             sort_graph_bookmark_refs(&mut bookmarks);
-            let mut workspaces = workspace_refs_by_commit
-                .get(id.as_str())
-                .cloned()
-                .unwrap_or_default();
-            sort_graph_workspace_refs(&mut workspaces);
             GraphNode {
                 id: id.clone(),
                 subject: graph_commit_subject(commit),
                 unix_time: commit.committer().timestamp.timestamp.0 / 1000,
                 bookmarks,
-                workspaces,
                 is_working_copy_parent: working_copy_parent_commit_id.as_deref() == Some(id.as_str()),
                 is_active_bookmark_target: active_bookmark_target_id.as_deref() == Some(id.as_str()),
             }
@@ -149,8 +138,6 @@ pub(super) fn build_graph_snapshot_from_context(
     Ok(GraphSnapshot {
         root: context.root.clone(),
         active_bookmark,
-        current_workspace_name,
-        workspaces: workspace_states,
         working_copy_commit_id,
         working_copy_parent_commit_id,
         nodes,
@@ -172,7 +159,6 @@ fn graph_seed_commit_ids(
     context: &RepoContext,
     active_bookmark: Option<&str>,
     wc_parent_id: Option<&str>,
-    workspace_states: &[GraphWorkspaceState],
     include_remote_bookmarks: bool,
 ) -> Result<Vec<CommitId>> {
     let mut seen = BTreeSet::new();
@@ -273,57 +259,12 @@ fn graph_seed_commit_ids(
         push_unique_graph_seed(&mut ids, &mut seen, commit_id);
     }
 
-    let mut workspace_seed_count = 0usize;
-    for workspace in workspace_states {
-        let Some(commit_id) = CommitId::try_from_hex(workspace.commit_id.as_str()) else {
-            return Err(anyhow!(
-                "invalid working-copy commit id '{}' for workspace '{}'",
-                workspace.commit_id,
-                workspace.name
-            ));
-        };
-        if push_unique_graph_seed(&mut ids, &mut seen, commit_id) {
-            workspace_seed_count = workspace_seed_count.saturating_add(1);
-            if workspace_seed_count >= GRAPH_MAX_WORKSPACE_SEEDS {
-                break;
-            }
-        }
-    }
-
     if ids.is_empty() {
         let wc_commit = current_wc_commit(context)?;
         ids.push(wc_commit.id().clone());
     }
 
     Ok(ids)
-}
-
-fn graph_workspace_states(
-    context: &RepoContext,
-    current_workspace_name: &str,
-) -> Vec<GraphWorkspaceState> {
-    let mut workspaces = context
-        .repo
-        .view()
-        .wc_commit_ids()
-        .iter()
-        .map(|(name, commit_id)| {
-            let workspace_name = name.as_str().to_string();
-            GraphWorkspaceState {
-                is_current: workspace_name == current_workspace_name,
-                name: workspace_name,
-                commit_id: commit_id.hex(),
-            }
-        })
-        .collect::<Vec<_>>();
-    workspaces.sort_by(|left, right| {
-        right
-            .is_current
-            .cmp(&left.is_current)
-            .then_with(|| left.name.cmp(&right.name))
-            .then_with(|| left.commit_id.cmp(&right.commit_id))
-    });
-    workspaces
 }
 
 fn push_unique_graph_seed(
@@ -482,22 +423,6 @@ fn graph_bookmarks_by_commit(
     Ok(by_commit)
 }
 
-fn graph_workspaces_by_commit(
-    workspace_states: &[GraphWorkspaceState],
-) -> BTreeMap<String, Vec<GraphWorkspaceRef>> {
-    let mut by_commit = BTreeMap::<String, Vec<GraphWorkspaceRef>>::new();
-    for workspace in workspace_states {
-        by_commit
-            .entry(workspace.commit_id.clone())
-            .or_default()
-            .push(GraphWorkspaceRef {
-                name: workspace.name.clone(),
-                is_current: workspace.is_current,
-            });
-    }
-    by_commit
-}
-
 fn graph_commit_subject(commit: &Commit) -> String {
     commit
         .description()
@@ -515,15 +440,6 @@ fn sort_graph_bookmark_refs(bookmarks: &mut [GraphBookmarkRef]) {
             .cmp(&graph_bookmark_scope_rank(right.scope))
             .then_with(|| left.name.cmp(&right.name))
             .then_with(|| left.remote.cmp(&right.remote))
-    });
-}
-
-fn sort_graph_workspace_refs(workspaces: &mut [GraphWorkspaceRef]) {
-    workspaces.sort_by(|left, right| {
-        right
-            .is_current
-            .cmp(&left.is_current)
-            .then_with(|| left.name.cmp(&right.name))
     });
 }
 

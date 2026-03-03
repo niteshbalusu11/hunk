@@ -39,8 +39,7 @@ use jj_lib::rewrite::{
 use jj_lib::settings::UserSettings;
 use jj_lib::str_util::StringExpression;
 use jj_lib::working_copy::SnapshotOptions;
-use jj_lib::workspace::{Workspace, default_working_copy_factories, default_working_copy_factory};
-use jj_lib::workspace_store::{SimpleWorkspaceStore, WorkspaceStore};
+use jj_lib::workspace::{Workspace, default_working_copy_factories};
 
 use super::*;
 
@@ -112,18 +111,6 @@ pub(super) fn load_repo_context_at_root(
         refresh_working_copy_snapshot(&mut context)?;
     }
     Ok(context)
-}
-
-pub(super) fn workspace_root_from_store(
-    context: &RepoContext,
-    workspace_name: &WorkspaceName,
-) -> Result<Option<PathBuf>> {
-    let store = SimpleWorkspaceStore::load(context.workspace.repo_path())
-        .context("failed to load workspace metadata store")?;
-    let workspace_root = store
-        .get_workspace_path(workspace_name)
-        .context("failed to read workspace metadata from store")?;
-    Ok(workspace_root)
 }
 
 include!("backend/settings.rs");
