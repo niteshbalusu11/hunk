@@ -277,7 +277,9 @@ impl DiffViewer {
                             .bg(cx.theme().secondary.opacity(if is_dark { 0.50 } else { 0.70 }))
                             .border_color(cx.theme().border.opacity(if is_dark { 0.90 } else { 0.74 }))
                             .label(active_bookmark_label.clone())
-                            .tooltip("Open bookmark list to switch, move changes, create, or rename bookmarks.")
+                            .tooltip(
+                                "Open bookmark/workspace menu to switch bookmarks, create task workspaces, and run branch actions.",
+                            )
                             .disabled(self.git_action_loading)
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
@@ -303,9 +305,9 @@ impl DiffViewer {
                                 .size(px(12.0)),
                             )
                             .tooltip(if self.branch_picker_open {
-                                "Hide bookmark menu"
+                                "Hide bookmark/workspace menu"
                             } else {
-                                "Show bookmark menu"
+                                "Show bookmark/workspace menu"
                             })
                             .disabled(self.git_action_loading)
                             .on_click(move |_, _, cx| {
@@ -601,6 +603,350 @@ impl DiffViewer {
                     .whitespace_normal()
                     .child(last_commit_text.to_string()),
             )
+            .into_any_element()
+    }
+
+    fn render_jj_graph_workspace_quick_actions_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let view = cx.entity();
+        let is_dark = cx.theme().mode.is_dark();
+        let selected_workspace = self.graph_selected_workspace_state();
+        let selected_workspace_selection = self.graph_selected_workspace.as_ref();
+        let selected_workspace_commit_visible = selected_workspace.is_some_and(|workspace| {
+            self.graph_nodes
+                .iter()
+                .any(|node| node.id == workspace.commit_id)
+        });
+        let pending_workspace_switch = self.pending_workspace_switch();
+        let pending_workspace_forget = self.pending_workspace_forget();
+        let workspace_switch_blocker = self.selected_graph_workspace_switch_blocker();
+        let workspace_switch_disabled = workspace_switch_blocker.is_some();
+        let graph_workspace_action_input = self
+            .graph_workspace_action_input_state
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        let graph_workspace_action_input_empty = graph_workspace_action_input.is_empty();
+        let workspace_create_blocker =
+            self.selected_graph_workspace_create_blocker(graph_workspace_action_input.as_str());
+        let workspace_create_disabled = workspace_create_blocker.is_some();
+        let workspace_forget_blocker = self.selected_graph_workspace_forget_blocker();
+        let workspace_forget_disabled = workspace_forget_blocker.is_some();
+        let focus_workspace_tooltip = if let Some(workspace) = selected_workspace {
+            if selected_workspace_commit_visible {
+                format!("Focus workspace {}@ commit in the graph.", workspace.name)
+            } else {
+                format!(
+                    "Workspace {}@ commit is outside current graph window. Refresh or load more history.",
+                    workspace.name
+                )
+            }
+        } else {
+            "Select a workspace chip to focus its commit.".to_string()
+        };
+        let copy_workspace_tooltip = if let Some(workspace) = selected_workspace {
+            format!("Copy workspace name {}@ to clipboard.", workspace.name)
+        } else {
+            "Select a workspace chip before copying workspace name.".to_string()
+        };
+        let switch_workspace_tooltip = workspace_switch_blocker.clone().unwrap_or_else(|| {
+            "Switch app context to the selected workspace root.".to_string()
+        });
+        let create_workspace_tooltip = workspace_create_blocker.clone().unwrap_or_else(|| {
+            "Create a task workspace + same-name bookmark from trunk in .jj/workspaces."
+                .to_string()
+        });
+        let forget_workspace_tooltip = workspace_forget_blocker.clone().unwrap_or_else(|| {
+            "Forget selected non-current workspace from repository metadata.".to_string()
+        });
+
+        v_flex()
+            .w_full()
+            .gap_1()
+            .px_2()
+            .py_1()
+            .rounded(px(8.0))
+            .border_1()
+            .border_color(cx.theme().border.opacity(if is_dark { 0.92 } else { 0.78 }))
+            .bg(cx.theme().background.blend(cx.theme().muted.opacity(if is_dark {
+                0.22
+            } else {
+                0.30
+            })))
+            .child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(cx.theme().foreground)
+                    .child("Workspaces"),
+            )
+            .child({
+                if let Some(workspace) = selected_workspace {
+                    return div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!(
+                            "Selected workspace: {}@ ({})",
+                            workspace.name,
+                            if workspace.is_current {
+                                "current"
+                            } else {
+                                "non-current"
+                            }
+                        ))
+                        .into_any_element();
+                }
+                if let Some(selected) = selected_workspace_selection {
+                    return div()
+                        .text_xs()
+                        .text_color(cx.theme().warning)
+                        .child(format!(
+                            "Selected workspace {}@ is no longer in current snapshot.",
+                            selected.name
+                        ))
+                        .into_any_element();
+                }
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Select a `W name@` chip in graph to inspect/switch/forget.")
+                    .into_any_element()
+            })
+            .child(
+                Input::new(&self.graph_workspace_action_input_state)
+                    .h(px(30.0))
+                    .rounded(px(7.0))
+                    .border_1()
+                    .border_color(cx.theme().border.opacity(if is_dark { 0.90 } else { 0.74 }))
+                    .bg(cx.theme().background.opacity(if is_dark { 0.28 } else { 0.18 }))
+                    .disabled(self.git_action_loading || pending_workspace_forget.is_some()),
+            )
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .gap_1()
+                    .flex_wrap()
+                    .child({
+                        let view = view.clone();
+                        Button::new("workspace-focus-commit-quick")
+                            .outline()
+                            .compact()
+                            .with_size(gpui_component::Size::Small)
+                            .rounded(px(7.0))
+                            .label("Focus Commit")
+                            .tooltip(focus_workspace_tooltip)
+                            .disabled(self.git_action_loading || !selected_workspace_commit_visible)
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.focus_selected_graph_workspace_commit(cx);
+                                });
+                            })
+                    })
+                    .child({
+                        let view = view.clone();
+                        Button::new("workspace-copy-name-quick")
+                            .outline()
+                            .compact()
+                            .with_size(gpui_component::Size::Small)
+                            .rounded(px(7.0))
+                            .label("Copy Name")
+                            .tooltip(copy_workspace_tooltip)
+                            .disabled(self.git_action_loading || selected_workspace.is_none())
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.copy_selected_graph_workspace_name(cx);
+                                });
+                            })
+                    })
+                    .child({
+                        let view = view.clone();
+                        Button::new("workspace-switch-quick")
+                            .primary()
+                            .compact()
+                            .with_size(gpui_component::Size::Small)
+                            .rounded(px(7.0))
+                            .label("Switch")
+                            .tooltip(switch_workspace_tooltip)
+                            .disabled(workspace_switch_disabled)
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.request_switch_selected_graph_workspace(cx);
+                                });
+                            })
+                    })
+                    .child({
+                        let view = view.clone();
+                        Button::new("workspace-create-quick")
+                            .outline()
+                            .compact()
+                            .with_size(gpui_component::Size::Small)
+                            .rounded(px(7.0))
+                            .label("Create")
+                            .tooltip(create_workspace_tooltip)
+                            .disabled(workspace_create_disabled || graph_workspace_action_input_empty)
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.request_create_graph_workspace_at_selected_revision(cx);
+                                });
+                            })
+                    })
+                    .child({
+                        let view = view.clone();
+                        Button::new("workspace-forget-quick")
+                            .outline()
+                            .compact()
+                            .with_size(gpui_component::Size::Small)
+                            .rounded(px(7.0))
+                            .label("Forget")
+                            .tooltip(forget_workspace_tooltip)
+                            .disabled(workspace_forget_disabled)
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.request_forget_selected_graph_workspace(cx);
+                                });
+                            })
+                    }),
+            )
+            .when_some(pending_workspace_switch, |this, pending| {
+                this.child(
+                    v_flex()
+                        .w_full()
+                        .gap_1()
+                        .px_2()
+                        .py_1()
+                        .rounded(px(7.0))
+                        .border_1()
+                        .border_color(cx.theme().warning.opacity(if is_dark { 0.90 } else { 0.72 }))
+                        .bg(cx.theme().warning.opacity(if is_dark { 0.16 } else { 0.10 }))
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_semibold()
+                                .text_color(cx.theme().foreground)
+                                .child("Confirm Workspace Switch"),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().foreground)
+                                .whitespace_normal()
+                                .child(format!(
+                                    "Switch {}@ -> {}@ with {} local files?",
+                                    pending.source_workspace,
+                                    pending.target_workspace,
+                                    pending.changed_file_count
+                                )),
+                        )
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .items_center()
+                                .gap_1()
+                                .child({
+                                    let view = view.clone();
+                                    Button::new("workspace-confirm-switch-quick")
+                                        .primary()
+                                        .compact()
+                                        .with_size(gpui_component::Size::Small)
+                                        .rounded(px(7.0))
+                                        .label("Confirm Switch")
+                                        .disabled(self.git_action_loading)
+                                        .on_click(move |_, _, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.confirm_pending_workspace_switch(cx);
+                                            });
+                                        })
+                                })
+                                .child({
+                                    let view = view.clone();
+                                    Button::new("workspace-cancel-switch-quick")
+                                        .outline()
+                                        .compact()
+                                        .with_size(gpui_component::Size::Small)
+                                        .rounded(px(7.0))
+                                        .label("Cancel")
+                                        .disabled(self.git_action_loading)
+                                        .on_click(move |_, _, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.cancel_pending_workspace_switch(cx);
+                                            });
+                                        })
+                                }),
+                        ),
+                )
+            })
+            .when_some(pending_workspace_forget, |this, pending| {
+                let short_id = pending
+                    .workspace_commit_id
+                    .chars()
+                    .take(12)
+                    .collect::<String>();
+                this.child(
+                    v_flex()
+                        .w_full()
+                        .gap_1()
+                        .px_2()
+                        .py_1()
+                        .rounded(px(7.0))
+                        .border_1()
+                        .border_color(cx.theme().warning.opacity(if is_dark { 0.90 } else { 0.72 }))
+                        .bg(cx.theme().warning.opacity(if is_dark { 0.16 } else { 0.10 }))
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_semibold()
+                                .text_color(cx.theme().foreground)
+                                .child("Confirm Workspace Forget"),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().foreground)
+                                .whitespace_normal()
+                                .child(format!(
+                                    "Forget workspace {}@ (wc {})?",
+                                    pending.workspace_name, short_id
+                                )),
+                        )
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .items_center()
+                                .gap_1()
+                                .child({
+                                    let view = view.clone();
+                                    Button::new("workspace-confirm-forget-quick")
+                                        .primary()
+                                        .compact()
+                                        .with_size(gpui_component::Size::Small)
+                                        .rounded(px(7.0))
+                                        .label("Confirm Forget")
+                                        .disabled(self.git_action_loading)
+                                        .on_click(move |_, _, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.confirm_pending_workspace_forget(cx);
+                                            });
+                                        })
+                                })
+                                .child({
+                                    let view = view.clone();
+                                    Button::new("workspace-cancel-forget-quick")
+                                        .outline()
+                                        .compact()
+                                        .with_size(gpui_component::Size::Small)
+                                        .rounded(px(7.0))
+                                        .label("Cancel")
+                                        .disabled(self.git_action_loading)
+                                        .on_click(move |_, _, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.cancel_pending_workspace_forget(cx);
+                                            });
+                                        })
+                                }),
+                        ),
+                )
+            })
             .into_any_element()
     }
 

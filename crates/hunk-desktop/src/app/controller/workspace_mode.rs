@@ -21,6 +21,13 @@ impl DiffViewer {
         bookmark_name: String,
         cx: &mut Context<Self>,
     ) {
+        if let Some(reason) = self.task_workspace_bookmark_mutation_blocker() {
+            let reason = reason.to_string();
+            self.git_status_message = Some(reason.clone());
+            Self::push_warning_notification(reason, cx);
+            cx.notify();
+            return;
+        }
         let target_bookmark = bookmark_name.trim().to_string();
         if target_bookmark.is_empty() {
             self.git_status_message = Some("Bookmark name is required.".to_string());
@@ -282,8 +289,10 @@ impl DiffViewer {
             return;
         }
 
-        let Some(selected_node_id) = self.graph_selected_node_id.clone() else {
-            let message = "Select a revision in the graph before creating a workspace.".to_string();
+        let Some(base_revision_id) = self.active_bookmark_target_revision_id() else {
+            let message =
+                "Cannot resolve trunk bookmark target revision for task workspace creation."
+                    .to_string();
             self.git_status_message = Some(message.clone());
             Self::push_warning_notification(message, cx);
             cx.notify();
@@ -297,7 +306,7 @@ impl DiffViewer {
         let destination_root =
             Self::workspace_create_destination_root(repo_root.as_path(), workspace_name.as_str());
 
-        let epoch = self.begin_git_action("Create workspace", cx);
+        let epoch = self.begin_git_action("Create Task Workspace", cx);
         self.pending_workspace_switch = None;
         self.pending_workspace_forget = None;
         self.pending_bookmark_switch = None;
@@ -307,12 +316,37 @@ impl DiffViewer {
 
         self.git_action_task = cx.spawn(async move |this, cx| {
             let result = cx.background_executor().spawn(async move {
-                create_workspace_at_revision(
+                let created = create_workspace_at_revision(
                     &repo_root,
                     &workspace_name,
-                    &selected_node_id,
+                    &base_revision_id,
                     destination_root.as_path(),
-                )
+                )?;
+
+                match checkout_or_create_bookmark_with_change_transfer(
+                    &created.root,
+                    &workspace_name,
+                    false,
+                ) {
+                    Ok(()) => Ok(created),
+                    Err(bookmark_err) => {
+                        let rollback_result = forget_workspace(&repo_root, &workspace_name);
+                        if let Err(rollback_err) = rollback_result {
+                            return Err(bookmark_err).with_context(|| {
+                                format!(
+                                    "failed to create paired bookmark '{}' in workspace '{}' and rollback failed: {rollback_err:#}",
+                                    workspace_name, workspace_name
+                                )
+                            });
+                        }
+                        Err(bookmark_err).with_context(|| {
+                            format!(
+                                "failed to create paired bookmark '{}' in workspace '{}'; partially created workspace was forgotten",
+                                workspace_name, workspace_name
+                            )
+                        })
+                    }
+                }
             });
             let result = result.await;
 
@@ -325,13 +359,17 @@ impl DiffViewer {
                     this.finish_git_action();
                     match result {
                         Ok(created) => {
-                            let short_id = created.commit_id.chars().take(12).collect::<String>();
+                            let workspace_name = created.name.clone();
+                            let workspace_root = created.root.clone();
+                            this.apply_workspace_switch_root(
+                                workspace_name.clone(),
+                                workspace_root,
+                                cx,
+                            );
                             this.git_status_message = Some(format!(
-                                "Created workspace {}@ at {} (wc {short_id}).",
-                                created.name,
-                                created.root.display()
+                                "Created task workspace {}@ with paired bookmark {}@ and switched context.",
+                                workspace_name, workspace_name
                             ));
-                            this.request_snapshot_refresh_internal(true, cx);
                         }
                         Err(err) => {
                             error!("Create workspace failed: {err:#}");
@@ -371,6 +409,7 @@ impl DiffViewer {
             workspace_commit_id: selected_workspace.commit_id,
             unix_time: Self::now_unix_seconds(),
         });
+        self.branch_picker_open = true;
         self.git_status_message = Some(format!(
             "Forget workspace {}@ from repository metadata? Confirm to continue.",
             selected_workspace.name
@@ -468,8 +507,18 @@ impl DiffViewer {
                     .to_string(),
             );
         }
-        if self.graph_selected_node_id.is_none() {
-            return Some("Select a revision in the graph first.".to_string());
+        if let Some(reason) = Self::task_workspace_create_context_blocker(
+            self.graph_current_workspace_name.as_deref(),
+            self.graph_active_bookmark.as_deref(),
+            self.files.len(),
+        ) {
+            return Some(reason.to_string());
+        }
+        if self.active_bookmark_target_revision_id().is_none() {
+            return Some(
+                "Cannot resolve active trunk bookmark target revision from graph state."
+                    .to_string(),
+            );
         }
         let workspace_name = workspace_name_input.trim();
         if workspace_name.is_empty() {
@@ -477,6 +526,12 @@ impl DiffViewer {
         }
         if let Some(reason) = Self::workspace_name_validation_error(workspace_name) {
             return Some(reason);
+        }
+        if !is_valid_bookmark_name(workspace_name) {
+            return Some(
+                "Task workspace name must also be a valid bookmark name for pairing."
+                    .to_string(),
+            );
         }
         if self
             .graph_workspaces
@@ -565,6 +620,7 @@ impl DiffViewer {
                 changed_file_count: self.files.len(),
                 unix_time: Self::now_unix_seconds(),
             });
+            self.branch_picker_open = true;
             self.git_status_message = Some(Self::workspace_switch_confirmation_message(
                 source_workspace.as_str(),
                 target.name.as_str(),
@@ -602,8 +658,81 @@ impl DiffViewer {
     }
 
     fn workspace_create_destination_root(repo_root: &Path, workspace_name: &str) -> PathBuf {
-        let parent = repo_root.parent().unwrap_or(repo_root);
-        parent.join(workspace_name.trim())
+        let workspace_name = workspace_name.trim();
+        if let Some(internal_workspaces_dir) = Self::workspace_internal_workspaces_dir(repo_root) {
+            return internal_workspaces_dir.join(workspace_name);
+        }
+
+        repo_root.join(".jj").join("workspaces").join(workspace_name)
+    }
+
+    fn workspace_internal_workspaces_dir(repo_root: &Path) -> Option<PathBuf> {
+        let parent = repo_root.parent()?;
+        if parent.file_name() != Some(std::ffi::OsStr::new("workspaces")) {
+            return None;
+        }
+        if parent
+            .parent()
+            .and_then(Path::file_name)
+            != Some(std::ffi::OsStr::new(".jj"))
+        {
+            return None;
+        }
+        Some(parent.to_path_buf())
+    }
+
+    fn active_bookmark_target_revision_id(&self) -> Option<String> {
+        self.graph_nodes
+            .iter()
+            .find(|node| node.is_active_bookmark_target)
+            .map(|node| node.id.clone())
+    }
+
+    fn is_trunk_bookmark_name(bookmark_name: &str) -> bool {
+        matches!(bookmark_name, "main" | "master")
+    }
+
+    fn task_workspace_bookmark_mutation_blocker_for_workspace(
+        current_workspace_name: Option<&str>,
+    ) -> Option<&'static str> {
+        match current_workspace_name {
+            Some("default") | None => None,
+            Some(_) => Some(
+                "Bookmark mutations are disabled in task workspace mode. Switch to default workspace.",
+            ),
+        }
+    }
+
+    pub(super) fn task_workspace_bookmark_mutation_blocker(&self) -> Option<&'static str> {
+        Self::task_workspace_bookmark_mutation_blocker_for_workspace(
+            self.graph_current_workspace_name.as_deref(),
+        )
+    }
+
+    fn task_workspace_create_context_blocker(
+        current_workspace_name: Option<&str>,
+        active_bookmark: Option<&str>,
+        changed_file_count: usize,
+    ) -> Option<&'static str> {
+        if current_workspace_name != Some("default") {
+            return Some(
+                "Task workspace creation is only available from the default workspace.",
+            );
+        }
+        let Some(active_bookmark) = active_bookmark else {
+            return Some("Activate trunk bookmark (main/master) before creating a task workspace.");
+        };
+        if !Self::is_trunk_bookmark_name(active_bookmark) {
+            return Some(
+                "Task workspace creation is only available from trunk bookmark (main/master).",
+            );
+        }
+        if changed_file_count > 0 {
+            return Some(
+                "Commit, restore, or discard local changes before creating a task workspace.",
+            );
+        }
+        None
     }
 
     fn workspace_name_validation_error(workspace_name: &str) -> Option<String> {
@@ -658,11 +787,21 @@ mod workspace_mode_tests {
     }
 
     #[test]
-    fn workspace_create_destination_uses_repo_parent_directory() {
+    fn workspace_create_destination_uses_internal_jj_workspaces_directory() {
         let repo_root = Path::new("/tmp/repo-default");
         let destination =
             DiffViewer::workspace_create_destination_root(repo_root, "feature-workspace");
-        assert_eq!(destination, Path::new("/tmp/feature-workspace"));
+        assert_eq!(
+            destination,
+            Path::new("/tmp/repo-default/.jj/workspaces/feature-workspace")
+        );
+    }
+
+    #[test]
+    fn workspace_create_destination_reuses_internal_workspaces_parent_when_already_inside_it() {
+        let repo_root = Path::new("/tmp/repo-default/.jj/workspaces/ws-a");
+        let destination = DiffViewer::workspace_create_destination_root(repo_root, "ws-b");
+        assert_eq!(destination, Path::new("/tmp/repo-default/.jj/workspaces/ws-b"));
     }
 
     #[test]
@@ -672,5 +811,54 @@ mod workspace_mode_tests {
         assert!(DiffViewer::workspace_name_validation_error("foo/bar").is_some());
         assert!(DiffViewer::workspace_name_validation_error("foo\\bar").is_some());
         assert!(DiffViewer::workspace_name_validation_error("ws2").is_none());
+    }
+
+    #[test]
+    fn task_workspace_name_must_be_valid_bookmark_name() {
+        assert!(!is_valid_bookmark_name("task workspace"));
+        assert!(is_valid_bookmark_name("task-workspace"));
+    }
+
+    #[test]
+    fn task_workspace_create_context_requires_default_workspace() {
+        let reason = DiffViewer::task_workspace_create_context_blocker(Some("ws2"), Some("main"), 0);
+        assert!(reason.is_some());
+    }
+
+    #[test]
+    fn task_workspace_create_context_requires_trunk_bookmark() {
+        let reason =
+            DiffViewer::task_workspace_create_context_blocker(Some("default"), Some("feature"), 0);
+        assert!(reason.is_some());
+    }
+
+    #[test]
+    fn task_workspace_create_context_requires_clean_working_copy() {
+        let reason = DiffViewer::task_workspace_create_context_blocker(
+            Some("default"),
+            Some("main"),
+            1,
+        );
+        assert!(reason.is_some());
+    }
+
+    #[test]
+    fn task_workspace_create_context_allows_default_on_trunk_when_clean() {
+        let reason =
+            DiffViewer::task_workspace_create_context_blocker(Some("default"), Some("master"), 0);
+        assert!(reason.is_none());
+    }
+
+    #[test]
+    fn task_workspace_bookmark_mutation_blocked_outside_default_workspace() {
+        let reason = DiffViewer::task_workspace_bookmark_mutation_blocker_for_workspace(Some("ws2"));
+        assert!(reason.is_some());
+    }
+
+    #[test]
+    fn task_workspace_bookmark_mutation_allowed_in_default_workspace() {
+        let reason =
+            DiffViewer::task_workspace_bookmark_mutation_blocker_for_workspace(Some("default"));
+        assert!(reason.is_none());
     }
 }

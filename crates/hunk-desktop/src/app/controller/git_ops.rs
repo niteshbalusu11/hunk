@@ -365,6 +365,12 @@ impl DiffViewer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(reason) = self.task_workspace_bookmark_mutation_blocker() {
+            self.git_status_message = Some(reason.to_string());
+            Self::push_warning_notification(reason.to_string(), cx);
+            cx.notify();
+            return;
+        }
         if !self.can_run_active_bookmark_actions() {
             self.git_status_message = Some("Activate a bookmark before renaming it.".to_string());
             cx.notify();

@@ -30,7 +30,7 @@ impl DiffViewer {
         let selected_bookmark_selection = self.graph_selected_bookmark.as_ref();
         let selected_bookmark_is_local = selected_bookmark_selection
             .is_some_and(|bookmark| bookmark.scope == GraphBookmarkScope::Local);
-        let bookmark_mutation_blocker = self.graph_workspace_inspect_only_blocker();
+        let bookmark_mutation_blocker = self.graph_bookmark_mutation_blocker_reason();
         let bookmark_mutation_disabled = bookmark_mutation_blocker.is_some();
         let selected_review_blocker = self.selected_graph_review_action_blocker();
         let selected_review_disabled = selected_review_blocker.is_some();
@@ -86,7 +86,7 @@ impl DiffViewer {
             "Switch app context to the selected workspace root.".to_string()
         });
         let create_workspace_tooltip = workspace_create_blocker.clone().unwrap_or_else(|| {
-            "Create a workspace rooted next to the current workspace and target the selected revision."
+            "Create a task workspace + same-name bookmark from trunk in .jj/workspaces."
                 .to_string()
         });
         let forget_workspace_tooltip = workspace_forget_blocker.clone().unwrap_or_else(|| {
@@ -471,7 +471,7 @@ impl DiffViewer {
                             .text_color(cx.theme().muted_foreground)
                             .whitespace_normal()
                             .child(
-                                "Workspace switch/create/forget are explicit and guarded. Create uses selected revision and workspace-name input.",
+                                "Workspace switch/create/forget are explicit and guarded. Task workspace create uses active trunk target and pairs workspace+bookmark names.",
                             ),
                     ),
             )

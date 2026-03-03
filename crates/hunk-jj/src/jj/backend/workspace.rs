@@ -62,7 +62,7 @@ pub(super) fn create_workspace_at_revision(
         working_copy_factory.as_ref(),
         workspace_name_buf.clone(),
     );
-    let (_, repo_after_init) = match init_result {
+    let (mut workspace_after_init, repo_after_init) = match init_result {
         Ok(result) => result,
         Err(err) => {
             if created_workspace_root {
@@ -77,6 +77,15 @@ pub(super) fn create_workspace_at_revision(
             });
         }
     };
+    let mut locked_workspace = workspace_after_init
+        .start_working_copy_mutation()
+        .with_context(|| {
+            format!(
+                "failed to lock working copy for workspace '{}' at '{}'",
+                workspace_name,
+                workspace_root.display()
+            )
+        })?;
 
     let target_commit = repo_after_init
         .store()
@@ -110,6 +119,41 @@ pub(super) fn create_workspace_at_revision(
             workspace_name_buf.as_symbol()
         ))
         .context("failed to finalize workspace creation")?;
+
+    let new_wc_commit_id = repo
+        .view()
+        .get_wc_commit_id(&workspace_name_buf)
+        .ok_or_else(|| {
+            anyhow!(
+                "workspace '{}' missing working-copy commit after creation",
+                workspace_name
+            )
+        })?
+        .clone();
+    let new_wc_commit = repo
+        .store()
+        .get_commit(&new_wc_commit_id)
+        .with_context(|| {
+            format!(
+                "failed to load working-copy commit for workspace '{}'",
+                workspace_name
+            )
+        })?;
+    block_on(locked_workspace.locked_wc().check_out(&new_wc_commit)).with_context(|| {
+        format!(
+            "failed to update files in workspace '{}' at '{}'",
+            workspace_name,
+            workspace_root.display()
+        )
+    })?;
+    locked_workspace
+        .finish(repo.op_id().clone())
+        .with_context(|| {
+            format!(
+                "failed to persist working-copy state for workspace '{}'",
+                workspace_name
+            )
+        })?;
 
     context.repo = repo;
     Ok(new_wc.id().hex())

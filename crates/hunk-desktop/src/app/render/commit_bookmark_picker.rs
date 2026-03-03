@@ -121,9 +121,13 @@ impl DiffViewer {
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
         let bookmark_input_empty = self.branch_input_state.read(cx).value().trim().is_empty();
-        let rename_disabled =
-            self.git_action_loading || bookmark_input_empty || !self.can_run_active_bookmark_actions();
-        let create_or_activate_disabled = self.git_action_loading || bookmark_input_empty;
+        let bookmark_mutation_blocker = self.task_workspace_bookmark_mutation_blocker();
+        let rename_disabled = self.git_action_loading
+            || bookmark_input_empty
+            || !self.can_run_active_bookmark_actions()
+            || bookmark_mutation_blocker.is_some();
+        let create_or_activate_disabled =
+            self.git_action_loading || bookmark_input_empty || bookmark_mutation_blocker.is_some();
 
         v_flex()
             .w_full()
@@ -240,10 +244,21 @@ impl DiffViewer {
                     } else {
                         0.14
                     })))
-                    .disabled(self.git_action_loading),
+                    .disabled(self.git_action_loading || bookmark_mutation_blocker.is_some()),
             )
             .child({
                 let view = view.clone();
+                let create_tooltip = bookmark_mutation_blocker
+                    .map(str::to_string)
+                    .unwrap_or_else(|| {
+                        "Create a bookmark from the entered name or activate it if it already exists."
+                            .to_string()
+                    });
+                let rename_tooltip = bookmark_mutation_blocker
+                    .map(str::to_string)
+                    .unwrap_or_else(|| {
+                        "Rename the currently active bookmark to the entered name.".to_string()
+                    });
                 h_flex()
                     .w_full()
                     .items_center()
@@ -254,7 +269,7 @@ impl DiffViewer {
                             .primary()
                             .rounded(px(7.0))
                             .label("Create / Activate")
-                            .tooltip("Create a bookmark from the entered name or activate it if it already exists.")
+                            .tooltip(create_tooltip)
                             .disabled(create_or_activate_disabled)
                             .on_click({
                                 let view = view.clone();
@@ -270,7 +285,7 @@ impl DiffViewer {
                             .outline()
                             .rounded(px(7.0))
                             .label("Rename Active")
-                            .tooltip("Rename the currently active bookmark to the entered name.")
+                            .tooltip(rename_tooltip)
                             .disabled(rename_disabled)
                             .on_click(move |_, window, cx| {
                                 view.update(cx, |this, cx| {
@@ -279,6 +294,7 @@ impl DiffViewer {
                             }),
                     )
             })
+            .child(self.render_jj_graph_workspace_quick_actions_panel(cx))
             .into_any_element()
     }
 }

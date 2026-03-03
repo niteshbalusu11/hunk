@@ -698,7 +698,13 @@ impl DiffViewer {
     }
 
     fn graph_bookmark_mutation_blocker(&self) -> Option<&'static str> {
-        self.graph_workspace_inspect_only_blocker()
+        self.graph_workspace_inspect_only_blocker().or_else(|| {
+            self.task_workspace_bookmark_mutation_blocker()
+        })
+    }
+
+    pub(super) fn graph_bookmark_mutation_blocker_reason(&self) -> Option<&'static str> {
+        self.graph_bookmark_mutation_blocker()
     }
 
     fn reconciled_graph_right_panel_mode(
@@ -826,5 +832,18 @@ mod jj_graph_tests {
         assert!(
             DiffViewer::graph_workspace_inspect_only_blocker_for_selection(false).is_none()
         );
+    }
+
+    #[test]
+    fn non_default_workspace_blocks_bookmark_mutation_actions() {
+        let reason = DiffViewer::task_workspace_bookmark_mutation_blocker_for_workspace(Some("ws2"));
+        assert!(reason.is_some());
+    }
+
+    #[test]
+    fn default_workspace_allows_bookmark_mutation_actions() {
+        let reason =
+            DiffViewer::task_workspace_bookmark_mutation_blocker_for_workspace(Some("default"));
+        assert!(reason.is_none());
     }
 }

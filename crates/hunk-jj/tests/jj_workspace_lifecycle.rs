@@ -51,6 +51,15 @@ fn create_workspace_at_revision_registers_workspace_and_target_path() {
             .any(|workspace| workspace.name == "ws2"),
         "workspace should appear in graph workspace summary"
     );
+    assert!(
+        workspace_path.join("tracked.txt").is_file(),
+        "new workspace should materialize tracked files on disk"
+    );
+    let status_output = run_jj_capture(&workspace_path, ["status"]);
+    assert!(
+        status_output.contains("The working copy has no changes."),
+        "new workspace should start clean; got:\n{status_output}"
+    );
 
     let _ = fs::remove_dir_all(&workspace_path);
 }
@@ -258,6 +267,15 @@ fn latest_graph_revision_id(repo_root: &Path) -> String {
 }
 
 fn run_jj<const N: usize>(cwd: &Path, args: [&str; N]) {
+    let _ = run_jj_output(cwd, args);
+}
+
+fn run_jj_capture<const N: usize>(cwd: &Path, args: [&str; N]) -> String {
+    let output = run_jj_output(cwd, args);
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+fn run_jj_output<const N: usize>(cwd: &Path, args: [&str; N]) -> std::process::Output {
     let output = Command::new("jj")
         .args(args)
         .current_dir(cwd)
@@ -274,6 +292,7 @@ fn run_jj<const N: usize>(cwd: &Path, args: [&str; N]) {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+    output
 }
 
 fn write_file(path: PathBuf, contents: &str) {
