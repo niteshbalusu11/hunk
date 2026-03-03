@@ -503,6 +503,11 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
         RepoTreeCancelInlineEdit,
         Some("RepoTree"),
     ));
+    bindings.push(KeyBinding::new(
+        "escape",
+        RepoTreeCancelInlineEdit,
+        Some("RepoTreeInlineEdit"),
+    ));
 
     cx.bind_keys(bindings);
 }

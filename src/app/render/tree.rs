@@ -2,6 +2,11 @@ impl DiffViewer {
     fn render_tree(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
+        let tree_key_context = if self.repo_tree_inline_edit.is_some() {
+            "RepoTreeInlineEdit"
+        } else {
+            "RepoTree"
+        };
         let tree_summary = if self.repo_tree.loading && !self.repo_tree.rows.is_empty() {
             format!(
                 "{} files • {} folders • Refreshing...",
@@ -17,7 +22,7 @@ impl DiffViewer {
         v_flex()
             .size_full()
             .relative()
-            .key_context("RepoTree")
+            .key_context(tree_key_context)
             .track_focus(&self.repo_tree_focus_handle)
             .on_action(cx.listener(Self::repo_tree_new_file_action))
             .on_action(cx.listener(Self::repo_tree_new_folder_action))
@@ -450,6 +455,7 @@ impl DiffViewer {
         } else {
             cx.theme().muted_foreground
         };
+        let hover_bg = cx.theme().secondary_hover;
         div()
             .w_full()
             .px_2()
@@ -458,11 +464,11 @@ impl DiffViewer {
             .text_sm()
             .text_color(text_color)
             .when(enabled, |this| {
-                this.cursor_pointer()
-                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                        cx.stop_propagation();
-                        on_click(window, cx);
-                    })
+                this.on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                    cx.stop_propagation();
+                    on_click(window, cx);
+                })
+                .hover(move |style| style.bg(hover_bg).cursor_pointer())
             })
             .child(
                 h_flex()
@@ -579,6 +585,11 @@ impl DiffViewer {
         let file_status = row.file_status;
         let rename_input = self.inline_repo_tree_rename_input_for_path(row.path.as_str());
         let rename_active = rename_input.is_some();
+        let row_hover_bg = if is_selected {
+            cx.theme().secondary_active
+        } else {
+            cx.theme().secondary_hover
+        };
         let path_for_click = row.path.clone();
         let kind_for_click = row.kind;
         let menu_target_path = row.path.clone();
@@ -667,7 +678,8 @@ impl DiffViewer {
                 }
             })
             .when(!rename_active, |this| {
-                this.on_click({
+                this.hover(move |style| style.bg(row_hover_bg).cursor_pointer())
+                    .on_click({
                     let view = view.clone();
                     move |_, window, cx| {
                         view.update(cx, |this, cx| match kind_for_click {

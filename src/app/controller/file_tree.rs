@@ -168,6 +168,7 @@ impl DiffViewer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.repo_tree_inline_edit.is_some() { return; }
         self.repo_tree_focus_handle.focus(window, cx);
         self.open_repo_tree_new_file_prompt_at(
             self.selected_repo_tree_file_target(),
@@ -182,6 +183,7 @@ impl DiffViewer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.repo_tree_inline_edit.is_some() { return; }
         self.repo_tree_focus_handle.focus(window, cx);
         self.open_repo_tree_new_folder_prompt_at(
             self.selected_repo_tree_file_target(),
@@ -196,6 +198,7 @@ impl DiffViewer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.repo_tree_inline_edit.is_some() { return; }
         self.repo_tree_focus_handle.focus(window, cx);
         let Some(path) = self.selected_path.clone() else {
             let message = "Select a file in the tree before renaming.".to_string();
