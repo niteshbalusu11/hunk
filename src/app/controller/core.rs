@@ -160,7 +160,7 @@ impl DiffViewer {
         let graph_action_input_state = cx.new(|cx| {
             InputState::new(window, cx).placeholder("Bookmark name for create/fork/rename")
         });
-        let in_app_menu_bar = (!cfg!(target_os = "macos")).then(|| AppMenuBar::new(window, cx));
+        let in_app_menu_bar = (!cfg!(target_os = "macos")).then(|| AppMenuBar::new(cx));
 
         let mut view = Self {
             config_store,
@@ -199,6 +199,7 @@ impl DiffViewer {
             graph_selected_node_id: None,
             graph_selected_bookmark: None,
             graph_list_state: ListState::new(0, ListAlignment::Top, px(30.0)),
+            graph_right_panel_scroll_handle: ScrollHandle::default(),
             graph_action_input_state,
             graph_pending_confirmation: None,
             graph_right_panel_mode: GraphRightPanelMode::ActiveWorkflow,
@@ -250,6 +251,7 @@ impl DiffViewer {
             patch_loading: false,
             in_app_menu_bar,
             focus_handle: cx.focus_handle(),
+            repo_tree_focus_handle: cx.focus_handle(),
             selection_anchor_row: None,
             selection_head_row: None,
             drag_selecting_rows: false,
@@ -269,6 +271,8 @@ impl DiffViewer {
             error_message: None,
             sidebar_collapsed: false,
             repo_tree: RepoTreeState::new(),
+            repo_tree_inline_edit: None,
+            repo_tree_context_menu: None,
             editor_input_state,
             editor_path: None,
             editor_loading: false,
@@ -421,8 +425,7 @@ impl DiffViewer {
                             this.apply_snapshot_error(err, cx)
                         }
                     }
-                })
-                .ok();
+                });
             }
         });
     }
@@ -453,8 +456,7 @@ impl DiffViewer {
                             this.git_status_message =
                                 Some(format!("Failed to open folder picker: {err:#}"));
                             cx.notify();
-                        })
-                        .ok();
+                        });
                     }
                     return;
                 }
@@ -472,8 +474,7 @@ impl DiffViewer {
                     this.start_repo_watch(cx);
                     this.request_snapshot_refresh_internal(true, cx);
                     cx.notify();
-                })
-                .ok();
+                });
             }
         });
     }
@@ -835,8 +836,7 @@ impl DiffViewer {
                         this.patch_loading = false;
                         this.apply_loaded_diff_stream(stream);
                         cx.notify();
-                    })
-                    .ok();
+                    });
                 }
                 return;
             }
@@ -892,8 +892,7 @@ impl DiffViewer {
                             error!("initial diff stage failed after {:?}: {err:#}", elapsed);
                             this.apply_diff_stream_error(err);
                             cx.notify();
-                        })
-                        .ok();
+                        });
                     }
                     return;
                 }
@@ -916,8 +915,7 @@ impl DiffViewer {
                     );
                     this.apply_loaded_diff_stream(initial_stream);
                     cx.notify();
-                })
-                .ok();
+                });
             }
 
             if remaining_files.is_empty() {
@@ -929,8 +927,7 @@ impl DiffViewer {
                         this.patch_loading = false;
                         this.reconcile_comments_with_loaded_diff();
                         cx.notify();
-                    })
-                    .ok();
+                    });
                 }
                 return;
             }
@@ -990,8 +987,7 @@ impl DiffViewer {
                                 );
                                 this.apply_diff_stream_error(err);
                                 cx.notify();
-                            })
-                            .ok();
+                            });
                         }
                         return;
                     }
@@ -1019,8 +1015,7 @@ impl DiffViewer {
                         }
                         this.apply_loaded_diff_stream(stream);
                         cx.notify();
-                    })
-                    .ok();
+                    });
                 }
             }
         });

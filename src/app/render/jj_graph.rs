@@ -1,17 +1,37 @@
 impl DiffViewer {
     fn render_jj_workspace_graph_shell(&self, cx: &mut Context<Self>) -> AnyElement {
-        h_resizable("hunk-jj-graph-workspace")
+        div()
+            .size_full()
+            .min_h_0()
+            .min_w_0()
             .child(
-                resizable_panel()
-                    .size(px(700.0))
-                    .size_range(px(360.0)..px(1200.0))
-                    .child(self.render_jj_graph_canvas(cx)),
-            )
-            .child(
-                resizable_panel()
-                    .size(px(440.0))
-                    .size_range(px(320.0)..px(760.0))
-                    .child(self.render_jj_graph_right_panel(cx)),
+                div().size_full().min_h_0().min_w_0().child(
+                    h_resizable("hunk-jj-graph-workspace")
+                        .child(
+                            resizable_panel()
+                                .size(px(700.0))
+                                .size_range(px(360.0)..px(1200.0))
+                                .child(
+                                    div()
+                                        .size_full()
+                                        .min_h_0()
+                                        .min_w_0()
+                                        .child(self.render_jj_graph_canvas(cx)),
+                                ),
+                        )
+                        .child(
+                            resizable_panel()
+                                .size(px(440.0))
+                                .size_range(px(320.0)..px(760.0))
+                                .child(
+                                    div()
+                                        .size_full()
+                                        .min_h_0()
+                                        .min_w_0()
+                                        .child(self.render_jj_graph_right_panel(cx)),
+                                ),
+                        ),
+                ),
             )
             .into_any_element()
     }
@@ -26,6 +46,7 @@ impl DiffViewer {
         v_flex()
             .size_full()
             .min_h_0()
+            .min_w_0()
             .gap_2()
             .p_2()
             .rounded(px(8.0))
@@ -41,8 +62,27 @@ impl DiffViewer {
                 div()
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scrollbar()
-                    .child(panel_body),
+                    .relative()
+                    .child(
+                        div()
+                            .id("jj-graph-right-scroll-area")
+                            .size_full()
+                            .track_scroll(&self.graph_right_panel_scroll_handle)
+                            .overflow_y_scroll()
+                            .child(v_flex().w_full().gap_2().pb_2().child(panel_body)),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .right_0()
+                            .bottom_0()
+                            .w(px(16.0))
+                            .child(
+                                Scrollbar::vertical(&self.graph_right_panel_scroll_handle)
+                                    .scrollbar_show(ScrollbarShow::Always),
+                            ),
+                    ),
             )
             .into_any_element()
     }

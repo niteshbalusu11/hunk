@@ -58,6 +58,9 @@ pub struct KeyboardShortcuts {
     pub save_current_file: Vec<String>,
     pub open_settings: Vec<String>,
     pub quit_app: Vec<String>,
+    pub repo_tree_new_file: Vec<String>,
+    pub repo_tree_new_folder: Vec<String>,
+    pub repo_tree_rename_file: Vec<String>,
 }
 
 impl Default for KeyboardShortcuts {
@@ -83,6 +86,9 @@ impl Default for KeyboardShortcuts {
             save_current_file: vec!["cmd-s".into(), "ctrl-s".into()],
             open_settings: vec!["cmd-,".into(), "ctrl-,".into()],
             quit_app: vec!["cmd-q".into()],
+            repo_tree_new_file: vec!["%".into()],
+            repo_tree_new_folder: vec!["d".into()],
+            repo_tree_rename_file: vec!["shift-r".into()],
         }
     }
 }

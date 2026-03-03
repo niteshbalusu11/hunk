@@ -194,8 +194,7 @@ impl DiffViewer {
                     if inserted {
                         cx.notify();
                     }
-                })
-                .ok();
+                });
             }
         });
     }

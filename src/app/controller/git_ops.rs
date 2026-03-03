@@ -158,8 +158,7 @@ impl DiffViewer {
                     }
 
                     cx.notify();
-                })
-                .ok();
+                });
             }
         });
     }
@@ -752,8 +751,7 @@ impl DiffViewer {
                     }
 
                     cx.notify();
-                })
-                .ok();
+                });
             }
         });
     }
@@ -862,8 +860,7 @@ impl DiffViewer {
                     }
 
                     cx.notify();
-                })
-                .ok();
+                });
             }
         });
     }

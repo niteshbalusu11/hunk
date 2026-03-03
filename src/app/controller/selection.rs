@@ -73,7 +73,7 @@ impl DiffViewer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.focus_handle.focus(window);
+        self.focus_handle.focus(window, cx);
         self.drag_selecting_rows = true;
         self.select_row(row_ix, event.modifiers.shift, cx);
     }

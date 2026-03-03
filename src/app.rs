@@ -5,18 +5,18 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use gpui::{
-    Animation, AnimationExt as _, AnyElement, App, AppContext as _, Application, ClipboardItem,
-    Context, Entity, FocusHandle, Hsla, InteractiveElement as _, IntoElement, IsZero as _,
-    KeyBinding, ListAlignment, ListOffset, ListSizingBehavior, ListState, Menu, MenuItem,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, OsAction, ParentElement as _,
-    PathPromptOptions, Render, ScrollWheelEvent, SharedString, StatefulInteractiveElement as _,
-    Styled as _, SystemMenuType, Task, Timer, TitlebarOptions, Window, WindowOptions, actions, div,
-    list, prelude::FluentBuilder as _, px,
+    Animation, AnimationExt as _, AnyElement, App, AppContext as _, ClipboardItem, Context, Corner,
+    Entity, FocusHandle, Hsla, InteractiveElement as _, IntoElement, IsZero as _, KeyBinding,
+    ListAlignment, ListOffset, ListSizingBehavior, ListState, Menu, MenuItem, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, OsAction, ParentElement as _, PathPromptOptions,
+    Point, Render, ScrollHandle, ScrollWheelEvent, SharedString, StatefulInteractiveElement as _,
+    Styled as _, SystemMenuType, Task, TitlebarOptions, Window, WindowOptions, actions, anchored,
+    deferred, div, list, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     ActiveTheme as _, Colorize as _, Root, StyledExt as _, Theme, ThemeMode, h_flex,
     highlighter::HighlightThemeStyle,
-    input::InputState,
+    input::{InputEvent, InputState},
     menu::AppMenuBar,
     resizable::{h_resizable, resizable_panel},
     scroll::ScrollableElement,
@@ -41,8 +41,8 @@ use hunk::markdown_preview::MarkdownPreviewBlock;
 use hunk::state::{AppState, AppStateStore};
 
 use data::{
-    DiffRowSegmentCache, DiffStreamRowMeta, FileRowRange, RepoTreeNode, RepoTreeRow,
-    WorkspaceViewMode,
+    DiffRowSegmentCache, DiffStreamRowMeta, FileRowRange, RepoTreeNode, RepoTreeNodeKind,
+    RepoTreeRow, WorkspaceViewMode,
 };
 
 const FPS_SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
@@ -91,6 +91,26 @@ enum GraphRightPanelMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+enum RepoTreePromptAction {
+    CreateFile { base_dir: Option<String> },
+    CreateFolder { base_dir: Option<String> },
+    RenameFile { path: String },
+}
+
+#[derive(Clone)]
+struct RepoTreeInlineEditState {
+    action: RepoTreePromptAction,
+    input_state: Entity<InputState>,
+}
+
+#[derive(Debug, Clone)]
+struct RepoTreeContextMenuState {
+    target_path: String,
+    target_kind: RepoTreeNodeKind,
+    position: Point<gpui::Pixels>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct WorkingCopyRecoveryCandidate {
     source_revision_id: String,
     source_bookmark: String,
@@ -136,6 +156,9 @@ actions!(
         SaveCurrentFile,
         OpenSettings,
         QuitApp,
+        RepoTreeNewFile,
+        RepoTreeNewFolder,
+        RepoTreeRenameFile,
     ]
 );
 
@@ -458,14 +481,30 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
             .iter()
             .map(|shortcut| KeyBinding::new(shortcut.as_str(), QuitApp, None)),
     );
+    bindings.extend(
+        shortcuts
+            .repo_tree_new_file
+            .iter()
+            .map(|shortcut| KeyBinding::new(shortcut.as_str(), RepoTreeNewFile, Some("RepoTree"))),
+    );
+    bindings.extend(
+        shortcuts.repo_tree_new_folder.iter().map(|shortcut| {
+            KeyBinding::new(shortcut.as_str(), RepoTreeNewFolder, Some("RepoTree"))
+        }),
+    );
+    bindings.extend(
+        shortcuts.repo_tree_rename_file.iter().map(|shortcut| {
+            KeyBinding::new(shortcut.as_str(), RepoTreeRenameFile, Some("RepoTree"))
+        }),
+    );
 
     cx.bind_keys(bindings);
 }
 
 pub fn run() -> Result<()> {
-    let app = Application::new().with_assets(Assets);
+    let app = gpui_platform::application().with_assets(Assets);
     let keyboard_shortcuts = load_keyboard_shortcuts();
-    app.on_reopen(|cx| {
+    app.on_reopen(|cx: &mut App| {
         if cx.windows().is_empty() {
             open_main_window(cx);
         }
@@ -554,6 +593,9 @@ struct SettingsShortcutInputs {
     save_current_file: Entity<InputState>,
     open_settings: Entity<InputState>,
     quit_app: Entity<InputState>,
+    repo_tree_new_file: Entity<InputState>,
+    repo_tree_new_folder: Entity<InputState>,
+    repo_tree_rename_file: Entity<InputState>,
 }
 
 impl SettingsShortcutInputs {
@@ -678,6 +720,24 @@ impl SettingsShortcutInputs {
                 label: "Quit App",
                 hint: "Quits Hunk.",
                 input_state: self.quit_app.clone(),
+            },
+            SettingsShortcutRow {
+                id: "repo-tree-new-file",
+                label: "Tree: New File",
+                hint: "Creates a file from the focused file tree.",
+                input_state: self.repo_tree_new_file.clone(),
+            },
+            SettingsShortcutRow {
+                id: "repo-tree-new-folder",
+                label: "Tree: New Folder",
+                hint: "Creates a folder from the focused file tree.",
+                input_state: self.repo_tree_new_folder.clone(),
+            },
+            SettingsShortcutRow {
+                id: "repo-tree-rename-file",
+                label: "Tree: Rename File",
+                hint: "Renames the selected file in the focused file tree.",
+                input_state: self.repo_tree_rename_file.clone(),
             },
         ]
     }
@@ -823,6 +883,7 @@ struct DiffViewer {
     graph_selected_node_id: Option<String>,
     graph_selected_bookmark: Option<GraphBookmarkSelection>,
     graph_list_state: ListState,
+    graph_right_panel_scroll_handle: ScrollHandle,
     graph_action_input_state: Entity<InputState>,
     graph_pending_confirmation: Option<GraphPendingConfirmation>,
     graph_right_panel_mode: GraphRightPanelMode,
@@ -874,6 +935,7 @@ struct DiffViewer {
     patch_loading: bool,
     in_app_menu_bar: Option<Entity<AppMenuBar>>,
     focus_handle: FocusHandle,
+    repo_tree_focus_handle: FocusHandle,
     selection_anchor_row: Option<usize>,
     selection_head_row: Option<usize>,
     drag_selecting_rows: bool,
@@ -893,6 +955,8 @@ struct DiffViewer {
     error_message: Option<String>,
     sidebar_collapsed: bool,
     repo_tree: RepoTreeState,
+    repo_tree_inline_edit: Option<RepoTreeInlineEditState>,
+    repo_tree_context_menu: Option<RepoTreeContextMenuState>,
     editor_input_state: Entity<InputState>,
     editor_path: Option<String>,
     editor_loading: bool,

@@ -15,7 +15,7 @@ impl DiffViewer {
         }
 
         self.fps_task = cx.spawn(async move |this, cx| {
-            Timer::after(FPS_SAMPLE_INTERVAL).await;
+            cx.background_executor().timer(FPS_SAMPLE_INTERVAL).await;
             if let Some(this) = this.upgrade() {
                 this.update(cx, |this, cx| {
                     let elapsed = this.frame_sample_started_at.elapsed().as_secs_f32();
@@ -36,8 +36,7 @@ impl DiffViewer {
                     let next_epoch = this.next_fps_epoch();
                     this.schedule_fps_sample(next_epoch, cx);
                     cx.notify();
-                })
-                .ok();
+                });
             }
         });
     }

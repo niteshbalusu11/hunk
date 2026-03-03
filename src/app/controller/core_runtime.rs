@@ -165,8 +165,7 @@ impl DiffViewer {
                 if let Some(this) = this.upgrade() {
                     this.update(cx, |this, cx| {
                         this.schedule_repo_watch_refresh(cx);
-                    })
-                    .ok();
+                    });
                 }
             }
             drop(watcher);
@@ -181,15 +180,16 @@ impl DiffViewer {
     fn schedule_repo_watch_refresh(&mut self, cx: &mut Context<Self>) {
         let epoch = self.next_repo_watch_refresh_epoch();
         self.repo_watch_refresh_task = cx.spawn(async move |this, cx| {
-            Timer::after(Self::REPO_WATCH_DEBOUNCE).await;
+            cx.background_executor()
+                .timer(Self::REPO_WATCH_DEBOUNCE)
+                .await;
             if let Some(this) = this.upgrade() {
                 this.update(cx, |this, cx| {
                     if epoch != this.repo_watch_refresh_epoch {
                         return;
                     }
                     this.request_snapshot_refresh_internal(true, cx);
-                })
-                .ok();
+                });
             }
         });
     }
@@ -252,7 +252,7 @@ impl DiffViewer {
         }
 
         self.auto_refresh_task = cx.spawn(async move |this, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             if let Some(this) = this.upgrade() {
                 this.update(cx, |this, cx| {
                     if this.config.auto_refresh_interval_ms == 0 {
@@ -273,8 +273,7 @@ impl DiffViewer {
                     let next_delay = this.auto_refresh_interval();
                     let next_epoch = this.next_refresh_epoch();
                     this.schedule_auto_refresh(next_epoch, next_delay, cx);
-                })
-                .ok();
+                });
             }
         });
     }

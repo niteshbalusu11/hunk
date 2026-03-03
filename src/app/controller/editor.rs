@@ -83,8 +83,7 @@ impl DiffViewer {
                     }
 
                     cx.notify();
-                })
-                .ok();
+                });
             }
         });
     }
@@ -156,8 +155,7 @@ impl DiffViewer {
                     }
 
                     cx.notify();
-                })
-                .ok();
+                });
             }
         });
     }
@@ -248,7 +246,9 @@ impl DiffViewer {
         cx.notify();
 
         self.editor_markdown_preview_task = cx.spawn(async move |this, cx| {
-            Timer::after(MARKDOWN_PREVIEW_DEBOUNCE).await;
+            cx.background_executor()
+                .timer(MARKDOWN_PREVIEW_DEBOUNCE)
+                .await;
             let preview_path = path;
             let blocks = cx.background_executor().spawn(async move {
                 hunk::markdown_preview::parse_markdown_preview(markdown_text.as_str())
@@ -271,8 +271,7 @@ impl DiffViewer {
                     this.editor_markdown_preview_blocks = blocks;
                     this.editor_markdown_preview_loading = false;
                     cx.notify();
-                })
-                .ok();
+                });
             }
         });
     }

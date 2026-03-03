@@ -16,9 +16,17 @@ anyhow = "1.0"
 dirs = "6.0"
 futures = "0.3"
 gix = { version = "0.78.0", default-features = false }
-gpui = { package = "gpui", version = "*", features = ["runtime_shaders"] }
-gpui-component = { version = "0.5.1", features = ["tree-sitter-languages"] }
-gpui-component-assets = "0.5.1"
+gpui = { git = "https://github.com/zed-industries/zed" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = [
+  "font-kit",
+  "x11",
+  "wayland",
+  "runtime_shaders",
+] }
+gpui-component = { git = "https://github.com/longbridge/gpui-component", features = [
+  "tree-sitter-languages",
+] }
+gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
 jj-lib = "0.38.0"
 serde = { version = "1.0", features = ["derive"] }
 notify = "8.2.0"

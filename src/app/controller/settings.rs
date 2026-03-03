@@ -54,6 +54,9 @@ fn validate_keyboard_shortcuts(shortcuts: &KeyboardShortcuts) -> Result<(), Stri
     validate_shortcut_list("Save Current File", &shortcuts.save_current_file)?;
     validate_shortcut_list("Open Settings", &shortcuts.open_settings)?;
     validate_shortcut_list("Quit App", &shortcuts.quit_app)?;
+    validate_shortcut_list("Tree: New File", &shortcuts.repo_tree_new_file)?;
+    validate_shortcut_list("Tree: New Folder", &shortcuts.repo_tree_new_folder)?;
+    validate_shortcut_list("Tree: Rename File", &shortcuts.repo_tree_rename_file)?;
     Ok(())
 }
 
@@ -197,6 +200,24 @@ impl DiffViewer {
                 window,
                 cx,
             ),
+            repo_tree_new_file: settings_shortcut_input(
+                &self.config.keyboard_shortcuts.repo_tree_new_file,
+                "Comma-separated shortcuts, e.g. %",
+                window,
+                cx,
+            ),
+            repo_tree_new_folder: settings_shortcut_input(
+                &self.config.keyboard_shortcuts.repo_tree_new_folder,
+                "Comma-separated shortcuts, e.g. d",
+                window,
+                cx,
+            ),
+            repo_tree_rename_file: settings_shortcut_input(
+                &self.config.keyboard_shortcuts.repo_tree_rename_file,
+                "Comma-separated shortcuts, e.g. shift-r",
+                window,
+                cx,
+            ),
         };
 
         self.settings_draft = Some(SettingsDraft {
@@ -225,7 +246,7 @@ impl DiffViewer {
         cx: &mut Context<Self>,
     ) {
         self.close_settings(cx);
-        self.focus_handle.focus(window);
+        self.focus_handle.focus(window, cx);
     }
 
     pub(super) fn select_settings_category(
@@ -368,6 +389,18 @@ impl DiffViewer {
                 ),
                 open_settings: read_shortcut_input(&settings.shortcuts.open_settings, cx),
                 quit_app: read_shortcut_input(&settings.shortcuts.quit_app, cx),
+                repo_tree_new_file: read_shortcut_input(
+                    &settings.shortcuts.repo_tree_new_file,
+                    cx,
+                ),
+                repo_tree_new_folder: read_shortcut_input(
+                    &settings.shortcuts.repo_tree_new_folder,
+                    cx,
+                ),
+                repo_tree_rename_file: read_shortcut_input(
+                    &settings.shortcuts.repo_tree_rename_file,
+                    cx,
+                ),
             };
 
             if let Err(err) = validate_keyboard_shortcuts(&keyboard_shortcuts) {

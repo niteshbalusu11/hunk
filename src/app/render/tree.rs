@@ -1,5 +1,6 @@
 impl DiffViewer {
     fn render_tree(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
         let tree_summary = if self.repo_tree.loading && !self.repo_tree.rows.is_empty() {
             format!(
@@ -15,6 +16,30 @@ impl DiffViewer {
 
         v_flex()
             .size_full()
+            .relative()
+            .key_context("RepoTree")
+            .track_focus(&self.repo_tree_focus_handle)
+            .on_action(cx.listener(Self::repo_tree_new_file_action))
+            .on_action(cx.listener(Self::repo_tree_new_folder_action))
+            .on_action(cx.listener(Self::repo_tree_rename_file_action))
+            .on_mouse_down(MouseButton::Left, {
+                let view = view.clone();
+                move |_, window, cx| {
+                    view.update(cx, |this, cx| {
+                        this.repo_tree_focus_handle.focus(window, cx);
+                        this.close_repo_tree_context_menu(cx);
+                    });
+                }
+            })
+            .on_mouse_down(MouseButton::Right, {
+                let view = view.clone();
+                move |_, window, cx| {
+                    view.update(cx, |this, cx| {
+                        this.repo_tree_focus_handle.focus(window, cx);
+                        this.close_repo_tree_context_menu(cx);
+                    });
+                }
+            })
             .child(
                 h_flex()
                     .w_full()
@@ -39,6 +64,9 @@ impl DiffViewer {
                     ),
             )
             .child(div().flex_1().min_h_0().child(self.render_repo_tree_content(cx)))
+            .when_some(self.render_repo_tree_context_menu(cx), |this, menu| {
+                this.child(menu)
+            })
     }
 
     fn render_repo_tree_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -103,12 +131,292 @@ impl DiffViewer {
         })
         .with_sizing_behavior(ListSizingBehavior::Auto);
 
-        div()
+        v_flex()
             .size_full()
-            .overflow_y_scrollbar()
-            .px_1()
+            .when_some(self.render_repo_tree_inline_new_entry_row(cx), |this, inline_row| {
+                this.child(inline_row)
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scrollbar()
+                    .px_1()
+                    .py_1()
+                    .child(list),
+            )
+            .into_any_element()
+    }
+
+    fn render_repo_tree_inline_new_entry_row(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (base_dir, is_folder, input_state) = self.inline_repo_tree_new_entry()?;
+        let is_dark = cx.theme().mode.is_dark();
+        let depth = base_dir
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .map(|value| value.split('/').count())
+            .unwrap_or(0);
+        let location_hint = repo_tree_inline_location_hint(base_dir.as_deref());
+        let icon = if is_folder {
+            IconName::FolderClosed
+        } else {
+            IconName::File
+        };
+
+        Some(
+            v_flex()
+                .w_full()
+                .px_1()
+                .pt_1()
+                .child(
+                    h_flex()
+                        .w_full()
+                        .items_center()
+                        .gap_1()
+                        .px_1()
+                        .py_1()
+                        .rounded(px(6.0))
+                        .border_1()
+                        .border_color(cx.theme().accent.opacity(if is_dark { 0.74 } else { 0.56 }))
+                        .bg(cx.theme().accent.opacity(if is_dark { 0.16 } else { 0.10 }))
+                        .child(div().w(px(depth as f32 * 14.0)))
+                        .child(div().w(px(14.0)))
+                        .child(
+                            div().w(px(18.0)).child(
+                                Icon::new(icon)
+                                    .size(px(14.0))
+                                    .text_color(cx.theme().muted_foreground),
+                            ),
+                        )
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap_0p5()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(location_hint),
+                                )
+                                .child(
+                                    Input::new(&input_state)
+                                        .h(px(24.0))
+                                        .rounded(px(6.0))
+                                        .border_1()
+                                        .border_color(
+                                            cx.theme().border.opacity(if is_dark { 0.90 } else { 0.74 }),
+                                        )
+                                        .bg(cx.theme().background),
+                                ),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn render_repo_tree_context_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let menu_state = self.repo_tree_context_menu.as_ref()?.clone();
+        let view = cx.entity();
+        let is_dark = cx.theme().mode.is_dark();
+        let allow_manage = self.workspace_view_mode == WorkspaceViewMode::Files && self.repo_root.is_some();
+        let allow_rename = allow_manage && menu_state.target_kind == RepoTreeNodeKind::File;
+        let allow_delete = allow_manage && menu_state.target_kind == RepoTreeNodeKind::File;
+        let allow_collapse = !self.repo_tree.expanded_dirs.is_empty();
+
+        Some(
+            deferred(
+                anchored()
+                    .position(menu_state.position)
+                    .anchor(Corner::TopLeft)
+                    .snap_to_window_with_margin(px(8.0))
+                    .child(
+                        v_flex()
+                            .id("repo-tree-context-menu")
+                            .w(px(234.0))
+                            .p_1()
+                            .gap_0p5()
+                            .rounded(px(8.0))
+                            .border_1()
+                            .border_color(cx.theme().border.opacity(if is_dark { 0.92 } else { 0.74 }))
+                            .bg(cx.theme().popover)
+                            .shadow_none()
+                            .on_mouse_down_out({
+                                let view = view.clone();
+                                move |_, _, cx| {
+                                    view.update(cx, |this, cx| {
+                                        this.close_repo_tree_context_menu(cx);
+                                    });
+                                }
+                            })
+                            .child(
+                                self.render_repo_tree_context_menu_item(
+                                    "New File",
+                                    allow_manage,
+                                    {
+                                        let view = view.clone();
+                                        let target_path = menu_state.target_path.clone();
+                                        let target_kind = menu_state.target_kind;
+                                        move |window, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.close_repo_tree_context_menu(cx);
+                                                this.open_repo_tree_new_file_prompt_at(
+                                                    Some((target_path.clone(), target_kind)),
+                                                    window,
+                                                    cx,
+                                                );
+                                            });
+                                        }
+                                    },
+                                    cx,
+                                ),
+                            )
+                            .child(
+                                self.render_repo_tree_context_menu_item(
+                                    "New Folder",
+                                    allow_manage,
+                                    {
+                                        let view = view.clone();
+                                        let target_path = menu_state.target_path.clone();
+                                        let target_kind = menu_state.target_kind;
+                                        move |window, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.close_repo_tree_context_menu(cx);
+                                                this.open_repo_tree_new_folder_prompt_at(
+                                                    Some((target_path.clone(), target_kind)),
+                                                    window,
+                                                    cx,
+                                                );
+                                            });
+                                        }
+                                    },
+                                    cx,
+                                ),
+                            )
+                            .child(div().h(px(1.0)).mx_1().bg(cx.theme().border))
+                            .child(
+                                self.render_repo_tree_context_menu_item(
+                                    "Rename File",
+                                    allow_rename,
+                                    {
+                                        let view = view.clone();
+                                        let target_path = menu_state.target_path.clone();
+                                        move |window, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.close_repo_tree_context_menu(cx);
+                                                this.open_repo_tree_rename_prompt_for_file(
+                                                    target_path.clone(),
+                                                    window,
+                                                    cx,
+                                                );
+                                            });
+                                        }
+                                    },
+                                    cx,
+                                ),
+                            )
+                            .child(
+                                self.render_repo_tree_context_menu_item(
+                                    "Delete File",
+                                    allow_delete,
+                                    {
+                                        let view = view.clone();
+                                        let target_path = menu_state.target_path.clone();
+                                        move |_, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.close_repo_tree_context_menu(cx);
+                                                this.delete_repo_tree_file_at(target_path.as_str(), cx);
+                                            });
+                                        }
+                                    },
+                                    cx,
+                                ),
+                            )
+                            .child(div().h(px(1.0)).mx_1().bg(cx.theme().border))
+                            .child(
+                                self.render_repo_tree_context_menu_item(
+                                    "Copy Path",
+                                    true,
+                                    {
+                                        let view = view.clone();
+                                        let target_path = menu_state.target_path.clone();
+                                        move |_, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.close_repo_tree_context_menu(cx);
+                                                this.copy_repo_tree_absolute_path(target_path.as_str(), cx);
+                                            });
+                                        }
+                                    },
+                                    cx,
+                                ),
+                            )
+                            .child(
+                                self.render_repo_tree_context_menu_item(
+                                    "Copy Relative Path",
+                                    true,
+                                    {
+                                        let view = view.clone();
+                                        let target_path = menu_state.target_path.clone();
+                                        move |_, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.close_repo_tree_context_menu(cx);
+                                                this.copy_repo_tree_relative_path(target_path.as_str(), cx);
+                                            });
+                                        }
+                                    },
+                                    cx,
+                                ),
+                            )
+                            .child(div().h(px(1.0)).mx_1().bg(cx.theme().border))
+                            .child(
+                                self.render_repo_tree_context_menu_item(
+                                    "Collapse All Folders",
+                                    allow_collapse,
+                                    {
+                                        let view = view.clone();
+                                        move |_, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.close_repo_tree_context_menu(cx);
+                                                this.collapse_all_repo_tree_directories(cx);
+                                            });
+                                        }
+                                    },
+                                    cx,
+                                ),
+                            ),
+                    ),
+            )
+            .with_priority(1)
+            .into_any_element(),
+        )
+    }
+
+    fn render_repo_tree_context_menu_item(
+        &self,
+        label: &'static str,
+        enabled: bool,
+        on_click: impl Fn(&mut Window, &mut App) + 'static,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let text_color = if enabled {
+            cx.theme().popover_foreground
+        } else {
+            cx.theme().muted_foreground
+        };
+        div()
+            .w_full()
+            .px_2()
             .py_1()
-            .child(list)
+            .rounded(px(6.0))
+            .text_sm()
+            .text_color(text_color)
+            .when(enabled, |this| {
+                this.cursor_pointer()
+                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                        on_click(window, cx);
+                    })
+            })
+            .child(label)
             .into_any_element()
     }
 
@@ -206,6 +514,12 @@ impl DiffViewer {
         };
         let row_id = stable_row_id_for_path(row.path.as_str());
         let file_status = row.file_status;
+        let rename_input = self.inline_repo_tree_rename_input_for_path(row.path.as_str());
+        let rename_active = rename_input.is_some();
+        let path_for_click = row.path.clone();
+        let kind_for_click = row.kind;
+        let menu_target_path = row.path.clone();
+        let menu_target_kind = row.kind;
 
         h_flex()
             .id(("repo-tree-row", row_id))
@@ -249,27 +563,54 @@ impl DiffViewer {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .text_xs()
-                    .truncate()
-                    .text_color(text_color)
-                    .child(row.name.clone()),
+                    .when_some(rename_input.clone(), |this, input_state| {
+                        this.child(
+                            Input::new(&input_state)
+                                .h(px(22.0))
+                                .rounded(px(6.0))
+                                .border_1()
+                                .border_color(cx.theme().accent.opacity(if is_dark { 0.78 } else { 0.62 }))
+                                .bg(cx.theme().background),
+                        )
+                    })
+                    .when(rename_input.is_none(), |this| {
+                        this.text_xs()
+                            .truncate()
+                            .text_color(text_color)
+                            .child(row.name.clone())
+                    }),
             )
-            .on_click({
+            .on_mouse_down(MouseButton::Right, {
                 let view = view.clone();
-                let path = row.path.clone();
-                let kind = row.kind;
-                move |_, window, cx| {
-                    view.update(cx, |this, cx| match kind {
-                        RepoTreeNodeKind::Directory => {
-                            this.toggle_repo_tree_directory(path.clone(), cx);
-                            this.focus_handle.focus(window);
-                        }
-                        RepoTreeNodeKind::File => {
-                            this.select_repo_tree_file(path.clone(), cx);
-                            this.focus_handle.focus(window);
-                        }
+                move |event, window, cx| {
+                    cx.stop_propagation();
+                    view.update(cx, |this, cx| {
+                        this.repo_tree_focus_handle.focus(window, cx);
+                        this.open_repo_tree_context_menu(
+                            menu_target_path.clone(),
+                            menu_target_kind,
+                            event.position,
+                            cx,
+                        );
                     });
                 }
+            })
+            .when(!rename_active, |this| {
+                this.on_click({
+                    let view = view.clone();
+                    move |_, window, cx| {
+                        view.update(cx, |this, cx| match kind_for_click {
+                            RepoTreeNodeKind::Directory => {
+                                this.toggle_repo_tree_directory(path_for_click.clone(), cx);
+                                this.repo_tree_focus_handle.focus(window, cx);
+                            }
+                            RepoTreeNodeKind::File => {
+                                this.select_repo_tree_file(path_for_click.clone(), cx);
+                                this.repo_tree_focus_handle.focus(window, cx);
+                            }
+                        });
+                    }
+                })
             })
             .into_any_element()
     }
@@ -300,5 +641,12 @@ fn file_icon_for_path(path: &str) -> IconName {
         }
         Some("md") => IconName::BookOpen,
         _ => IconName::File,
+    }
+}
+
+fn repo_tree_inline_location_hint(base_dir: Option<&str>) -> String {
+    match base_dir {
+        Some(path) => format!("Target directory: `{path}`"),
+        None => "Target directory: repository root".to_string(),
     }
 }

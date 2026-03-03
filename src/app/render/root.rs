@@ -103,6 +103,7 @@ impl DiffViewer {
 
         div()
             .size_full()
+            .min_h_0()
             .pb(px(APP_BOTTOM_SAFE_INSET))
             .child(self.render_jj_workspace_graph_shell(cx))
             .into_any_element()
@@ -160,7 +161,7 @@ impl DiffViewer {
                                 .on_click(move |_, window, cx| {
                                     view.update(cx, |this, cx| {
                                         this.toggle_sidebar_tree(cx);
-                                        this.focus_handle.focus(window);
+                                        this.focus_handle.focus(window, cx);
                                     });
                                 });
                             if self.sidebar_collapsed {
@@ -183,7 +184,7 @@ impl DiffViewer {
                             .on_click(move |_, window, cx| {
                                 view.update(cx, |this, cx| {
                                     this.set_workspace_view_mode(WorkspaceViewMode::Files, cx);
-                                    this.focus_handle.focus(window);
+                                    this.focus_handle.focus(window, cx);
                                 });
                             });
                         if files_selected {
@@ -205,7 +206,7 @@ impl DiffViewer {
                             .on_click(move |_, window, cx| {
                                 view.update(cx, |this, cx| {
                                     this.set_workspace_view_mode(WorkspaceViewMode::Diff, cx);
-                                    this.focus_handle.focus(window);
+                                    this.focus_handle.focus(window, cx);
                                 });
                             });
                         if diff_selected {
@@ -230,7 +231,7 @@ impl DiffViewer {
                                         WorkspaceViewMode::JjWorkspace,
                                         cx,
                                     );
-                                    this.focus_handle.focus(window);
+                                    this.focus_handle.focus(window, cx);
                                 });
                             });
                         if jj_selected {
