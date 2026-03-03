@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
 use jj_lib::object_id::ObjectId;
-use jj_lib::ref_name::RefName;
+use jj_lib::ref_name::{RefName, WorkspaceName};
 use jj_lib::repo::Repo as _;
 use tracing::warn;
 
@@ -19,12 +19,14 @@ use backend::{
     checkout_existing_bookmark, checkout_existing_bookmark_with_change_transfer,
     collect_materialized_diff_entries_for_paths, commit_working_copy_changes,
     commit_working_copy_selected_paths, conflict_materialize_options,
-    create_bookmark_at_working_copy, current_bookmarks_from_context,
-    current_commit_id_from_context, describe_bookmark_head as describe_local_bookmark_head,
-    discover_repo_root, git_head_branch_name_from_context, last_commit_subject_from_context,
-    list_bookmark_revisions_from_context, list_local_branches_from_context,
-    load_changed_files_from_context, load_repo_context, load_repo_context_at_root,
-    load_tracked_paths_from_context, materialized_entry_matches_path,
+    create_bookmark_at_working_copy,
+    create_workspace_at_revision as create_workspace_at_revision_in_context,
+    current_bookmarks_from_context, current_commit_id_from_context,
+    describe_bookmark_head as describe_local_bookmark_head, discover_repo_root,
+    forget_workspace as forget_workspace_in_context, git_head_branch_name_from_context,
+    last_commit_subject_from_context, list_bookmark_revisions_from_context,
+    list_local_branches_from_context, load_changed_files_from_context, load_repo_context,
+    load_repo_context_at_root, load_tracked_paths_from_context, materialized_entry_matches_path,
     move_bookmark_to_parent_of_working_copy, normalize_path, push_bookmark,
     redo_last_operation as redo_last_operation_in_context,
     rename_bookmark as rename_local_bookmark, render_patch_for_entry,
@@ -35,7 +37,7 @@ use backend::{
     set_local_bookmark_target_revision,
     squash_bookmark_head_into_parent as squash_local_bookmark_head_into_parent,
     sync_bookmark_from_remote, undo_last_operation as undo_last_operation_in_context,
-    walk_repo_tree,
+    walk_repo_tree, workspace_root_from_store,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,11 +141,25 @@ pub struct GraphBookmarkRef {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphWorkspaceRef {
+    pub name: String,
+    pub is_current: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphWorkspaceState {
+    pub name: String,
+    pub commit_id: String,
+    pub is_current: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphNode {
     pub id: String,
     pub subject: String,
     pub unix_time: i64,
     pub bookmarks: Vec<GraphBookmarkRef>,
+    pub workspaces: Vec<GraphWorkspaceRef>,
     pub is_working_copy_parent: bool,
     pub is_active_bookmark_target: bool,
 }
@@ -175,12 +191,29 @@ impl Default for GraphSnapshotOptions {
 pub struct GraphSnapshot {
     pub root: PathBuf,
     pub active_bookmark: Option<String>,
+    pub current_workspace_name: String,
+    pub workspaces: Vec<GraphWorkspaceState>,
     pub working_copy_commit_id: String,
     pub working_copy_parent_commit_id: Option<String>,
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
     pub has_more: bool,
     pub next_offset: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceSwitchTarget {
+    pub name: String,
+    pub root: PathBuf,
+    pub commit_id: String,
+    pub is_current: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceCreationResult {
+    pub name: String,
+    pub root: PathBuf,
+    pub commit_id: String,
 }
 
 pub fn graph_bookmark_revision_chain(
@@ -572,6 +605,103 @@ pub fn checkout_or_create_bookmark(repo_root: &Path, bookmark_name: &str) -> Res
     checkout_or_create_bookmark_with_change_transfer(repo_root, bookmark_name, false)
 }
 
+pub fn resolve_workspace_switch_target(
+    repo_root: &Path,
+    workspace_name: &str,
+) -> Result<WorkspaceSwitchTarget> {
+    let workspace_name = workspace_name.trim();
+    if workspace_name.is_empty() {
+        return Err(anyhow!("workspace name cannot be empty"));
+    }
+
+    let context = load_repo_context_at_root(repo_root, false)?;
+    let workspace_ref = WorkspaceName::new(workspace_name);
+    let Some(target_commit_id) = context.repo.view().get_wc_commit_id(workspace_ref).cloned()
+    else {
+        return Err(anyhow!(
+            "workspace '{workspace_name}' does not exist in this repository view"
+        ));
+    };
+
+    let is_current = context.workspace.workspace_name().as_str() == workspace_name;
+    let stored_root = workspace_root_from_store(&context, workspace_ref)?;
+    let workspace_root = match stored_root {
+        Some(stored_root) => resolve_workspace_root_path_candidates(
+            context.root.as_path(),
+            context.workspace.repo_path(),
+            workspace_name,
+            stored_root.as_path(),
+        )
+        .or_else(|| {
+            discover_workspace_root_from_nearby_workspaces(
+                context.root.as_path(),
+                context.workspace.repo_path(),
+                workspace_name,
+            )
+        }),
+        None => discover_workspace_root_from_nearby_workspaces(
+            context.root.as_path(),
+            context.workspace.repo_path(),
+            workspace_name,
+        ),
+    }
+    .or_else(|| is_current.then_some(context.root.clone()))
+    .ok_or_else(|| {
+        anyhow!(
+            "workspace '{workspace_name}' has no accessible root path; run `jj workspace list` and update stale workspace metadata"
+        )
+    })?;
+
+    Ok(WorkspaceSwitchTarget {
+        name: workspace_name.to_string(),
+        root: workspace_root,
+        commit_id: target_commit_id.hex(),
+        is_current,
+    })
+}
+
+pub fn create_workspace_at_revision(
+    repo_root: &Path,
+    workspace_name: &str,
+    revision_id: &str,
+    workspace_root: &Path,
+) -> Result<WorkspaceCreationResult> {
+    let workspace_name = workspace_name.trim();
+    if workspace_name.is_empty() {
+        return Err(anyhow!("workspace name cannot be empty"));
+    }
+    let revision_id = revision_id.trim();
+    if revision_id.is_empty() {
+        return Err(anyhow!("revision id cannot be empty"));
+    }
+
+    let mut context = load_repo_context_at_root(repo_root, false)?;
+    let commit_id = create_workspace_at_revision_in_context(
+        &mut context,
+        workspace_name,
+        revision_id,
+        workspace_root,
+    )?;
+    let resolved_root =
+        fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
+
+    Ok(WorkspaceCreationResult {
+        name: workspace_name.to_string(),
+        root: resolved_root,
+        commit_id,
+    })
+}
+
+pub fn forget_workspace(repo_root: &Path, workspace_name: &str) -> Result<()> {
+    let workspace_name = workspace_name.trim();
+    if workspace_name.is_empty() {
+        return Err(anyhow!("workspace name cannot be empty"));
+    }
+
+    let mut context = load_repo_context_at_root(repo_root, false)?;
+    forget_workspace_in_context(&mut context, workspace_name)
+}
+
 pub fn restore_working_copy_from_revision(
     repo_root: &Path,
     source_revision_id: &str,
@@ -814,6 +944,7 @@ pub fn checkout_or_create_bookmark_with_change_transfer(
                     move_bookmark_to_parent_of_working_copy(&mut context, bookmark.as_str())?;
                 }
             }
+            move_bookmark_to_parent_of_working_copy(&mut context, bookmark_name)?;
         } else {
             move_bookmark_to_parent_of_working_copy(&mut context, bookmark_name)?;
         }
@@ -847,6 +978,87 @@ pub fn sync_current_bookmark(repo_root: &Path, bookmark_name: &str) -> Result<()
 
     let mut context = load_repo_context_at_root(repo_root, true)?;
     sync_bookmark_from_remote(&mut context, bookmark_name)
+}
+
+fn resolve_workspace_root_path_candidates(
+    current_workspace_root: &Path,
+    repo_path: &Path,
+    workspace_name: &str,
+    stored_root: &Path,
+) -> Option<PathBuf> {
+    let canonical_repo_path =
+        fs::canonicalize(repo_path).unwrap_or_else(|_| repo_path.to_path_buf());
+    let candidates = if stored_root.is_absolute() {
+        vec![stored_root.to_path_buf()]
+    } else {
+        let mut candidates = vec![
+            current_workspace_root.join(stored_root),
+            repo_path.join(stored_root),
+        ];
+        if let Some(repo_parent) = repo_path.parent() {
+            candidates.push(repo_parent.join(stored_root));
+        }
+        candidates.push(stored_root.to_path_buf());
+        candidates
+    };
+
+    candidates.into_iter().find_map(|candidate| {
+        workspace_root_if_matches_target(
+            candidate.as_path(),
+            canonical_repo_path.as_path(),
+            workspace_name,
+        )
+    })
+}
+
+fn discover_workspace_root_from_nearby_workspaces(
+    current_workspace_root: &Path,
+    repo_path: &Path,
+    workspace_name: &str,
+) -> Option<PathBuf> {
+    let canonical_repo_path =
+        fs::canonicalize(repo_path).unwrap_or_else(|_| repo_path.to_path_buf());
+    let mut candidate_roots = vec![current_workspace_root.to_path_buf()];
+    if let Some(parent_dir) = current_workspace_root.parent()
+        && let Ok(entries) = fs::read_dir(parent_dir)
+    {
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.is_dir() {
+                candidate_roots.push(path);
+            }
+        }
+    }
+
+    candidate_roots.into_iter().find_map(|candidate_root| {
+        workspace_root_if_matches_target(
+            candidate_root.as_path(),
+            canonical_repo_path.as_path(),
+            workspace_name,
+        )
+    })
+}
+
+fn workspace_root_if_matches_target(
+    candidate_root: &Path,
+    canonical_repo_path: &Path,
+    workspace_name: &str,
+) -> Option<PathBuf> {
+    if !candidate_root.join(".jj").is_dir() {
+        return None;
+    }
+    let Ok(candidate_context) = load_repo_context_at_root(candidate_root, false) else {
+        return None;
+    };
+    let candidate_repo_path = fs::canonicalize(candidate_context.workspace.repo_path())
+        .unwrap_or_else(|_| candidate_context.workspace.repo_path().to_path_buf());
+    if candidate_repo_path != canonical_repo_path {
+        return None;
+    }
+    if candidate_context.workspace.workspace_name().as_str() != workspace_name {
+        return None;
+    }
+    Some(candidate_context.root)
 }
 
 pub fn sanitize_bookmark_name(input: &str) -> String {

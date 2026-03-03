@@ -109,19 +109,11 @@ impl DiffViewer {
         self.active_comment_editor_row = self.active_comment_editor_row.map(|ix| ix.min(max_ix));
     }
 
-    fn comment_scope_repo_root(&self) -> Option<String> {
-        self.repo_root
-            .as_ref()
-            .map(|path| path.to_string_lossy().to_string())
-    }
-
-    fn comment_scope_bookmark_name(&self) -> String {
-        let name = self.branch_name.trim();
-        if name.is_empty() || name == "unknown" {
-            "detached".to_string()
-        } else {
-            name.to_string()
-        }
+    fn comment_scope_fields(&self) -> Option<(String, String)> {
+        let context = self.workspace_execution_context.as_ref()?;
+        let repo_root = context.workspace_root.to_string_lossy().to_string();
+        let bookmark_name = Self::workspace_context_comment_bookmark_key(context);
+        Some((repo_root, bookmark_name))
     }
 
     fn refresh_comments_cache_from_store(&mut self) {
@@ -130,12 +122,11 @@ impl DiffViewer {
             self.reset_comment_row_match_cache();
             return;
         };
-        let Some(repo_root) = self.comment_scope_repo_root() else {
+        let Some((repo_root, bookmark_name)) = self.comment_scope_fields() else {
             self.comments_cache.clear();
             self.reset_comment_row_match_cache();
             return;
         };
-        let bookmark_name = self.comment_scope_bookmark_name();
 
         match store.list_comments(repo_root.as_str(), bookmark_name.as_str(), true) {
             Ok(records) => {
@@ -329,7 +320,7 @@ impl DiffViewer {
             cx.notify();
             return;
         };
-        let Some(repo_root) = self.comment_scope_repo_root() else {
+        let Some((repo_root, bookmark_name)) = self.comment_scope_fields() else {
             self.comment_status_message = Some("No repository is open.".to_string());
             cx.notify();
             return;
@@ -337,7 +328,7 @@ impl DiffViewer {
 
         let input = NewComment {
             repo_root,
-            bookmark_name: self.comment_scope_bookmark_name(),
+            bookmark_name,
             created_head_commit: None,
             file_path: anchor.file_path,
             line_side: anchor.line_side,

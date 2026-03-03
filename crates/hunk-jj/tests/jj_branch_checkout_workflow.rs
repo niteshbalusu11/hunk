@@ -104,9 +104,9 @@ fn creating_bookmark_can_move_uncommitted_changes_off_current_bookmark() {
         .and_then(|line| line.split_whitespace().nth(2))
         .expect("feature target commit should be listed")
         .to_string();
-    assert_ne!(
+    assert_eq!(
         main_target, feature_target,
-        "moving changes should leave main and feature on different commits"
+        "creating a bookmark while moving changes should keep both bookmarks on the same committed parent"
     );
 }
 

@@ -4,6 +4,33 @@ impl DiffViewer {
         self.set_graph_selected_node(node_id, false, cx);
     }
 
+    pub(super) fn select_graph_workspace(
+        &mut self,
+        node_id: String,
+        name: String,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.graph_nodes.iter().any(|node| node.id == node_id) {
+            return;
+        }
+        if !self
+            .graph_workspaces
+            .iter()
+            .any(|workspace| workspace.name == name)
+        {
+            return;
+        }
+        self.graph_selected_node_id = Some(node_id.clone());
+        self.graph_selected_workspace = Some(GraphWorkspaceSelection { name });
+        self.graph_selected_bookmark = None;
+        self.graph_pending_confirmation = None;
+        self.pending_workspace_switch = None;
+        self.pending_workspace_forget = None;
+        self.graph_right_panel_mode = GraphRightPanelMode::ActiveWorkflow;
+        self.scroll_graph_node_into_view(node_id.as_str());
+        cx.notify();
+    }
+
     pub(super) fn select_graph_bookmark(
         &mut self,
         node_id: String,
@@ -21,7 +48,10 @@ impl DiffViewer {
             remote,
             scope,
         });
+        self.graph_selected_workspace = None;
         self.graph_pending_confirmation = None;
+        self.pending_workspace_switch = None;
+        self.pending_workspace_forget = None;
         self.graph_right_panel_mode = GraphRightPanelMode::SelectedBookmark;
         self.scroll_graph_node_into_view(node_id.as_str());
         cx.notify();
@@ -69,7 +99,10 @@ impl DiffViewer {
             remote: bookmark_remote,
             scope: bookmark_scope,
         });
+        self.graph_selected_workspace = None;
         self.graph_pending_confirmation = None;
+        self.pending_workspace_switch = None;
+        self.pending_workspace_forget = None;
         self.graph_right_panel_mode = GraphRightPanelMode::SelectedBookmark;
         self.scroll_graph_node_into_view(node_id.as_str());
         cx.notify();
@@ -80,7 +113,10 @@ impl DiffViewer {
             return;
         }
         self.graph_selected_bookmark = None;
+        self.graph_selected_workspace = None;
         self.graph_pending_confirmation = None;
+        self.pending_workspace_switch = None;
+        self.pending_workspace_forget = None;
         self.graph_right_panel_mode = GraphRightPanelMode::ActiveWorkflow;
         cx.notify();
     }
@@ -134,6 +170,13 @@ impl DiffViewer {
             .iter()
             .flat_map(|node| node.bookmarks.iter())
             .find(|bookmark| Self::graph_bookmark_matches_selection(bookmark, selected))
+    }
+
+    pub(super) fn graph_selected_workspace_state(&self) -> Option<&GraphWorkspaceState> {
+        let selected = self.graph_selected_workspace.as_ref()?;
+        self.graph_workspaces
+            .iter()
+            .find(|workspace| Self::graph_workspace_matches_selection(workspace, selected))
     }
 
     pub(super) fn graph_node_is_selected(&self, node_id: &str) -> bool {
@@ -201,6 +244,13 @@ impl DiffViewer {
         &mut self,
         cx: &mut Context<Self>,
     ) {
+        if let Some(reason) = self.graph_bookmark_mutation_blocker() {
+            let reason = reason.to_string();
+            self.git_status_message = Some(reason.clone());
+            Self::push_warning_notification(reason, cx);
+            cx.notify();
+            return;
+        }
         let Some(selected_node_id) = self.graph_selected_node_id.clone() else {
             self.git_status_message = Some("Select a revision before creating a bookmark.".to_string());
             Self::push_warning_notification(
@@ -243,6 +293,13 @@ impl DiffViewer {
         &mut self,
         cx: &mut Context<Self>,
     ) {
+        if let Some(reason) = self.graph_bookmark_mutation_blocker() {
+            let reason = reason.to_string();
+            self.git_status_message = Some(reason.clone());
+            Self::push_warning_notification(reason, cx);
+            cx.notify();
+            return;
+        }
         let Some(selected_node_id) = self.graph_selected_node_id.clone() else {
             self.git_status_message = Some("Select a revision before forking a bookmark.".to_string());
             Self::push_warning_notification(
@@ -296,6 +353,13 @@ impl DiffViewer {
         &mut self,
         cx: &mut Context<Self>,
     ) {
+        if let Some(reason) = self.graph_bookmark_mutation_blocker() {
+            let reason = reason.to_string();
+            self.git_status_message = Some(reason.clone());
+            Self::push_warning_notification(reason, cx);
+            cx.notify();
+            return;
+        }
         let Some(selected_bookmark) = self.graph_selected_bookmark.clone() else {
             self.git_status_message = Some("Select a bookmark before renaming.".to_string());
             Self::push_warning_notification("Select a bookmark before renaming.".to_string(), cx);
@@ -340,6 +404,13 @@ impl DiffViewer {
         &mut self,
         cx: &mut Context<Self>,
     ) {
+        if let Some(reason) = self.graph_bookmark_mutation_blocker() {
+            let reason = reason.to_string();
+            self.git_status_message = Some(reason.clone());
+            Self::push_warning_notification(reason, cx);
+            cx.notify();
+            return;
+        }
         let Some(selected_bookmark) = self.graph_selected_bookmark.clone() else {
             self.git_status_message = Some("Select a bookmark before moving it.".to_string());
             Self::push_warning_notification("Select a bookmark before moving it.".to_string(), cx);
@@ -374,6 +445,13 @@ impl DiffViewer {
     }
 
     pub(super) fn confirm_graph_pending_confirmation(&mut self, cx: &mut Context<Self>) {
+        if let Some(reason) = self.graph_bookmark_mutation_blocker() {
+            let reason = reason.to_string();
+            self.git_status_message = Some(reason.clone());
+            Self::push_warning_notification(reason, cx);
+            cx.notify();
+            return;
+        }
         let Some(pending) = self.graph_pending_confirmation.clone() else {
             return;
         };
@@ -403,6 +481,57 @@ impl DiffViewer {
             target_node_id,
         } = self.graph_pending_confirmation.as_ref()?;
         Some((bookmark.name.as_str(), target_node_id.as_str()))
+    }
+
+    pub(super) fn copy_selected_graph_workspace_name(&mut self, cx: &mut Context<Self>) {
+        let Some(workspace_name) = self
+            .graph_selected_workspace_state()
+            .map(|workspace| workspace.name.clone())
+        else {
+            let message = "Select a workspace chip before copying workspace name.".to_string();
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
+            cx.notify();
+            return;
+        };
+        cx.write_to_clipboard(ClipboardItem::new_string(workspace_name.clone()));
+        self.git_status_message = Some(format!("Copied workspace name {}@", workspace_name));
+        cx.notify();
+    }
+
+    pub(super) fn focus_selected_graph_workspace_commit(&mut self, cx: &mut Context<Self>) {
+        let Some((workspace_name, target_node_id)) = self
+            .graph_selected_workspace_state()
+            .map(|workspace| (workspace.name.clone(), workspace.commit_id.clone()))
+        else {
+            let message = "Select a workspace chip before focusing workspace commit.".to_string();
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
+            cx.notify();
+            return;
+        };
+        if !self.graph_nodes.iter().any(|node| node.id == target_node_id) {
+            let message = format!(
+                "Workspace {}@ commit is outside the current graph window. Refresh or load more history.",
+                workspace_name
+            );
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, cx);
+            cx.notify();
+            return;
+        }
+
+        self.graph_selected_bookmark = None;
+        self.graph_pending_confirmation = None;
+        self.graph_right_panel_mode = GraphRightPanelMode::ActiveWorkflow;
+        self.graph_selected_node_id = Some(target_node_id.clone());
+        self.scroll_graph_node_into_view(target_node_id.as_str());
+        self.git_status_message = Some(format!(
+            "Focused workspace {}@ at {}",
+            workspace_name,
+            target_node_id.chars().take(12).collect::<String>()
+        ));
+        cx.notify();
     }
 
     fn arm_move_graph_bookmark_to_target(
@@ -535,6 +664,54 @@ impl DiffViewer {
         None
     }
 
+    fn graph_workspace_matches_selection(
+        workspace: &GraphWorkspaceState,
+        selected: &GraphWorkspaceSelection,
+    ) -> bool {
+        workspace.name == selected.name
+    }
+
+    fn graph_workspace_exists(&self, selected: &GraphWorkspaceSelection) -> bool {
+        self.graph_workspaces
+            .iter()
+            .any(|workspace| Self::graph_workspace_matches_selection(workspace, selected))
+    }
+
+    pub(super) fn graph_workspace_focus_inspect_only_reason() -> &'static str {
+        "Workspace focus is inspect-only right now. Clear workspace focus before bookmark mutations."
+    }
+
+    fn graph_workspace_inspect_only_blocker_for_selection(
+        has_selected_workspace: bool,
+    ) -> Option<&'static str> {
+        if has_selected_workspace {
+            Some(Self::graph_workspace_focus_inspect_only_reason())
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn graph_workspace_inspect_only_blocker(&self) -> Option<&'static str> {
+        Self::graph_workspace_inspect_only_blocker_for_selection(
+            self.graph_selected_workspace.is_some(),
+        )
+    }
+
+    fn graph_bookmark_mutation_blocker(&self) -> Option<&'static str> {
+        self.graph_workspace_inspect_only_blocker()
+    }
+
+    fn reconciled_graph_right_panel_mode(
+        mode: GraphRightPanelMode,
+        has_selected_bookmark: bool,
+    ) -> GraphRightPanelMode {
+        if mode == GraphRightPanelMode::SelectedBookmark && !has_selected_bookmark {
+            GraphRightPanelMode::ActiveWorkflow
+        } else {
+            mode
+        }
+    }
+
     fn reconcile_graph_selection_after_snapshot(&mut self) {
         self.graph_selected_node_id = self
             .graph_selected_node_id
@@ -547,6 +724,11 @@ impl DiffViewer {
             .graph_selected_bookmark
             .take()
             .filter(|selected| self.graph_bookmark_exists(selected));
+
+        self.graph_selected_workspace = self
+            .graph_selected_workspace
+            .take()
+            .filter(|selected| self.graph_workspace_exists(selected));
 
         self.graph_pending_confirmation =
             self.graph_pending_confirmation
@@ -561,6 +743,19 @@ impl DiffViewer {
                             && self.graph_nodes.iter().any(|node| node.id == *target_node_id)
                     }
                 });
+
+        if self.graph_selected_workspace.is_some() {
+            self.graph_pending_confirmation = None;
+        }
+
+        if let Some(pending_forget) = self.pending_workspace_forget.as_ref()
+            && !self
+                .graph_workspaces
+                .iter()
+                .any(|workspace| workspace.name == pending_forget.workspace_name)
+        {
+            self.pending_workspace_forget = None;
+        }
 
         if self.graph_selected_bookmark.is_some() {
             let focused_ids = self.graph_focused_revision_ids();
@@ -579,10 +774,57 @@ impl DiffViewer {
             }
         }
 
-        if self.graph_right_panel_mode == GraphRightPanelMode::SelectedBookmark
-            && self.graph_selected_bookmark.is_none()
-        {
-            self.graph_right_panel_mode = GraphRightPanelMode::ActiveWorkflow;
+        if self.graph_selected_bookmark.is_some() {
+            self.graph_selected_workspace = None;
         }
+
+        self.graph_right_panel_mode = Self::reconciled_graph_right_panel_mode(
+            self.graph_right_panel_mode,
+            self.graph_selected_bookmark.is_some(),
+        );
+    }
+}
+
+#[cfg(test)]
+mod jj_graph_tests {
+    use super::*;
+
+    #[test]
+    fn graph_workspace_matches_selection_by_name() {
+        let workspace = GraphWorkspaceState {
+            name: "ws2".to_string(),
+            commit_id: "abc".to_string(),
+            is_current: false,
+        };
+        let selected = GraphWorkspaceSelection {
+            name: "ws2".to_string(),
+        };
+        assert!(DiffViewer::graph_workspace_matches_selection(
+            &workspace, &selected
+        ));
+    }
+
+    #[test]
+    fn selected_bookmark_mode_falls_back_to_active_when_bookmark_missing() {
+        let reconciled = DiffViewer::reconciled_graph_right_panel_mode(
+            GraphRightPanelMode::SelectedBookmark,
+            false,
+        );
+        assert_eq!(reconciled, GraphRightPanelMode::ActiveWorkflow);
+    }
+
+    #[test]
+    fn workspace_focus_reason_mentions_inspect_only_guard() {
+        let reason = DiffViewer::graph_workspace_focus_inspect_only_reason();
+        assert!(reason.contains("inspect-only"));
+        assert!(reason.contains("bookmark"));
+    }
+
+    #[test]
+    fn workspace_selection_blocks_bookmark_mutation_actions() {
+        assert!(DiffViewer::graph_workspace_inspect_only_blocker_for_selection(true).is_some());
+        assert!(
+            DiffViewer::graph_workspace_inspect_only_blocker_for_selection(false).is_none()
+        );
     }
 }

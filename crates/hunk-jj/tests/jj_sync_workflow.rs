@@ -4,8 +4,8 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use hunk_jj::jj::{
-    checkout_or_create_bookmark, commit_staged, load_snapshot, push_current_bookmark,
-    sync_current_bookmark,
+    checkout_or_create_bookmark, checkout_or_create_bookmark_with_change_transfer, commit_staged,
+    load_snapshot, push_current_bookmark, sync_current_bookmark,
 };
 
 #[test]
@@ -102,6 +102,50 @@ fn sync_prefers_present_untracked_remote_over_origin_fallback() {
         snapshot.last_commit_subject.as_deref(),
         Some("peer upstream update"),
         "sync should update master from upstream remote, not origin fallback"
+    );
+}
+
+#[test]
+fn publishing_new_bookmark_with_moved_uncommitted_changes_succeeds() {
+    let fixture = SyncFixture::new("publish-new-bookmark-with-moved-changes");
+
+    checkout_or_create_bookmark(fixture.local_path(), "master")
+        .expect("master bookmark should be created in local repo");
+    let tracked_local = fixture.local_path().join("tracked.txt");
+    write_file(tracked_local, "line one\n");
+    commit_staged(fixture.local_path(), "initial commit").expect("initial commit should succeed");
+
+    write_file(
+        fixture.local_path().join("docs").join("new.md"),
+        "new docs\n",
+    );
+    checkout_or_create_bookmark_with_change_transfer(fixture.local_path(), "feature/docs", true)
+        .expect("creating feature bookmark with moved changes should succeed");
+
+    let before_publish = load_snapshot(fixture.local_path())
+        .expect("snapshot should load after moving changes to feature bookmark");
+    assert_eq!(before_publish.branch_name, "feature/docs");
+    assert!(
+        !before_publish.branch_has_upstream,
+        "new bookmark should be unpublished before first push"
+    );
+    assert!(
+        before_publish
+            .files
+            .iter()
+            .any(|file| file.path == "docs/new.md"),
+        "moved uncommitted changes should remain in the working copy"
+    );
+
+    push_current_bookmark(fixture.local_path(), "feature/docs", false)
+        .expect("publishing feature bookmark should succeed with moved changes");
+
+    let after_publish =
+        load_snapshot(fixture.local_path()).expect("snapshot should load after publish");
+    assert_eq!(after_publish.branch_name, "feature/docs");
+    assert!(
+        after_publish.branch_has_upstream,
+        "bookmark should be marked as published after push"
     );
 }
 

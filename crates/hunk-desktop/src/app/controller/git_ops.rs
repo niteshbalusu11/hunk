@@ -322,7 +322,6 @@ impl DiffViewer {
     pub(super) fn can_publish_current_bookmark(&self) -> bool {
         self.can_run_active_bookmark_actions()
             && !self.branch_has_upstream
-            && self.tracking_area_clean()
             && !self.git_action_loading
     }
 
@@ -491,13 +490,6 @@ impl DiffViewer {
     pub(super) fn publish_current_bookmark(&mut self, cx: &mut Context<Self>) {
         if !self.can_run_active_bookmark_actions() {
             let message = "Activate a bookmark before publishing.".to_string();
-            self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, cx);
-            cx.notify();
-            return;
-        }
-        if !self.tracking_area_clean() {
-            let message = "Commit or discard working-copy changes before publishing.".to_string();
             self.git_status_message = Some(message.clone());
             Self::push_warning_notification(message, cx);
             cx.notify();
