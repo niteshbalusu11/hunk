@@ -6,7 +6,7 @@ use hunk_codex::state::TurnStatus;
 use hunk_domain::state::AppState;
 
 impl DiffViewer {
-    const AI_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(80);
+    const AI_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(33);
 
     pub(super) fn ensure_ai_runtime_started(&mut self, cx: &mut Context<Self>) {
         if self.ai_command_tx.is_some() {
@@ -324,6 +324,22 @@ impl DiffViewer {
         self.ai_selected_thread_id = Some(thread_id.clone());
         self.sync_ai_session_selection_from_state();
         self.send_ai_worker_command(AiWorkerCommand::SelectThread { thread_id }, cx);
+        cx.notify();
+    }
+
+    pub(super) fn ai_copy_thread_id_action(
+        &mut self,
+        thread_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(thread_id.clone()));
+        let message = format!("Copied thread ID: {thread_id}");
+        gpui_component::WindowExt::push_notification(
+            window,
+            gpui_component::notification::Notification::success(message),
+            cx,
+        );
         cx.notify();
     }
 

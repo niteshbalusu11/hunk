@@ -63,8 +63,10 @@ use crate::app::ai_rollout_fallback::find_rollout_path_for_thread;
 use crate::app::ai_rollout_fallback::parse_rollout_fallback;
 
 const HOST_START_TIMEOUT: Duration = Duration::from_secs(10);
-const POLL_INTERVAL: Duration = Duration::from_millis(100);
-const NOTIFICATION_POLL_TIMEOUT: Duration = Duration::from_millis(25);
+const COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(20);
+const NOTIFICATION_POLL_TIMEOUT: Duration = Duration::from_millis(20);
+const NOTIFICATION_DRAIN_TIMEOUT: Duration = Duration::from_millis(2);
+const MAX_NOTIFICATIONS_PER_POLL: usize = 256;
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -310,7 +312,7 @@ fn run_ai_worker(
     runtime.emit_snapshot_after_sync(event_tx)?;
 
     loop {
-        match command_rx.recv_timeout(POLL_INTERVAL) {
+        match command_rx.recv_timeout(COMMAND_POLL_INTERVAL) {
             Ok(command) => {
                 if let Err(error) = runtime.handle_command(command, event_tx) {
                     let _ = event_tx.send(AiWorkerEvent::Error(error.to_string()));
@@ -917,9 +919,20 @@ impl AiWorkerRuntime {
         &mut self,
         event_tx: &Sender<AiWorkerEvent>,
     ) -> Result<(), CodexIntegrationError> {
-        let captured = self
+        let mut captured = self
             .session
             .poll_server_notifications(NOTIFICATION_POLL_TIMEOUT)?;
+        if captured > 0 {
+            for _ in 1..MAX_NOTIFICATIONS_PER_POLL {
+                let drained = self
+                    .session
+                    .poll_server_notifications(NOTIFICATION_DRAIN_TIMEOUT)?;
+                if drained == 0 {
+                    break;
+                }
+                captured += drained;
+            }
+        }
         let mut notifications = Vec::new();
         if captured > 0 {
             notifications = self

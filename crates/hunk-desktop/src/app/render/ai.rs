@@ -372,7 +372,7 @@ impl DiffViewer {
                                                     h_flex()
                                                         .w_full()
                                                         .items_center()
-                                                        .justify_between()
+                                                        .gap_1()
                                                         .child(
                                                             div()
                                                                 .text_sm()
@@ -382,6 +382,10 @@ impl DiffViewer {
                                                         .when_some(
                                                             selected_thread_id.clone(),
                                                             |this, thread_id| {
+                                                                let thread_id_hover_color =
+                                                                    cx.theme().foreground;
+                                                                let copy_thread_id = thread_id.clone();
+                                                                let view = view.clone();
                                                                 this.child(
                                                                     div()
                                                                         .text_xs()
@@ -392,6 +396,28 @@ impl DiffViewer {
                                                                             cx.theme()
                                                                                 .mono_font_family
                                                                                 .clone(),
+                                                                        )
+                                                                        .hover(move |style| {
+                                                                            style
+                                                                                .text_color(
+                                                                                    thread_id_hover_color,
+                                                                                )
+                                                                                .cursor_pointer()
+                                                                        })
+                                                                        .on_mouse_down(
+                                                                            MouseButton::Left,
+                                                                            move |_, window, cx| {
+                                                                                view.update(
+                                                                                    cx,
+                                                                                    |this, cx| {
+                                                                                        this.ai_copy_thread_id_action(
+                                                                                            copy_thread_id.clone(),
+                                                                                            window,
+                                                                                            cx,
+                                                                                        );
+                                                                                    },
+                                                                                );
+                                                                            },
                                                                         )
                                                                         .child(thread_id),
                                                                 )
