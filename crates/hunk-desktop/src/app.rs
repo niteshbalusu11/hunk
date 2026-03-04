@@ -795,6 +795,7 @@ struct SettingsDraft {
     show_whitespace: bool,
     show_eol_markers: bool,
     reduce_motion: bool,
+    show_fps_counter: bool,
     shortcuts: SettingsShortcutInputs,
     error_message: Option<String>,
 }

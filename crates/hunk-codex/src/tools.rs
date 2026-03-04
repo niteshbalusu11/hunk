@@ -214,11 +214,19 @@ fn safe_join(cwd: &Path, relative: &str) -> Result<PathBuf, String> {
         return Err("parent path traversal is not allowed".to_string());
     }
 
-    let workspace_root = fs::canonicalize(cwd)
-        .map_err(|error| format!("failed to resolve workspace root '{}': {error}", cwd.display()))?;
+    let workspace_root = fs::canonicalize(cwd).map_err(|error| {
+        format!(
+            "failed to resolve workspace root '{}': {error}",
+            cwd.display()
+        )
+    })?;
     let target = cwd.join(path);
-    let resolved = fs::canonicalize(&target)
-        .map_err(|error| format!("failed to resolve target path '{}': {error}", target.display()))?;
+    let resolved = fs::canonicalize(&target).map_err(|error| {
+        format!(
+            "failed to resolve target path '{}': {error}",
+            target.display()
+        )
+    })?;
     if !resolved.starts_with(&workspace_root) {
         return Err(format!(
             "path '{}' escapes workspace root '{}'",

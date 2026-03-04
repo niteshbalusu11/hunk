@@ -102,6 +102,7 @@ pub struct AppConfig {
     pub show_whitespace: bool,
     pub show_eol_markers: bool,
     pub reduce_motion: bool,
+    pub show_fps_counter: bool,
     pub keyboard_shortcuts: KeyboardShortcuts,
     pub review_provider_mappings: Vec<ReviewProviderMapping>,
     #[serde(default = "default_auto_refresh_interval_ms")]
@@ -115,6 +116,7 @@ impl Default for AppConfig {
             show_whitespace: false,
             show_eol_markers: false,
             reduce_motion: false,
+            show_fps_counter: false,
             keyboard_shortcuts: KeyboardShortcuts::default(),
             review_provider_mappings: Vec::new(),
             auto_refresh_interval_ms: default_auto_refresh_interval_ms(),

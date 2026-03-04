@@ -290,6 +290,7 @@ impl DiffViewer {
         let whitespace_label = if settings.show_whitespace { "On" } else { "Off" };
         let eol_label = if settings.show_eol_markers { "On" } else { "Off" };
         let reduced_motion_label = if settings.reduce_motion { "On" } else { "Off" };
+        let show_fps_counter_label = if settings.show_fps_counter { "On" } else { "Off" };
         v_flex()
             .w_full()
             .gap_3()
@@ -308,7 +309,7 @@ impl DiffViewer {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Theme and diff marker preferences."),
+                            .child("Theme and UI visibility preferences."),
                     ),
             )
             .child(
@@ -538,6 +539,61 @@ impl DiffViewer {
                                                     move |_, _, cx| {
                                                         view.update(cx, |this, cx| {
                                                             this.set_settings_reduce_motion(false, cx);
+                                                        });
+                                                    }
+                                                }),
+                                        )
+                                    })
+                            }),
+                    )
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .items_center()
+                            .justify_between()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_semibold()
+                                    .text_color(cx.theme().foreground)
+                                    .child("FPS Counter"),
+                            )
+                            .child({
+                                let view = view.clone();
+                                let show_fps_counter = settings.show_fps_counter;
+                                Button::new("settings-fps-counter-dropdown")
+                                    .outline()
+                                    .compact()
+                                    .rounded(px(8.0))
+                                    .bg(dropdown_bg)
+                                    .dropdown_caret(true)
+                                    .label(show_fps_counter_label)
+                                    .dropdown_menu(move |menu, _, _| {
+                                        menu.item(
+                                            PopupMenuItem::new("On")
+                                                .checked(show_fps_counter)
+                                                .on_click({
+                                                    let view = view.clone();
+                                                    move |_, _, cx| {
+                                                        view.update(cx, |this, cx| {
+                                                            this.set_settings_show_fps_counter(
+                                                                true, cx,
+                                                            );
+                                                        });
+                                                    }
+                                                }),
+                                        )
+                                        .item(
+                                            PopupMenuItem::new("Off")
+                                                .checked(!show_fps_counter)
+                                                .on_click({
+                                                    let view = view.clone();
+                                                    move |_, _, cx| {
+                                                        view.update(cx, |this, cx| {
+                                                            this.set_settings_show_fps_counter(
+                                                                false, cx,
+                                                            );
                                                         });
                                                     }
                                                 }),

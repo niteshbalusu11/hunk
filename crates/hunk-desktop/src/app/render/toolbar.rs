@@ -224,19 +224,21 @@ impl DiffViewer {
                             .text_color(cx.theme().muted_foreground)
                             .child(format!("{} files", self.files.len())),
                     )
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_family(cx.theme().mono_font_family.clone())
-                            .text_color(if self.fps >= 110.0 {
-                                cx.theme().success
-                            } else if self.fps >= 60.0 {
-                                cx.theme().warning
-                            } else {
-                                cx.theme().danger
-                            })
-                            .child(format!("{:>3.0} fps", self.fps.round())),
-                    ),
+                    .when(self.config.show_fps_counter, |this| {
+                        this.child(
+                            div()
+                                .text_sm()
+                                .font_family(cx.theme().mono_font_family.clone())
+                                .text_color(if self.fps >= 110.0 {
+                                    cx.theme().success
+                                } else if self.fps >= 60.0 {
+                                    cx.theme().warning
+                                } else {
+                                    cx.theme().danger
+                                })
+                                .child(format!("{:>3.0} fps", self.fps.round())),
+                        )
+                    }),
             )
     }
 

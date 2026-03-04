@@ -227,6 +227,7 @@ impl DiffViewer {
             show_whitespace: self.config.show_whitespace,
             show_eol_markers: self.config.show_eol_markers,
             reduce_motion: self.config.reduce_motion,
+            show_fps_counter: self.config.show_fps_counter,
             shortcuts,
             error_message: None,
         });
@@ -330,8 +331,31 @@ impl DiffViewer {
         cx.notify();
     }
 
+    pub(super) fn set_settings_show_fps_counter(
+        &mut self,
+        show_fps_counter: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(settings) = self.settings_draft.as_mut() else {
+            return;
+        };
+        if settings.show_fps_counter == show_fps_counter {
+            return;
+        }
+        settings.show_fps_counter = show_fps_counter;
+        settings.error_message = None;
+        cx.notify();
+    }
+
     pub(super) fn save_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (theme, show_whitespace, show_eol_markers, reduce_motion, keyboard_shortcuts) = {
+        let (
+            theme,
+            show_whitespace,
+            show_eol_markers,
+            reduce_motion,
+            show_fps_counter,
+            keyboard_shortcuts,
+        ) = {
             let Some(settings) = self.settings_draft.as_mut() else {
                 return;
             };
@@ -417,6 +441,7 @@ impl DiffViewer {
                 settings.show_whitespace,
                 settings.show_eol_markers,
                 settings.reduce_motion,
+                settings.show_fps_counter,
                 keyboard_shortcuts,
             )
         };
@@ -425,6 +450,7 @@ impl DiffViewer {
         self.config.show_whitespace = show_whitespace;
         self.config.show_eol_markers = show_eol_markers;
         self.config.reduce_motion = reduce_motion;
+        self.config.show_fps_counter = show_fps_counter;
         self.config.keyboard_shortcuts = keyboard_shortcuts;
         self.diff_show_whitespace = self.config.show_whitespace;
         self.diff_show_eol_markers = self.config.show_eol_markers;

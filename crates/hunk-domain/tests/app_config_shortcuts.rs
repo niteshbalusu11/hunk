@@ -91,6 +91,10 @@ fn app_config_defaults_include_existing_keyboard_shortcuts() {
         !config.reduce_motion,
         "reduced motion should default to disabled"
     );
+    assert!(
+        !config.show_fps_counter,
+        "fps counter should default to disabled"
+    );
 }
 
 #[test]
@@ -107,6 +111,20 @@ theme = "dark"
         !config.reduce_motion,
         "configs missing reduce_motion should fall back to false"
     );
+    assert!(
+        !config.show_fps_counter,
+        "configs missing show_fps_counter should fall back to false"
+    );
+}
+
+#[test]
+fn app_config_parses_show_fps_counter_when_present() {
+    let raw = r#"
+show_fps_counter = true
+"#;
+    let config: AppConfig = toml::from_str(raw).expect("config with show_fps_counter should parse");
+
+    assert!(config.show_fps_counter);
 }
 
 #[test]
