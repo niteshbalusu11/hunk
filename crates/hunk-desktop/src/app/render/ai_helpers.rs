@@ -78,13 +78,11 @@ struct AiAccountPanelView<'a> {
     pending_chatgpt_login_id: Option<&'a str>,
     pending_chatgpt_auth_url: Option<&'a str>,
     rate_limits: Option<&'a codex_app_server_protocol::RateLimitSnapshot>,
-    is_dark: bool,
 }
 
 fn render_ai_account_panel_for_view(
     this: &DiffViewer,
-    view: Entity<DiffViewer>,
-    is_dark: bool,
+    _: Entity<DiffViewer>,
     cx: &mut Context<DiffViewer>,
 ) -> AnyElement {
     render_ai_account_panel(
@@ -94,36 +92,53 @@ fn render_ai_account_panel_for_view(
             pending_chatgpt_login_id: this.ai_pending_chatgpt_login_id.as_deref(),
             pending_chatgpt_auth_url: this.ai_pending_chatgpt_auth_url.as_deref(),
             rate_limits: this.ai_rate_limits.as_ref(),
-            is_dark,
         },
-        view,
         cx,
     )
 }
 
 fn render_ai_account_panel(
     panel: AiAccountPanelView<'_>,
-    view: Entity<DiffViewer>,
     cx: &mut Context<DiffViewer>,
 ) -> AnyElement {
     let login_pending = panel.pending_chatgpt_login_id.is_some();
     let summary = ai_account_summary(panel.account, panel.requires_openai_auth);
+    let (five_hour_rate_limit, weekly_rate_limit) = ai_rate_limit_summary(panel.rate_limits);
 
     v_flex()
         .w_full()
-        .gap_1()
-        .rounded_md()
-        .border_1()
-        .border_color(cx.theme().border)
-        .bg(cx.theme().muted.opacity(if panel.is_dark { 0.20 } else { 0.40 }))
-        .p_2()
+        .min_w_0()
+        .items_end()
+        .gap_0p5()
         .child(
             h_flex()
                 .w_full()
+                .min_w_0()
+                .justify_end()
                 .items_center()
-                .justify_between()
                 .gap_2()
-                .child(div().text_xs().font_semibold().child("Account"))
+                .flex_wrap()
+                .child(
+                    div()
+                        .text_xs()
+                        .font_semibold()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(summary),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .text_color(cx.theme().muted_foreground)
+                        .child(five_hour_rate_limit),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .text_color(cx.theme().muted_foreground)
+                        .child(weekly_rate_limit),
+                )
                 .child(
                     div()
                         .text_xs()
@@ -139,33 +154,6 @@ fn render_ai_account_panel(
                         }),
                 ),
         )
-        .child(
-            div()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .whitespace_normal()
-                .child(summary),
-        )
-        .when_some(ai_rate_limit_summary(panel.rate_limits), |this, summary| {
-            this.child(
-                div()
-                    .text_xs()
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .text_color(cx.theme().muted_foreground)
-                    .whitespace_normal()
-                    .child(summary),
-            )
-        })
-        .when_some(panel.pending_chatgpt_login_id, |this, login_id| {
-            this.child(
-                div()
-                    .text_xs()
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .text_color(cx.theme().muted_foreground)
-                    .whitespace_normal()
-                    .child(format!("loginId: {login_id}")),
-            )
-        })
         .when_some(panel.pending_chatgpt_auth_url, |this, auth_url| {
             this.child(
                 div()
@@ -173,70 +161,80 @@ fn render_ai_account_panel(
                     .font_family(cx.theme().mono_font_family.clone())
                     .text_color(cx.theme().muted_foreground)
                     .whitespace_normal()
-                    .child(format!("authUrl: {auth_url}")),
+                    .child(auth_url.to_string()),
             )
         })
-        .child(
-            h_flex()
-                .w_full()
-                .items_center()
-                .gap_1()
-                .child({
-                    let view = view.clone();
-                    Button::new("ai-account-refresh")
-                        .compact()
-                        .outline()
-                        .with_size(gpui_component::Size::Small)
-                        .label("Refresh")
-                        .on_click(move |_, _, cx| {
-                            view.update(cx, |this, cx| {
-                                this.ai_refresh_account(cx);
-                            });
-                        })
+        .into_any_element()
+}
+
+fn render_ai_account_actions_for_view(
+    this: &DiffViewer,
+    view: Entity<DiffViewer>,
+    _: &mut Context<DiffViewer>,
+) -> AnyElement {
+    let login_pending = this.ai_pending_chatgpt_login_id.is_some();
+
+    h_flex()
+        .w_full()
+        .items_center()
+        .justify_end()
+        .gap_1()
+        .flex_wrap()
+        .child({
+            let view = view.clone();
+            Button::new("ai-account-refresh")
+                .compact()
+                .outline()
+                .with_size(gpui_component::Size::Small)
+                .label("Refresh Account")
+                .on_click(move |_, _, cx| {
+                    view.update(cx, |this, cx| {
+                        this.ai_refresh_account(cx);
+                    });
                 })
-                .child({
-                    let view = view.clone();
-                    Button::new("ai-account-login")
-                        .compact()
-                        .primary()
-                        .with_size(gpui_component::Size::Small)
-                        .label("Login")
-                        .disabled(login_pending)
-                        .on_click(move |_, _, cx| {
-                            view.update(cx, |this, cx| {
-                                this.ai_start_chatgpt_login_action(cx);
-                            });
-                        })
+        })
+        .child({
+            let view = view.clone();
+            Button::new("ai-account-login")
+                .compact()
+                .primary()
+                .with_size(gpui_component::Size::Small)
+                .label("Login")
+                .disabled(login_pending)
+                .on_click(move |_, _, cx| {
+                    view.update(cx, |this, cx| {
+                        this.ai_start_chatgpt_login_action(cx);
+                    });
                 })
-                .child({
-                    let view = view.clone();
-                    Button::new("ai-account-cancel-login")
-                        .compact()
-                        .outline()
-                        .with_size(gpui_component::Size::Small)
-                        .label("Cancel Login")
-                        .disabled(!login_pending)
-                        .on_click(move |_, _, cx| {
-                            view.update(cx, |this, cx| {
-                                this.ai_cancel_chatgpt_login_action(cx);
-                            });
-                        })
+        })
+        .child({
+            let view = view.clone();
+            Button::new("ai-account-cancel-login")
+                .compact()
+                .outline()
+                .with_size(gpui_component::Size::Small)
+                .label("Cancel Login")
+                .disabled(!login_pending)
+                .on_click(move |_, _, cx| {
+                    view.update(cx, |this, cx| {
+                        this.ai_cancel_chatgpt_login_action(cx);
+                    });
                 })
-                .child({
-                    let view = view.clone();
-                    Button::new("ai-account-logout")
-                        .compact()
-                        .outline()
-                        .with_size(gpui_component::Size::Small)
-                        .label("Logout")
-                        .disabled(panel.account.is_none())
-                        .on_click(move |_, _, cx| {
-                            view.update(cx, |this, cx| {
-                                this.ai_logout_account_action(cx);
-                            });
-                        })
-                }),
-        )
+        })
+        .child({
+            let view = view.clone();
+            Button::new("ai-account-logout")
+                .compact()
+                .outline()
+                .with_size(gpui_component::Size::Small)
+                .label("Logout")
+                .disabled(this.ai_account.is_none())
+                .on_click(move |_, _, cx| {
+                    view.update(cx, |this, cx| {
+                        this.ai_logout_account_action(cx);
+                    });
+                })
+        })
         .into_any_element()
 }
 
@@ -248,13 +246,11 @@ struct AiSessionControlsPanelView<'a> {
     selected_model: Option<&'a str>,
     selected_effort: Option<&'a str>,
     selected_collaboration_mode: Option<&'a str>,
-    is_dark: bool,
 }
 
 fn render_ai_session_controls_panel_for_view(
     this: &DiffViewer,
     view: Entity<DiffViewer>,
-    is_dark: bool,
     cx: &mut Context<DiffViewer>,
 ) -> AnyElement {
     render_ai_session_controls_panel(
@@ -266,7 +262,6 @@ fn render_ai_session_controls_panel_for_view(
             selected_model: this.ai_selected_model.as_deref(),
             selected_effort: this.ai_selected_effort.as_deref(),
             selected_collaboration_mode: this.ai_selected_collaboration_mode.as_deref(),
-            is_dark,
         },
         view,
         cx,
@@ -319,73 +314,12 @@ fn render_ai_session_controls_panel(
         .map(|mode| mode.name.clone())
         .collect::<Vec<_>>();
 
-    v_flex()
-        .w_full()
+    h_flex()
+        .items_center()
         .gap_1()
-        .rounded_md()
-        .border_1()
-        .border_color(cx.theme().border)
-        .bg(cx.theme().muted.opacity(if panel.is_dark { 0.20 } else { 0.40 }))
-        .p_2()
-        .child(
-            h_flex()
-                .w_full()
-                .items_center()
-                .justify_between()
-                .gap_2()
-                .child(div().text_xs().font_semibold().child("Workspace Defaults"))
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(format!("Models: {}", panel.models.len())),
-                ),
-        )
-        .child(
-            h_flex()
-                .w_full()
-                .items_center()
-                .gap_1()
-                .child({
-                    let view = view.clone();
-                    Button::new("ai-session-refresh")
-                        .compact()
-                        .outline()
-                        .with_size(gpui_component::Size::Small)
-                        .label("Refresh")
-                        .on_click(move |_, _, cx| {
-                            view.update(cx, |this, cx| {
-                                this.ai_refresh_session_metadata(cx);
-                            });
-                        })
-                })
-                .child({
-                    let view = view.clone();
-                    let enable_hidden = !panel.include_hidden_models;
-                    Button::new("ai-session-toggle-hidden-models")
-                        .compact()
-                        .outline()
-                        .with_size(gpui_component::Size::Small)
-                        .label(if panel.include_hidden_models {
-                            "Hidden Models On"
-                        } else {
-                            "Hidden Models Off"
-                        })
-                        .on_click(move |_, _, cx| {
-                            view.update(cx, |this, cx| {
-                                this.ai_set_include_hidden_models_action(enable_hidden, cx);
-                            });
-                        })
-                }),
-        )
-        .child(
-            h_flex()
-                .w_full()
-                .items_center()
-                .justify_between()
-                .gap_2()
-                .child(div().text_xs().text_color(cx.theme().muted_foreground).child("Model"))
-                .child({
+        .flex_wrap()
+        .child(div().text_xs().text_color(cx.theme().muted_foreground).child("Model"))
+        .child({
                     let view = view.clone();
                     let selected_model = panel.selected_model.map(ToOwned::to_owned);
                     Button::new("ai-session-model-dropdown")
@@ -432,16 +366,9 @@ fn render_ai_session_controls_panel(
                             }
                             menu
                         })
-                }),
-        )
-        .child(
-            h_flex()
-                .w_full()
-                .items_center()
-                .justify_between()
-                .gap_2()
-                .child(div().text_xs().text_color(cx.theme().muted_foreground).child("Effort"))
-                .child({
+                })
+        .child(div().text_xs().text_color(cx.theme().muted_foreground).child("Effort"))
+        .child({
                     let view = view.clone();
                     let selected_effort = panel.selected_effort.map(ToOwned::to_owned);
                     Button::new("ai-session-effort-dropdown")
@@ -489,22 +416,15 @@ fn render_ai_session_controls_panel(
                             }
                             menu
                         })
-                }),
-        )
+                })
         .when(collaboration_enabled, |this| {
             this.child(
-                h_flex()
-                    .w_full()
-                    .items_center()
-                    .justify_between()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Collaboration"),
-                    )
-                    .child({
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Collab"),
+            )
+            .child({
                         let view = view.clone();
                         let selected = panel.selected_collaboration_mode.map(ToOwned::to_owned);
                         Button::new("ai-session-collaboration-dropdown")
@@ -552,9 +472,26 @@ fn render_ai_session_controls_panel(
                                 }
                                 menu
                             })
-                    }),
-            )
+                    })
         })
+        .child({
+                    let view = view.clone();
+                    let enable_hidden = !panel.include_hidden_models;
+                    Button::new("ai-session-toggle-hidden-models")
+                        .compact()
+                        .outline()
+                        .with_size(gpui_component::Size::Small)
+                        .label(if panel.include_hidden_models {
+                            "Hidden Models On"
+                        } else {
+                            "Hidden Models Off"
+                        })
+                        .on_click(move |_, _, cx| {
+                            view.update(cx, |this, cx| {
+                                this.ai_set_include_hidden_models_action(enable_hidden, cx);
+                            });
+                        })
+                })
         .when(selected_model_unavailable, |this| {
             this.child(
                 div()
@@ -589,17 +526,80 @@ fn ai_account_summary(
 
 fn ai_rate_limit_summary(
     rate_limits: Option<&codex_app_server_protocol::RateLimitSnapshot>,
-) -> Option<String> {
-    let snapshot = rate_limits?;
-    let primary = snapshot.primary.as_ref()?;
-    let mut summary = format!("Rate limit: {}% used", primary.used_percent);
-    if let Some(limit_name) = snapshot.limit_name.as_ref() {
-        summary.push_str(&format!(" ({limit_name})"));
+) -> (String, String) {
+    let Some(snapshot) = rate_limits else {
+        return ("5h: unavailable".to_string(), "weekly: unavailable".to_string());
+    };
+
+    let (five_hour_window, weekly_window) = ai_rate_limit_windows(snapshot);
+    (
+        ai_rate_limit_window_summary("5h", five_hour_window.as_ref()),
+        ai_rate_limit_window_summary("weekly", weekly_window.as_ref()),
+    )
+}
+
+fn ai_rate_limit_windows(
+    snapshot: &codex_app_server_protocol::RateLimitSnapshot,
+) -> (
+    Option<codex_app_server_protocol::RateLimitWindow>,
+    Option<codex_app_server_protocol::RateLimitWindow>,
+) {
+    let primary = snapshot.primary.clone();
+    let secondary = snapshot.secondary.clone();
+    let mut five_hour = None;
+    let mut weekly = None;
+
+    for window in [primary.clone(), secondary.clone()].into_iter().flatten() {
+        match window.window_duration_mins {
+            Some(300) => five_hour = Some(window.clone()),
+            Some(10_080) => weekly = Some(window.clone()),
+            _ => {}
+        }
     }
-    if let Some(resets_at) = primary.resets_at {
-        summary.push_str(&format!(", resetsAt={resets_at}"));
+
+    if five_hour.is_none() {
+        five_hour = primary.clone().or(secondary.clone());
     }
-    Some(summary)
+
+    if weekly.is_none() {
+        weekly = secondary
+            .clone()
+            .filter(|window| five_hour.as_ref() != Some(window))
+            .or_else(|| {
+                primary
+                    .clone()
+                    .filter(|window| five_hour.as_ref() != Some(window))
+            });
+    }
+
+    (five_hour, weekly)
+}
+
+fn ai_rate_limit_window_summary(
+    label: &str,
+    window: Option<&codex_app_server_protocol::RateLimitWindow>,
+) -> String {
+    let Some(window) = window else {
+        return format!("{label}: unavailable");
+    };
+
+    let resets_at = window
+        .resets_at
+        .map(ai_format_rate_limit_reset_timestamp)
+        .unwrap_or_else(|| "unknown".to_string());
+    format!("{label}: {}% used, resets {resets_at}", window.used_percent)
+}
+
+fn ai_format_rate_limit_reset_timestamp(unix_seconds: i64) -> String {
+    let Ok(utc_datetime) = time::OffsetDateTime::from_unix_timestamp(unix_seconds) else {
+        return unix_seconds.to_string();
+    };
+    let local_datetime = time::UtcOffset::current_local_offset()
+        .map(|offset| utc_datetime.to_offset(offset))
+        .unwrap_or(utc_datetime);
+    local_datetime
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| unix_seconds.to_string())
 }
 
 fn ai_model_picker_label(
@@ -850,4 +850,69 @@ fn render_ai_pending_user_inputs_panel(
                 .into_any_element()
         }))
         .into_any_element()
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+mod ai_helper_tests {
+    use super::ai_rate_limit_summary;
+
+    fn rate_limit_window(
+        used_percent: i32,
+        window_duration_mins: Option<i64>,
+        resets_at: Option<i64>,
+    ) -> codex_app_server_protocol::RateLimitWindow {
+        codex_app_server_protocol::RateLimitWindow {
+            used_percent,
+            window_duration_mins,
+            resets_at,
+        }
+    }
+
+    fn rate_limit_snapshot(
+        primary: Option<codex_app_server_protocol::RateLimitWindow>,
+        secondary: Option<codex_app_server_protocol::RateLimitWindow>,
+    ) -> codex_app_server_protocol::RateLimitSnapshot {
+        codex_app_server_protocol::RateLimitSnapshot {
+            limit_id: Some("codex".to_string()),
+            limit_name: Some("Codex".to_string()),
+            primary,
+            secondary,
+            credits: None,
+            plan_type: None,
+        }
+    }
+
+    #[test]
+    fn rate_limit_summary_reports_five_hour_and_weekly_windows() {
+        let snapshot = rate_limit_snapshot(
+            Some(rate_limit_window(42, Some(300), Some(1_700_000_000))),
+            Some(rate_limit_window(19, Some(10_080), Some(1_700_300_000))),
+        );
+
+        let (five_hour, weekly) = ai_rate_limit_summary(Some(&snapshot));
+        assert!(five_hour.contains("5h: 42% used"));
+        assert!(weekly.contains("weekly: 19% used"));
+        assert!(!five_hour.contains("1700000000"));
+        assert!(!weekly.contains("1700300000"));
+    }
+
+    #[test]
+    fn rate_limit_summary_falls_back_to_unavailable_when_missing() {
+        let (five_hour, weekly) = ai_rate_limit_summary(None);
+        assert_eq!(five_hour, "5h: unavailable");
+        assert_eq!(weekly, "weekly: unavailable");
+    }
+
+    #[test]
+    fn rate_limit_summary_uses_primary_and_secondary_when_durations_are_unknown() {
+        let snapshot = rate_limit_snapshot(
+            Some(rate_limit_window(11, Some(60), Some(1_700_000_000))),
+            Some(rate_limit_window(27, Some(120), Some(1_700_100_000))),
+        );
+
+        let (five_hour, weekly) = ai_rate_limit_summary(Some(&snapshot));
+        assert!(five_hour.contains("5h: 11% used"));
+        assert!(weekly.contains("weekly: 27% used"));
+    }
 }

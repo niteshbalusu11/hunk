@@ -343,6 +343,7 @@ impl Render for DiffViewer {
             .child(
                 div()
                     .flex_1()
+                    .w_full()
                     .min_h_0()
                     .child(match self.workspace_view_mode {
                         WorkspaceViewMode::Files => self.render_file_workspace_screen(window, cx),

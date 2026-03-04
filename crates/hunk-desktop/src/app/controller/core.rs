@@ -235,6 +235,7 @@ impl DiffViewer {
             ai_error_message: None,
             ai_state_snapshot: hunk_codex::state::AiState::default(),
             ai_selected_thread_id: None,
+            ai_scroll_timeline_to_bottom: false,
             ai_thread_list_scroll_handle: ScrollHandle::default(),
             ai_timeline_scroll_handle: ScrollHandle::default(),
             ai_last_command_result: None,
@@ -354,9 +355,7 @@ impl DiffViewer {
 
         let ai_composer_state = view.ai_composer_input_state.clone();
         cx.subscribe(&ai_composer_state, |this, _, event, cx| {
-            if let InputEvent::PressEnter { secondary } = event
-                && !secondary
-            {
+            if should_send_ai_prompt_from_input_event(event) {
                 this.ai_send_prompt_action_from_keyboard(cx);
             }
         })
@@ -1172,4 +1171,35 @@ impl DiffViewer {
         self.rebuild_comment_row_match_cache();
     }
 
+}
+
+fn should_send_ai_prompt_from_input_event(event: &InputEvent) -> bool {
+    matches!(event, InputEvent::PressEnter { secondary: false })
+}
+
+#[cfg(test)]
+mod ai_input_tests {
+    use super::should_send_ai_prompt_from_input_event;
+    use gpui_component::input::InputEvent;
+
+    #[test]
+    fn enter_sends_prompt() {
+        assert!(should_send_ai_prompt_from_input_event(&InputEvent::PressEnter {
+            secondary: false,
+        }));
+    }
+
+    #[test]
+    fn secondary_enter_does_not_send_prompt() {
+        assert!(!should_send_ai_prompt_from_input_event(
+            &InputEvent::PressEnter { secondary: true }
+        ));
+    }
+
+    #[test]
+    fn non_enter_events_do_not_send_prompt() {
+        assert!(!should_send_ai_prompt_from_input_event(&InputEvent::Change));
+        assert!(!should_send_ai_prompt_from_input_event(&InputEvent::Focus));
+        assert!(!should_send_ai_prompt_from_input_event(&InputEvent::Blur));
+    }
 }

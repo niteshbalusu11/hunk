@@ -62,9 +62,6 @@ impl DiffViewer {
     pub(super) fn ai_refresh_account(&mut self, cx: &mut Context<Self>) {
         self.send_ai_worker_command(AiWorkerCommand::RefreshAccount, cx);
         self.send_ai_worker_command(AiWorkerCommand::RefreshRateLimits, cx);
-    }
-
-    pub(super) fn ai_refresh_session_metadata(&mut self, cx: &mut Context<Self>) {
         self.send_ai_worker_command(AiWorkerCommand::RefreshSessionMetadata, cx);
     }
 
@@ -323,6 +320,7 @@ impl DiffViewer {
         thread_id: String,
         cx: &mut Context<Self>,
     ) {
+        self.ai_scroll_timeline_to_bottom = true;
         self.ai_selected_thread_id = Some(thread_id.clone());
         self.sync_ai_session_selection_from_state();
         self.send_ai_worker_command(AiWorkerCommand::SelectThread { thread_id }, cx);
@@ -679,6 +677,7 @@ impl DiffViewer {
     }
 
     fn apply_ai_snapshot(&mut self, snapshot: AiSnapshot) {
+        let previous_selected_thread = self.ai_selected_thread_id.clone();
         self.ai_state_snapshot = snapshot.state;
         self.ai_last_command_result = snapshot.last_command_result;
         self.ai_pending_approvals = snapshot.pending_approvals;
@@ -713,6 +712,16 @@ impl DiffViewer {
             && let Some(first_thread) = self.ai_visible_threads().first()
         {
             self.ai_selected_thread_id = Some(first_thread.id.clone());
+        }
+        if should_scroll_timeline_to_bottom_on_selection_change(
+            previous_selected_thread.as_deref(),
+            self.ai_selected_thread_id.as_deref(),
+        ) {
+            self.ai_scroll_timeline_to_bottom = true;
+        }
+        if self.ai_scroll_timeline_to_bottom && self.ai_selected_thread_id.is_some() {
+            self.ai_timeline_scroll_handle.scroll_to_bottom();
+            self.ai_scroll_timeline_to_bottom = false;
         }
 
         self.sync_ai_session_selection_from_state();
@@ -909,6 +918,13 @@ fn reasoning_effort_key(effort: &codex_protocol::openai_models::ReasoningEffort)
         .unwrap_or_else(|| format!("{effort:?}").to_lowercase())
 }
 
+fn should_scroll_timeline_to_bottom_on_selection_change(
+    previous_thread_id: Option<&str>,
+    next_thread_id: Option<&str>,
+) -> bool {
+    previous_thread_id != next_thread_id && next_thread_id.is_some()
+}
+
 fn resolve_bundled_codex_executable_from_exe(current_exe: &std::path::Path) -> Option<std::path::PathBuf> {
     bundled_codex_executable_candidates(current_exe)
         .into_iter()
@@ -1027,6 +1043,7 @@ mod ai_tests {
     use super::normalized_user_input_answers;
     use super::resolve_bundled_codex_executable_from_exe;
     use super::sorted_threads;
+    use super::should_scroll_timeline_to_bottom_on_selection_change;
     use super::workspace_include_hidden_models;
     use super::workspace_mad_max_mode;
     use crate::app::ai_runtime::AiPendingUserInputQuestion;
@@ -1101,6 +1118,31 @@ mod ai_tests {
         let sorted = sorted_threads(&state);
         assert_eq!(sorted[0].id, "thread-z");
         assert_eq!(sorted[1].id, "thread-a");
+    }
+
+    #[test]
+    fn thread_selection_change_triggers_timeline_scroll() {
+        assert!(should_scroll_timeline_to_bottom_on_selection_change(
+            Some("thread-a"),
+            Some("thread-b"),
+        ));
+        assert!(should_scroll_timeline_to_bottom_on_selection_change(
+            None,
+            Some("thread-b"),
+        ));
+    }
+
+    #[test]
+    fn unchanged_or_missing_selection_does_not_trigger_scroll() {
+        assert!(!should_scroll_timeline_to_bottom_on_selection_change(
+            Some("thread-a"),
+            Some("thread-a"),
+        ));
+        assert!(!should_scroll_timeline_to_bottom_on_selection_change(
+            Some("thread-a"),
+            None,
+        ));
+        assert!(!should_scroll_timeline_to_bottom_on_selection_change(None, None));
     }
 
     #[test]

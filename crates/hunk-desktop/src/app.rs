@@ -18,7 +18,7 @@ use gpui::{
 use gpui_component::{
     ActiveTheme as _, Colorize as _, Root, StyledExt as _, Theme, ThemeMode, h_flex,
     highlighter::HighlightThemeStyle,
-    input::{InputEvent, InputState},
+    input::{Enter as InputEnter, InputEvent, InputState},
     menu::AppMenuBar,
     resizable::{h_resizable, resizable_panel},
     scroll::ScrollableElement,
@@ -531,6 +531,11 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
         RepoTreeCancelInlineEdit,
         Some("RepoTreeInlineEdit"),
     ));
+    bindings.push(KeyBinding::new(
+        "shift-enter",
+        InputEnter { secondary: true },
+        Some("Input"),
+    ));
 
     cx.bind_keys(bindings);
 }
@@ -929,6 +934,7 @@ struct DiffViewer {
     ai_error_message: Option<String>,
     ai_state_snapshot: hunk_codex::state::AiState,
     ai_selected_thread_id: Option<String>,
+    ai_scroll_timeline_to_bottom: bool,
     ai_thread_list_scroll_handle: ScrollHandle,
     ai_timeline_scroll_handle: ScrollHandle,
     ai_last_command_result: Option<String>,
