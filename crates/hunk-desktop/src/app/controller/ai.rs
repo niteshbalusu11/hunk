@@ -1073,9 +1073,8 @@ fn sorted_threads(state: &hunk_codex::state::AiState) -> Vec<ThreadSummary> {
     let mut threads = state.threads.values().cloned().collect::<Vec<_>>();
     threads.sort_by(|left, right| {
         right
-            .updated_at
-            .cmp(&left.updated_at)
-            .then_with(|| right.last_sequence.cmp(&left.last_sequence))
+            .created_at
+            .cmp(&left.created_at)
             .then_with(|| right.id.cmp(&left.id))
     });
     threads
@@ -1267,7 +1266,7 @@ mod ai_tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn sorted_threads_orders_by_updated_at_descending() {
+    fn sorted_threads_orders_by_created_at_descending() {
         let mut state = AiState::default();
         state.threads.insert(
             "t-older".to_string(),
@@ -1276,6 +1275,7 @@ mod ai_tests {
                 cwd: "/repo".to_string(),
                 title: None,
                 status: ThreadLifecycleStatus::Active,
+                created_at: 10,
                 updated_at: 10,
                 last_sequence: 2,
             },
@@ -1287,6 +1287,7 @@ mod ai_tests {
                 cwd: "/repo".to_string(),
                 title: None,
                 status: ThreadLifecycleStatus::Active,
+                created_at: 20,
                 updated_at: 20,
                 last_sequence: 1,
             },
@@ -1298,7 +1299,7 @@ mod ai_tests {
     }
 
     #[test]
-    fn sorted_threads_breaks_ties_in_descending_id_order() {
+    fn sorted_threads_breaks_created_at_ties_in_descending_id_order() {
         let mut state = AiState::default();
         state.threads.insert(
             "thread-a".to_string(),
@@ -1307,6 +1308,7 @@ mod ai_tests {
                 cwd: "/repo".to_string(),
                 title: None,
                 status: ThreadLifecycleStatus::Active,
+                created_at: 7,
                 updated_at: 7,
                 last_sequence: 7,
             },
@@ -1318,6 +1320,7 @@ mod ai_tests {
                 cwd: "/repo".to_string(),
                 title: None,
                 status: ThreadLifecycleStatus::Active,
+                created_at: 7,
                 updated_at: 7,
                 last_sequence: 7,
             },
@@ -1326,6 +1329,39 @@ mod ai_tests {
         let sorted = sorted_threads(&state);
         assert_eq!(sorted[0].id, "thread-z");
         assert_eq!(sorted[1].id, "thread-a");
+    }
+
+    #[test]
+    fn sorted_threads_ignores_activity_updates_when_created_at_differs() {
+        let mut state = AiState::default();
+        state.threads.insert(
+            "thread-early".to_string(),
+            ThreadSummary {
+                id: "thread-early".to_string(),
+                cwd: "/repo".to_string(),
+                title: None,
+                status: ThreadLifecycleStatus::Active,
+                created_at: 5,
+                updated_at: 1000,
+                last_sequence: 999,
+            },
+        );
+        state.threads.insert(
+            "thread-late".to_string(),
+            ThreadSummary {
+                id: "thread-late".to_string(),
+                cwd: "/repo".to_string(),
+                title: None,
+                status: ThreadLifecycleStatus::Idle,
+                created_at: 10,
+                updated_at: 1,
+                last_sequence: 1,
+            },
+        );
+
+        let sorted = sorted_threads(&state);
+        assert_eq!(sorted[0].id, "thread-late");
+        assert_eq!(sorted[1].id, "thread-early");
     }
 
     #[test]
@@ -1363,6 +1399,7 @@ mod ai_tests {
                 cwd: "/repo".to_string(),
                 title: None,
                 status: ThreadLifecycleStatus::Active,
+                created_at: 1,
                 updated_at: 1,
                 last_sequence: 3,
             },

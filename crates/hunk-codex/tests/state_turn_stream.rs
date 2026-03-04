@@ -26,6 +26,7 @@ fn turn_stream_reaches_correct_final_state() {
                 thread_id: "t1".to_string(),
                 cwd: "/repo".to_string(),
                 title: Some("Feature Branch".to_string()),
+                created_at: Some(50),
                 updated_at: Some(100),
             },
         ),

@@ -22,6 +22,7 @@ fn ordered_stream_application_updates_all_entities() {
                 thread_id: "t1".to_string(),
                 cwd: "/repo".to_string(),
                 title: Some("Main Thread".to_string()),
+                created_at: Some(150),
                 updated_at: Some(200),
             },
         ),
@@ -94,6 +95,7 @@ fn ordered_stream_application_updates_all_entities() {
     let thread = state.threads.get("t1").expect("thread must exist");
     assert_eq!(thread.cwd, "/repo");
     assert_eq!(thread.status, ThreadLifecycleStatus::Idle);
+    assert_eq!(thread.created_at, 150);
 
     let turn = find_turn(&state, "t1", "r1");
     assert_eq!(turn.status, TurnStatus::Completed);
@@ -132,6 +134,7 @@ fn out_of_order_and_duplicate_events_are_idempotent() {
                 thread_id: "t1".to_string(),
                 cwd: "/repo".to_string(),
                 title: None,
+                created_at: Some(90),
                 updated_at: Some(100),
             },
         ),
@@ -194,6 +197,7 @@ fn out_of_order_and_duplicate_events_are_idempotent() {
 
     let thread = state.threads.get("t1").expect("thread must exist");
     assert_eq!(thread.status, ThreadLifecycleStatus::Closed);
+    assert_eq!(thread.created_at, 90);
 
     let item = find_item(&state, "t1", "r1", "i1");
     assert_eq!(item.content, "AB");
@@ -224,6 +228,7 @@ fn item_start_backfills_turn_association_after_delta_first() {
                 thread_id: "t1".to_string(),
                 cwd: "/repo".to_string(),
                 title: None,
+                created_at: None,
                 updated_at: None,
             },
         ),
@@ -275,6 +280,7 @@ fn thread_scoped_turn_and_item_ids_do_not_collide_across_threads() {
                 thread_id: "t1".to_string(),
                 cwd: "/repo".to_string(),
                 title: None,
+                created_at: None,
                 updated_at: None,
             },
         ),
@@ -313,6 +319,7 @@ fn thread_scoped_turn_and_item_ids_do_not_collide_across_threads() {
                 thread_id: "t2".to_string(),
                 cwd: "/repo".to_string(),
                 title: None,
+                created_at: None,
                 updated_at: None,
             },
         ),

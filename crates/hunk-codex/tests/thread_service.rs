@@ -565,6 +565,7 @@ fn known_thread_not_loaded_status_is_preserved() {
             thread_id: "thread-known".to_string(),
             cwd: WORKSPACE_CWD.to_string(),
             title: None,
+            created_at: Some(21),
             updated_at: Some(42),
         },
     });
@@ -597,6 +598,7 @@ fn idle_status_notification_completes_in_progress_turns() {
             thread_id: "thread-known".to_string(),
             cwd: WORKSPACE_CWD.to_string(),
             title: None,
+            created_at: None,
             updated_at: None,
         },
     });
@@ -632,6 +634,7 @@ fn thread_closed_notification_marks_not_loaded_and_completes_in_progress_turns()
             thread_id: "thread-known".to_string(),
             cwd: WORKSPACE_CWD.to_string(),
             title: None,
+            created_at: None,
             updated_at: None,
         },
     });
@@ -673,6 +676,7 @@ fn non_retryable_error_notification_completes_turn() {
             thread_id: "thread-known".to_string(),
             cwd: WORKSPACE_CWD.to_string(),
             title: None,
+            created_at: None,
             updated_at: None,
         },
     });
@@ -712,6 +716,7 @@ fn retryable_error_notification_keeps_turn_in_progress() {
             thread_id: "thread-known".to_string(),
             cwd: WORKSPACE_CWD.to_string(),
             title: None,
+            created_at: None,
             updated_at: None,
         },
     });
@@ -751,6 +756,7 @@ fn rollout_fallback_history_is_ingested_into_turn_items() {
             thread_id: "thread-known".to_string(),
             cwd: WORKSPACE_CWD.to_string(),
             title: None,
+            created_at: None,
             updated_at: None,
         },
     });
@@ -798,6 +804,7 @@ fn server_request_resolved_notification_is_recorded_for_known_thread() {
             thread_id: "thread-known".to_string(),
             cwd: WORKSPACE_CWD.to_string(),
             title: None,
+            created_at: None,
             updated_at: None,
         },
     });

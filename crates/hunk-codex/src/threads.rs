@@ -892,6 +892,7 @@ impl ThreadService {
             thread_id,
             cwd: self.cwd_key(),
             title: None,
+            created_at: None,
             updated_at: None,
         });
     }
@@ -985,6 +986,7 @@ impl ThreadService {
             thread_id: thread.id.clone(),
             cwd: thread.cwd.to_string_lossy().to_string(),
             title,
+            created_at: Some(thread.created_at),
             updated_at: Some(thread.updated_at),
         });
         self.apply_event(ReducerEvent::ThreadStatusChanged {
