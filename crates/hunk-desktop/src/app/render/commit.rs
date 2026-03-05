@@ -1,6 +1,10 @@
 impl DiffViewer {
     fn git_action_loading_named(&self, action_label: &str) -> bool {
-        self.git_action_loading && self.git_action_label.as_deref() == Some(action_label)
+        self.git_action_loading
+            && self
+                .git_action_label
+                .as_deref()
+                .is_some_and(|label| label.eq_ignore_ascii_case(action_label))
     }
 
     fn render_git_action_status_banner(&self, cx: &mut Context<Self>) -> AnyElement {

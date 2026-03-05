@@ -15,7 +15,10 @@ impl DiffViewer {
         let branch_syncable = self.can_run_active_bookmark_actions();
         let sync_disabled = !self.can_sync_current_bookmark();
         let publish_disabled = !self.can_publish_current_bookmark();
-        let push_revisions_disabled = !self.can_push_current_bookmark_revisions();
+        let push_revisions_available =
+            self.can_push_current_bookmark_revisions() || push_revisions_loading;
+        let push_revisions_disabled =
+            !push_revisions_available || (self.git_action_loading && !push_revisions_loading);
         let sync_tooltip = if !branch_syncable {
             "Activate a bookmark before syncing."
         } else if !self.branch_has_upstream {
@@ -90,7 +93,9 @@ impl DiffViewer {
         let included_count = self.included_commit_file_count();
         let total_count = self.files.len();
         let commit_message_present = !self.commit_input_state.read(cx).value().trim().is_empty();
-        let commit_disabled = self.git_action_loading || !commit_message_present || included_count == 0;
+        let commit_disabled = !commit_message_present
+            || included_count == 0
+            || (self.git_action_loading && !create_revision_loading);
         let describe_tip_disabled = self.git_action_loading
             || !commit_message_present
             || !branch_syncable
@@ -555,7 +560,11 @@ impl DiffViewer {
                                     .primary()
                                     .rounded(px(7.0))
                                     .loading(create_revision_loading)
-                                    .label("Create Revision")
+                                    .label(if create_revision_loading {
+                                        "Creating Revision..."
+                                    } else {
+                                        "Create Revision"
+                                    })
                                     .tooltip("Create a new revision from included files using the message above.")
                                     .disabled(commit_disabled)
                                     .on_click(move |_, window, cx| {
@@ -570,7 +579,11 @@ impl DiffViewer {
                                     .outline()
                                     .rounded(px(7.0))
                                     .loading(push_revisions_loading)
-                                    .label(push_revisions_label)
+                                    .label(if push_revisions_loading {
+                                        "Pushing Revisions..."
+                                    } else {
+                                        push_revisions_label
+                                    })
                                     .tooltip(push_revisions_tooltip)
                                     .disabled(push_revisions_disabled)
                                     .on_click(move |_, _, cx| {
