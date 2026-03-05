@@ -25,6 +25,65 @@ fn thread_item_kind(item: &ThreadItem) -> &'static str {
     }
 }
 
+const MAX_ITEM_DETAILS_JSON_BYTES: usize = 16 * 1024;
+
+fn thread_item_display_metadata(item: &ThreadItem) -> Option<crate::state::ItemDisplayMetadata> {
+    if !thread_item_supports_display_metadata(item) {
+        return None;
+    }
+
+    let summary = thread_item_display_summary(item).map(ToOwned::to_owned);
+    let details_json = serde_json::to_string_pretty(item)
+        .ok()
+        .map(|json| truncate_utf8_for_display(json, MAX_ITEM_DETAILS_JSON_BYTES));
+
+    if summary.is_none() && details_json.is_none() {
+        return None;
+    }
+
+    Some(crate::state::ItemDisplayMetadata {
+        summary,
+        details_json,
+    })
+}
+
+fn thread_item_supports_display_metadata(item: &ThreadItem) -> bool {
+    matches!(
+        item,
+        ThreadItem::CommandExecution { .. }
+            | ThreadItem::FileChange { .. }
+            | ThreadItem::McpToolCall { .. }
+            | ThreadItem::DynamicToolCall { .. }
+            | ThreadItem::CollabAgentToolCall { .. }
+    )
+}
+
+fn thread_item_display_summary(item: &ThreadItem) -> Option<&'static str> {
+    match item {
+        ThreadItem::CommandExecution { .. } => Some("Ran command"),
+        ThreadItem::FileChange { .. } => Some("Applied file changes"),
+        ThreadItem::McpToolCall { .. } => Some("Called MCP tool"),
+        ThreadItem::DynamicToolCall { .. } => Some("Called tool"),
+        ThreadItem::CollabAgentToolCall { .. } => Some("Delegated to collaborator"),
+        _ => None,
+    }
+}
+
+fn truncate_utf8_for_display(input: String, max_bytes: usize) -> String {
+    if input.len() <= max_bytes {
+        return input;
+    }
+
+    let mut cutoff = max_bytes.min(input.len());
+    while cutoff > 0 && !input.is_char_boundary(cutoff) {
+        cutoff = cutoff.saturating_sub(1);
+    }
+
+    let mut truncated = input[..cutoff].to_string();
+    truncated.push_str("\n... [truncated]");
+    truncated
+}
+
 fn thread_item_seed_content(item: &ThreadItem) -> Option<String> {
     match item {
         ThreadItem::UserMessage { content, .. } => user_message_seed_content(content.as_slice()),
@@ -241,5 +300,15 @@ mod tests {
             thread_item_seed_content(&item).as_deref(),
             Some("Searched 'rain' in https://example.com/weather")
         );
+    }
+
+    #[test]
+    fn truncate_utf8_for_display_keeps_utf8_boundaries() {
+        let value = "tool ✅ output".to_string();
+        let truncated = truncate_utf8_for_display(value, 7);
+        assert!(truncated.starts_with("tool "));
+        assert!(!truncated.starts_with("tool ✅"));
+        assert!(!truncated.contains('\u{fffd}'));
+        assert!(truncated.contains("... [truncated]"));
     }
 }

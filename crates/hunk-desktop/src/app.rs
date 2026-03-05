@@ -146,6 +146,21 @@ struct PendingBookmarkSwitch {
     unix_time: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AiTimelineRowSource {
+    Item { item_key: String },
+    TurnDiff { turn_key: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AiTimelineRow {
+    id: String,
+    thread_id: String,
+    turn_id: String,
+    last_sequence: u64,
+    source: AiTimelineRowSource,
+}
+
 mod ai_rollout_fallback;
 mod ai_runtime;
 mod controller;
@@ -965,9 +980,10 @@ struct DiffViewer {
     ai_timeline_list_row_count: usize,
     ai_timeline_visible_turn_limit_by_thread: BTreeMap<String, usize>,
     ai_timeline_turn_ids_by_thread: BTreeMap<String, Vec<String>>,
-    ai_timeline_item_ids_by_turn: BTreeMap<String, Vec<String>>,
+    ai_timeline_row_ids_by_thread: BTreeMap<String, Vec<String>>,
+    ai_timeline_rows_by_id: BTreeMap<String, AiTimelineRow>,
     ai_in_progress_turn_started_at: BTreeMap<String, Instant>,
-    ai_expanded_command_output_item_ids: BTreeSet<String>,
+    ai_expanded_timeline_row_ids: BTreeSet<String>,
     ai_pending_approvals: Vec<AiPendingApproval>,
     ai_pending_user_inputs: Vec<AiPendingUserInputRequest>,
     ai_pending_user_input_answers: BTreeMap<String, BTreeMap<String, Vec<String>>>,

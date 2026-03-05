@@ -5,7 +5,11 @@ mod ai_helper_tests {
     use super::ai_thread_status_text;
     use super::ai_item_display_label;
     use super::ai_rate_limit_summary;
+    use super::ai_timeline_item_is_renderable;
     use super::ai_truncate_multiline_content;
+    use hunk_codex::state::ItemDisplayMetadata;
+    use hunk_codex::state::ItemStatus;
+    use hunk_codex::state::ItemSummary;
     use hunk_codex::state::ThreadLifecycleStatus;
 
     fn rate_limit_window(
@@ -109,5 +113,29 @@ mod ai_helper_tests {
             ai_thread_status_text(ThreadLifecycleStatus::NotLoaded),
             "not loaded"
         );
+    }
+
+    #[test]
+    fn timeline_item_renderability_hides_empty_reasoning_without_metadata() {
+        let reasoning = ItemSummary {
+            id: "item-1".to_string(),
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            kind: "reasoning".to_string(),
+            status: ItemStatus::Completed,
+            content: "   ".to_string(),
+            display_metadata: None,
+            last_sequence: 1,
+        };
+        assert!(!ai_timeline_item_is_renderable(&reasoning));
+
+        let reasoning_with_metadata = ItemSummary {
+            display_metadata: Some(ItemDisplayMetadata {
+                summary: Some("Thinking".to_string()),
+                details_json: None,
+            }),
+            ..reasoning
+        };
+        assert!(ai_timeline_item_is_renderable(&reasoning_with_metadata));
     }
 }

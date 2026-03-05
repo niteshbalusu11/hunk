@@ -33,13 +33,6 @@ fn ai_thread_status_text(status: ThreadLifecycleStatus) -> &'static str {
     }
 }
 
-fn ai_turn_status_label(status: TurnStatus) -> &'static str {
-    match status {
-        TurnStatus::InProgress => "in-progress",
-        TurnStatus::Completed => "completed",
-    }
-}
-
 fn ai_item_status_label(status: ItemStatus) -> &'static str {
     match status {
         ItemStatus::Started => "started",

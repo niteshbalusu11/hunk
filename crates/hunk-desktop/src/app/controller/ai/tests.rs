@@ -22,11 +22,15 @@ mod ai_tests {
     use super::should_follow_timeline_output;
     use super::should_scroll_timeline_to_bottom_on_new_activity;
     use super::sorted_threads;
+    use super::timeline_visible_row_ids_for_turns;
+    use super::timeline_visible_turn_ids;
     use super::should_scroll_timeline_to_bottom_on_selection_change;
     use super::should_sync_selected_thread_from_active_thread;
     use super::thread_latest_timeline_sequence;
     use super::workspace_include_hidden_models;
     use super::workspace_mad_max_mode;
+    use crate::app::AiTimelineRow;
+    use crate::app::AiTimelineRowSource;
     use crate::app::ai_runtime::AiPendingUserInputQuestion;
     use crate::app::ai_runtime::AiPendingUserInputQuestionOption;
     use crate::app::ai_runtime::AiPendingUserInputRequest;
@@ -36,8 +40,10 @@ mod ai_tests {
     use hunk_codex::state::ThreadSummary;
     use hunk_domain::state::AiThreadSessionState;
     use hunk_domain::state::AppState;
+    use std::collections::BTreeMap;
+    use std::env;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
     #[test]
     fn sorted_threads_orders_by_created_at_descending() {
@@ -178,6 +184,198 @@ mod ai_tests {
     }
 
     #[test]
+    fn timeline_visible_turn_ids_paginates_from_newest_turns() {
+        let turn_ids = vec![
+            "turn-1".to_string(),
+            "turn-2".to_string(),
+            "turn-3".to_string(),
+            "turn-4".to_string(),
+        ];
+
+        let (total, visible, hidden, visible_turn_ids) =
+            timeline_visible_turn_ids(turn_ids.as_slice(), 2);
+        assert_eq!(total, 4);
+        assert_eq!(visible, 2);
+        assert_eq!(hidden, 2);
+        assert_eq!(visible_turn_ids, vec!["turn-3".to_string(), "turn-4".to_string()]);
+    }
+
+    #[test]
+    fn timeline_visible_row_ids_filter_by_visible_turns_and_preserve_row_order() {
+        let row_ids = vec![
+            "item:1".to_string(),
+            "item:2".to_string(),
+            "turn-diff:2".to_string(),
+            "item:3".to_string(),
+            "item:missing".to_string(),
+        ];
+        let rows_by_id = BTreeMap::from([
+            (
+                "item:1".to_string(),
+                AiTimelineRow {
+                    id: "item:1".to_string(),
+                    thread_id: "thread-1".to_string(),
+                    turn_id: "turn-1".to_string(),
+                    last_sequence: 1,
+                    source: AiTimelineRowSource::Item {
+                        item_key: "item-1".to_string(),
+                    },
+                },
+            ),
+            (
+                "item:2".to_string(),
+                AiTimelineRow {
+                    id: "item:2".to_string(),
+                    thread_id: "thread-1".to_string(),
+                    turn_id: "turn-2".to_string(),
+                    last_sequence: 2,
+                    source: AiTimelineRowSource::Item {
+                        item_key: "item-2".to_string(),
+                    },
+                },
+            ),
+            (
+                "turn-diff:2".to_string(),
+                AiTimelineRow {
+                    id: "turn-diff:2".to_string(),
+                    thread_id: "thread-1".to_string(),
+                    turn_id: "turn-2".to_string(),
+                    last_sequence: 2,
+                    source: AiTimelineRowSource::TurnDiff {
+                        turn_key: "turn-2".to_string(),
+                    },
+                },
+            ),
+            (
+                "item:3".to_string(),
+                AiTimelineRow {
+                    id: "item:3".to_string(),
+                    thread_id: "thread-1".to_string(),
+                    turn_id: "turn-3".to_string(),
+                    last_sequence: 3,
+                    source: AiTimelineRowSource::Item {
+                        item_key: "item-3".to_string(),
+                    },
+                },
+            ),
+        ]);
+        let visible_turn_ids = vec!["turn-2".to_string(), "turn-3".to_string()];
+
+        let visible_rows = timeline_visible_row_ids_for_turns(
+            row_ids.as_slice(),
+            &rows_by_id,
+            visible_turn_ids.as_slice(),
+        );
+        assert_eq!(
+            visible_rows,
+            vec![
+                "item:2".to_string(),
+                "turn-diff:2".to_string(),
+                "item:3".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    #[ignore = "Runs an AI timeline row-index benchmark and optionally enforces thresholds."]
+    fn ai_timeline_visible_row_index_perf_harness() {
+        let turn_count = env::var("HUNK_AI_TIMELINE_PERF_TURNS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(2_000)
+            .max(1);
+        let items_per_turn = env::var("HUNK_AI_TIMELINE_PERF_ITEMS_PER_TURN")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(6)
+            .max(1);
+        let visible_turn_limit = env::var("HUNK_AI_TIMELINE_PERF_VISIBLE_TURNS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(64)
+            .max(1);
+        let iterations = env::var("HUNK_AI_TIMELINE_PERF_ITERATIONS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(250)
+            .max(1);
+        let enforce_thresholds = env::var("HUNK_AI_TIMELINE_PERF_ENFORCE")
+            .ok()
+            .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"));
+        let max_avg_us = env::var("HUNK_AI_TIMELINE_PERF_MAX_AVG_US")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(15_000.0);
+
+        let mut turn_ids = Vec::with_capacity(turn_count);
+        let mut row_ids = Vec::with_capacity(turn_count.saturating_mul(items_per_turn + 1));
+        let mut rows_by_id = BTreeMap::new();
+
+        for turn_ix in 0..turn_count {
+            let turn_id = format!("turn-{turn_ix}");
+            turn_ids.push(turn_id.clone());
+            for item_ix in 0..items_per_turn {
+                let row_id = format!("item:{turn_ix}:{item_ix}");
+                row_ids.push(row_id.clone());
+                rows_by_id.insert(
+                    row_id.clone(),
+                    AiTimelineRow {
+                        id: row_id,
+                        thread_id: "thread-perf".to_string(),
+                        turn_id: turn_id.clone(),
+                        last_sequence: ((turn_ix * items_per_turn) + item_ix) as u64,
+                        source: AiTimelineRowSource::Item {
+                            item_key: format!("item-key:{turn_ix}:{item_ix}"),
+                        },
+                    },
+                );
+            }
+            let diff_row_id = format!("turn-diff:{turn_ix}");
+            row_ids.push(diff_row_id.clone());
+            rows_by_id.insert(
+                diff_row_id.clone(),
+                AiTimelineRow {
+                    id: diff_row_id,
+                    thread_id: "thread-perf".to_string(),
+                    turn_id: turn_id.clone(),
+                    last_sequence: ((turn_ix * items_per_turn) + items_per_turn) as u64,
+                    source: AiTimelineRowSource::TurnDiff {
+                        turn_key: turn_id,
+                    },
+                },
+            );
+        }
+
+        let started = Instant::now();
+        let mut visible_row_total = 0usize;
+        for _ in 0..iterations {
+            let (_, _, _, visible_turn_ids) =
+                timeline_visible_turn_ids(turn_ids.as_slice(), visible_turn_limit);
+            let visible_rows =
+                timeline_visible_row_ids_for_turns(row_ids.as_slice(), &rows_by_id, visible_turn_ids.as_slice());
+            visible_row_total = visible_row_total.saturating_add(visible_rows.len());
+        }
+        let elapsed = started.elapsed();
+        let average_us = elapsed.as_secs_f64() * 1_000_000.0 / iterations as f64;
+
+        println!("PERF_METRIC ai_timeline_turn_count={turn_count}");
+        println!("PERF_METRIC ai_timeline_items_per_turn={items_per_turn}");
+        println!("PERF_METRIC ai_timeline_iterations={iterations}");
+        println!("PERF_METRIC ai_timeline_avg_us={average_us:.2}");
+        println!("PERF_METRIC ai_timeline_visible_rows_total={visible_row_total}");
+
+        assert!(visible_row_total > 0);
+        if enforce_thresholds {
+            assert!(
+                average_us <= max_avg_us,
+                "AI timeline row-index average {:.2}us exceeded threshold {:.2}us",
+                average_us,
+                max_avg_us
+            );
+        }
+    }
+
+    #[test]
     fn active_thread_change_updates_selection_when_current_selection_is_valid() {
         let mut state = AiState::default();
         state.threads.insert(
@@ -306,6 +504,7 @@ mod ai_tests {
                 kind: "agentMessage".to_string(),
                 status: ItemStatus::Streaming,
                 content: "chunk".to_string(),
+                display_metadata: None,
                 last_sequence: 11,
             },
         );

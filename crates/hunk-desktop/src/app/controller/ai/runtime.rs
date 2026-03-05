@@ -198,7 +198,7 @@ impl DiffViewer {
         ) {
             self.ai_timeline_follow_output = true;
             self.ai_scroll_timeline_to_bottom = true;
-            self.ai_expanded_command_output_item_ids.clear();
+            self.ai_expanded_timeline_row_ids.clear();
         }
         if let Some(selected_thread_id) = self.ai_selected_thread_id.as_deref()
             && previous_selected_thread.as_deref() == Some(selected_thread_id)
@@ -213,8 +213,8 @@ impl DiffViewer {
                 self.ai_scroll_timeline_to_bottom = true;
             }
         }
-        self.ai_expanded_command_output_item_ids
-            .retain(|item_id| self.ai_state_snapshot.items.contains_key(item_id));
+        self.ai_expanded_timeline_row_ids
+            .retain(|row_id| self.ai_timeline_rows_by_id.contains_key(row_id));
 
         self.sync_ai_session_selection_from_state();
     }

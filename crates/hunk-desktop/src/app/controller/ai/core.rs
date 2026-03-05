@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use hunk_codex::state::turn_storage_key;
 use hunk_domain::state::AiThreadSessionState;
 use hunk_codex::state::ThreadLifecycleStatus;
 use hunk_codex::state::ThreadSummary;
@@ -429,7 +428,7 @@ impl DiffViewer {
     ) {
         self.ai_timeline_follow_output = true;
         self.ai_scroll_timeline_to_bottom = true;
-        self.ai_expanded_command_output_item_ids.clear();
+        self.ai_expanded_timeline_row_ids.clear();
         self.ai_selected_thread_id = Some(thread_id.clone());
         self.sync_ai_session_selection_from_state();
         self.send_ai_worker_command(AiWorkerCommand::SelectThread { thread_id }, cx);
@@ -476,26 +475,22 @@ impl DiffViewer {
 
         if self.ai_selected_thread_id.as_deref() == Some(thread_id.as_str()) {
             self.ai_selected_thread_id = None;
-            self.ai_expanded_command_output_item_ids.clear();
+            self.ai_expanded_timeline_row_ids.clear();
             self.ai_timeline_follow_output = true;
             self.ai_scroll_timeline_to_bottom = true;
         }
         self.show_ai_thread_inline_toast("Thread archived.", cx);
     }
 
-    pub(super) fn ai_toggle_command_output_expansion_action(
+    pub(super) fn ai_toggle_timeline_row_expansion_action(
         &mut self,
-        item_id: String,
+        row_id: String,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .ai_expanded_command_output_item_ids
-            .contains(item_id.as_str())
-        {
-            self.ai_expanded_command_output_item_ids
-                .remove(item_id.as_str());
+        if self.ai_expanded_timeline_row_ids.contains(row_id.as_str()) {
+            self.ai_expanded_timeline_row_ids.remove(row_id.as_str());
         } else {
-            self.ai_expanded_command_output_item_ids.insert(item_id);
+            self.ai_expanded_timeline_row_ids.insert(row_id);
         }
         cx.notify();
     }
@@ -527,19 +522,48 @@ impl DiffViewer {
             .collect()
     }
 
-    pub(super) fn ai_timeline_turn_ids(&self, thread_id: &str) -> Vec<String> {
+    pub(super) fn ai_timeline_turn_ids(&self, thread_id: &str) -> &[String] {
         self.ai_timeline_turn_ids_by_thread
             .get(thread_id)
-            .cloned()
-            .unwrap_or_default()
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 
-    pub(super) fn ai_timeline_item_ids(&self, thread_id: &str, turn_id: &str) -> Vec<String> {
-        let turn_key = turn_storage_key(thread_id, turn_id);
-        self.ai_timeline_item_ids_by_turn
-            .get(turn_key.as_str())
-            .cloned()
-            .unwrap_or_default()
+    pub(super) fn ai_timeline_row_ids(&self, thread_id: &str) -> &[String] {
+        self.ai_timeline_row_ids_by_thread
+            .get(thread_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    pub(super) fn ai_timeline_row(&self, row_id: &str) -> Option<&AiTimelineRow> {
+        self.ai_timeline_rows_by_id.get(row_id)
+    }
+
+    pub(super) fn ai_timeline_visible_rows_for_thread(
+        &self,
+        thread_id: &str,
+    ) -> (usize, usize, usize, Vec<String>) {
+        let turn_ids = self.ai_timeline_turn_ids(thread_id);
+        let configured_limit = self
+            .ai_timeline_visible_turn_limit_by_thread
+            .get(thread_id)
+            .copied()
+            .unwrap_or(AI_TIMELINE_DEFAULT_VISIBLE_TURNS);
+        let (total_turn_count, visible_turn_count, hidden_turn_count, visible_turn_ids) =
+            timeline_visible_turn_ids(turn_ids, configured_limit);
+        let row_ids = self.ai_timeline_row_ids(thread_id);
+        let visible_row_ids = timeline_visible_row_ids_for_turns(
+            row_ids,
+            &self.ai_timeline_rows_by_id,
+            visible_turn_ids.as_slice(),
+        );
+        (
+            total_turn_count,
+            visible_turn_count,
+            hidden_turn_count,
+            visible_row_ids,
+        )
     }
 
     fn rebuild_ai_timeline_indexes(&mut self) {
@@ -565,28 +589,66 @@ impl DiffViewer {
             })
             .collect();
 
-        let mut item_ids_by_turn = BTreeMap::<String, Vec<(u64, String)>>::new();
+        let mut rows_by_thread = BTreeMap::<String, Vec<(u64, String)>>::new();
+        let mut rows_by_id = BTreeMap::<String, AiTimelineRow>::new();
         for (item_key, item) in &self.ai_state_snapshot.items {
-            let turn_key = turn_storage_key(item.thread_id.as_str(), item.turn_id.as_str());
-            item_ids_by_turn
-                .entry(turn_key)
+            let row_id = format!("item:{item_key}");
+            rows_by_thread
+                .entry(item.thread_id.clone())
                 .or_default()
-                .push((item.last_sequence, item_key.clone()));
+                .push((item.last_sequence, row_id.clone()));
+            rows_by_id.insert(
+                row_id.clone(),
+                AiTimelineRow {
+                    id: row_id,
+                    thread_id: item.thread_id.clone(),
+                    turn_id: item.turn_id.clone(),
+                    last_sequence: item.last_sequence,
+                    source: AiTimelineRowSource::Item {
+                        item_key: item_key.clone(),
+                    },
+                },
+            );
         }
 
-        self.ai_timeline_item_ids_by_turn = item_ids_by_turn
+        for (turn_key, turn) in &self.ai_state_snapshot.turns {
+            let Some(diff) = self.ai_state_snapshot.turn_diffs.get(turn_key.as_str()) else {
+                continue;
+            };
+            if diff.trim().is_empty() {
+                continue;
+            }
+            let diff_row_id = format!("turn-diff:{turn_key}");
+            rows_by_thread
+                .entry(turn.thread_id.clone())
+                .or_default()
+                .push((turn.last_sequence, diff_row_id.clone()));
+            rows_by_id.entry(diff_row_id.clone()).or_insert(AiTimelineRow {
+                id: diff_row_id,
+                thread_id: turn.thread_id.clone(),
+                turn_id: turn.id.clone(),
+                last_sequence: turn.last_sequence,
+                source: AiTimelineRowSource::TurnDiff {
+                    turn_key: turn_key.clone(),
+                },
+            });
+        }
+
+        self.ai_timeline_row_ids_by_thread = rows_by_thread
             .into_iter()
-            .map(|(turn_key, mut entries)| {
+            .map(|(thread_id, mut entries)| {
                 entries.sort_by(|left, right| {
                     left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1))
                 });
+                entries.dedup_by(|left, right| left.1 == right.1);
                 let ids = entries
                     .into_iter()
-                    .map(|(_, item_id)| item_id)
+                    .map(|(_, row_id)| row_id)
                     .collect::<Vec<_>>();
-                (turn_key, ids)
+                (thread_id, ids)
             })
             .collect();
+        self.ai_timeline_rows_by_id = rows_by_id;
     }
 
     pub(super) fn sync_ai_timeline_list_state(&mut self, row_count: usize) {

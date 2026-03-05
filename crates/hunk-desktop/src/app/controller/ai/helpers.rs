@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 fn sorted_threads(state: &hunk_codex::state::AiState) -> Vec<ThreadSummary> {
     let mut threads = state.threads.values().cloned().collect::<Vec<_>>();
     threads.sort_by(|left, right| {
@@ -58,6 +60,49 @@ fn should_follow_timeline_output(
 
     let current_scroll_offset_y = (-scroll_offset_y).clamp(0.0, max_scroll_offset_y);
     current_scroll_offset_y >= max_scroll_offset_y - TIMELINE_BOTTOM_EPSILON_PX
+}
+
+fn timeline_visible_turn_ids(
+    turn_ids: &[String],
+    configured_limit: usize,
+) -> (usize, usize, usize, Vec<String>) {
+    let total_turn_count = turn_ids.len();
+    let visible_turn_count = configured_limit.min(total_turn_count);
+    let hidden_turn_count = total_turn_count.saturating_sub(visible_turn_count);
+    let visible_turn_ids = turn_ids
+        .iter()
+        .skip(hidden_turn_count)
+        .cloned()
+        .collect::<Vec<_>>();
+    (
+        total_turn_count,
+        visible_turn_count,
+        hidden_turn_count,
+        visible_turn_ids,
+    )
+}
+
+fn timeline_visible_row_ids_for_turns(
+    row_ids: &[String],
+    rows_by_id: &BTreeMap<String, AiTimelineRow>,
+    visible_turn_ids: &[String],
+) -> Vec<String> {
+    if visible_turn_ids.is_empty() {
+        return Vec::new();
+    }
+    let visible_turn_ids = visible_turn_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    row_ids
+        .iter()
+        .filter(|row_id| {
+            rows_by_id
+                .get(row_id.as_str())
+                .is_some_and(|row| visible_turn_ids.contains(row.turn_id.as_str()))
+        })
+        .cloned()
+        .collect::<Vec<_>>()
 }
 
 fn should_sync_selected_thread_from_active_thread(

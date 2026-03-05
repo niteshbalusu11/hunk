@@ -2,7 +2,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use hunk_codex::state::ItemStatus;
 use hunk_codex::state::ThreadLifecycleStatus;
-use hunk_codex::state::TurnStatus;
 
 impl DiffViewer {
     fn render_ai_workspace_screen(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -41,36 +40,41 @@ impl DiffViewer {
         let pending_user_input_count = pending_user_inputs.len();
         let selected_thread_id = self.current_ai_thread_id();
         let previous_timeline_row_count = self.ai_timeline_list_row_count;
-        let (timeline_total_turn_count, timeline_visible_turn_count, timeline_hidden_turn_count, timeline_visible_turn_ids) =
+        let (
+            timeline_total_turn_count,
+            timeline_visible_turn_count,
+            timeline_hidden_turn_count,
+            timeline_visible_row_ids,
+        ) =
             if let Some(thread_id) = selected_thread_id.as_deref() {
-                let turn_ids = self.ai_timeline_turn_ids(thread_id);
-                let total_turn_count = turn_ids.len();
-                let configured_limit = self
-                    .ai_timeline_visible_turn_limit_by_thread
-                    .get(thread_id)
-                    .copied()
-                    .unwrap_or(AI_TIMELINE_DEFAULT_VISIBLE_TURNS);
-                let visible_turn_count = configured_limit.min(total_turn_count);
-                let hidden_turn_count = total_turn_count.saturating_sub(visible_turn_count);
-                let visible_turn_ids = turn_ids.into_iter().skip(hidden_turn_count).collect::<Vec<_>>();
-                self.sync_ai_timeline_list_state(visible_turn_count);
+                let (total_turn_count, visible_turn_count, hidden_turn_count, visible_row_ids) =
+                    self.ai_timeline_visible_rows_for_thread(thread_id);
+                let visible_row_ids = visible_row_ids
+                    .into_iter()
+                    .filter(|row_id| {
+                        self.ai_timeline_row(row_id.as_str()).is_some_and(|row| {
+                            ai_timeline_row_is_renderable(self, row)
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                self.sync_ai_timeline_list_state(visible_row_ids.len());
                 (
                     total_turn_count,
                     visible_turn_count,
                     hidden_turn_count,
-                    visible_turn_ids,
+                    visible_row_ids,
                 )
             } else {
                 self.sync_ai_timeline_list_state(0);
                 (0, 0, 0, Vec::new())
             };
         self.sync_ai_timeline_follow_output(
-            timeline_visible_turn_count,
-            timeline_visible_turn_count == previous_timeline_row_count,
+            timeline_visible_row_ids.len(),
+            timeline_visible_row_ids.len() == previous_timeline_row_count,
         );
         let ai_timeline_follow_output = self.ai_timeline_follow_output;
         let timeline_loading =
-            show_global_loading_overlay && selected_thread_id.is_some() && timeline_visible_turn_ids.is_empty();
+            show_global_loading_overlay && selected_thread_id.is_some() && timeline_visible_row_ids.is_empty();
         let ai_timeline_list_state = self.ai_timeline_list_state.clone();
         let in_progress_turn = selected_thread_id
             .as_ref()
@@ -902,236 +906,21 @@ impl DiffViewer {
                                                         .clone()
                                                         .filter(|_| !timeline_loading),
                                                     |this, thread_id| {
-                                                            let timeline_turn_ids_for_list = timeline_visible_turn_ids.clone();
+                                                            let timeline_row_ids_for_list = timeline_visible_row_ids.clone();
                                                             let timeline_list_state = ai_timeline_list_state.clone();
                                                             let view_for_list = view.clone();
                                                             let timeline_list = list(timeline_list_state.clone(), {
                                                                 cx.processor(move |this, ix: usize, _window, cx| {
-                                                                    let Some(turn_id) = timeline_turn_ids_for_list.get(ix) else {
+                                                                    let Some(row_id) = timeline_row_ids_for_list.get(ix) else {
                                                                         return div().w_full().h(px(0.0)).into_any_element();
                                                                     };
-                                                                    let Some(turn) =
-                                                                        this.ai_state_snapshot.turns.get(turn_id.as_str())
-                                                                    else {
-                                                                        return div().w_full().h(px(0.0)).into_any_element();
-                                                                    };
-                                                                    let turn_status = ai_turn_status_label(turn.status);
-                                                                    let item_ids = this.ai_timeline_item_ids(
-                                                                        turn.thread_id.as_str(),
-                                                                        turn.id.as_str(),
-                                                                    );
-                                                                    let diff_preview = this
-                                                                        .ai_state_snapshot
-                                                                        .turn_diffs
-                                                                        .get(turn_id.as_str())
-                                                                        .cloned();
-
-                                                                    v_flex()
-                                                                        .w_full()
-                                                                        .gap_1p5()
-                                                                        .p_2()
-                                                                        .rounded_md()
-                                                                        .border_1()
-                                                                        .border_color(cx.theme().border)
-                                                                        .bg(cx.theme().background.blend(
-                                                                            cx.theme().muted.opacity(if is_dark {
-                                                                                0.20
-                                                                            } else {
-                                                                                0.30
-                                                                            }),
-                                                                        ))
-                                                                        .child(
-                                                                            h_flex()
-                                                                                .w_full()
-                                                                                .items_center()
-                                                                                .justify_between()
-                                                                                .child(
-                                                                                    div()
-                                                                                        .text_xs()
-                                                                                        .font_semibold()
-                                                                                        .child(format!(
-                                                                                            "Turn {}",
-                                                                                            turn.id
-                                                                                        )),
-                                                                                )
-                                                                                .child(
-                                                                                    div()
-                                                                                        .text_xs()
-                                                                                        .text_color(
-                                                                                            if turn.status
-                                                                                                == TurnStatus::Completed
-                                                                                            {
-                                                                                                cx.theme().success
-                                                                                            } else {
-                                                                                                cx.theme().warning
-                                                                                            },
-                                                                                        )
-                                                                                        .child(turn_status),
-                                                                                ),
-                                                                        )
-                                                                        .children(item_ids.into_iter().filter_map(|item_id| {
-                                                                            let item = this.ai_state_snapshot.items.get(&item_id)?;
-                                                                            if matches!(item.kind.as_str(), "reasoning" | "webSearch")
-                                                                                && item.content.trim().is_empty()
-                                                                            {
-                                                                                return None;
-                                                                            }
-                                                                            let status = ai_item_status_label(item.status);
-                                                                            let item_label = ai_item_display_label(item.kind.as_str()).to_string();
-                                                                            let command_output_collapsible =
-                                                                                item.kind == "commandExecution";
-                                                                            let command_output_expanded = command_output_collapsible
-                                                                                && this.ai_expanded_command_output_item_ids.contains(item_id.as_str());
-                                                                            let (item_content, command_output_truncated) =
-                                                                                if command_output_collapsible && !command_output_expanded {
-                                                                                    ai_truncate_multiline_content(
-                                                                                        item.content.as_str(),
-                                                                                        3,
-                                                                                    )
-                                                                                } else {
-                                                                                    (item.content.clone(), false)
-                                                                                };
-
-                                                                            Some(
-                                                                                v_flex()
-                                                                                    .w_full()
-                                                                                    .gap_0p5()
-                                                                                    .p_2()
-                                                                                    .rounded(px(8.0))
-                                                                                    .border_1()
-                                                                                    .border_color(
-                                                                                        cx.theme().border.opacity(if is_dark {
-                                                                                            0.90
-                                                                                        } else {
-                                                                                            0.72
-                                                                                        }),
-                                                                                    )
-                                                                                    .bg(cx.theme().background.blend(
-                                                                                        cx.theme().muted.opacity(if is_dark {
-                                                                                            0.10
-                                                                                        } else {
-                                                                                            0.16
-                                                                                        }),
-                                                                                    ))
-                                                                                    .child(
-                                                                                        h_flex()
-                                                                                            .w_full()
-                                                                                            .items_center()
-                                                                                            .justify_between()
-                                                                                            .child(
-                                                                                                div()
-                                                                                                    .text_xs()
-                                                                                                    .font_medium()
-                                                                                                    .child(item_label),
-                                                                                            )
-                                                                                            .child(
-                                                                                                div()
-                                                                                                    .text_xs()
-                                                                                                    .text_color(
-                                                                                                        ai_item_status_color(
-                                                                                                            item.status,
-                                                                                                            cx,
-                                                                                                        ),
-                                                                                                    )
-                                                                                                    .child(status),
-                                                                                            ),
-                                                                                    )
-                                                                                    .when(!item_content.is_empty(), |this| {
-                                                                                        this.child(
-                                                                                            div()
-                                                                                                .text_xs()
-                                                                                                .font_family(
-                                                                                                    cx.theme()
-                                                                                                        .mono_font_family
-                                                                                                        .clone(),
-                                                                                                )
-                                                                                                .text_color(
-                                                                                                    cx.theme()
-                                                                                                        .muted_foreground,
-                                                                                                )
-                                                                                                .whitespace_normal()
-                                                                                                .child(item_content.clone()),
-                                                                                        )
-                                                                                    })
-                                                                                    .when(
-                                                                                        command_output_collapsible
-                                                                                            && (command_output_truncated
-                                                                                                || command_output_expanded),
-                                                                                        |this| {
-                                                                                            let item_key = item_id.clone();
-                                                                                            let button_id = format!(
-                                                                                                "ai-toggle-command-output-{}",
-                                                                                                item_key.replace('\u{1f}', "--"),
-                                                                                            );
-                                                                                            let view = view_for_list.clone();
-                                                                                            this.child(
-                                                                                                Button::new(
-                                                                                                    button_id,
-                                                                                                )
-                                                                                                .compact()
-                                                                                                .outline()
-                                                                                                .with_size(gpui_component::Size::Small)
-                                                                                                .label(if command_output_expanded {
-                                                                                                    "Collapse output"
-                                                                                                } else {
-                                                                                                    "Show full output"
-                                                                                                })
-                                                                                                .on_click(move |_, _, cx| {
-                                                                                                    view.update(cx, |this, cx| {
-                                                                                                        this.ai_toggle_command_output_expansion_action(
-                                                                                                            item_key.clone(),
-                                                                                                            cx,
-                                                                                                        );
-                                                                                                    });
-                                                                                                }),
-                                                                                            )
-                                                                                        },
-                                                                                    )
-                                                                                    .into_any_element(),
-                                                                            )
-                                                                        }))
-                                                                        .when_some(diff_preview, |this, diff| {
-                                                                            let diff_line_count = diff.lines().count();
-                                                                            this.child(
-                                                                                h_flex()
-                                                                                    .w_full()
-                                                                                    .items_center()
-                                                                                    .justify_between()
-                                                                                    .gap_2()
-                                                                                    .pt_1()
-                                                                                    .border_t_1()
-                                                                                    .border_color(cx.theme().border)
-                                                                                    .child(
-                                                                                        div()
-                                                                                            .text_xs()
-                                                                                            .text_color(
-                                                                                                cx.theme().muted_foreground,
-                                                                                            )
-                                                                                            .child(format!(
-                                                                                                "Turn diff available ({diff_line_count} lines)",
-                                                                                            )),
-                                                                                    )
-                                                                                    .child({
-                                                                                        let view = view_for_list.clone();
-                                                                                        Button::new(
-                                                                                            format!(
-                                                                                                "ai-open-review-tab-{}",
-                                                                                                turn.id
-                                                                                            ),
-                                                                                        )
-                                                                                        .compact()
-                                                                                        .outline()
-                                                                                        .with_size(gpui_component::Size::Small)
-                                                                                        .label("View Diff")
-                                                                                        .on_click(move |_, _, cx| {
-                                                                                            view.update(cx, |this, cx| {
-                                                                                                this.ai_open_review_tab(cx);
-                                                                                            });
-                                                                                        })
-                                                                                    }),
-                                                                            )
-                                                                        })
-                                                                        .into_any_element()
+                                                                    render_ai_chat_timeline_row_for_view(
+                                                                        this,
+                                                                        row_id.as_str(),
+                                                                        view_for_list.clone(),
+                                                                        is_dark,
+                                                                        cx,
+                                                                    )
                                                                 })
                                                             })
                                                             .size_full()
@@ -1158,6 +947,32 @@ impl DiffViewer {
                                                                         ),
                                                                 )
                                                             })
+                                                            .when(
+                                                                timeline_visible_turn_count > 0
+                                                                    && timeline_visible_row_ids.is_empty(),
+                                                                |this| {
+                                                                    this.child(
+                                                                        div()
+                                                                            .rounded_md()
+                                                                            .border_1()
+                                                                            .border_color(cx.theme().border)
+                                                                            .bg(cx.theme().muted.opacity(if is_dark {
+                                                                                0.22
+                                                                            } else {
+                                                                                0.40
+                                                                            }))
+                                                                            .p_3()
+                                                                            .child(
+                                                                                div()
+                                                                                    .text_sm()
+                                                                                    .text_color(
+                                                                                        cx.theme().muted_foreground,
+                                                                                    )
+                                                                                    .child("No timeline events for visible turns yet."),
+                                                                            ),
+                                                                    )
+                                                                },
+                                                            )
                                                             .when(timeline_hidden_turn_count > 0, |this| {
                                                                 let load_older_thread_id = thread_id.clone();
                                                                 let show_all_thread_id = thread_id.clone();
@@ -1234,7 +1049,7 @@ impl DiffViewer {
                                                                         ),
                                                                 )
                                                             })
-                                                            .when(timeline_visible_turn_count > 0, |this| {
+                                                            .when(!timeline_visible_row_ids.is_empty(), |this| {
                                                                 let view = view.clone();
                                                                 this.child(
                                                                     div()
