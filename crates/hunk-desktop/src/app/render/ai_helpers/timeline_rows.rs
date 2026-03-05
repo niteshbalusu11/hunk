@@ -5,6 +5,18 @@ enum AiTimelineItemRole {
     Tool,
 }
 
+const AI_TIMELINE_CONTENT_LANE_MAX_WIDTH: f32 = 960.0;
+
+struct AiCommandExecutionDisplayDetails {
+    command: String,
+    cwd: String,
+    process_id: Option<String>,
+    status: String,
+    action_summaries: Vec<String>,
+    exit_code: Option<i32>,
+    duration_ms: Option<i64>,
+}
+
 fn ai_timeline_item_role(kind: &str) -> AiTimelineItemRole {
     match kind {
         "userMessage" => AiTimelineItemRole::User,
@@ -45,6 +57,331 @@ fn ai_timeline_row_is_renderable(this: &DiffViewer, row: &AiTimelineRow) -> bool
             .get(turn_key.as_str())
             .is_some_and(|diff| !diff.trim().is_empty()),
     }
+}
+
+fn ai_timeline_item_details_json(item: &hunk_codex::state::ItemSummary) -> Option<&str> {
+    item.display_metadata
+        .as_ref()
+        .and_then(|metadata| metadata.details_json.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn ai_command_execution_display_details(
+    item: &hunk_codex::state::ItemSummary,
+) -> Option<AiCommandExecutionDisplayDetails> {
+    let details_json = ai_timeline_item_details_json(item)?;
+    let details = serde_json::from_str::<serde_json::Value>(details_json).ok()?;
+    let object = details.as_object()?;
+    if object.get("kind").and_then(|value| value.as_str()) != Some("commandExecution") {
+        return None;
+    }
+
+    Some(AiCommandExecutionDisplayDetails {
+        command: object
+            .get("command")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        cwd: object
+            .get("cwd")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        process_id: object
+            .get("processId")
+            .and_then(|value| value.as_str())
+            .map(ToOwned::to_owned),
+        status: object
+            .get("status")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        action_summaries: object
+            .get("actionSummaries")
+            .and_then(|value| value.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|value| value.as_str().map(ToOwned::to_owned))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+        exit_code: object
+            .get("exitCode")
+            .and_then(|value| value.as_i64())
+            .and_then(|value| i32::try_from(value).ok()),
+        duration_ms: object.get("durationMs").and_then(|value| value.as_i64()),
+    })
+}
+
+fn ai_tool_preview_text(
+    item: &hunk_codex::state::ItemSummary,
+    content_text: &str,
+) -> Option<String> {
+    if let Some(details) = ai_command_execution_display_details(item) {
+        return Some(details.command);
+    }
+
+    let details_json = ai_timeline_item_details_json(item)?;
+    let thread_item =
+        serde_json::from_str::<codex_app_server_protocol::ThreadItem>(details_json).ok();
+    match thread_item {
+        Some(codex_app_server_protocol::ThreadItem::FileChange { changes, .. }) => {
+            let mut preview = changes
+                .iter()
+                .take(3)
+                .map(|change| change.path.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            if changes.len() > 3 {
+                if !preview.is_empty() {
+                    preview.push('\n');
+                }
+                preview.push_str(&format!("+{} more files", changes.len() - 3));
+            }
+            (!preview.trim().is_empty()).then_some(preview)
+        }
+        Some(codex_app_server_protocol::ThreadItem::McpToolCall { server, tool, .. }) => {
+            Some(format!("{server} :: {tool}"))
+        }
+        Some(codex_app_server_protocol::ThreadItem::DynamicToolCall { tool, .. }) => Some(tool),
+        Some(codex_app_server_protocol::ThreadItem::CollabAgentToolCall {
+            tool,
+            receiver_thread_ids,
+            ..
+        }) => {
+            let receivers = if receiver_thread_ids.is_empty() {
+                "no targets".to_string()
+            } else {
+                receiver_thread_ids.join(", ")
+            };
+            Some(format!("{tool:?} -> {receivers}"))
+        }
+        _ => (!content_text.is_empty()).then(|| content_text.to_string()),
+    }
+}
+
+fn ai_tool_summary_is_placeholder(summary: &str) -> bool {
+    let trimmed = summary.trim();
+    trimmed.is_empty() || !trimmed.chars().any(|ch| ch.is_alphanumeric())
+}
+
+fn ai_tool_header_label(item: &hunk_codex::state::ItemSummary, content_text: &str) -> String {
+    if let Some(summary) = item
+        .display_metadata
+        .as_ref()
+        .and_then(|metadata| metadata.summary.as_deref())
+        .filter(|value| !ai_tool_summary_is_placeholder(value))
+    {
+        return summary.to_string();
+    }
+
+    if let Some(preview_line) = ai_tool_preview_text(item, content_text)
+        .and_then(|preview| {
+            preview
+                .lines()
+                .map(str::trim)
+                .find(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+        })
+    {
+        return preview_line;
+    }
+
+    ai_item_display_label(item.kind.as_str()).to_string()
+}
+
+fn ai_duration_ms_label(duration_ms: Option<i64>) -> Option<String> {
+    let duration_ms = duration_ms?;
+    let millis = u64::try_from(duration_ms).ok()?;
+    Some(ai_activity_elapsed_label(std::time::Duration::from_millis(
+        millis,
+    )))
+}
+
+fn ai_tool_meta_chip(
+    label: &str,
+    value: String,
+    mono: bool,
+    is_dark: bool,
+    cx: &mut Context<DiffViewer>,
+) -> AnyElement {
+    h_flex()
+        .items_center()
+        .gap_1()
+        .px_1p5()
+        .py_0p5()
+        .rounded(px(6.0))
+        .border_1()
+        .border_color(cx.theme().border.opacity(if is_dark { 0.84 } else { 0.68 }))
+        .bg(cx.theme().background.blend(cx.theme().muted.opacity(if is_dark {
+            0.10
+        } else {
+            0.16
+        })))
+        .child(
+            div()
+                .text_xs()
+                .font_semibold()
+                .text_color(cx.theme().muted_foreground)
+                .child(label.to_string()),
+        )
+        .child({
+            let value = if value.trim().is_empty() {
+                "none".to_string()
+            } else {
+                value
+            };
+            let mut element = div()
+                .min_w_0()
+                .text_xs()
+                .text_color(cx.theme().foreground)
+                .child(value);
+            if mono {
+                element = element.font_family(cx.theme().mono_font_family.clone());
+            }
+            element
+        })
+        .into_any_element()
+}
+
+fn ai_tool_detail_section(
+    title: &str,
+    content: String,
+    mono: bool,
+    max_height: Option<gpui::Pixels>,
+    scroll_x: bool,
+    is_dark: bool,
+    cx: &mut Context<DiffViewer>,
+) -> AnyElement {
+    let container = div()
+        .w_full()
+        .min_w_0()
+        .rounded(px(8.0))
+        .border_1()
+        .border_color(cx.theme().border.opacity(if is_dark { 0.85 } else { 0.68 }))
+        .bg(cx.theme().background.blend(cx.theme().muted.opacity(if is_dark {
+            0.10
+        } else {
+            0.14
+        })))
+        .overflow_hidden()
+        .px_2()
+        .py_1p5();
+
+    let mut text = div()
+        .w_full()
+        .min_w_0()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .whitespace_normal()
+        .child(content);
+    if mono {
+        text = text.font_family(cx.theme().mono_font_family.clone());
+    }
+    if scroll_x {
+        text = text.whitespace_nowrap();
+    }
+
+    let container = container.child(text);
+    let container = match (max_height, scroll_x) {
+        (Some(max_height), true) => container
+            .max_h(max_height)
+            .overflow_scrollbar()
+            .occlude()
+            .into_any_element(),
+        (Some(max_height), false) => container
+            .max_h(max_height)
+            .overflow_y_scrollbar()
+            .occlude()
+            .into_any_element(),
+        (None, true) => container.overflow_x_scrollbar().into_any_element(),
+        (None, false) => container.into_any_element(),
+    };
+
+    v_flex()
+        .w_full()
+        .min_w_0()
+        .gap_1()
+        .child(
+            div()
+                .text_xs()
+                .font_semibold()
+                .text_color(cx.theme().muted_foreground)
+                .child(title.to_string()),
+        )
+        .child(container)
+        .into_any_element()
+}
+
+fn render_ai_command_execution_details(
+    details: &AiCommandExecutionDisplayDetails,
+    output: &str,
+    is_dark: bool,
+    cx: &mut Context<DiffViewer>,
+) -> AnyElement {
+    let mut chips = Vec::new();
+    chips.push(ai_tool_meta_chip("status", details.status.clone(), false, is_dark, cx));
+    chips.push(ai_tool_meta_chip("cwd", details.cwd.clone(), true, is_dark, cx));
+    if let Some(process_id) = details.process_id.as_ref() {
+        chips.push(ai_tool_meta_chip("pid", process_id.clone(), true, is_dark, cx));
+    }
+    if let Some(exit_code) = details.exit_code {
+        chips.push(ai_tool_meta_chip("exit", exit_code.to_string(), true, is_dark, cx));
+    }
+    if let Some(duration) = ai_duration_ms_label(details.duration_ms) {
+        chips.push(ai_tool_meta_chip("duration", duration, false, is_dark, cx));
+    }
+
+    let mut sections = vec![ai_tool_detail_section(
+        "Command",
+        details.command.clone(),
+        true,
+        None,
+        true,
+        is_dark,
+        cx,
+    )];
+    if !details.action_summaries.is_empty() {
+        sections.push(ai_tool_detail_section(
+            "Actions",
+            details.action_summaries.join("\n"),
+            false,
+            Some(px(140.0)),
+            false,
+            is_dark,
+            cx,
+        ));
+    }
+    if !output.trim().is_empty() {
+        sections.push(ai_tool_detail_section(
+            "Output",
+            output.trim().to_string(),
+            true,
+            Some(px(220.0)),
+            false,
+            is_dark,
+            cx,
+        ));
+    }
+
+    v_flex()
+        .w_full()
+        .min_w_0()
+        .gap_1p5()
+        .when(!chips.is_empty(), |this| {
+            this.child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap_1()
+                    .flex_wrap()
+                    .children(chips),
+            )
+        })
+        .children(sections)
+        .into_any_element()
 }
 
 fn render_ai_chat_timeline_row_for_view(
@@ -91,8 +428,7 @@ fn render_ai_chat_timeline_row_for_view(
                     } else {
                         "Assistant"
                     };
-                    let status = ai_item_status_label(item.status);
-                    let status_color = ai_item_status_color(item.status, cx);
+                    let bubble_max_width = if is_user { px(680.0) } else { px(760.0) };
                     let text_content = item.content.trim();
                     let fallback_summary = item
                         .display_metadata
@@ -107,14 +443,18 @@ fn render_ai_chat_timeline_row_for_view(
 
                     let row_element = h_flex()
                         .w_full()
+                        .min_w_0()
                         .when(is_user, |this| this.justify_end())
                         .when(!is_user, |this| this.justify_start())
                         .child(
                             v_flex()
-                                .max_w(px(760.0))
-                                .gap_1()
+                                .w_full()
+                                .max_w(bubble_max_width)
+                                .min_w_0()
+                                .gap_1p5()
                                 .px_3()
                                 .py_2()
+                                .overflow_hidden()
                                 .rounded(px(12.0))
                                 .border_1()
                                 .border_color(bubble_border)
@@ -122,22 +462,24 @@ fn render_ai_chat_timeline_row_for_view(
                                 .child(
                                     h_flex()
                                         .w_full()
+                                        .min_w_0()
                                         .items_center()
-                                        .justify_between()
                                         .gap_2()
                                         .child(
-                                            div().text_xs().font_semibold().child(role_label),
-                                        )
-                                        .child(
                                             div()
+                                                .flex_none()
+                                                .whitespace_nowrap()
                                                 .text_xs()
-                                                .text_color(status_color)
-                                                .child(status),
-                                        ),
+                                                .font_semibold()
+                                                .child(role_label),
+                                        )
                                 )
                                 .when(!bubble_text.is_empty(), |this| {
                                     this.child(
                                         div()
+                                            .w_full()
+                                            .min_w_0()
+                                            .overflow_hidden()
                                             .text_sm()
                                             .whitespace_normal()
                                             .child(bubble_text.to_string()),
@@ -147,26 +489,25 @@ fn render_ai_chat_timeline_row_for_view(
                     ai_timeline_row_with_animation(this, row.id.as_str(), row_element)
                 }
                 AiTimelineItemRole::Tool => {
-                    let label = item
-                        .display_metadata
-                        .as_ref()
-                        .and_then(|metadata| metadata.summary.as_deref())
-                        .filter(|value| !value.trim().is_empty())
-                        .unwrap_or_else(|| ai_item_display_label(item.kind.as_str()));
+                    let content_text = item.content.trim();
+                    let label = ai_tool_header_label(item, content_text);
                     let status = ai_item_status_label(item.status);
                     let status_color = ai_item_status_color(item.status, cx);
-                    let content_text = item.content.trim();
-                    let details_json = item
-                        .display_metadata
-                        .as_ref()
-                        .and_then(|metadata| metadata.details_json.as_deref())
-                        .map(str::trim)
-                        .filter(|value| !value.is_empty());
-                    let details_text = details_json.unwrap_or(content_text);
-                    let has_details = !details_text.is_empty();
-                    let expanded = has_details && this.ai_expanded_timeline_row_ids.contains(row.id.as_str());
-                    let (preview, _preview_truncated) = if !content_text.is_empty() {
-                        ai_truncate_multiline_content(content_text, 3)
+                    let command_details = (item.kind == "commandExecution")
+                        .then(|| ai_command_execution_display_details(item))
+                        .flatten();
+                    let details_text = if item.kind == "commandExecution" {
+                        content_text
+                    } else {
+                        ai_timeline_item_details_json(item).unwrap_or(content_text)
+                    };
+                    let has_details = command_details.is_some() || !details_text.is_empty();
+                    let expanded =
+                        has_details && this.ai_expanded_timeline_row_ids.contains(row.id.as_str());
+                    let preview_source = ai_tool_preview_text(item, content_text)
+                        .unwrap_or_default();
+                    let (preview, _preview_truncated) = if !preview_source.is_empty() {
+                        ai_truncate_multiline_content(preview_source.as_str(), 3)
                     } else {
                         (String::new(), false)
                     };
@@ -177,14 +518,17 @@ fn render_ai_chat_timeline_row_for_view(
 
                     let row_element = h_flex()
                         .w_full()
+                        .min_w_0()
                         .justify_start()
                         .child(
                             v_flex()
                                 .max_w(px(900.0))
                                 .w_full()
+                                .min_w_0()
                                 .gap_1()
                                 .px_2p5()
                                 .py_2()
+                                .overflow_hidden()
                                 .rounded(px(10.0))
                                 .border_1()
                                 .border_color(cx.theme().border.opacity(if is_dark {
@@ -200,21 +544,28 @@ fn render_ai_chat_timeline_row_for_view(
                                 .child(
                                     h_flex()
                                         .w_full()
-                                        .items_center()
+                                        .min_w_0()
+                                        .items_start()
                                         .justify_between()
                                         .gap_2()
                                         .child(
                                             h_flex()
+                                                .flex_1()
+                                                .min_w_0()
                                                 .items_center()
                                                 .gap_2()
                                                 .child(
                                                     div()
+                                                        .flex_1()
+                                                        .min_w_0()
                                                         .text_xs()
                                                         .font_semibold()
+                                                        .truncate()
                                                         .child(label.to_string()),
                                                 )
                                                 .child(
                                                     div()
+                                                        .flex_none()
                                                         .text_xs()
                                                         .text_color(status_color)
                                                         .child(status),
@@ -253,44 +604,39 @@ fn render_ai_chat_timeline_row_for_view(
                                         }),
                                 )
                                 .when(show_preview, |this| {
-                                    this.child(
-                                        div()
-                                            .text_xs()
-                                            .font_family(cx.theme().mono_font_family.clone())
-                                            .text_color(cx.theme().muted_foreground)
-                                            .whitespace_normal()
-                                            .child(preview.clone()),
-                                    )
+                                    this.child(ai_tool_detail_section(
+                                        "Preview",
+                                        preview.clone(),
+                                        true,
+                                        None,
+                                        false,
+                                        is_dark,
+                                        cx,
+                                    ))
                                 })
                                 .when(expanded, |this| {
-                                    this.child(
-                                        div()
-                                            .w_full()
-                                            .rounded(px(8.0))
-                                            .border_1()
-                                            .border_color(cx.theme().border.opacity(if is_dark {
-                                                0.85
-                                            } else {
-                                                0.68
-                                            }))
-                                            .bg(cx.theme().background.blend(
-                                                cx.theme().muted.opacity(if is_dark {
-                                                    0.10
-                                                } else {
-                                                    0.14
-                                                }),
-                                            ))
-                                            .px_2()
-                                            .py_1p5()
-                                            .child(
-                                                div()
-                                                    .text_xs()
-                                                    .font_family(cx.theme().mono_font_family.clone())
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .whitespace_normal()
-                                                    .child(details_text.to_string()),
-                                            ),
-                                    )
+                                    let expanded_details = command_details
+                                        .as_ref()
+                                        .map(|details| {
+                                            render_ai_command_execution_details(
+                                                details,
+                                                content_text,
+                                                is_dark,
+                                                cx,
+                                            )
+                                        })
+                                        .unwrap_or_else(|| {
+                                            ai_tool_detail_section(
+                                                "Details",
+                                                details_text.to_string(),
+                                                true,
+                                                Some(px(240.0)),
+                                                false,
+                                                is_dark,
+                                                cx,
+                                            )
+                                        });
+                                    this.child(expanded_details)
                                 }),
                         );
                     ai_timeline_row_with_animation(this, row.id.as_str(), row_element)
@@ -319,14 +665,17 @@ fn render_ai_chat_timeline_row_for_view(
 
             let row_element = h_flex()
                 .w_full()
+                .min_w_0()
                 .justify_start()
                 .child(
                     v_flex()
                         .max_w(px(920.0))
                         .w_full()
+                        .min_w_0()
                         .gap_1()
                         .px_2p5()
                         .py_2()
+                        .overflow_hidden()
                         .rounded(px(10.0))
                         .border_1()
                         .border_color(cx.theme().border.opacity(if is_dark { 0.9 } else { 0.74 }))
@@ -338,13 +687,18 @@ fn render_ai_chat_timeline_row_for_view(
                         .child(
                             h_flex()
                                 .w_full()
-                                .items_center()
+                                .min_w_0()
+                                .items_start()
                                 .justify_between()
                                 .gap_2()
                                 .child(
                                     div()
+                                        .flex_1()
+                                        .min_w_0()
                                         .text_xs()
                                         .font_semibold()
+                                        .whitespace_nowrap()
+                                        .truncate()
                                         .child(format!("Code Diff ({diff_line_count} lines)")),
                                 )
                                 .child(
@@ -398,14 +752,15 @@ fn render_ai_chat_timeline_row_for_view(
                                 ),
                         )
                         .when(!preview.is_empty(), |this| {
-                            this.child(
-                                div()
-                                    .text_xs()
-                                    .font_family(cx.theme().mono_font_family.clone())
-                                    .text_color(cx.theme().muted_foreground)
-                                    .whitespace_normal()
-                                    .child(preview),
-                            )
+                            this.child(ai_tool_detail_section(
+                                "Preview",
+                                preview.clone(),
+                                true,
+                                expanded.then_some(px(280.0)),
+                                false,
+                                is_dark,
+                                cx,
+                            ))
                         }),
                 );
             ai_timeline_row_with_animation(this, row.id.as_str(), row_element)
@@ -418,7 +773,19 @@ fn ai_timeline_row_with_animation(
     row_id: &str,
     row: gpui::Div,
 ) -> AnyElement {
-    let row = div().w_full().py_1().child(row);
+    let row = h_flex()
+        .w_full()
+        .min_w_0()
+        .justify_center()
+        .child(
+            div()
+                .w_full()
+                .max_w(px(AI_TIMELINE_CONTENT_LANE_MAX_WIDTH))
+                .min_w_0()
+                .px_1()
+                .py_1p5()
+                .child(row),
+        );
     if this.reduced_motion_enabled() {
         row.into_any_element()
     } else {

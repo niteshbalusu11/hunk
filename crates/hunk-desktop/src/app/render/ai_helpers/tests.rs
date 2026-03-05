@@ -2,9 +2,11 @@
 #[allow(clippy::items_after_test_module)]
 mod ai_helper_tests {
     use super::ai_account_summary;
+    use super::ai_command_execution_display_details;
     use super::ai_thread_status_text;
     use super::ai_item_display_label;
     use super::ai_rate_limit_summary;
+    use super::ai_tool_header_label;
     use super::ai_timeline_item_is_renderable;
     use super::ai_truncate_multiline_content;
     use hunk_codex::state::ItemDisplayMetadata;
@@ -137,5 +139,72 @@ mod ai_helper_tests {
             ..reasoning
         };
         assert!(ai_timeline_item_is_renderable(&reasoning_with_metadata));
+    }
+
+    #[test]
+    fn command_display_details_parse_compact_metadata_shape() {
+        let item = ItemSummary {
+            id: "item-1".to_string(),
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            kind: "commandExecution".to_string(),
+            status: ItemStatus::Completed,
+            content: "Finished test suite".to_string(),
+            display_metadata: Some(ItemDisplayMetadata {
+                summary: Some("Ran command".to_string()),
+                details_json: Some(
+                    r#"{
+                        "kind": "commandExecution",
+                        "command": "cargo test -p hunk-desktop",
+                        "cwd": "/repo",
+                        "processId": "123",
+                        "status": "completed",
+                        "actionSummaries": ["Run cargo test"],
+                        "exitCode": 0,
+                        "durationMs": 1250
+                    }"#
+                        .to_string(),
+                ),
+            }),
+            last_sequence: 1,
+        };
+
+        let details =
+            ai_command_execution_display_details(&item).expect("command details should parse");
+        assert_eq!(details.command, "cargo test -p hunk-desktop");
+        assert_eq!(details.cwd, "/repo");
+        assert_eq!(details.process_id.as_deref(), Some("123"));
+        assert_eq!(details.status, "completed");
+        assert_eq!(details.action_summaries, vec!["Run cargo test".to_string()]);
+        assert_eq!(details.exit_code, Some(0));
+        assert_eq!(details.duration_ms, Some(1250));
+    }
+
+    #[test]
+    fn tool_header_label_falls_back_to_preview_when_summary_is_placeholder() {
+        let item = ItemSummary {
+            id: "item-1".to_string(),
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            kind: "commandExecution".to_string(),
+            status: ItemStatus::Completed,
+            content: "Finished test suite".to_string(),
+            display_metadata: Some(ItemDisplayMetadata {
+                summary: Some("...".to_string()),
+                details_json: Some(
+                    r#"{
+                        "kind": "commandExecution",
+                        "command": "sed -n '1,40p' crates/hunk-desktop/src/app/render/ai.rs",
+                        "cwd": "/repo",
+                        "status": "completed"
+                    }"#
+                        .to_string(),
+                ),
+            }),
+            last_sequence: 1,
+        };
+
+        let label = ai_tool_header_label(&item, item.content.trim());
+        assert_eq!(label, "sed -n '1,40p' crates/hunk-desktop/src/app/render/ai.rs");
     }
 }
