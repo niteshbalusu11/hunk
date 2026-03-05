@@ -267,7 +267,7 @@ impl DiffViewer {
                     }
 
                     if this.project_path.is_some() {
-                        this.request_snapshot_refresh(cx);
+                        this.request_snapshot_refresh_workflow_only(false, cx);
                     }
 
                     let next_delay = this.auto_refresh_interval();
@@ -334,4 +334,5 @@ mod tests {
             repo_root.as_path()
         ));
     }
+
 }
