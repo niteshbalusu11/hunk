@@ -41,6 +41,7 @@ mod ai_tests {
     use hunk_codex::state::ItemStatus;
     use hunk_codex::state::ThreadLifecycleStatus;
     use hunk_codex::state::ThreadSummary;
+    use hunk_domain::state::AiServiceTierSelection;
     use hunk_domain::state::AiThreadSessionState;
     use hunk_domain::state::AppState;
     use std::collections::{BTreeMap, BTreeSet};
@@ -717,10 +718,41 @@ mod ai_tests {
             model: Some("gpt-5-codex".to_string()),
             effort: Some("high".to_string()),
             collaboration_mode: Some("Plan".to_string()),
+            service_tier: Some(AiServiceTierSelection::Fast),
         };
         assert_eq!(
             normalized_thread_session_state(session.clone()),
             Some(session),
+        );
+    }
+
+    #[test]
+    fn normalized_thread_session_state_drops_standard_service_tier_only() {
+        let session = AiThreadSessionState {
+            model: None,
+            effort: None,
+            collaboration_mode: None,
+            service_tier: Some(AiServiceTierSelection::Standard),
+        };
+        assert_eq!(normalized_thread_session_state(session), None);
+    }
+
+    #[test]
+    fn normalized_thread_session_state_strips_standard_service_tier_from_overrides() {
+        let session = AiThreadSessionState {
+            model: Some("gpt-5-codex".to_string()),
+            effort: None,
+            collaboration_mode: None,
+            service_tier: Some(AiServiceTierSelection::Standard),
+        };
+        assert_eq!(
+            normalized_thread_session_state(session),
+            Some(AiThreadSessionState {
+                model: Some("gpt-5-codex".to_string()),
+                effort: None,
+                collaboration_mode: None,
+                service_tier: None,
+            })
         );
     }
 

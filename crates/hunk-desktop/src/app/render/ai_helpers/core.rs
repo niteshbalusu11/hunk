@@ -302,6 +302,7 @@ struct AiSessionControlsPanelView<'a> {
     selected_model: Option<&'a str>,
     selected_effort: Option<&'a str>,
     selected_collaboration_mode: Option<&'a str>,
+    selected_service_tier: AiServiceTierSelection,
 }
 
 fn render_ai_session_controls_panel_for_view(
@@ -317,6 +318,7 @@ fn render_ai_session_controls_panel_for_view(
             selected_model: this.ai_selected_model.as_deref(),
             selected_effort: this.ai_selected_effort.as_deref(),
             selected_collaboration_mode: this.ai_selected_collaboration_mode.as_deref(),
+            selected_service_tier: this.ai_selected_service_tier,
         },
         view,
         cx,
@@ -353,6 +355,7 @@ fn render_ai_session_controls_panel(
         panel.experimental_features,
         "collaboration_modes",
     ) && !panel.collaboration_modes.is_empty();
+    let service_tier_label = ai_service_tier_picker_label(panel.selected_service_tier);
     let collaboration_label = ai_collaboration_picker_label(panel.selected_collaboration_mode);
     let (visible_models, hidden_models): (Vec<_>, Vec<_>) = panel
         .models
@@ -489,6 +492,55 @@ fn render_ai_session_controls_panel(
                         );
                     }
                     menu
+                })
+        })
+        .child({
+            let view = view.clone();
+            let selected_service_tier = panel.selected_service_tier;
+            Button::new("ai-session-service-tier-dropdown")
+                .compact()
+                .ghost()
+                .rounded(px(999.0))
+                .with_size(gpui_component::Size::Small)
+                .dropdown_caret(true)
+                .label(service_tier_label)
+                .dropdown_menu(move |menu, _, _| {
+                    menu.item(
+                        PopupMenuItem::new("Standard")
+                            .checked(matches!(
+                                selected_service_tier,
+                                AiServiceTierSelection::Standard
+                            ))
+                            .on_click({
+                                let view = view.clone();
+                                move |_, _, cx| {
+                                    view.update(cx, |this, cx| {
+                                        this.ai_select_service_tier_action(
+                                            AiServiceTierSelection::Standard,
+                                            cx,
+                                        );
+                                    });
+                                }
+                            }),
+                    )
+                    .item(
+                        PopupMenuItem::new("Fast")
+                            .checked(matches!(
+                                selected_service_tier,
+                                AiServiceTierSelection::Fast
+                            ))
+                            .on_click({
+                                let view = view.clone();
+                                move |_, _, cx| {
+                                    view.update(cx, |this, cx| {
+                                        this.ai_select_service_tier_action(
+                                            AiServiceTierSelection::Fast,
+                                            cx,
+                                        );
+                                    });
+                                }
+                            }),
+                    )
                 })
         })
         .when(collaboration_enabled, |this| {
@@ -762,4 +814,12 @@ fn ai_collaboration_picker_label(selected: Option<&str>) -> String {
     selected
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| "Off".to_string())
+}
+
+fn ai_service_tier_picker_label(selected: AiServiceTierSelection) -> String {
+    match selected {
+        AiServiceTierSelection::Standard => "Standard".to_string(),
+        AiServiceTierSelection::Fast => "Fast".to_string(),
+        AiServiceTierSelection::Flex => "Flex".to_string(),
+    }
 }

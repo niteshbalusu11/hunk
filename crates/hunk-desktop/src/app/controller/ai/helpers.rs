@@ -401,12 +401,35 @@ fn is_command_name_without_path(path: &std::path::Path) -> bool {
 fn normalized_thread_session_state(
     session: AiThreadSessionState,
 ) -> Option<AiThreadSessionState> {
-    let is_empty =
-        session.model.is_none() && session.effort.is_none() && session.collaboration_mode.is_none();
+    let AiThreadSessionState {
+        model,
+        effort,
+        collaboration_mode,
+        service_tier,
+    } = session;
+    let service_tier = normalized_ai_service_tier_selection(service_tier.unwrap_or_default());
+    let is_empty = model.is_none()
+        && effort.is_none()
+        && collaboration_mode.is_none()
+        && service_tier.is_none();
     if is_empty {
         return None;
     }
-    Some(session)
+    Some(AiThreadSessionState {
+        model,
+        effort,
+        collaboration_mode,
+        service_tier,
+    })
+}
+
+fn normalized_ai_service_tier_selection(
+    selection: AiServiceTierSelection,
+) -> Option<AiServiceTierSelection> {
+    match selection {
+        AiServiceTierSelection::Standard => None,
+        other => Some(other),
+    }
 }
 
 fn normalized_user_input_answers(

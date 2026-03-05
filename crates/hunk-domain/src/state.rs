@@ -8,12 +8,22 @@ use serde::{Deserialize, Serialize};
 const APP_DATA_DIR_NAME: &str = "hunk";
 const STATE_FILE_NAME: &str = "state.toml";
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AiServiceTierSelection {
+    #[default]
+    Standard,
+    Fast,
+    Flex,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AiThreadSessionState {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub collaboration_mode: Option<String>,
+    pub service_tier: Option<AiServiceTierSelection>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

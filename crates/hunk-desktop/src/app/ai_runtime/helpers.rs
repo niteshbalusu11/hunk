@@ -98,6 +98,17 @@ fn apply_thread_start_session_overrides(
     params: &mut ThreadStartParams,
 ) {
     params.model = session_overrides.model.clone();
+    params.service_tier = selected_ai_service_tier(session_overrides.service_tier);
+}
+
+fn selected_ai_service_tier(
+    selection: AiServiceTierSelection,
+) -> Option<Option<ServiceTier>> {
+    Some(match selection {
+        AiServiceTierSelection::Standard => None,
+        AiServiceTierSelection::Fast => Some(ServiceTier::Fast),
+        AiServiceTierSelection::Flex => Some(ServiceTier::Flex),
+    })
 }
 
 fn parse_reasoning_effort(raw: &str) -> Option<ReasoningEffort> {
@@ -287,4 +298,3 @@ fn open_url_in_system_browser(url: &str) -> Result<(), CodexIntegrationError> {
         format!("failed to open browser for URL '{url}'"),
     )))
 }
-

@@ -444,6 +444,7 @@ impl DiffViewer {
             ai_selected_model: None,
             ai_selected_effort: None,
             ai_selected_collaboration_mode: None,
+            ai_selected_service_tier: AiServiceTierSelection::Standard,
             ai_mad_max_mode: initial_ai_mad_max_mode,
             ai_event_epoch: 0,
             ai_event_task: Task::ready(()),

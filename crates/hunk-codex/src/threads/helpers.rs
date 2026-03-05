@@ -19,6 +19,7 @@ fn thread_item_kind(item: &ThreadItem) -> &'static str {
         ThreadItem::CollabAgentToolCall { .. } => "collabAgentToolCall",
         ThreadItem::WebSearch { .. } => "webSearch",
         ThreadItem::ImageView { .. } => "imageView",
+        ThreadItem::ImageGeneration { .. } => "imageGeneration",
         ThreadItem::EnteredReviewMode { .. } => "enteredReviewMode",
         ThreadItem::ExitedReviewMode { .. } => "exitedReviewMode",
         ThreadItem::ContextCompaction { .. } => "contextCompaction",
@@ -210,6 +211,27 @@ fn thread_item_seed_content(item: &ThreadItem) -> Option<String> {
             let detail = web_search_detail(action.as_ref(), query.as_str());
             (!detail.is_empty()).then(|| format!("Searched {detail}"))
         }
+        ThreadItem::ImageGeneration {
+            status,
+            revised_prompt,
+            result,
+            ..
+        } => {
+            let detail = revised_prompt
+                .as_deref()
+                .filter(|value| !value.is_empty())
+                .unwrap_or(result.as_str());
+            let detail = detail.trim();
+            if detail.is_empty() && status.trim().is_empty() {
+                None
+            } else if detail.is_empty() {
+                Some(format!("Generated image ({status})"))
+            } else if status.trim().is_empty() {
+                Some(format!("Generated image: {detail}"))
+            } else {
+                Some(format!("Generated image ({status}): {detail}"))
+            }
+        }
         ThreadItem::DynamicToolCall { .. }
         | ThreadItem::CollabAgentToolCall { .. }
         | ThreadItem::ImageView { .. }
@@ -327,6 +349,7 @@ fn thread_item_is_complete(item: &ThreadItem) -> bool {
         ThreadItem::CollabAgentToolCall { status, .. } => {
             !matches!(status, CollabAgentToolCallStatus::InProgress)
         }
+        ThreadItem::ImageGeneration { status, .. } => !status.trim().is_empty(),
         _ => false,
     }
 }

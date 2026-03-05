@@ -37,5 +37,5 @@ time = { version = "0.3", features = ["formatting", "local-offset"] }
 hunk-domain = { path = "../hunk-domain" }
 hunk-jj = { path = "../hunk-jj" }
 hunk-codex = { path = "../hunk-codex" }
-codex-app-server-protocol = { git = "https://github.com/openai/codex.git", rev = "6bee02a346d0aa8dc4d5dcb312545fa37408b6ca" }
-codex-protocol = { git = "https://github.com/openai/codex.git", rev = "6bee02a346d0aa8dc4d5dcb312545fa37408b6ca" }
+codex-app-server-protocol = { git = "https://github.com/openai/codex.git", tag = "rust-v0.111.0" }
+codex-protocol = { git = "https://github.com/openai/codex.git", tag = "rust-v0.111.0" }

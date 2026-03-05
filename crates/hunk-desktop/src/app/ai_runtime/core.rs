@@ -45,7 +45,9 @@ use codex_app_server_protocol::UserInput;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Settings;
+use codex_protocol::config_types::ServiceTier;
 use codex_protocol::openai_models::ReasoningEffort;
+use hunk_domain::state::AiServiceTierSelection;
 use hunk_codex::api::InitializeOptions;
 use hunk_codex::errors::CodexIntegrationError;
 use hunk_codex::host::HostConfig;
@@ -138,6 +140,7 @@ pub struct AiTurnSessionOverrides {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub collaboration_mode: Option<String>,
+    pub service_tier: AiServiceTierSelection,
 }
 
 #[derive(Debug, Clone)]
@@ -818,6 +821,7 @@ impl AiWorkerRuntime {
         session_overrides: &AiTurnSessionOverrides,
     ) {
         params.model = session_overrides.model.clone();
+        params.service_tier = selected_ai_service_tier(session_overrides.service_tier);
         params.effort = session_overrides
             .effort
             .as_deref()

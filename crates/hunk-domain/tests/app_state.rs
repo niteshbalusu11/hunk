@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use hunk_domain::state::AiServiceTierSelection;
 use hunk_domain::state::AiThreadSessionState;
 use hunk_domain::state::AppState;
 use hunk_domain::state::CachedBookmarkRevisionState;
@@ -42,6 +43,7 @@ fn app_state_round_trips_last_project_path() {
                 model: Some("gpt-5-codex".to_string()),
                 effort: Some("high".to_string()),
                 collaboration_mode: Some("Plan".to_string()),
+                service_tier: Some(AiServiceTierSelection::Fast),
             },
         )]
         .into_iter()

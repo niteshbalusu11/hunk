@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use hunk_domain::state::AiServiceTierSelection;
 use hunk_domain::state::AiThreadSessionState;
 use hunk_codex::state::ThreadLifecycleStatus;
 use hunk_codex::state::ThreadSummary;
@@ -361,6 +362,16 @@ impl DiffViewer {
         self.ai_selected_effort = effort;
         self.ai_selected_collaboration_mode = None;
         self.normalize_ai_selected_effort();
+        self.persist_current_ai_workspace_session();
+        cx.notify();
+    }
+
+    pub(super) fn ai_select_service_tier_action(
+        &mut self,
+        service_tier: AiServiceTierSelection,
+        cx: &mut Context<Self>,
+    ) {
+        self.ai_selected_service_tier = service_tier;
         self.persist_current_ai_workspace_session();
         cx.notify();
     }

@@ -339,6 +339,7 @@ impl DiffViewer {
             model,
             effort,
             collaboration_mode,
+            service_tier: self.ai_selected_service_tier,
         }
     }
 
@@ -405,6 +406,7 @@ impl DiffViewer {
                 .any(|mask| mask.name == *mode_name)
         });
         self.ai_selected_effort = persisted.effort;
+        self.ai_selected_service_tier = persisted.service_tier.unwrap_or_default();
         self.normalize_ai_selected_effort();
     }
 
@@ -417,6 +419,7 @@ impl DiffViewer {
             model: self.ai_selected_model.clone(),
             effort: self.ai_selected_effort.clone(),
             collaboration_mode: self.ai_selected_collaboration_mode.clone(),
+            service_tier: normalized_ai_service_tier_selection(self.ai_selected_service_tier),
         };
 
         if let Some(session) = normalized_thread_session_state(session) {

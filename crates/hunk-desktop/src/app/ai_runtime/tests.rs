@@ -11,19 +11,24 @@ mod ai_tests {
     use codex_app_server_protocol::SandboxPolicy;
     use codex_app_server_protocol::ThreadStartParams;
     use codex_app_server_protocol::TurnStartParams;
+    use codex_protocol::config_types::ServiceTier;
     use hunk_codex::errors::CodexIntegrationError;
     use hunk_codex::state::AiState;
     use hunk_codex::state::ReducerEvent;
     use hunk_codex::state::StreamEvent;
+    use hunk_domain::state::AiServiceTierSelection;
 
     use super::AiApprovalDecision;
+    use super::AiTurnSessionOverrides;
     use super::apply_login_completed_state;
     use super::apply_thread_start_policy;
+    use super::apply_thread_start_session_overrides;
     use super::apply_turn_start_policy;
     use super::map_command_approval_decision;
     use super::map_file_change_approval_decision;
     use super::preferred_rate_limit_snapshot;
     use super::request_id_key;
+    use super::selected_ai_service_tier;
     use super::should_retry_stale_turn_after_steer_error;
     use super::thread_missing_item_turn_ids;
 
@@ -53,6 +58,35 @@ mod ai_tests {
         apply_thread_start_policy(true, &mut params);
         assert_eq!(params.approval_policy, Some(AskForApproval::Never));
         assert_eq!(params.sandbox, Some(SandboxMode::DangerFullAccess));
+    }
+
+    #[test]
+    fn service_tier_selection_maps_to_protocol_override() {
+        assert_eq!(
+            selected_ai_service_tier(AiServiceTierSelection::Standard),
+            Some(None)
+        );
+        assert_eq!(
+            selected_ai_service_tier(AiServiceTierSelection::Fast),
+            Some(Some(ServiceTier::Fast))
+        );
+        assert_eq!(
+            selected_ai_service_tier(AiServiceTierSelection::Flex),
+            Some(Some(ServiceTier::Flex))
+        );
+    }
+
+    #[test]
+    fn thread_start_session_overrides_apply_explicit_standard_service_tier() {
+        let mut params = ThreadStartParams::default();
+        apply_thread_start_session_overrides(
+            &AiTurnSessionOverrides {
+                service_tier: AiServiceTierSelection::Standard,
+                ..AiTurnSessionOverrides::default()
+            },
+            &mut params,
+        );
+        assert_eq!(params.service_tier, Some(None));
     }
 
     #[test]
