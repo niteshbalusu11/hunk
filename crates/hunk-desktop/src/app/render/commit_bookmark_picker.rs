@@ -9,6 +9,7 @@ impl DiffViewer {
         let included_in_commit = !self.commit_excluded_files.contains(file.path.as_str());
         let is_selected = self.selected_path.as_deref() == Some(file.path.as_str());
         let is_dark = cx.theme().mode.is_dark();
+        let undo_loading = self.git_action_loading_named("Undo file changes");
         let (status_label, status_color) = change_status_label_color(file.status, cx);
         let is_tracked = file.is_tracked();
         let tracking_label = if is_tracked { "tracked" } else { "untracked" };
@@ -99,6 +100,7 @@ impl DiffViewer {
                     .outline()
                     .compact()
                     .rounded(px(5.0))
+                    .loading(undo_loading)
                     .label("Undo")
                     .tooltip(undo_tooltip)
                     .disabled(self.git_action_loading)

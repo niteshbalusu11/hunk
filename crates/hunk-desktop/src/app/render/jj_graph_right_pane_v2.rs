@@ -2,6 +2,16 @@ impl DiffViewer {
     fn render_jj_graph_operations_panel_v2(&self, cx: &mut Context<Self>) -> AnyElement {
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
+        let activate_bookmark_loading = self.git_action_loading_named("Activate bookmark");
+        let sync_loading = self.git_action_loading_named("Sync bookmark");
+        let publish_loading = self.git_action_loading_named("Publish bookmark");
+        let rename_loading = self.git_action_loading_named("Rename bookmark");
+        let open_review_loading = self.git_action_loading_named("Open PR/MR");
+        let copy_review_loading = self.git_action_loading_named("Copy PR/MR URL");
+        let recover_loading = self.git_action_loading_named("Recover working copy");
+        let create_revision_loading = self.git_action_loading_named("Create revision");
+        let push_revisions_loading = self.git_action_loading_named("Push revisions");
+        let edit_description_loading = self.git_action_loading_named("Edit revision description");
         let branch_syncable = self.can_run_active_bookmark_actions();
         let sync_disabled = !self.can_sync_current_bookmark();
         let publish_disabled = !self.can_publish_current_bookmark();
@@ -44,8 +54,7 @@ impl DiffViewer {
         let active_bookmark_label = self
             .checked_out_bookmark_name()
             .map_or_else(|| "detached".to_string(), ToOwned::to_owned);
-        let repo_label = self.project_display_name().to_lowercase();
-        let active_bookmark_chip_label = format!("{repo_label}/{active_bookmark_label}");
+        let active_bookmark_chip_label = active_bookmark_label.clone();
         let sync_state_label = if !branch_syncable {
             "Detached".to_string()
         } else if self.branch_has_upstream {
@@ -148,6 +157,7 @@ impl DiffViewer {
                                         .compact()
                                         .with_size(gpui_component::Size::Small)
                                         .rounded(px(7.0))
+                                        .loading(activate_bookmark_loading)
                                         .label("Move Changes to Target")
                                         .tooltip("Switch and carry current working-copy changes into the target bookmark.")
                                         .disabled(self.git_action_loading)
@@ -164,6 +174,7 @@ impl DiffViewer {
                                         .compact()
                                         .with_size(gpui_component::Size::Small)
                                         .rounded(px(7.0))
+                                        .loading(activate_bookmark_loading)
                                         .label("Snapshot Here, Then Switch")
                                         .tooltip("Keep current changes captured on the source bookmark, then switch to the target bookmark.")
                                         .disabled(self.git_action_loading)
@@ -225,6 +236,7 @@ impl DiffViewer {
                                     .compact()
                                     .with_size(gpui_component::Size::Small)
                                     .rounded(px(7.0))
+                                    .loading(activate_bookmark_loading)
                                     .min_w(px(150.0))
                                     .bg(cx.theme().secondary.opacity(if is_dark { 0.50 } else { 0.70 }))
                                     .border_color(
@@ -266,6 +278,7 @@ impl DiffViewer {
                                     .compact()
                                     .with_size(gpui_component::Size::Small)
                                     .rounded(px(7.0))
+                                    .loading(sync_loading)
                                     .min_w(px(92.0))
                                     .label("Sync")
                                     .tooltip(sync_tooltip)
@@ -282,6 +295,7 @@ impl DiffViewer {
                                     .compact()
                                     .with_size(gpui_component::Size::Small)
                                     .rounded(px(7.0))
+                                    .loading(publish_loading)
                                     .min_w(px(104.0))
                                     .label(if self.branch_has_upstream {
                                         "Published"
@@ -334,6 +348,7 @@ impl DiffViewer {
                                     .compact()
                                     .with_size(gpui_component::Size::Small)
                                     .rounded(px(7.0))
+                                    .loading(activate_bookmark_loading)
                                     .label("Create / Activate")
                                     .tooltip("Create a bookmark from the entered name or activate it if it already exists.")
                                     .disabled(create_or_activate_disabled)
@@ -350,6 +365,7 @@ impl DiffViewer {
                                     .compact()
                                     .with_size(gpui_component::Size::Small)
                                     .rounded(px(7.0))
+                                    .loading(rename_loading)
                                     .label("Rename Active")
                                     .tooltip("Rename the currently active bookmark to the entered name.")
                                     .disabled(rename_disabled)
@@ -367,6 +383,7 @@ impl DiffViewer {
                                     .compact()
                                     .with_size(gpui_component::Size::Small)
                                     .rounded(px(7.0))
+                                    .loading(open_review_loading)
                                     .label("Open PR/MR")
                                     .tooltip(blocker.clone().unwrap_or_else(|| {
                                         "Open a prefilled pull/merge request page for the active bookmark.".to_string()
@@ -386,6 +403,7 @@ impl DiffViewer {
                                     .compact()
                                     .with_size(gpui_component::Size::Small)
                                     .rounded(px(7.0))
+                                    .loading(copy_review_loading)
                                     .label("Copy Review URL")
                                     .tooltip(blocker.unwrap_or_else(|| {
                                         "Copy a prefilled pull/merge request URL for the active bookmark.".to_string()
@@ -440,6 +458,7 @@ impl DiffViewer {
                                         .compact()
                                         .with_size(gpui_component::Size::Small)
                                         .rounded(px(7.0))
+                                        .loading(recover_loading)
                                         .label("Restore Captured Changes")
                                         .tooltip("Restore files from the captured pre-switch working-copy revision.")
                                         .disabled(self.git_action_loading)
@@ -535,6 +554,7 @@ impl DiffViewer {
                                 Button::new("commit-staged-v2")
                                     .primary()
                                     .rounded(px(7.0))
+                                    .loading(create_revision_loading)
                                     .label("Create Revision")
                                     .tooltip("Create a new revision from included files using the message above.")
                                     .disabled(commit_disabled)
@@ -549,6 +569,7 @@ impl DiffViewer {
                                 Button::new("push-bookmark-revisions-v2")
                                     .outline()
                                     .rounded(px(7.0))
+                                    .loading(push_revisions_loading)
                                     .label(push_revisions_label)
                                     .tooltip(push_revisions_tooltip)
                                     .disabled(push_revisions_disabled)
@@ -563,6 +584,7 @@ impl DiffViewer {
                                 Button::new("describe-tip-revision-v2")
                                     .outline()
                                     .rounded(px(7.0))
+                                    .loading(edit_description_loading)
                                     .label("Edit Working Revision")
                                     .tooltip("Rewrite the tip revision description for the active bookmark.")
                                     .disabled(describe_tip_disabled)

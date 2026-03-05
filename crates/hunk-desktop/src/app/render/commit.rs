@@ -1,4 +1,8 @@
 impl DiffViewer {
+    fn git_action_loading_named(&self, action_label: &str) -> bool {
+        self.git_action_loading && self.git_action_label.as_deref() == Some(action_label)
+    }
+
     fn render_git_action_status_banner(&self, cx: &mut Context<Self>) -> AnyElement {
         let is_dark = cx.theme().mode.is_dark();
         let loading = self.git_action_loading;
@@ -80,6 +84,12 @@ impl DiffViewer {
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
         let revisions = &self.bookmark_revisions;
+        let reorder_loading = self.git_action_loading_named("Reorder tip revision");
+        let squash_loading = self.git_action_loading_named("Squash tip revision");
+        let abandon_loading = self.git_action_loading_named("Abandon tip revision");
+        let undo_op_loading = self.git_action_loading_named("Undo operation");
+        let redo_op_loading = self.git_action_loading_named("Redo operation");
+        let undo_all_loading = self.git_action_loading_named("Undo all working-copy changes");
         let actions_enabled = self.can_run_active_bookmark_actions();
         let can_abandon_tip = !self.git_action_loading && actions_enabled && !revisions.is_empty();
         let can_squash_tip = !self.git_action_loading && actions_enabled && revisions.len() >= 2;
@@ -173,6 +183,7 @@ impl DiffViewer {
                                 .compact()
                                 .with_size(gpui_component::Size::Small)
                                 .rounded(px(7.0))
+                                .loading(reorder_loading)
                                 .label("Move Tip Down")
                                 .tooltip("Reorder the stack so the current tip becomes second and the previous revision becomes tip.")
                                 .disabled(!can_reorder_tip)
@@ -189,6 +200,7 @@ impl DiffViewer {
                                 .compact()
                                 .with_size(gpui_component::Size::Small)
                                 .rounded(px(7.0))
+                                .loading(squash_loading)
                                 .label("Squash Into Parent")
                                 .tooltip("Combine tip revision changes into its parent revision.")
                                 .disabled(!can_squash_tip)
@@ -205,6 +217,7 @@ impl DiffViewer {
                                 .compact()
                                 .with_size(gpui_component::Size::Small)
                                 .rounded(px(7.0))
+                                .loading(abandon_loading)
                                 .label("Drop Tip Revision")
                                 .tooltip("Abandon and remove the current tip revision from the stack.")
                                 .disabled(!can_abandon_tip)
@@ -221,6 +234,7 @@ impl DiffViewer {
                                 .compact()
                                 .with_size(gpui_component::Size::Small)
                                 .rounded(px(7.0))
+                                .loading(undo_op_loading)
                                 .label("Undo Op")
                                 .tooltip("Undo the latest JJ operation in operation history.")
                                 .bg(cx.theme().warning.opacity(if is_dark { 0.24 } else { 0.14 }))
@@ -240,6 +254,7 @@ impl DiffViewer {
                                 .compact()
                                 .with_size(gpui_component::Size::Small)
                                 .rounded(px(7.0))
+                                .loading(redo_op_loading)
                                 .label("Redo Op")
                                 .tooltip("Redo the most recently undone JJ operation.")
                                 .bg(cx.theme().accent.opacity(if is_dark { 0.28 } else { 0.16 }))
@@ -261,6 +276,7 @@ impl DiffViewer {
                                 .compact()
                                 .with_size(gpui_component::Size::Small)
                                 .rounded(px(7.0))
+                                .loading(undo_all_loading)
                                 .label("Undo All")
                                 .tooltip("Discard all working-copy changes using jj restore.")
                                 .bg(cx.theme().danger.opacity(if is_dark { 0.24 } else { 0.14 }))
