@@ -35,6 +35,7 @@ impl DiffViewer {
                                     this.ai_models.clear();
                                     this.ai_experimental_features.clear();
                                     this.ai_collaboration_modes.clear();
+                                    this.ai_bootstrap_loading = false;
                                     if this.ai_error_message.is_none() {
                                         this.ai_connection_state = AiConnectionState::Disconnected;
                                         this.ai_status_message = Some(
@@ -82,6 +83,9 @@ impl DiffViewer {
                 self.ai_connection_state = AiConnectionState::Ready;
                 self.ai_error_message = None;
             }
+            AiWorkerEvent::BootstrapCompleted => {
+                self.ai_bootstrap_loading = false;
+            }
             AiWorkerEvent::Status(message) => {
                 self.ai_status_message = Some(message);
             }
@@ -107,6 +111,7 @@ impl DiffViewer {
                 self.ai_models.clear();
                 self.ai_experimental_features.clear();
                 self.ai_collaboration_modes.clear();
+                self.ai_bootstrap_loading = false;
                 Self::push_error_notification(format!("Codex AI failed: {message}"), cx);
             }
         }
@@ -142,6 +147,7 @@ impl DiffViewer {
         } = snapshot;
 
         self.ai_state_snapshot = state;
+        self.rebuild_ai_timeline_indexes();
         self.sync_ai_in_progress_turn_started_at();
         self.ai_pending_approvals = pending_approvals;
         self.ai_pending_user_inputs = pending_user_inputs;

@@ -124,10 +124,12 @@ fn ai_approval_description(approval: &AiPendingApproval) -> String {
 
 struct AiAccountPanelView<'a> {
     account: Option<&'a codex_app_server_protocol::Account>,
+    account_loading: bool,
     requires_openai_auth: bool,
     pending_chatgpt_login_id: Option<&'a str>,
     pending_chatgpt_auth_url: Option<&'a str>,
     rate_limits: Option<&'a codex_app_server_protocol::RateLimitSnapshot>,
+    rate_limits_loading: bool,
 }
 
 fn render_ai_account_panel_for_view(
@@ -138,10 +140,14 @@ fn render_ai_account_panel_for_view(
     render_ai_account_panel(
         AiAccountPanelView {
             account: this.ai_account.as_ref(),
+            account_loading: this.ai_bootstrap_loading
+                && this.ai_account.is_none()
+                && !this.ai_requires_openai_auth,
             requires_openai_auth: this.ai_requires_openai_auth,
             pending_chatgpt_login_id: this.ai_pending_chatgpt_login_id.as_deref(),
             pending_chatgpt_auth_url: this.ai_pending_chatgpt_auth_url.as_deref(),
             rate_limits: this.ai_rate_limits.as_ref(),
+            rate_limits_loading: this.ai_bootstrap_loading && this.ai_rate_limits.is_none(),
         },
         cx,
     )
@@ -152,8 +158,13 @@ fn render_ai_account_panel(
     cx: &mut Context<DiffViewer>,
 ) -> AnyElement {
     let login_pending = panel.pending_chatgpt_login_id.is_some();
-    let summary = ai_account_summary(panel.account, panel.requires_openai_auth);
-    let (five_hour_rate_limit, weekly_rate_limit) = ai_rate_limit_summary(panel.rate_limits);
+    let summary = ai_account_summary(
+        panel.account,
+        panel.requires_openai_auth,
+        panel.account_loading,
+    );
+    let (five_hour_rate_limit, weekly_rate_limit) =
+        ai_rate_limit_summary(panel.rate_limits, panel.rate_limits_loading);
 
     v_flex()
         .w_full()
@@ -192,12 +203,17 @@ fn render_ai_account_panel(
                 .child(
                     div()
                         .text_xs()
-                        .text_color(if login_pending {
+                        .text_color(if panel.account_loading
+                            || panel.rate_limits_loading
+                            || login_pending
+                        {
                             cx.theme().warning
                         } else {
                             cx.theme().muted_foreground
                         })
-                        .child(if login_pending {
+                        .child(if panel.account_loading || panel.rate_limits_loading {
+                            "Loading"
+                        } else if login_pending {
                             "Login Pending"
                         } else {
                             "Ready"
@@ -557,7 +573,12 @@ fn render_ai_session_controls_panel(
 fn ai_account_summary(
     account: Option<&codex_app_server_protocol::Account>,
     requires_openai_auth: bool,
+    account_loading: bool,
 ) -> String {
+    if account_loading {
+        return "Loading account...".to_string();
+    }
+
     match account {
         Some(codex_app_server_protocol::Account::ApiKey { .. }) => {
             "Signed in with API key.".to_string()
@@ -574,7 +595,12 @@ fn ai_account_summary(
 
 fn ai_rate_limit_summary(
     rate_limits: Option<&codex_app_server_protocol::RateLimitSnapshot>,
+    rate_limits_loading: bool,
 ) -> (String, String) {
+    if rate_limits_loading {
+        return ("5h: loading".to_string(), "weekly: loading".to_string());
+    }
+
     let Some(snapshot) = rate_limits else {
         return ("5h: unavailable".to_string(), "weekly: unavailable".to_string());
     };

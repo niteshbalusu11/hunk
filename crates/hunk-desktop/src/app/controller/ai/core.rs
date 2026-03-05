@@ -1,5 +1,7 @@
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
+use hunk_codex::state::turn_storage_key;
 use hunk_domain::state::AiThreadSessionState;
 use hunk_codex::state::ThreadLifecycleStatus;
 use hunk_codex::state::ThreadSummary;
@@ -20,6 +22,7 @@ impl DiffViewer {
 
         let Some(cwd) = self.ai_workspace_cwd() else {
             self.ai_connection_state = AiConnectionState::Failed;
+            self.ai_bootstrap_loading = false;
             self.ai_error_message = Some("Open a workspace before using AI.".to_string());
             cx.notify();
             return;
@@ -27,6 +30,7 @@ impl DiffViewer {
 
         let Some(codex_home) = Self::resolve_codex_home_path() else {
             self.ai_connection_state = AiConnectionState::Failed;
+            self.ai_bootstrap_loading = false;
             self.ai_error_message = Some("Unable to resolve ~/.codex home directory.".to_string());
             cx.notify();
             return;
@@ -35,6 +39,7 @@ impl DiffViewer {
         let codex_executable = Self::resolve_codex_executable_path();
         if let Err(error) = Self::validate_codex_executable_path(codex_executable.as_path()) {
             self.ai_connection_state = AiConnectionState::Failed;
+            self.ai_bootstrap_loading = false;
             self.ai_error_message = Some(error);
             cx.notify();
             return;
@@ -48,6 +53,7 @@ impl DiffViewer {
         let worker = spawn_ai_worker(start_config, command_rx, event_tx);
 
         self.ai_connection_state = AiConnectionState::Connecting;
+        self.ai_bootstrap_loading = true;
         self.ai_error_message = None;
         self.ai_status_message = Some("Starting Codex App Server...".to_string());
         self.ai_command_tx = Some(command_tx);
@@ -514,27 +520,65 @@ impl DiffViewer {
     }
 
     pub(super) fn ai_timeline_turn_ids(&self, thread_id: &str) -> Vec<String> {
-        let mut turns = self
-            .ai_state_snapshot
-            .turns
-            .iter()
-            .filter(|(_, turn)| turn.thread_id == thread_id)
-            .map(|(turn_key, turn)| (turn_key.clone(), turn.clone()))
-            .collect::<Vec<_>>();
-        turns.sort_by_key(|(_, turn)| turn.last_sequence);
-        turns.into_iter().map(|(turn_key, _)| turn_key).collect()
+        self.ai_timeline_turn_ids_by_thread
+            .get(thread_id)
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub(super) fn ai_timeline_item_ids(&self, thread_id: &str, turn_id: &str) -> Vec<String> {
-        let mut items = self
-            .ai_state_snapshot
-            .items
-            .iter()
-            .filter(|(_, item)| item.thread_id == thread_id && item.turn_id == turn_id)
-            .map(|(item_key, item)| (item_key.clone(), item.clone()))
-            .collect::<Vec<_>>();
-        items.sort_by_key(|(_, item)| item.last_sequence);
-        items.into_iter().map(|(item_key, _)| item_key).collect()
+        let turn_key = turn_storage_key(thread_id, turn_id);
+        self.ai_timeline_item_ids_by_turn
+            .get(turn_key.as_str())
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn rebuild_ai_timeline_indexes(&mut self) {
+        let mut turn_ids_by_thread = BTreeMap::<String, Vec<(u64, String)>>::new();
+        for (turn_key, turn) in &self.ai_state_snapshot.turns {
+            turn_ids_by_thread
+                .entry(turn.thread_id.clone())
+                .or_default()
+                .push((turn.last_sequence, turn_key.clone()));
+        }
+
+        self.ai_timeline_turn_ids_by_thread = turn_ids_by_thread
+            .into_iter()
+            .map(|(thread_id, mut entries)| {
+                entries.sort_by(|left, right| {
+                    left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1))
+                });
+                let ids = entries
+                    .into_iter()
+                    .map(|(_, turn_id)| turn_id)
+                    .collect::<Vec<_>>();
+                (thread_id, ids)
+            })
+            .collect();
+
+        let mut item_ids_by_turn = BTreeMap::<String, Vec<(u64, String)>>::new();
+        for (item_key, item) in &self.ai_state_snapshot.items {
+            let turn_key = turn_storage_key(item.thread_id.as_str(), item.turn_id.as_str());
+            item_ids_by_turn
+                .entry(turn_key)
+                .or_default()
+                .push((item.last_sequence, item_key.clone()));
+        }
+
+        self.ai_timeline_item_ids_by_turn = item_ids_by_turn
+            .into_iter()
+            .map(|(turn_key, mut entries)| {
+                entries.sort_by(|left, right| {
+                    left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1))
+                });
+                let ids = entries
+                    .into_iter()
+                    .map(|(_, item_id)| item_id)
+                    .collect::<Vec<_>>();
+                (turn_key, ids)
+            })
+            .collect();
     }
 
     pub(super) fn sync_ai_timeline_list_state(&mut self, row_count: usize) {
@@ -889,6 +933,7 @@ impl DiffViewer {
         }
 
         self.ai_connection_state = AiConnectionState::Failed;
+        self.ai_bootstrap_loading = false;
         self.ai_error_message = Some("AI worker channel disconnected.".to_string());
         self.ai_command_tx = None;
         self.join_ai_worker_thread("worker channel disconnect");

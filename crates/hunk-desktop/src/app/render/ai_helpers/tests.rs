@@ -1,6 +1,7 @@
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod ai_helper_tests {
+    use super::ai_account_summary;
     use super::ai_thread_status_text;
     use super::ai_item_display_label;
     use super::ai_rate_limit_summary;
@@ -40,7 +41,7 @@ mod ai_helper_tests {
             Some(rate_limit_window(19, Some(10_080), Some(1_700_300_000))),
         );
 
-        let (five_hour, weekly) = ai_rate_limit_summary(Some(&snapshot));
+        let (five_hour, weekly) = ai_rate_limit_summary(Some(&snapshot), false);
         assert!(five_hour.contains("5h: 42% used"));
         assert!(weekly.contains("weekly: 19% used"));
         assert!(!five_hour.contains("1700000000"));
@@ -51,9 +52,22 @@ mod ai_helper_tests {
 
     #[test]
     fn rate_limit_summary_falls_back_to_unavailable_when_missing() {
-        let (five_hour, weekly) = ai_rate_limit_summary(None);
+        let (five_hour, weekly) = ai_rate_limit_summary(None, false);
         assert_eq!(five_hour, "5h: unavailable");
         assert_eq!(weekly, "weekly: unavailable");
+    }
+
+    #[test]
+    fn rate_limit_summary_reports_loading_during_bootstrap() {
+        let (five_hour, weekly) = ai_rate_limit_summary(None, true);
+        assert_eq!(five_hour, "5h: loading");
+        assert_eq!(weekly, "weekly: loading");
+    }
+
+    #[test]
+    fn account_summary_reports_loading_while_bootstrapping() {
+        let summary = ai_account_summary(None, false, true);
+        assert_eq!(summary, "Loading account...");
     }
 
     #[test]
@@ -63,7 +77,7 @@ mod ai_helper_tests {
             Some(rate_limit_window(27, Some(120), Some(1_700_100_000))),
         );
 
-        let (five_hour, weekly) = ai_rate_limit_summary(Some(&snapshot));
+        let (five_hour, weekly) = ai_rate_limit_summary(Some(&snapshot), false);
         assert!(five_hour.contains("5h: 11% used"));
         assert!(weekly.contains("weekly: 27% used"));
     }

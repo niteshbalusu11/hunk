@@ -161,6 +161,7 @@ pub struct AiSnapshot {
 #[derive(Debug)]
 pub enum AiWorkerEvent {
     Snapshot(Box<AiSnapshot>),
+    BootstrapCompleted,
     Status(String),
     Error(String),
     Fatal(String),
@@ -301,23 +302,35 @@ fn run_ai_worker(
     let _ = event_tx.send(AiWorkerEvent::Status(
         "Codex App Server connected over WebSocket".to_string(),
     ));
+    runtime.emit_snapshot(event_tx);
     runtime.refresh_thread_list()?;
-    if let Err(error) = runtime.refresh_session_metadata() {
-        let _ = event_tx.send(AiWorkerEvent::Status(format!(
-            "Unable to read model/session metadata: {error}"
-        )));
-    }
+    runtime.emit_snapshot(event_tx);
     if let Err(error) = runtime.refresh_account_state() {
         let _ = event_tx.send(AiWorkerEvent::Status(format!(
             "Unable to read account state: {error}"
         )));
     }
+    runtime.emit_snapshot(event_tx);
     if let Err(error) = runtime.refresh_account_rate_limits() {
         let _ = event_tx.send(AiWorkerEvent::Status(format!(
             "Unable to read account rate limits: {error}"
         )));
     }
-    runtime.emit_snapshot_after_sync(event_tx)?;
+    runtime.emit_snapshot(event_tx);
+    if let Err(error) = runtime.refresh_session_metadata() {
+        let _ = event_tx.send(AiWorkerEvent::Status(format!(
+            "Unable to read model/session metadata: {error}"
+        )));
+    }
+    runtime.emit_snapshot(event_tx);
+    if let Err(error) = runtime.hydrate_initial_timeline() {
+        let _ = event_tx.send(AiWorkerEvent::Status(format!(
+            "Unable to hydrate initial thread timeline: {error}"
+        )));
+    }
+    runtime.emit_snapshot(event_tx);
+    let _ = event_tx.send(AiWorkerEvent::BootstrapCompleted);
+    runtime.emit_snapshot(event_tx);
 
     loop {
         match command_rx.recv_timeout(COMMAND_POLL_INTERVAL) {

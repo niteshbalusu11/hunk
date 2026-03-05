@@ -27,10 +27,12 @@ impl DiffViewer {
 
         let is_dark = cx.theme().mode.is_dark();
         let view = cx.entity();
+        let threads = self.ai_visible_threads();
+        let show_global_loading_overlay = self.ai_bootstrap_loading;
+        let threads_loading = show_global_loading_overlay && threads.is_empty();
         let active_bookmark = self
             .checked_out_bookmark_name()
             .map_or_else(|| "detached".to_string(), ToOwned::to_owned);
-        let threads = self.ai_visible_threads();
         let pending_approvals = self.ai_visible_pending_approvals();
         let pending_approvals_for_timeline = pending_approvals.clone();
         let pending_approval_count = pending_approvals.len();
@@ -61,6 +63,8 @@ impl DiffViewer {
                 self.sync_ai_timeline_list_state(0);
                 (0, 0, 0, Vec::new())
             };
+        let timeline_loading =
+            show_global_loading_overlay && selected_thread_id.is_some() && timeline_visible_turn_ids.is_empty();
         let ai_timeline_list_state = self.ai_timeline_list_state.clone();
         let in_progress_turn = selected_thread_id
             .as_ref()
@@ -91,7 +95,7 @@ impl DiffViewer {
             cx.theme().warning.opacity(if is_dark { 0.14 } else { 0.08 })
         };
 
-        v_flex()
+        let workspace = v_flex()
             .size_full()
             .w_full()
             .min_h_0()
@@ -293,7 +297,13 @@ impl DiffViewer {
                                                                     .w_full()
                                                                     .gap_1()
                                                                     .p_2()
-                                                                    .when(threads.is_empty(), |this| {
+                                                                    .when(threads_loading, |this| {
+                                                                        this.child(render_ai_thread_list_loading_skeleton(
+                                                                            is_dark,
+                                                                            cx,
+                                                                        ))
+                                                                    })
+                                                                    .when(threads.is_empty() && !threads_loading, |this| {
                                                                         this.child(
                                                                             div()
                                                                                 .rounded_md()
@@ -849,7 +859,15 @@ impl DiffViewer {
                                                         )
                                                     },
                                                 )
-                                                .when(selected_thread_id.is_none(), |this| {
+                                                .when(timeline_loading, |this| {
+                                                    this.child(
+                                                        render_ai_timeline_loading_skeleton(
+                                                            is_dark,
+                                                            cx,
+                                                        ),
+                                                    )
+                                                })
+                                                .when(selected_thread_id.is_none() && !timeline_loading, |this| {
                                                     this.child(
                                                         div()
                                                             .rounded_md()
@@ -873,7 +891,11 @@ impl DiffViewer {
                                                             ),
                                                     )
                                                 })
-                                                        .when_some(selected_thread_id.clone(), |this, thread_id| {
+                                                .when_some(
+                                                    selected_thread_id
+                                                        .clone()
+                                                        .filter(|_| !timeline_loading),
+                                                    |this, thread_id| {
                                                             let timeline_turn_ids_for_list = timeline_visible_turn_ids.clone();
                                                             let timeline_list_state = ai_timeline_list_state.clone();
                                                             let view_for_list = view.clone();
@@ -1459,7 +1481,8 @@ impl DiffViewer {
                                                             view.update(cx, |this, cx| {
                                                                 this.ai_send_prompt_action(window, cx);
                                                             });
-                                                        })
+                                                        },
+                                                )
                                                 })
                                                 .child({
                                                     let view = view.clone();
@@ -1500,6 +1523,15 @@ impl DiffViewer {
                     ),
                     ),
             )
+            .into_any_element();
+
+        div()
+            .size_full()
+            .relative()
+            .child(workspace)
+            .when(show_global_loading_overlay, |this| {
+                this.child(render_ai_global_loading_overlay(is_dark, cx))
+            })
             .into_any_element()
     }
 }

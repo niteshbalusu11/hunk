@@ -14,6 +14,61 @@ impl AiWorkerRuntime {
         Ok(())
     }
 
+    fn hydrate_initial_timeline(&mut self) -> Result<(), CodexIntegrationError> {
+        let thread_id = self
+            .service
+            .active_thread_for_workspace()
+            .filter(|thread_id| {
+                self.service
+                    .state()
+                    .threads
+                    .get(*thread_id)
+                    .is_some_and(|thread| {
+                        thread.cwd == self.cwd_key
+                            && thread.status != ThreadLifecycleStatus::Archived
+                    })
+            })
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                self.service
+                    .state()
+                    .threads
+                    .values()
+                    .filter(|thread| {
+                        thread.cwd == self.cwd_key
+                            && thread.status != ThreadLifecycleStatus::Archived
+                    })
+                    .max_by(|left, right| {
+                        left.updated_at
+                            .cmp(&right.updated_at)
+                            .then_with(|| left.created_at.cmp(&right.created_at))
+                            .then_with(|| left.id.cmp(&right.id))
+                    })
+                    .map(|thread| thread.id.clone())
+            });
+        let Some(thread_id) = thread_id else {
+            return Ok(());
+        };
+
+        self.service.resume_thread(
+            &mut self.session,
+            ThreadResumeParams {
+                thread_id: thread_id.clone(),
+                persist_extended_history: true,
+                ..ThreadResumeParams::default()
+            },
+            self.request_timeout,
+        )?;
+        self.service.read_thread(
+            &mut self.session,
+            thread_id.clone(),
+            true,
+            self.request_timeout,
+        )?;
+        self.hydrate_thread_from_rollout_fallback_if_needed(thread_id.as_str());
+        Ok(())
+    }
+
     fn refresh_session_metadata(&mut self) -> Result<(), CodexIntegrationError> {
         self.refresh_models()?;
         self.refresh_experimental_features()?;
