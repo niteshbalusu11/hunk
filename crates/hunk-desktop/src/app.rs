@@ -191,6 +191,7 @@ actions!(
         SwitchToGraphView,
         SwitchToAiView,
         AiNewThread,
+        AiInterruptSelectedTurn,
         OpenProject,
         SaveCurrentFile,
         OpenSettings,
@@ -564,6 +565,11 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
         "escape",
         RepoTreeCancelInlineEdit,
         Some("RepoTreeInlineEdit"),
+    ));
+    bindings.push(KeyBinding::new(
+        "escape",
+        AiInterruptSelectedTurn,
+        Some("AiWorkspace"),
     ));
     bindings.push(KeyBinding::new(
         "shift-enter",
@@ -983,6 +989,7 @@ struct DiffViewer {
     ai_timeline_row_ids_by_thread: BTreeMap<String, Vec<String>>,
     ai_timeline_rows_by_id: BTreeMap<String, AiTimelineRow>,
     ai_in_progress_turn_started_at: BTreeMap<String, Instant>,
+    ai_composer_activity_elapsed_second: Option<u64>,
     ai_expanded_timeline_row_ids: BTreeSet<String>,
     ai_pending_approvals: Vec<AiPendingApproval>,
     ai_pending_user_inputs: Vec<AiPendingUserInputRequest>,

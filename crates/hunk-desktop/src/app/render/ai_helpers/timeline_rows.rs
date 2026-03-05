@@ -407,20 +407,6 @@ fn render_ai_chat_timeline_row_for_view(
             match role {
                 AiTimelineItemRole::User | AiTimelineItemRole::Assistant => {
                     let is_user = role == AiTimelineItemRole::User;
-                    let bubble_bg = if is_user {
-                        cx.theme().accent.opacity(if is_dark { 0.18 } else { 0.12 })
-                    } else {
-                        cx.theme().background.blend(cx.theme().muted.opacity(if is_dark {
-                            0.18
-                        } else {
-                            0.26
-                        }))
-                    };
-                    let bubble_border = if is_user {
-                        cx.theme().accent.opacity(if is_dark { 0.72 } else { 0.48 })
-                    } else {
-                        cx.theme().border.opacity(if is_dark { 0.9 } else { 0.72 })
-                    };
                     let role_label = if is_user {
                         "You"
                     } else if item.kind == "plan" {
@@ -452,13 +438,23 @@ fn render_ai_chat_timeline_row_for_view(
                                 .max_w(bubble_max_width)
                                 .min_w_0()
                                 .gap_1p5()
-                                .px_3()
-                                .py_2()
-                                .overflow_hidden()
-                                .rounded(px(12.0))
-                                .border_1()
-                                .border_color(bubble_border)
-                                .bg(bubble_bg)
+                                .when(is_user, |this| {
+                                    this.px_3()
+                                        .py_2()
+                                        .overflow_hidden()
+                                        .rounded(px(12.0))
+                                        .border_1()
+                                        .border_color(cx.theme().accent.opacity(if is_dark {
+                                            0.72
+                                        } else {
+                                            0.48
+                                        }))
+                                        .bg(cx.theme().accent.opacity(if is_dark {
+                                            0.18
+                                        } else {
+                                            0.12
+                                        }))
+                                })
                                 .child(
                                     h_flex()
                                         .w_full()

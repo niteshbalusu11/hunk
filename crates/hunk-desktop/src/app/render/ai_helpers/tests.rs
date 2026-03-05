@@ -3,8 +3,10 @@
 mod ai_helper_tests {
     use super::ai_account_summary;
     use super::ai_command_execution_display_details;
+    use super::ai_composer_status_tone;
     use super::ai_thread_status_text;
     use super::ai_item_display_label;
+    use super::ai_reasoning_effort_label;
     use super::ai_rate_limit_summary;
     use super::ai_tool_header_label;
     use super::ai_timeline_item_is_renderable;
@@ -206,5 +208,22 @@ mod ai_helper_tests {
 
         let label = ai_tool_header_label(&item, item.content.trim());
         assert_eq!(label, "sed -n '1,40p' crates/hunk-desktop/src/app/render/ai.rs");
+    }
+
+    #[test]
+    fn reasoning_effort_labels_are_compact_and_human_readable() {
+        assert_eq!(ai_reasoning_effort_label("high"), "High");
+        assert_eq!(ai_reasoning_effort_label("extra_high"), "Extra High");
+        assert_eq!(ai_reasoning_effort_label("extra-high"), "Extra High");
+        assert_eq!(ai_reasoning_effort_label("medium"), "Medium");
+    }
+
+    #[test]
+    fn composer_status_tone_hides_routine_transport_and_attachment_messages() {
+        assert!(ai_composer_status_tone("Codex App Server connected over WebSocket").is_none());
+        assert!(ai_composer_status_tone("Starting Codex App Server...").is_none());
+        assert!(ai_composer_status_tone("Attached 2 images.").is_none());
+        assert!(ai_composer_status_tone("Interrupted").is_some());
+        assert!(ai_composer_status_tone("Prompt cannot be empty.").is_some());
     }
 }

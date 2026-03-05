@@ -27,6 +27,7 @@ impl DiffViewer {
                                     this.ai_pending_user_inputs.clear();
                                     this.ai_pending_user_input_answers.clear();
                                     this.ai_in_progress_turn_started_at.clear();
+                                    this.ai_composer_activity_elapsed_second = None;
                                     this.ai_account = None;
                                     this.ai_requires_openai_auth = false;
                                     this.ai_rate_limits = None;
@@ -53,6 +54,18 @@ impl DiffViewer {
                 }
 
                 if buffered_events.is_empty() {
+                    if let Some(this) = this.upgrade() {
+                        this.update(cx, |this, cx| {
+                            if this.ai_event_epoch != epoch {
+                                return;
+                            }
+                            if this.sync_ai_composer_activity_elapsed_second() {
+                                cx.notify();
+                            }
+                        });
+                    } else {
+                        return;
+                    }
                     cx.background_executor()
                         .timer(Self::AI_EVENT_POLL_INTERVAL)
                         .await;
@@ -103,6 +116,7 @@ impl DiffViewer {
                 self.ai_pending_user_inputs.clear();
                 self.ai_pending_user_input_answers.clear();
                 self.ai_in_progress_turn_started_at.clear();
+                self.ai_composer_activity_elapsed_second = None;
                 self.ai_account = None;
                 self.ai_requires_openai_auth = false;
                 self.ai_rate_limits = None;
@@ -159,6 +173,7 @@ impl DiffViewer {
         self.ai_state_snapshot = state;
         self.rebuild_ai_timeline_indexes();
         self.sync_ai_in_progress_turn_started_at();
+        self.ai_composer_activity_elapsed_second = self.current_ai_composer_activity_elapsed_second();
         self.ai_pending_approvals = pending_approvals;
         self.ai_pending_user_inputs = pending_user_inputs;
         self.sync_ai_pending_user_input_answers();
@@ -269,6 +284,24 @@ impl DiffViewer {
             .retain(|key, _| in_progress_turn_keys.contains(key));
     }
 
+    fn current_ai_composer_activity_elapsed_second(&self) -> Option<u64> {
+        let thread_id = self.current_ai_thread_id()?;
+        let turn_id = self.current_ai_in_progress_turn_id(thread_id.as_str())?;
+        let tracking_key = format!("{thread_id}::{turn_id}");
+        self.ai_in_progress_turn_started_at
+            .get(tracking_key.as_str())
+            .map(|started_at| started_at.elapsed().as_secs())
+    }
+
+    fn sync_ai_composer_activity_elapsed_second(&mut self) -> bool {
+        let next = self.current_ai_composer_activity_elapsed_second();
+        if self.ai_composer_activity_elapsed_second == next {
+            return false;
+        }
+        self.ai_composer_activity_elapsed_second = next;
+        true
+    }
+
     fn sync_ai_pending_user_input_answers(&mut self) {
         let existing_answers = std::mem::take(&mut self.ai_pending_user_input_answers);
         let mut next_answers = BTreeMap::new();
@@ -329,7 +362,7 @@ impl DiffViewer {
 
         let session_overrides = self.current_ai_turn_session_overrides();
         if let Some(thread_id) = self.current_ai_thread_id() {
-            return self.send_ai_worker_command(
+            let sent = self.send_ai_worker_command(
                 AiWorkerCommand::SendPrompt {
                     thread_id,
                     prompt,
@@ -338,16 +371,24 @@ impl DiffViewer {
                 },
                 cx,
             );
+            if sent {
+                self.ai_status_message = None;
+            }
+            return sent;
         }
 
-        self.send_ai_worker_command(
+        let sent = self.send_ai_worker_command(
             AiWorkerCommand::StartThread {
                 prompt,
                 local_image_paths,
                 session_overrides,
             },
             cx,
-        )
+        );
+        if sent {
+            self.ai_status_message = None;
+        }
+        sent
     }
 
     fn sync_ai_session_selection_from_state(&mut self) {

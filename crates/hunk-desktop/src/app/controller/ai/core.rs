@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use hunk_domain::state::AiThreadSessionState;
 use hunk_codex::state::ThreadLifecycleStatus;
@@ -111,6 +111,7 @@ impl DiffViewer {
             },
             cx,
         ) {
+            self.ai_status_message = None;
             self.clear_ai_composer_input(window, cx);
         }
         self.focus_ai_composer_input(window, cx);
@@ -189,13 +190,12 @@ impl DiffViewer {
 
             if let Some(this) = this.upgrade() {
                 this.update(cx, |this, cx| {
+                    let selected_count = selected_paths.len();
                     let added = this.ai_add_composer_local_images(selected_paths);
-                    if added == 0 {
-                        this.ai_status_message =
-                            Some("No supported image files were selected.".to_string());
-                    } else {
-                        let suffix = if added == 1 { "" } else { "s" };
-                        this.ai_status_message = Some(format!("Attached {added} image{suffix}."));
+                    if let Some(message) =
+                        ai_attachment_status_message(selected_count, added)
+                    {
+                        this.ai_status_message = Some(message);
                     }
                     cx.notify();
                 });
@@ -213,14 +213,6 @@ impl DiffViewer {
         if self.ai_composer_local_images.len() != before {
             cx.notify();
         }
-    }
-
-    pub(super) fn ai_clear_composer_attachments_action(&mut self, cx: &mut Context<Self>) {
-        if self.ai_composer_local_images.is_empty() {
-            return;
-        }
-        self.ai_composer_local_images.clear();
-        cx.notify();
     }
 
     pub(super) fn ai_add_dropped_composer_paths_action(
@@ -244,7 +236,9 @@ impl DiffViewer {
 
         let dropped_count = dropped_paths.len();
         let added = self.ai_add_composer_local_images(dropped_paths);
-        self.ai_status_message = Some(ai_drop_image_attachment_status_message(dropped_count, added));
+        if let Some(message) = ai_attachment_status_message(dropped_count, added) {
+            self.ai_status_message = Some(message);
+        }
         self.focus_ai_composer_input(window, cx);
         cx.notify();
     }
@@ -274,6 +268,7 @@ impl DiffViewer {
             },
             cx,
         ) {
+            self.ai_status_message = None;
             self.clear_ai_composer_input(window, cx);
         }
     }
@@ -291,10 +286,34 @@ impl DiffViewer {
             return;
         };
 
-        self.send_ai_worker_command(
+        if self.send_ai_worker_command(
             AiWorkerCommand::InterruptTurn { thread_id, turn_id },
             cx,
-        );
+        ) {
+            self.ai_status_message = Some("Interrupted".to_string());
+            cx.notify();
+        }
+    }
+
+    pub(super) fn ai_interrupt_selected_turn_action(
+        &mut self,
+        _: &AiInterruptSelectedTurn,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.workspace_view_mode != WorkspaceViewMode::Ai {
+            return;
+        }
+        let Some(thread_id) = self.current_ai_thread_id() else {
+            return;
+        };
+        if self
+            .current_ai_in_progress_turn_id(thread_id.as_str())
+            .is_none()
+        {
+            return;
+        }
+        self.ai_interrupt_turn_action(cx);
     }
 
     pub(super) fn ai_set_mad_max_mode(&mut self, enabled: bool, cx: &mut Context<Self>) {
@@ -799,17 +818,6 @@ impl DiffViewer {
             .map(|turn| turn.id.clone())
     }
 
-    pub(super) fn ai_in_progress_turn_elapsed(
-        &self,
-        thread_id: &str,
-        turn_id: &str,
-    ) -> Option<Duration> {
-        let key = ai_in_progress_turn_tracking_key(thread_id, turn_id);
-        self.ai_in_progress_turn_started_at
-            .get(key.as_str())
-            .map(Instant::elapsed)
-    }
-
     fn ai_workspace_cwd(&self) -> Option<std::path::PathBuf> {
         self.repo_root.clone().or_else(|| self.project_path.clone())
     }
@@ -1006,27 +1014,22 @@ fn is_supported_ai_image_path(path: &std::path::Path) -> bool {
     )
 }
 
-fn ai_drop_image_attachment_status_message(dropped_count: usize, added_count: usize) -> String {
-    if dropped_count == 0 {
-        return "No files were dropped.".to_string();
+fn ai_attachment_status_message(file_count: usize, added_count: usize) -> Option<String> {
+    if file_count == 0 || added_count == file_count {
+        return None;
     }
 
     if added_count == 0 {
-        if dropped_count == 1 {
-            return "Dropped file is not a supported image or is already attached.".to_string();
+        if file_count == 1 {
+            return Some("File is not a supported image or is already attached.".to_string());
         }
-        return "No dropped files were supported images or were already attached.".to_string();
-    }
-
-    if added_count == dropped_count {
-        let suffix = if added_count == 1 { "" } else { "s" };
-        return format!("Attached {added_count} image{suffix}.");
+        return Some("No files were supported images or were already attached.".to_string());
     }
 
     let added_suffix = if added_count == 1 { "" } else { "s" };
-    let skipped_count = dropped_count.saturating_sub(added_count);
+    let skipped_count = file_count.saturating_sub(added_count);
     let skipped_suffix = if skipped_count == 1 { "" } else { "s" };
-    format!(
+    Some(format!(
         "Attached {added_count} image{added_suffix}. Skipped {skipped_count} unsupported or duplicate file{skipped_suffix}."
-    )
+    ))
 }

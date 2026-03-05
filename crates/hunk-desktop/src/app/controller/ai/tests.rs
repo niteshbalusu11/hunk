@@ -9,7 +9,7 @@ fn item_status_chip(status: hunk_codex::state::ItemStatus) -> &'static str {
 
 #[cfg(test)]
 mod ai_tests {
-    use super::ai_drop_image_attachment_status_message;
+    use super::ai_attachment_status_message;
     use super::bundled_codex_executable_candidates;
     use super::codex_runtime_binary_name;
     use super::codex_runtime_platform_dir;
@@ -852,26 +852,20 @@ mod ai_tests {
     }
 
     #[test]
-    fn drop_image_attachment_status_message_reports_expected_outcomes() {
+    fn attachment_status_message_reports_only_problem_cases() {
+        assert_eq!(ai_attachment_status_message(1, 1), None);
+        assert_eq!(ai_attachment_status_message(3, 3), None);
         assert_eq!(
-            ai_drop_image_attachment_status_message(1, 1),
-            "Attached 1 image."
+            ai_attachment_status_message(3, 1),
+            Some("Attached 1 image. Skipped 2 unsupported or duplicate files.".to_string())
         );
         assert_eq!(
-            ai_drop_image_attachment_status_message(3, 3),
-            "Attached 3 images."
+            ai_attachment_status_message(1, 0),
+            Some("File is not a supported image or is already attached.".to_string())
         );
         assert_eq!(
-            ai_drop_image_attachment_status_message(3, 1),
-            "Attached 1 image. Skipped 2 unsupported or duplicate files."
-        );
-        assert_eq!(
-            ai_drop_image_attachment_status_message(1, 0),
-            "Dropped file is not a supported image or is already attached."
-        );
-        assert_eq!(
-            ai_drop_image_attachment_status_message(2, 0),
-            "No dropped files were supported images or were already attached."
+            ai_attachment_status_message(2, 0),
+            Some("No files were supported images or were already attached.".to_string())
         );
     }
 }

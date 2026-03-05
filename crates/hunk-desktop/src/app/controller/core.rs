@@ -357,7 +357,7 @@ impl DiffViewer {
             InputState::new(window, cx)
                 .multi_line(true)
                 .rows(4)
-                .placeholder("Ask Codex to edit code, run commands, explain changes, or focus a review.")
+                .placeholder("Ask for follow-up changes")
         });
         let graph_action_input_state = cx.new(|cx| {
             InputState::new(window, cx).placeholder("Bookmark name for create/fork/rename")
@@ -427,6 +427,7 @@ impl DiffViewer {
             ai_timeline_row_ids_by_thread: BTreeMap::new(),
             ai_timeline_rows_by_id: BTreeMap::new(),
             ai_in_progress_turn_started_at: BTreeMap::new(),
+            ai_composer_activity_elapsed_second: None,
             ai_expanded_timeline_row_ids: BTreeSet::new(),
             ai_pending_approvals: Vec::new(),
             ai_pending_user_inputs: Vec::new(),
