@@ -387,6 +387,23 @@ pub fn load_workflow_snapshot(cwd: &Path) -> Result<WorkflowSnapshot> {
     load_workflow_snapshot_from_context(&context)
 }
 
+pub fn load_workflow_snapshot_without_refresh(cwd: &Path) -> Result<WorkflowSnapshot> {
+    let context = load_repo_context(cwd, false)?;
+    load_workflow_snapshot_from_context(&context)
+}
+
+pub fn load_workflow_snapshot_with_fingerprint(
+    cwd: &Path,
+) -> Result<(RepoSnapshotFingerprint, WorkflowSnapshot)> {
+    load_workflow_snapshot_with_fingerprint_with_refresh(cwd, true)
+}
+
+pub fn load_workflow_snapshot_with_fingerprint_without_refresh(
+    cwd: &Path,
+) -> Result<(RepoSnapshotFingerprint, WorkflowSnapshot)> {
+    load_workflow_snapshot_with_fingerprint_with_refresh(cwd, false)
+}
+
 pub fn load_graph_snapshot(
     repo_root: &Path,
     options: GraphSnapshotOptions,
@@ -409,9 +426,33 @@ pub fn load_snapshot_fingerprint_without_refresh(cwd: &Path) -> Result<RepoSnaps
     load_snapshot_fingerprint_with_refresh(cwd, false)
 }
 
+pub fn load_repo_line_stats(cwd: &Path) -> Result<LineStats> {
+    load_repo_line_stats_with_refresh(cwd, true)
+}
+
+pub fn load_repo_line_stats_without_refresh(cwd: &Path) -> Result<LineStats> {
+    load_repo_line_stats_with_refresh(cwd, false)
+}
+
 fn load_snapshot_with_refresh(cwd: &Path, refresh_snapshot: bool) -> Result<RepoSnapshot> {
     let context = load_repo_context(cwd, refresh_snapshot)?;
     load_snapshot_from_context(&context)
+}
+
+fn load_workflow_snapshot_with_fingerprint_with_refresh(
+    cwd: &Path,
+    refresh_snapshot: bool,
+) -> Result<(RepoSnapshotFingerprint, WorkflowSnapshot)> {
+    let context = load_repo_context(cwd, refresh_snapshot)?;
+    let workflow = load_workflow_snapshot_from_context(&context)?;
+    let head_target = current_commit_id_from_context(&context)?;
+    let fingerprint = snapshot_fingerprint(
+        context.root.clone(),
+        workflow.branch_name.clone(),
+        head_target,
+        workflow.files.as_slice(),
+    );
+    Ok((fingerprint, workflow))
 }
 
 fn load_snapshot_from_context(context: &backend::RepoContext) -> Result<RepoSnapshot> {
@@ -439,6 +480,11 @@ fn load_graph_snapshot_with_refresh(
 ) -> Result<GraphSnapshot> {
     let context = load_repo_context_at_root(repo_root, refresh_snapshot)?;
     build_graph_snapshot_from_context(&context, options)
+}
+
+fn load_repo_line_stats_with_refresh(cwd: &Path, refresh_snapshot: bool) -> Result<LineStats> {
+    let context = load_repo_context(cwd, refresh_snapshot)?;
+    repo_line_stats_from_context(&context)
 }
 
 fn load_snapshot_fingerprint_with_refresh(

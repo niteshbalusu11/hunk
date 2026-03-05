@@ -112,9 +112,7 @@ impl DiffViewer {
     }
 
     fn refresh_workflow_and_full_snapshot_after_action(&mut self, cx: &mut Context<Self>) {
-        // Keep right-pane controls responsive by applying workflow state first, then
-        // refresh graph/tree state in the background.
-        self.request_workflow_refresh(cx);
+        // A forced snapshot refresh now applies workflow first, then graph/line-stats.
         self.request_snapshot_refresh_internal(true, cx);
     }
 

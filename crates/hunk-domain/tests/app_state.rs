@@ -2,6 +2,10 @@ use std::path::PathBuf;
 
 use hunk_domain::state::AiThreadSessionState;
 use hunk_domain::state::AppState;
+use hunk_domain::state::CachedBookmarkRevisionState;
+use hunk_domain::state::CachedChangedFileState;
+use hunk_domain::state::CachedLocalBranchState;
+use hunk_domain::state::CachedWorkflowState;
 
 #[test]
 fn app_state_defaults_last_project_path_to_none() {
@@ -10,6 +14,7 @@ fn app_state_defaults_last_project_path_to_none() {
     assert!(state.ai_workspace_mad_max.is_empty());
     assert!(state.ai_workspace_include_hidden_models.is_empty());
     assert!(state.ai_workspace_session_overrides.is_empty());
+    assert!(state.git_workflow_cache.is_none());
 }
 
 #[test]
@@ -20,6 +25,7 @@ fn app_state_parses_without_last_project_path_field() {
     assert!(state.ai_workspace_mad_max.is_empty());
     assert!(state.ai_workspace_include_hidden_models.is_empty());
     assert!(state.ai_workspace_session_overrides.is_empty());
+    assert!(state.git_workflow_cache.is_none());
 }
 
 #[test]
@@ -40,6 +46,32 @@ fn app_state_round_trips_last_project_path() {
         )]
         .into_iter()
         .collect(),
+        git_workflow_cache: Some(CachedWorkflowState {
+            root: Some(PathBuf::from("/tmp/hunk-repo")),
+            branch_name: "main".to_string(),
+            branch_has_upstream: true,
+            branch_ahead_count: 2,
+            can_undo_operation: true,
+            can_redo_operation: false,
+            branches: vec![CachedLocalBranchState {
+                name: "main".to_string(),
+                is_current: true,
+                tip_unix_time: Some(1_711_111_111),
+            }],
+            bookmark_revisions: vec![CachedBookmarkRevisionState {
+                id: "abc123".to_string(),
+                subject: "cached commit".to_string(),
+                unix_time: 1_711_111_111,
+            }],
+            files: vec![CachedChangedFileState {
+                path: "src/main.rs".to_string(),
+                status_tag: "M".to_string(),
+                staged: false,
+                untracked: false,
+            }],
+            last_commit_subject: Some("cached".to_string()),
+            cached_unix_time: 1_711_111_111,
+        }),
     };
 
     let raw = toml::to_string(&state).expect("state should serialize");

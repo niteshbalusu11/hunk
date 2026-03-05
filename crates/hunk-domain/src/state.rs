@@ -18,11 +18,53 @@ pub struct AiThreadSessionState {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+pub struct CachedChangedFileState {
+    pub path: String,
+    pub status_tag: String,
+    pub staged: bool,
+    pub untracked: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CachedLocalBranchState {
+    pub name: String,
+    pub is_current: bool,
+    pub tip_unix_time: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CachedBookmarkRevisionState {
+    pub id: String,
+    pub subject: String,
+    pub unix_time: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CachedWorkflowState {
+    pub root: Option<PathBuf>,
+    pub branch_name: String,
+    pub branch_has_upstream: bool,
+    pub branch_ahead_count: usize,
+    pub can_undo_operation: bool,
+    pub can_redo_operation: bool,
+    pub branches: Vec<CachedLocalBranchState>,
+    pub bookmark_revisions: Vec<CachedBookmarkRevisionState>,
+    pub files: Vec<CachedChangedFileState>,
+    pub last_commit_subject: Option<String>,
+    pub cached_unix_time: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppState {
     pub last_project_path: Option<PathBuf>,
     pub ai_workspace_mad_max: BTreeMap<String, bool>,
     pub ai_workspace_include_hidden_models: BTreeMap<String, bool>,
     pub ai_workspace_session_overrides: BTreeMap<String, AiThreadSessionState>,
+    pub git_workflow_cache: Option<CachedWorkflowState>,
 }
 
 #[derive(Debug, Clone)]

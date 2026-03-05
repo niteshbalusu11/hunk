@@ -101,11 +101,18 @@ impl DiffViewer {
                 .into_any_element();
         }
 
+        let is_dark = cx.theme().mode.is_dark();
+        let show_loading_overlay = self.workflow_loading || self.graph_loading;
+
         div()
             .size_full()
             .min_h_0()
+            .relative()
             .pb(px(APP_BOTTOM_SAFE_INSET))
             .child(self.render_jj_workspace_graph_shell(cx))
+            .when(show_loading_overlay, |this| {
+                this.child(render_jj_workspace_loading_overlay(is_dark, cx))
+            })
             .into_any_element()
     }
 

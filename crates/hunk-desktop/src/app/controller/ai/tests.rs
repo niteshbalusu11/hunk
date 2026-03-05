@@ -340,6 +340,7 @@ mod ai_tests {
             .collect(),
             ai_workspace_include_hidden_models: Default::default(),
             ai_workspace_session_overrides: Default::default(),
+            git_workflow_cache: None,
         };
         assert!(workspace_mad_max_mode(&state, Some("/repo-a")));
         assert!(!workspace_mad_max_mode(&state, Some("/repo-b")));
@@ -365,6 +366,7 @@ mod ai_tests {
             .into_iter()
             .collect(),
             ai_workspace_session_overrides: Default::default(),
+            git_workflow_cache: None,
         };
         assert!(workspace_include_hidden_models(&state, Some("/repo-a")));
         assert!(!workspace_include_hidden_models(&state, Some("/repo-b")));

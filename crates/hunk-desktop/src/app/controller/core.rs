@@ -95,6 +95,168 @@ impl DiffViewer {
         self.persist_state();
     }
 
+    fn workflow_cache_unix_time() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs() as i64)
+            .unwrap_or(0)
+    }
+
+    fn file_status_from_cache_tag(status_tag: &str) -> FileStatus {
+        match status_tag {
+            "A" => FileStatus::Added,
+            "M" => FileStatus::Modified,
+            "D" => FileStatus::Deleted,
+            "R" => FileStatus::Renamed,
+            "U" => FileStatus::Untracked,
+            "T" => FileStatus::TypeChange,
+            "!" => FileStatus::Conflicted,
+            _ => FileStatus::Unknown,
+        }
+    }
+
+    fn hydrate_workflow_cache_if_available(&mut self, cx: &mut Context<Self>) {
+        let Some(cache) = self.state.git_workflow_cache.clone() else {
+            return;
+        };
+        let Some(root) = cache.root.clone() else {
+            return;
+        };
+        let Some(expected_root) = self
+            .project_path
+            .clone()
+            .or_else(|| self.state.last_project_path.clone())
+        else {
+            return;
+        };
+        if root != expected_root {
+            return;
+        }
+
+        self.project_path = Some(root.clone());
+        self.repo_root = Some(root.clone());
+        self.ai_sync_workspace_preferences(cx);
+        self.branch_name = if cache.branch_name.is_empty() {
+            "unknown".to_string()
+        } else {
+            cache.branch_name
+        };
+        self.branch_has_upstream = cache.branch_has_upstream;
+        self.branch_ahead_count = cache.branch_ahead_count;
+        self.can_undo_operation = cache.can_undo_operation;
+        self.can_redo_operation = cache.can_redo_operation;
+        self.branches = cache
+            .branches
+            .into_iter()
+            .map(|branch| LocalBranch {
+                name: branch.name,
+                is_current: branch.is_current,
+                tip_unix_time: branch.tip_unix_time,
+            })
+            .collect();
+        self.bookmark_revisions = cache
+            .bookmark_revisions
+            .into_iter()
+            .map(|revision| BookmarkRevision {
+                id: revision.id,
+                subject: revision.subject,
+                unix_time: revision.unix_time,
+            })
+            .collect();
+        self.files = cache
+            .files
+            .into_iter()
+            .map(|file| ChangedFile {
+                path: file.path,
+                status: Self::file_status_from_cache_tag(file.status_tag.as_str()),
+                staged: file.staged,
+                untracked: file.untracked,
+            })
+            .collect();
+        self.file_status_by_path = self
+            .files
+            .iter()
+            .map(|file| (file.path.clone(), file.status))
+            .collect();
+        self.last_commit_subject = cache.last_commit_subject;
+        self.selected_path = self
+            .selected_path
+            .clone()
+            .filter(|selected| self.files.iter().any(|file| &file.path == selected))
+            .or_else(|| self.files.first().map(|file| file.path.clone()));
+        self.selected_status = self
+            .selected_path
+            .as_deref()
+            .and_then(|selected| self.status_for_path(selected));
+        self.repo_discovery_failed = false;
+        self.error_message = None;
+        info!(
+            "hydrated git workflow cache for {} (files={} branches={} revisions={})",
+            root.display(),
+            self.files.len(),
+            self.branches.len(),
+            self.bookmark_revisions.len()
+        );
+        cx.notify();
+    }
+
+    fn persist_workflow_cache(&mut self) {
+        let Some(root) = self.repo_root.clone() else {
+            return;
+        };
+
+        let mut cache = CachedWorkflowState {
+            root: Some(root),
+            branch_name: self.branch_name.clone(),
+            branch_has_upstream: self.branch_has_upstream,
+            branch_ahead_count: self.branch_ahead_count,
+            can_undo_operation: self.can_undo_operation,
+            can_redo_operation: self.can_redo_operation,
+            branches: self
+                .branches
+                .iter()
+                .map(|branch| CachedLocalBranchState {
+                    name: branch.name.clone(),
+                    is_current: branch.is_current,
+                    tip_unix_time: branch.tip_unix_time,
+                })
+                .collect(),
+            bookmark_revisions: self
+                .bookmark_revisions
+                .iter()
+                .map(|revision| CachedBookmarkRevisionState {
+                    id: revision.id.clone(),
+                    subject: revision.subject.clone(),
+                    unix_time: revision.unix_time,
+                })
+                .collect(),
+            files: self
+                .files
+                .iter()
+                .map(|file| CachedChangedFileState {
+                    path: file.path.clone(),
+                    status_tag: file.status.tag().to_string(),
+                    staged: file.staged,
+                    untracked: file.untracked,
+                })
+                .collect(),
+            last_commit_subject: self.last_commit_subject.clone(),
+            cached_unix_time: 0,
+        };
+
+        if let Some(previous) = self.state.git_workflow_cache.as_ref() {
+            let mut previous_without_time = previous.clone();
+            previous_without_time.cached_unix_time = 0;
+            if previous_without_time == cache {
+                return;
+            }
+        }
+
+        cache.cached_unix_time = Self::workflow_cache_unix_time();
+        self.state.git_workflow_cache = Some(cache);
+        self.persist_state();
+    }
+
     fn sync_theme_with_system_if_needed(&self, window: &mut Window, cx: &mut Context<Self>) {
         if self.config.theme != ThemePreference::System {
             return;
@@ -308,9 +470,10 @@ impl DiffViewer {
             snapshot_epoch: 0,
             snapshot_task: Task::ready(()),
             snapshot_loading: false,
-            workflow_snapshot_epoch: 0,
-            workflow_snapshot_task: Task::ready(()),
-            workflow_state_epoch: 0,
+            workflow_loading: false,
+            graph_loading: false,
+            line_stats_loading: false,
+            snapshot_refresh_pending_force: false,
             last_snapshot_fingerprint: None,
             open_project_task: Task::ready(()),
             patch_epoch: 0,
@@ -378,6 +541,7 @@ impl DiffViewer {
         })
         .detach();
 
+        view.hydrate_workflow_cache_if_available(cx);
         view.request_snapshot_refresh(cx);
         view.start_auto_refresh(cx);
         view.start_repo_watch(cx);
@@ -414,63 +578,35 @@ impl DiffViewer {
         self.request_snapshot_refresh_internal(false, cx);
     }
 
-    pub(super) fn request_workflow_refresh(&mut self, cx: &mut Context<Self>) {
-        self.request_workflow_refresh_internal(cx);
-    }
-
-    fn request_workflow_refresh_internal(&mut self, cx: &mut Context<Self>) {
-        let source_dir_result = self
-            .project_path
-            .clone()
-            .map(Ok)
-            .unwrap_or_else(|| std::env::current_dir().context("failed to resolve current directory"));
-        let epoch = self.next_workflow_snapshot_epoch();
-
-        self.workflow_snapshot_task = cx.spawn(async move |this, cx| {
-            let started_at = Instant::now();
-            let result = match source_dir_result {
-                Ok(source_dir) => cx
-                    .background_executor()
-                    .spawn(async move { load_workflow_snapshot(&source_dir) })
-                    .await,
-                Err(err) => Err(err),
-            };
-
-            if let Some(this) = this.upgrade() {
-                this.update(cx, |this, cx| {
-                    if epoch != this.workflow_snapshot_epoch {
-                        return;
-                    }
-
-                    let elapsed = started_at.elapsed();
-                    match result {
-                        Ok(snapshot) => {
-                            info!("workflow snapshot refresh completed in {:?}", elapsed);
-                            this.apply_workflow_snapshot(snapshot, cx);
-                        }
-                        Err(err) => {
-                            error!("workflow snapshot refresh failed after {:?}: {err:#}", elapsed);
-                        }
-                    }
-                });
-            }
-        });
+    fn maybe_run_pending_snapshot_refresh(&mut self, cx: &mut Context<Self>) {
+        if self.snapshot_loading {
+            return;
+        }
+        if !std::mem::take(&mut self.snapshot_refresh_pending_force) {
+            return;
+        }
+        info!("git workspace running queued forced refresh");
+        self.request_snapshot_refresh_internal(true, cx);
     }
 
     pub(super) fn request_snapshot_refresh_internal(&mut self, force: bool, cx: &mut Context<Self>) {
-        if self.snapshot_loading && !force {
+        if self.snapshot_loading {
+            if force {
+                self.snapshot_refresh_pending_force = true;
+            }
             return;
         }
         if force {
             self.auto_refresh_unmodified_streak = 0;
         }
+        let cold_start = self.last_snapshot_fingerprint.is_none();
 
-        enum SnapshotRefreshResult {
+        enum SnapshotRefreshStageA {
             Unchanged(RepoSnapshotFingerprint),
             Loaded {
                 fingerprint: RepoSnapshotFingerprint,
-                snapshot: Box<RepoSnapshot>,
-                graph_snapshot: Box<GraphSnapshot>,
+                workflow: Box<WorkflowSnapshot>,
+                loaded_without_refresh: bool,
             },
         }
 
@@ -484,31 +620,56 @@ impl DiffViewer {
         } else {
             self.last_snapshot_fingerprint.clone()
         };
-        let workflow_state_epoch_at_start = self.workflow_state_epoch;
+        let prefer_stale_first = cold_start && !force;
         let epoch = self.next_snapshot_epoch();
         self.snapshot_loading = true;
+        self.workflow_loading = true;
+        self.graph_loading = true;
+        self.line_stats_loading = true;
+        let refresh_root = self
+            .project_path
+            .clone()
+            .or_else(|| self.repo_root.clone())
+            .unwrap_or_else(|| PathBuf::from("."));
+        info!(
+            "git workspace refresh start: epoch={} force={} cold_start={} root={}",
+            epoch,
+            force,
+            cold_start,
+            refresh_root.display()
+        );
+        cx.notify();
 
         self.snapshot_task = cx.spawn(async move |this, cx| {
             let started_at = Instant::now();
-            let result = match source_dir_result {
+            // Stage A: resolve workspace state first so right-pane workflow data can paint early.
+            let stage_a_result = match source_dir_result {
                 Ok(source_dir) => {
                     cx.background_executor()
                         .spawn(async move {
-                            let load_once = || -> Result<SnapshotRefreshResult> {
-                                let fingerprint = load_snapshot_fingerprint(&source_dir)?;
-                                if previous_fingerprint.as_ref() == Some(&fingerprint) {
-                                    return Ok(SnapshotRefreshResult::Unchanged(fingerprint));
+                            let load_once = || -> Result<SnapshotRefreshStageA> {
+                                if prefer_stale_first {
+                                    let (fingerprint, workflow) =
+                                        load_workflow_snapshot_with_fingerprint_without_refresh(
+                                            &source_dir,
+                                        )?;
+                                    return Ok(SnapshotRefreshStageA::Loaded {
+                                        fingerprint,
+                                        workflow: Box::new(workflow),
+                                        loaded_without_refresh: true,
+                                    });
                                 }
 
-                                let snapshot = load_snapshot_without_refresh(&source_dir)?;
-                                let graph_snapshot = load_graph_snapshot_without_refresh(
-                                    &source_dir,
-                                    GraphSnapshotOptions::default(),
-                                )?;
-                                Ok(SnapshotRefreshResult::Loaded {
+                                let fingerprint = load_snapshot_fingerprint(&source_dir)?;
+                                if previous_fingerprint.as_ref() == Some(&fingerprint) {
+                                    return Ok(SnapshotRefreshStageA::Unchanged(fingerprint));
+                                }
+
+                                let workflow = load_workflow_snapshot(&source_dir)?;
+                                Ok(SnapshotRefreshStageA::Loaded {
                                     fingerprint,
-                                    snapshot: Box::new(snapshot),
-                                    graph_snapshot: Box::new(graph_snapshot),
+                                    workflow: Box::new(workflow),
+                                    loaded_without_refresh: false,
                                 })
                             };
 
@@ -516,34 +677,43 @@ impl DiffViewer {
                                 Ok(result) => Ok(result),
                                 Err(primary_err) => {
                                     warn!(
-                                        "snapshot refresh failed with working-copy refresh; retrying without refresh: {primary_err:#}"
+                                        "snapshot stage A stale-first load failed; retrying with working-copy refresh: {primary_err:#}"
                                     );
 
-                                    let fallback = || -> Result<SnapshotRefreshResult> {
+                                    let fallback = || -> Result<SnapshotRefreshStageA> {
+                                        if prefer_stale_first {
+                                            let (fingerprint, workflow) =
+                                                load_workflow_snapshot_with_fingerprint(
+                                                    &source_dir,
+                                                )?;
+                                            return Ok(SnapshotRefreshStageA::Loaded {
+                                                fingerprint,
+                                                workflow: Box::new(workflow),
+                                                loaded_without_refresh: false,
+                                            });
+                                        }
+
                                         let fingerprint =
                                             load_snapshot_fingerprint_without_refresh(&source_dir)?;
                                         if previous_fingerprint.as_ref() == Some(&fingerprint) {
-                                            return Ok(SnapshotRefreshResult::Unchanged(
+                                            return Ok(SnapshotRefreshStageA::Unchanged(
                                                 fingerprint,
                                             ));
                                         }
 
-                                        let snapshot = load_snapshot_without_refresh(&source_dir)?;
-                                        let graph_snapshot = load_graph_snapshot_without_refresh(
-                                            &source_dir,
-                                            GraphSnapshotOptions::default(),
-                                        )?;
-                                        Ok(SnapshotRefreshResult::Loaded {
+                                        let workflow =
+                                            load_workflow_snapshot_without_refresh(&source_dir)?;
+                                        Ok(SnapshotRefreshStageA::Loaded {
                                             fingerprint,
-                                            snapshot: Box::new(snapshot),
-                                            graph_snapshot: Box::new(graph_snapshot),
+                                            workflow: Box::new(workflow),
+                                            loaded_without_refresh: true,
                                         })
                                     };
 
                                     match fallback() {
                                         Ok(result) => Ok(result),
                                         Err(fallback_err) => Err(primary_err.context(format!(
-                                            "snapshot refresh fallback without working-copy refresh failed: {fallback_err:#}"
+                                            "snapshot stage A fallback load failed: {fallback_err:#}"
                                         ))),
                                     }
                                 }
@@ -554,42 +724,265 @@ impl DiffViewer {
                 Err(err) => Err(err),
             };
 
+            let (fingerprint, workflow_snapshot, loaded_without_refresh) = match stage_a_result {
+                Ok(SnapshotRefreshStageA::Loaded {
+                    fingerprint,
+                    workflow,
+                    loaded_without_refresh,
+                }) => (fingerprint, workflow, loaded_without_refresh),
+                Ok(SnapshotRefreshStageA::Unchanged(fingerprint)) => {
+                    if let Some(this) = this.upgrade() {
+                        this.update(cx, |this, cx| {
+                            if epoch != this.snapshot_epoch {
+                                return;
+                            }
+
+                            this.snapshot_loading = false;
+                            this.workflow_loading = false;
+                            this.graph_loading = false;
+                            this.line_stats_loading = false;
+                            let elapsed = started_at.elapsed();
+                            info!(
+                                "git workspace refresh skipped: epoch={} force={} cold_start={} elapsed_ms={} (no repo changes)",
+                                epoch,
+                                force,
+                                cold_start,
+                                elapsed.as_millis()
+                            );
+                            this.auto_refresh_unmodified_streak =
+                                this.auto_refresh_unmodified_streak.saturating_add(1);
+                            this.last_snapshot_fingerprint = Some(fingerprint);
+                            cx.notify();
+                            this.maybe_run_pending_snapshot_refresh(cx);
+                        });
+                    }
+                    return;
+                }
+                Err(err) => {
+                    if let Some(this) = this.upgrade() {
+                        this.update(cx, move |this, cx| {
+                            if epoch != this.snapshot_epoch {
+                                return;
+                            }
+
+                            this.snapshot_loading = false;
+                            this.workflow_loading = false;
+                            this.graph_loading = false;
+                            this.line_stats_loading = false;
+                            let elapsed = started_at.elapsed();
+                            error!(
+                                "git workspace refresh failed: epoch={} force={} cold_start={} elapsed_ms={} err={err:#}",
+                                epoch,
+                                force,
+                                cold_start,
+                                elapsed.as_millis()
+                            );
+                            this.apply_snapshot_error(err, cx);
+                            this.maybe_run_pending_snapshot_refresh(cx);
+                        });
+                    }
+                    return;
+                }
+            };
+
+            let workflow_file_count = workflow_snapshot.files.len();
+            let workflow_branch_count = workflow_snapshot.branches.len();
+            let workflow_revision_count = workflow_snapshot.bookmark_revisions.len();
+            let workflow_ready_elapsed = started_at.elapsed();
+            let should_run_cold_start_reconcile = cold_start && loaded_without_refresh;
+            info!(
+                "git workspace workflow ready: epoch={} force={} elapsed_ms={} files={} branches={} bookmark_revisions={} cold_start={}",
+                epoch,
+                force,
+                workflow_ready_elapsed.as_millis(),
+                workflow_file_count,
+                workflow_branch_count,
+                workflow_revision_count,
+                cold_start
+            );
+
+            let repo_root = workflow_snapshot.root.clone();
             if let Some(this) = this.upgrade() {
-                this.update(cx, |this, cx| {
+                this.update(cx, move |this, cx| {
+                    if epoch != this.snapshot_epoch {
+                        return;
+                    }
+                    this.auto_refresh_unmodified_streak = 0;
+                    this.last_snapshot_fingerprint = Some(fingerprint);
+                    this.workflow_loading = false;
+                    this.apply_workflow_snapshot(*workflow_snapshot, true, cx);
+                });
+            } else {
+                return;
+            }
+
+            let graph_repo_root = repo_root.clone();
+            let line_stats_repo_root = repo_root.clone();
+            let reconcile_repo_root = repo_root;
+            // Stage B: load graph and aggregate line-stats in parallel after workflow is visible.
+            let graph_task = cx.background_executor().spawn(async move {
+                let stage_started_at = Instant::now();
+                let result = load_graph_snapshot_without_refresh(
+                    &graph_repo_root,
+                    GraphSnapshotOptions::default(),
+                );
+                (stage_started_at.elapsed(), result)
+            });
+            let line_stats_task = cx.background_executor().spawn(async move {
+                let stage_started_at = Instant::now();
+                let result = load_repo_line_stats_without_refresh(&line_stats_repo_root);
+                (stage_started_at.elapsed(), result)
+            });
+
+            let (graph_elapsed, graph_result) = graph_task.await;
+            match &graph_result {
+                Ok(graph_snapshot) => {
+                    info!(
+                        "git workspace graph ready: epoch={} force={} elapsed_ms={} nodes={} edges={} has_more={} cold_start={}",
+                        epoch,
+                        force,
+                        graph_elapsed.as_millis(),
+                        graph_snapshot.nodes.len(),
+                        graph_snapshot.edges.len(),
+                        graph_snapshot.has_more,
+                        cold_start
+                    );
+                }
+                Err(err) => {
+                    error!(
+                        "git workspace graph load failed: epoch={} force={} elapsed_ms={} cold_start={} err={err:#}",
+                        epoch,
+                        force,
+                        graph_elapsed.as_millis(),
+                        cold_start
+                    );
+                }
+            }
+
+            if let Some(this) = this.upgrade() {
+                this.update(cx, move |this, cx| {
                     if epoch != this.snapshot_epoch {
                         return;
                     }
 
                     this.snapshot_loading = false;
-                    let elapsed = started_at.elapsed();
-                    match result {
-                        Ok(SnapshotRefreshResult::Loaded {
-                            fingerprint,
-                            snapshot,
-                            graph_snapshot,
-                        }) => {
-                            info!("snapshot refresh completed in {:?}", elapsed);
-                            this.auto_refresh_unmodified_streak = 0;
-                            this.last_snapshot_fingerprint = Some(fingerprint);
-                            this.apply_snapshot(
-                                *snapshot,
-                                *graph_snapshot,
-                                workflow_state_epoch_at_start,
-                                cx,
-                            )
+                    this.graph_loading = false;
+                    match graph_result {
+                        Ok(graph_snapshot) => {
+                            this.apply_graph_snapshot(graph_snapshot, cx);
                         }
-                        Ok(SnapshotRefreshResult::Unchanged(fingerprint)) => {
-                            info!("snapshot refresh skipped in {:?} (no repo changes)", elapsed);
-                            this.auto_refresh_unmodified_streak =
-                                this.auto_refresh_unmodified_streak.saturating_add(1);
-                            this.last_snapshot_fingerprint = Some(fingerprint);
-                            cx.notify();
-                        }
-                        Err(err) => {
-                            error!("snapshot refresh failed after {:?}: {err:#}", elapsed);
-                            this.apply_snapshot_error(err, cx)
+                        Err(_) => {
+                            this.git_status_message =
+                                Some("Loaded workflow data, but graph refresh failed.".to_string());
                         }
                     }
+                    let elapsed = started_at.elapsed();
+                    info!(
+                        "git workspace refresh complete: epoch={} force={} total_elapsed_ms={} cold_start={} line_stats_pending={}",
+                        epoch,
+                        force,
+                        elapsed.as_millis(),
+                        cold_start,
+                        this.line_stats_loading
+                    );
+
+                    cx.notify();
+                    this.maybe_run_pending_snapshot_refresh(cx);
+                });
+            } else {
+                return;
+            }
+
+            let (line_stats_elapsed, line_stats_result) = line_stats_task.await;
+
+            match &line_stats_result {
+                Ok(line_stats) => {
+                    info!(
+                        "git workspace line stats ready: epoch={} force={} elapsed_ms={} added={} removed={} changed={} cold_start={}",
+                        epoch,
+                        force,
+                        line_stats_elapsed.as_millis(),
+                        line_stats.added,
+                        line_stats.removed,
+                        line_stats.changed(),
+                        cold_start
+                    );
+                }
+                Err(err) => {
+                    error!(
+                        "git workspace line stats load failed: epoch={} force={} elapsed_ms={} cold_start={} err={err:#}",
+                        epoch,
+                        force,
+                        line_stats_elapsed.as_millis(),
+                        cold_start
+                    );
+                }
+            }
+
+            if let Some(this) = this.upgrade() {
+                this.update(cx, move |this, cx| {
+                    if epoch != this.snapshot_epoch {
+                        return;
+                    }
+
+                    this.line_stats_loading = false;
+                    if let Ok(line_stats) = line_stats_result {
+                        this.overall_line_stats = line_stats;
+                    }
+
+                    cx.notify();
+                });
+            }
+
+            if !should_run_cold_start_reconcile {
+                return;
+            }
+
+            let reconcile_started_at = Instant::now();
+            let reconcile_result = cx
+                .background_executor()
+                .spawn(async move { load_snapshot_fingerprint(&reconcile_repo_root) })
+                .await;
+
+            match &reconcile_result {
+                Ok(_) => {
+                    info!(
+                        "git workspace cold-start reconcile probe complete: epoch={} force={} elapsed_ms={} cold_start={}",
+                        epoch,
+                        force,
+                        reconcile_started_at.elapsed().as_millis(),
+                        cold_start
+                    );
+                }
+                Err(err) => {
+                    warn!(
+                        "git workspace cold-start reconcile probe failed: epoch={} force={} elapsed_ms={} cold_start={} err={err:#}",
+                        epoch,
+                        force,
+                        reconcile_started_at.elapsed().as_millis(),
+                        cold_start
+                    );
+                }
+            }
+
+            if let Some(this) = this.upgrade() {
+                this.update(cx, move |this, cx| {
+                    if epoch != this.snapshot_epoch {
+                        return;
+                    }
+
+                    let Ok(reconciled_fingerprint) = reconcile_result else {
+                        return;
+                    };
+                    if this.last_snapshot_fingerprint.as_ref() == Some(&reconciled_fingerprint) {
+                        return;
+                    }
+
+                    info!(
+                        "git workspace cold-start reconcile detected drift: epoch={} force={} cold_start={} -> scheduling foreground refresh",
+                        epoch, force, cold_start
+                    );
+                    this.request_snapshot_refresh_internal(false, cx);
                 });
             }
         });
@@ -644,35 +1037,9 @@ impl DiffViewer {
         });
     }
 
-    fn apply_snapshot(
-        &mut self,
-        snapshot: RepoSnapshot,
-        graph_snapshot: GraphSnapshot,
-        workflow_state_epoch_at_start: usize,
-        cx: &mut Context<Self>,
-    ) {
-        // A lightweight workflow refresh may finish before this full snapshot.
-        // If so, discard this older payload and reload so graph/tree catch up.
-        if workflow_state_epoch_at_start < self.workflow_state_epoch {
-            info!("discarded stale full snapshot after newer workflow refresh");
-            self.request_snapshot_refresh_internal(true, cx);
-            return;
-        }
-
-        let RepoSnapshot {
-            root,
-            branch_name,
-            branch_has_upstream,
-            branch_ahead_count,
-            can_undo_operation,
-            can_redo_operation,
-            branches,
-            bookmark_revisions,
-            files,
-            line_stats,
-            last_commit_subject,
-        } = snapshot;
+    fn apply_graph_snapshot(&mut self, graph_snapshot: GraphSnapshot, cx: &mut Context<Self>) {
         let GraphSnapshot {
+            root,
             active_bookmark: graph_active_bookmark,
             working_copy_commit_id,
             working_copy_parent_commit_id,
@@ -683,25 +1050,15 @@ impl DiffViewer {
             ..
         } = graph_snapshot;
 
-        info!("loaded repository snapshot from {}", root.display());
+        info!("loaded graph snapshot from {}", root.display());
         let root_changed = self.repo_root.as_ref() != Some(&root);
 
-        let previous_selected_path = self.selected_path.clone();
-        let previous_selected_status = self.selected_status;
-        let previous_files = self.files.clone();
         let previous_graph_len = self.graph_nodes.len();
 
         self.project_path = Some(root.clone());
         self.set_last_project_path(Some(root.clone()));
         self.repo_root = Some(root);
         self.ai_sync_workspace_preferences(cx);
-        self.branch_name = branch_name;
-        self.branch_has_upstream = branch_has_upstream;
-        self.branch_ahead_count = branch_ahead_count;
-        self.can_undo_operation = can_undo_operation;
-        self.can_redo_operation = can_redo_operation;
-        self.branches = branches;
-        self.bookmark_revisions = bookmark_revisions;
         self.graph_nodes = graph_nodes;
         self.graph_edges = graph_edges;
         self.graph_lane_rows =
@@ -717,87 +1074,18 @@ impl DiffViewer {
         self.graph_pending_confirmation = None;
         self.pending_bookmark_switch = None;
         self.reconcile_graph_selection_after_snapshot();
-        self.files = files;
-        self.file_status_by_path = self
-            .files
-            .iter()
-            .map(|file| (file.path.clone(), file.status))
-            .collect();
-        self.commit_excluded_files
-            .retain(|path| self.files.iter().any(|file| file.path == *path));
-        self.overall_line_stats = line_stats;
-        self.last_commit_subject = last_commit_subject;
         self.repo_discovery_failed = false;
         self.error_message = None;
-        self.clear_comment_ui_state();
-        if root_changed {
-            self.start_repo_watch(cx);
-        }
-        if root_changed {
-            self.working_copy_recovery_candidates.clear();
-            self.commit_excluded_files.clear();
-            self.repo_tree.nodes.clear();
-            self.repo_tree.rows.clear();
-            self.repo_tree.file_count = 0;
-            self.repo_tree.folder_count = 0;
-            self.repo_tree.expanded_dirs.clear();
-            self.repo_tree.scroll_anchor_path = None;
-            self.repo_tree.row_count = 0;
-            self.repo_tree.list_state.reset(0);
-            self.repo_tree.error = None;
-            self.repo_tree.changed_only = false;
-            self.clear_full_repo_tree_cache();
-            self.clear_editor_state(cx);
-        }
-        self.collapsed_files
-            .retain(|path| self.files.iter().any(|file| file.path == *path));
-
-        let current_selection = self.selected_path.clone();
-        self.selected_path = if self.workspace_view_mode == WorkspaceViewMode::Files {
-            current_selection.or_else(|| self.files.first().map(|file| file.path.clone()))
-        } else {
-            current_selection
-                .filter(|selected| self.files.iter().any(|file| &file.path == selected))
-                .or_else(|| self.files.first().map(|file| file.path.clone()))
-        };
-        self.selected_status = self
-            .selected_path
-            .as_deref()
-            .and_then(|selected| self.status_for_path(selected));
-
-        let selected_changed = self.selected_path != previous_selected_path
-            || self.selected_status != previous_selected_status;
-        let repo_tree_structure_changed =
-            Self::repo_tree_structure_changed(previous_files.as_slice(), self.files.as_slice());
-
-        self.refresh_comments_cache_from_store();
-
-        let should_reload_repo_tree = if root_changed {
-            true
-        } else if !self.workspace_view_mode.supports_sidebar_tree() {
-            false
-        } else {
-            self.workspace_view_mode == WorkspaceViewMode::Diff || repo_tree_structure_changed
-        };
-        if should_reload_repo_tree {
-            self.request_repo_tree_reload(cx);
-        }
-
-        // Avoid expensive diff reload churn while using graph/AI modes.
-        if !self.workspace_view_mode.supports_diff_stream() {
-            self.scroll_selected_after_reload = false;
-        } else {
-            // Always reload visible diff rows after any loaded snapshot.
-            // Fingerprints include more than file lists/counts, and diff text can change while
-            // aggregate line stats and selected path stay the same.
-            self.scroll_selected_after_reload = selected_changed || self.diff_rows.is_empty();
-            self.request_selected_diff_reload(cx);
-        }
 
         cx.notify();
     }
 
-    fn apply_workflow_snapshot(&mut self, snapshot: WorkflowSnapshot, cx: &mut Context<Self>) {
+    fn apply_workflow_snapshot(
+        &mut self,
+        snapshot: WorkflowSnapshot,
+        full_refresh: bool,
+        cx: &mut Context<Self>,
+    ) {
         let WorkflowSnapshot {
             root,
             branch_name,
@@ -813,6 +1101,9 @@ impl DiffViewer {
 
         info!("loaded workflow snapshot from {}", root.display());
         let root_changed = self.repo_root.as_ref() != Some(&root);
+        let previous_selected_path = self.selected_path.clone();
+        let previous_selected_status = self.selected_status;
+        let previous_files = self.files.clone();
 
         self.project_path = Some(root.clone());
         self.set_last_project_path(Some(root.clone()));
@@ -837,29 +1128,86 @@ impl DiffViewer {
         self.last_commit_subject = last_commit_subject;
         self.repo_discovery_failed = false;
         self.error_message = None;
+        if full_refresh {
+            self.clear_comment_ui_state();
+        }
         if root_changed {
             self.start_repo_watch(cx);
             self.working_copy_recovery_candidates.clear();
             self.commit_excluded_files.clear();
+            if full_refresh {
+                self.repo_tree.nodes.clear();
+                self.repo_tree.rows.clear();
+                self.repo_tree.file_count = 0;
+                self.repo_tree.folder_count = 0;
+                self.repo_tree.expanded_dirs.clear();
+                self.repo_tree.scroll_anchor_path = None;
+                self.repo_tree.row_count = 0;
+                self.repo_tree.list_state.reset(0);
+                self.repo_tree.error = None;
+                self.repo_tree.changed_only = false;
+                self.clear_full_repo_tree_cache();
+                self.clear_editor_state(cx);
+            }
         }
         self.collapsed_files
             .retain(|path| self.files.iter().any(|file| file.path == *path));
-        self.selected_path = self
-            .selected_path
-            .clone()
-            .filter(|selected| self.files.iter().any(|file| &file.path == selected))
-            .or_else(|| self.files.first().map(|file| file.path.clone()));
+        let current_selection = self.selected_path.clone();
+        self.selected_path = if full_refresh && self.workspace_view_mode == WorkspaceViewMode::Files {
+            current_selection.or_else(|| self.files.first().map(|file| file.path.clone()))
+        } else {
+            current_selection
+                .filter(|selected| self.files.iter().any(|file| &file.path == selected))
+                .or_else(|| self.files.first().map(|file| file.path.clone()))
+        };
         self.selected_status = self
             .selected_path
             .as_deref()
             .and_then(|selected| self.status_for_path(selected));
-        self.workflow_state_epoch = self.workflow_state_epoch.saturating_add(1);
+
+        if full_refresh {
+            let selected_changed = self.selected_path != previous_selected_path
+                || self.selected_status != previous_selected_status;
+            let repo_tree_structure_changed =
+                Self::repo_tree_structure_changed(previous_files.as_slice(), self.files.as_slice());
+
+            self.refresh_comments_cache_from_store();
+
+            let should_reload_repo_tree = if root_changed {
+                true
+            } else if !self.workspace_view_mode.supports_sidebar_tree() {
+                false
+            } else {
+                self.workspace_view_mode == WorkspaceViewMode::Diff || repo_tree_structure_changed
+            };
+            if should_reload_repo_tree {
+                self.request_repo_tree_reload(cx);
+            }
+
+            // Avoid expensive diff reload churn while using graph/AI modes.
+            if !self.workspace_view_mode.supports_diff_stream() {
+                self.scroll_selected_after_reload = false;
+            } else {
+                // Always reload visible diff rows after any loaded snapshot.
+                // Fingerprints include more than file lists/counts, and diff text can change while
+                // aggregate line stats and selected path stay the same.
+                self.scroll_selected_after_reload = selected_changed || self.diff_rows.is_empty();
+                self.request_selected_diff_reload(cx);
+            }
+        }
+
+        self.persist_workflow_cache();
         cx.notify();
     }
 
     fn apply_snapshot_error(&mut self, err: anyhow::Error, cx: &mut Context<Self>) {
         let missing_repository = Self::is_missing_repository_error(&err);
         let error_message = Self::format_error_chain(&err);
+        self.snapshot_loading = false;
+        self.workflow_loading = false;
+        self.graph_loading = false;
+        self.line_stats_loading = false;
+        self.snapshot_refresh_pending_force = false;
 
         if !missing_repository {
             self.repo_discovery_failed = false;
@@ -870,9 +1218,6 @@ impl DiffViewer {
 
         self.cancel_patch_reload();
         self.last_snapshot_fingerprint = None;
-        self.workflow_snapshot_task = Task::ready(());
-        self.workflow_snapshot_epoch = 0;
-        self.workflow_state_epoch = 0;
         self.repo_root = None;
         self.branch_name = "unknown".to_string();
         self.branch_has_upstream = false;
@@ -941,6 +1286,10 @@ impl DiffViewer {
         self.repo_tree.changed_only = false;
         self.clear_full_repo_tree_cache();
         self.clear_editor_state(cx);
+        if self.state.git_workflow_cache.is_some() {
+            self.state.git_workflow_cache = None;
+            self.persist_state();
+        }
         cx.notify();
     }
 

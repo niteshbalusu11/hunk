@@ -35,7 +35,10 @@ use hunk_domain::db::{
 };
 use hunk_domain::diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
 use hunk_domain::markdown_preview::MarkdownPreviewBlock;
-use hunk_domain::state::{AppState, AppStateStore};
+use hunk_domain::state::{
+    AppState, AppStateStore, CachedBookmarkRevisionState, CachedChangedFileState,
+    CachedLocalBranchState, CachedWorkflowState,
+};
 use hunk_jj::jj::{
     BookmarkRevision, ChangedFile, FileStatus, GraphBookmarkRef, GraphBookmarkScope, GraphEdge,
     GraphNode, LineStats, LocalBranch, RepoSnapshotFingerprint,
@@ -1027,9 +1030,10 @@ struct DiffViewer {
     snapshot_epoch: usize,
     snapshot_task: Task<()>,
     snapshot_loading: bool,
-    workflow_snapshot_epoch: usize,
-    workflow_snapshot_task: Task<()>,
-    workflow_state_epoch: usize,
+    workflow_loading: bool,
+    graph_loading: bool,
+    line_stats_loading: bool,
+    snapshot_refresh_pending_force: bool,
     last_snapshot_fingerprint: Option<RepoSnapshotFingerprint>,
     open_project_task: Task<()>,
     patch_epoch: usize,

@@ -38,9 +38,17 @@ impl DiffViewer {
 
     fn render_jj_graph_right_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let is_dark = cx.theme().mode.is_dark();
-        let panel_body = match self.graph_right_panel_mode {
-            GraphRightPanelMode::ActiveWorkflow => self.render_jj_graph_active_workflow_panel(cx),
-            GraphRightPanelMode::SelectedBookmark => self.render_jj_graph_selected_bookmark_panel(cx),
+        let show_workflow_skeleton =
+            self.workflow_loading && !self.jj_workflow_ready_for_right_panel();
+        let panel_body = if show_workflow_skeleton {
+            self.render_jj_graph_right_panel_loading_skeleton(cx)
+        } else {
+            match self.graph_right_panel_mode {
+                GraphRightPanelMode::ActiveWorkflow => self.render_jj_graph_active_workflow_panel(cx),
+                GraphRightPanelMode::SelectedBookmark => {
+                    self.render_jj_graph_selected_bookmark_panel(cx)
+                }
+            }
         };
 
         v_flex()
@@ -417,9 +425,35 @@ impl DiffViewer {
                                 nodes_len,
                                 if self.graph_has_more { " (windowed)" } else { "" }
                             )),
-                    ),
+                    )
+                    .when(self.graph_loading, |this| {
+                        this.child(
+                            h_flex()
+                                .items_center()
+                                .gap_1()
+                                .child(
+                                    gpui_component::spinner::Spinner::new()
+                                        .with_size(gpui_component::Size::Small)
+                                        .color(cx.theme().warning),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(legend_text_color)
+                                        .child("Loading graph..."),
+                                ),
+                        )
+                    }),
             )
             .child({
+                if self.graph_loading && self.graph_nodes.is_empty() {
+                    return div()
+                        .flex_1()
+                        .min_h_0()
+                        .child(render_jj_graph_canvas_loading_skeleton(is_dark, cx))
+                        .into_any_element();
+                }
+
                 if self.graph_nodes.is_empty() {
                     return div()
                         .flex_1()
