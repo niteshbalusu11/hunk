@@ -502,7 +502,9 @@ impl DiffViewer {
         row_id: String,
         cx: &mut Context<Self>,
     ) {
-        let changed_row_id = row_id.clone();
+        let changed_row_id = self
+            .ai_timeline_container_row_id(row_id.as_str())
+            .unwrap_or_else(|| row_id.clone());
         if self.ai_expanded_timeline_row_ids.contains(row_id.as_str()) {
             self.ai_expanded_timeline_row_ids.remove(row_id.as_str());
         } else {
@@ -561,6 +563,17 @@ impl DiffViewer {
         self.ai_timeline_rows_by_id.get(row_id)
     }
 
+    pub(super) fn ai_timeline_group(&self, group_id: &str) -> Option<&AiTimelineGroup> {
+        self.ai_timeline_groups_by_id.get(group_id)
+    }
+
+    fn ai_timeline_container_row_id(&self, row_id: &str) -> Option<String> {
+        self.ai_timeline_group_parent_by_child_row_id
+            .get(row_id)
+            .cloned()
+            .or_else(|| self.ai_timeline_rows_by_id.contains_key(row_id).then(|| row_id.to_string()))
+    }
+
     pub(super) fn ai_timeline_visible_rows_for_thread(
         &self,
         thread_id: &str,
@@ -590,11 +603,11 @@ impl DiffViewer {
     fn rebuild_ai_timeline_indexes(&mut self) {
         self.ai_timeline_turn_ids_by_thread = timeline_turn_ids_by_thread(&self.ai_state_snapshot);
 
-        let mut rows_by_thread = BTreeMap::<String, Vec<(u64, String)>>::new();
+        let mut base_rows_by_thread = BTreeMap::<String, Vec<(u64, String)>>::new();
         let mut rows_by_id = BTreeMap::<String, AiTimelineRow>::new();
         for (item_key, item) in &self.ai_state_snapshot.items {
             let row_id = format!("item:{item_key}");
-            rows_by_thread
+            base_rows_by_thread
                 .entry(item.thread_id.clone())
                 .or_default()
                 .push((item.last_sequence, row_id.clone()));
@@ -620,7 +633,7 @@ impl DiffViewer {
                 continue;
             }
             let diff_row_id = format!("turn-diff:{turn_key}");
-            rows_by_thread
+            base_rows_by_thread
                 .entry(turn.thread_id.clone())
                 .or_default()
                 .push((turn.last_sequence, diff_row_id.clone()));
@@ -635,7 +648,7 @@ impl DiffViewer {
             });
         }
 
-        self.ai_timeline_row_ids_by_thread = rows_by_thread
+        let base_row_ids_by_thread = base_rows_by_thread
             .into_iter()
             .map(|(thread_id, mut entries)| {
                 entries.sort_by(|left, right| {
@@ -648,8 +661,41 @@ impl DiffViewer {
                     .collect::<Vec<_>>();
                 (thread_id, ids)
             })
-            .collect();
+            .collect::<BTreeMap<_, _>>();
+
+        let mut grouped_row_ids_by_thread = BTreeMap::new();
+        let mut groups_by_id = BTreeMap::new();
+        let mut parent_by_child_row_id = BTreeMap::new();
+        for (thread_id, row_ids) in &base_row_ids_by_thread {
+            let (grouped_row_ids, groups, group_parent_by_child_row_id) =
+                group_ai_timeline_rows_for_thread(
+                    &self.ai_state_snapshot,
+                    row_ids.as_slice(),
+                    &rows_by_id,
+                );
+            for group in groups {
+                rows_by_id.insert(
+                    group.id.clone(),
+                    AiTimelineRow {
+                        id: group.id.clone(),
+                        thread_id: group.thread_id.clone(),
+                        turn_id: group.turn_id.clone(),
+                        last_sequence: group.last_sequence,
+                        source: AiTimelineRowSource::Group {
+                            group_id: group.id.clone(),
+                        },
+                    },
+                );
+                groups_by_id.insert(group.id.clone(), group);
+            }
+            parent_by_child_row_id.extend(group_parent_by_child_row_id);
+            grouped_row_ids_by_thread.insert(thread_id.clone(), grouped_row_ids);
+        }
+
+        self.ai_timeline_row_ids_by_thread = grouped_row_ids_by_thread;
         self.ai_timeline_rows_by_id = rows_by_id;
+        self.ai_timeline_groups_by_id = groups_by_id;
+        self.ai_timeline_group_parent_by_child_row_id = parent_by_child_row_id;
     }
 
     pub(super) fn sync_ai_timeline_list_state(&mut self, row_count: usize) {

@@ -249,6 +249,11 @@ impl DiffViewer {
         self.ai_expanded_timeline_row_ids
             .retain(|row_id| self.ai_timeline_rows_by_id.contains_key(row_id));
 
+        let changed_row_ids = changed_row_ids
+            .into_iter()
+            .filter_map(|row_id| self.ai_timeline_container_row_id(row_id.as_str()))
+            .collect::<BTreeSet<_>>();
+
         let next_visible_row_ids = self
             .ai_selected_thread_id
             .as_deref()

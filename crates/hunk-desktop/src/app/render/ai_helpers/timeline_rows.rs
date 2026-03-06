@@ -55,6 +55,9 @@ fn ai_timeline_row_is_renderable(this: &DiffViewer, row: &AiTimelineRow) -> bool
             .items
             .get(item_key.as_str())
             .is_some_and(ai_timeline_item_is_renderable),
+        AiTimelineRowSource::Group { group_id } => this
+            .ai_timeline_group(group_id.as_str())
+            .is_some_and(|group| !group.child_row_ids.is_empty()),
         AiTimelineRowSource::TurnDiff { turn_key } => this
             .ai_state_snapshot
             .turn_diffs
@@ -119,7 +122,7 @@ fn ai_command_execution_display_details(
     })
 }
 
-fn ai_tool_preview_text(
+fn ai_tool_compact_preview_text(
     item: &hunk_codex::state::ItemSummary,
     content_text: &str,
 ) -> Option<String> {
@@ -132,19 +135,12 @@ fn ai_tool_preview_text(
         serde_json::from_str::<codex_app_server_protocol::ThreadItem>(details_json).ok();
     match thread_item {
         Some(codex_app_server_protocol::ThreadItem::FileChange { changes, .. }) => {
-            let mut preview = changes
-                .iter()
-                .take(3)
-                .map(|change| change.path.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
-            if changes.len() > 3 {
-                if !preview.is_empty() {
-                    preview.push('\n');
-                }
-                preview.push_str(&format!("+{} more files", changes.len() - 3));
+            let first_path = changes.first()?.path.clone();
+            if changes.len() == 1 {
+                Some(first_path)
+            } else {
+                Some(format!("{first_path} (+{} more files)", changes.len() - 1))
             }
-            (!preview.trim().is_empty()).then_some(preview)
         }
         Some(codex_app_server_protocol::ThreadItem::McpToolCall { server, tool, .. }) => {
             Some(format!("{server} :: {tool}"))
@@ -155,14 +151,18 @@ fn ai_tool_preview_text(
             receiver_thread_ids,
             ..
         }) => {
-            let receivers = if receiver_thread_ids.is_empty() {
-                "no targets".to_string()
-            } else {
-                receiver_thread_ids.join(", ")
+            let receiver_summary = match receiver_thread_ids.len() {
+                0 => "no targets".to_string(),
+                1 => receiver_thread_ids[0].clone(),
+                count => format!("{count} targets"),
             };
-            Some(format!("{tool:?} -> {receivers}"))
+            Some(format!("{tool:?} -> {receiver_summary}"))
         }
-        _ => (!content_text.is_empty()).then(|| content_text.to_string()),
+        _ => content_text
+            .lines()
+            .map(str::trim)
+            .find(|value| !value.is_empty())
+            .map(ToOwned::to_owned),
     }
 }
 
@@ -171,29 +171,41 @@ fn ai_tool_summary_is_placeholder(summary: &str) -> bool {
     trimmed.is_empty() || !trimmed.chars().any(|ch| ch.is_alphanumeric())
 }
 
-fn ai_tool_header_label(item: &hunk_codex::state::ItemSummary, content_text: &str) -> String {
-    if let Some(summary) = item
-        .display_metadata
+fn ai_tool_header_title(item: &hunk_codex::state::ItemSummary) -> String {
+    item.display_metadata
         .as_ref()
         .and_then(|metadata| metadata.summary.as_deref())
         .filter(|value| !ai_tool_summary_is_placeholder(value))
-    {
-        return summary.to_string();
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| ai_item_display_label(item.kind.as_str()).to_string())
+}
+
+fn ai_tool_compact_summary(
+    item: &hunk_codex::state::ItemSummary,
+    content_text: &str,
+) -> Option<String> {
+    let summary = ai_tool_compact_preview_text(item, content_text)?;
+    let summary = summary.trim();
+    if summary.is_empty() {
+        return None;
     }
 
-    if let Some(preview_line) = ai_tool_preview_text(item, content_text)
-        .and_then(|preview| {
-            preview
-                .lines()
-                .map(str::trim)
-                .find(|value| !value.is_empty())
-                .map(ToOwned::to_owned)
-        })
-    {
+    let title = ai_tool_header_title(item);
+    (summary != title).then(|| summary.to_string())
+}
+
+#[cfg(test)]
+fn ai_tool_header_label(item: &hunk_codex::state::ItemSummary, content_text: &str) -> String {
+    let title = ai_tool_header_title(item);
+    if title != ai_item_display_label(item.kind.as_str()) {
+        return title;
+    }
+
+    if let Some(preview_line) = ai_tool_compact_summary(item, content_text) {
         return preview_line;
     }
 
-    ai_item_display_label(item.kind.as_str()).to_string()
+    title
 }
 
 fn ai_duration_ms_label(duration_ms: Option<i64>) -> Option<String> {
@@ -781,159 +793,23 @@ fn render_ai_chat_timeline_row_for_view(
                     ai_timeline_row_with_animation(this, row.id.as_str(), row_element)
                 }
                 AiTimelineItemRole::Tool => {
-                    let content_text = item.content.trim();
-                    let label = ai_tool_header_label(item, content_text);
-                    let status = ai_item_status_label(item.status);
-                    let status_color = ai_item_status_color(item.status, cx);
-                    let command_details = (item.kind == "commandExecution")
-                        .then(|| ai_command_execution_display_details(item))
-                        .flatten();
-                    let details_text = if item.kind == "commandExecution" {
-                        content_text
-                    } else {
-                        ai_timeline_item_details_json(item).unwrap_or(content_text)
-                    };
-                    let has_details = command_details.is_some() || !details_text.is_empty();
-                    let expanded =
-                        has_details && this.ai_expanded_timeline_row_ids.contains(row.id.as_str());
-                    let preview_source = ai_tool_preview_text(item, content_text)
-                        .unwrap_or_default();
-                    let (preview, _preview_truncated) = if !preview_source.is_empty() {
-                        ai_truncate_multiline_content(preview_source.as_str(), 3)
-                    } else {
-                        (String::new(), false)
-                    };
-                    let show_preview = !preview.is_empty() && !expanded;
-                    let show_toggle = has_details;
-                    let toggle_id =
-                        format!("ai-toggle-timeline-row-{}", row.id.replace('\u{1f}', "--"));
-
-                    let row_element = h_flex()
-                        .w_full()
-                        .min_w_0()
-                        .justify_start()
-                        .child(
-                            v_flex()
-                                .max_w(px(900.0))
-                                .w_full()
-                                .min_w_0()
-                                .gap_1()
-                                .px_2p5()
-                                .py_2()
-                                .overflow_hidden()
-                                .rounded(px(10.0))
-                                .border_1()
-                                .border_color(cx.theme().border.opacity(if is_dark {
-                                    0.88
-                                } else {
-                                    0.72
-                                }))
-                                .bg(cx.theme().background.blend(cx.theme().muted.opacity(if is_dark {
-                                    0.14
-                                } else {
-                                    0.20
-                                })))
-                                .child(
-                                    h_flex()
-                                        .w_full()
-                                        .min_w_0()
-                                        .items_start()
-                                        .justify_between()
-                                        .gap_2()
-                                        .child(
-                                            h_flex()
-                                                .flex_1()
-                                                .min_w_0()
-                                                .items_center()
-                                                .gap_2()
-                                                .child(
-                                                    div()
-                                                        .flex_1()
-                                                        .min_w_0()
-                                                        .text_xs()
-                                                        .font_semibold()
-                                                        .truncate()
-                                                        .child(label.to_string()),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .flex_none()
-                                                        .text_xs()
-                                                        .text_color(status_color)
-                                                        .child(status),
-                                                ),
-                                        )
-                                        .when(show_toggle, |this| {
-                                            let row_id = row.id.clone();
-                                            let view = view.clone();
-                                            this.child(
-                                                Button::new(toggle_id)
-                                                    .compact()
-                                                    .outline()
-                                                    .with_size(gpui_component::Size::Small)
-                                                    .icon(
-                                                        Icon::new(if expanded {
-                                                            IconName::ChevronDown
-                                                        } else {
-                                                            IconName::ChevronRight
-                                                        })
-                                                        .size(px(12.0)),
-                                                    )
-                                                    .tooltip(if expanded {
-                                                        "Hide details"
-                                                    } else {
-                                                        "Show details"
-                                                    })
-                                                    .on_click(move |_, _, cx| {
-                                                        view.update(cx, |this, cx| {
-                                                            this.ai_toggle_timeline_row_expansion_action(
-                                                                row_id.clone(),
-                                                                cx,
-                                                            );
-                                                        });
-                                                    }),
-                                            )
-                                        }),
-                                )
-                                .when(show_preview, |this| {
-                                    this.child(ai_tool_detail_section(
-                                        "Preview",
-                                        preview.clone(),
-                                        true,
-                                        None,
-                                        false,
-                                        is_dark,
-                                        cx,
-                                    ))
-                                })
-                                .when(expanded, |this| {
-                                    let expanded_details = command_details
-                                        .as_ref()
-                                        .map(|details| {
-                                            render_ai_command_execution_details(
-                                                details,
-                                                content_text,
-                                                is_dark,
-                                                cx,
-                                            )
-                                        })
-                                        .unwrap_or_else(|| {
-                                            ai_tool_detail_section(
-                                                "Details",
-                                                details_text.to_string(),
-                                                true,
-                                                Some(px(240.0)),
-                                                false,
-                                                is_dark,
-                                                cx,
-                                            )
-                                        });
-                                    this.child(expanded_details)
-                                }),
-                        );
-                    ai_timeline_row_with_animation(this, row.id.as_str(), row_element)
+                    render_ai_tool_item_row(
+                        this,
+                        view,
+                        row.id.as_str(),
+                        item,
+                        is_dark,
+                        false,
+                        cx,
+                    )
                 }
             }
+        }
+        AiTimelineRowSource::Group { group_id } => {
+            let Some(group) = this.ai_timeline_group(group_id.as_str()) else {
+                return div().w_full().h(px(0.0)).into_any_element();
+            };
+            render_ai_timeline_group_row(this, view, row, group, is_dark, cx)
         }
         AiTimelineRowSource::TurnDiff { turn_key } => {
             let Some(diff) = this.ai_state_snapshot.turn_diffs.get(turn_key.as_str()) else {

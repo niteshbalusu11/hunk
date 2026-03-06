@@ -180,6 +180,7 @@ fn ai_timeline_row_is_renderable_for_layout(
             .items
             .get(item_key.as_str())
             .is_some_and(ai_timeline_item_is_renderable_for_layout),
+        AiTimelineRowSource::Group { .. } => true,
         AiTimelineRowSource::TurnDiff { turn_key } => state
             .turn_diffs
             .get(turn_key.as_str())

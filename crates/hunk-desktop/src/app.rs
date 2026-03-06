@@ -256,6 +256,7 @@ impl PendingLineStatsRefresh {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum AiTimelineRowSource {
     Item { item_key: String },
+    Group { group_id: String },
     TurnDiff { turn_key: String },
 }
 
@@ -266,6 +267,19 @@ struct AiTimelineRow {
     turn_id: String,
     last_sequence: u64,
     source: AiTimelineRowSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AiTimelineGroup {
+    id: String,
+    thread_id: String,
+    turn_id: String,
+    last_sequence: u64,
+    kind: String,
+    status: hunk_codex::state::ItemStatus,
+    title: String,
+    summary: Option<String>,
+    child_row_ids: Vec<String>,
 }
 
 mod ai_rollout_fallback;
@@ -1056,6 +1070,8 @@ struct DiffViewer {
     ai_timeline_turn_ids_by_thread: BTreeMap<String, Vec<String>>,
     ai_timeline_row_ids_by_thread: BTreeMap<String, Vec<String>>,
     ai_timeline_rows_by_id: BTreeMap<String, AiTimelineRow>,
+    ai_timeline_groups_by_id: BTreeMap<String, AiTimelineGroup>,
+    ai_timeline_group_parent_by_child_row_id: BTreeMap<String, String>,
     ai_in_progress_turn_started_at: BTreeMap<String, Instant>,
     ai_composer_activity_elapsed_second: Option<u64>,
     ai_expanded_timeline_row_ids: BTreeSet<String>,

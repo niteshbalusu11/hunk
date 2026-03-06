@@ -5,7 +5,9 @@ mod ai_helper_tests {
     use super::ai_chat_markdown_text;
     use super::ai_command_execution_display_details;
     use super::ai_composer_status_tone;
+    use super::ai_tool_compact_summary;
     use super::ai_thread_status_text;
+    use super::ai_tool_header_title;
     use super::ai_item_display_label;
     use super::ai_reasoning_effort_label;
     use super::ai_rate_limit_summary;
@@ -210,6 +212,55 @@ mod ai_helper_tests {
 
         let label = ai_tool_header_label(&item, item.content.trim());
         assert_eq!(label, "sed -n '1,40p' crates/hunk-desktop/src/app/render/ai.rs");
+    }
+
+    #[test]
+    fn tool_header_title_prefers_non_placeholder_summary() {
+        let item = ItemSummary {
+            id: "item-1".to_string(),
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            kind: "commandExecution".to_string(),
+            status: ItemStatus::Completed,
+            content: "Finished test suite".to_string(),
+            display_metadata: Some(ItemDisplayMetadata {
+                summary: Some("Ran command".to_string()),
+                details_json: None,
+            }),
+            last_sequence: 1,
+        };
+
+        assert_eq!(ai_tool_header_title(&item), "Ran command");
+    }
+
+    #[test]
+    fn tool_compact_summary_uses_command_preview_when_summary_exists() {
+        let item = ItemSummary {
+            id: "item-1".to_string(),
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            kind: "commandExecution".to_string(),
+            status: ItemStatus::Completed,
+            content: "Finished test suite".to_string(),
+            display_metadata: Some(ItemDisplayMetadata {
+                summary: Some("Ran command".to_string()),
+                details_json: Some(
+                    r#"{
+                        "kind": "commandExecution",
+                        "command": "cargo clippy --workspace --all-targets -- -D warnings",
+                        "cwd": "/repo",
+                        "status": "completed"
+                    }"#
+                        .to_string(),
+                ),
+            }),
+            last_sequence: 1,
+        };
+
+        assert_eq!(
+            ai_tool_compact_summary(&item, item.content.trim()).as_deref(),
+            Some("cargo clippy --workspace --all-targets -- -D warnings")
+        );
     }
 
     #[test]

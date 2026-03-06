@@ -391,6 +391,8 @@ impl DiffViewer {
             ai_timeline_turn_ids_by_thread: BTreeMap::new(),
             ai_timeline_row_ids_by_thread: BTreeMap::new(),
             ai_timeline_rows_by_id: BTreeMap::new(),
+            ai_timeline_groups_by_id: BTreeMap::new(),
+            ai_timeline_group_parent_by_child_row_id: BTreeMap::new(),
             ai_in_progress_turn_started_at: BTreeMap::new(),
             ai_composer_activity_elapsed_second: None,
             ai_expanded_timeline_row_ids: BTreeSet::new(),
