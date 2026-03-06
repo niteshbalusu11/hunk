@@ -41,15 +41,10 @@ fn validate_keyboard_shortcuts(shortcuts: &KeyboardShortcuts) -> Result<(), Stri
     validate_shortcut_list("Previous Hunk", &shortcuts.previous_hunk)?;
     validate_shortcut_list("Next File", &shortcuts.next_file)?;
     validate_shortcut_list("Previous File", &shortcuts.previous_file)?;
-    validate_shortcut_list("Next Bookmark Revision", &shortcuts.next_bookmark_revision)?;
-    validate_shortcut_list(
-        "Previous Bookmark Revision",
-        &shortcuts.previous_bookmark_revision,
-    )?;
     validate_shortcut_list("Toggle File Tree", &shortcuts.toggle_sidebar_tree)?;
     validate_shortcut_list("Switch to Files View", &shortcuts.switch_to_files_view)?;
     validate_shortcut_list("Switch to Review View", &shortcuts.switch_to_review_view)?;
-    validate_shortcut_list("Switch to Graph View", &shortcuts.switch_to_graph_view)?;
+    validate_shortcut_list("Switch to Git View", &shortcuts.switch_to_git_view)?;
     validate_shortcut_list("Switch to AI View", &shortcuts.switch_to_ai_view)?;
     validate_shortcut_list("Open Project", &shortcuts.open_project)?;
     validate_shortcut_list("Save Current File", &shortcuts.save_current_file)?;
@@ -62,6 +57,18 @@ fn validate_keyboard_shortcuts(shortcuts: &KeyboardShortcuts) -> Result<(), Stri
 }
 
 impl DiffViewer {
+    pub(super) const fn reduced_motion_enabled(&self) -> bool {
+        self.config.reduce_motion
+    }
+
+    pub(super) fn animation_duration_ms(&self, default_ms: u64) -> std::time::Duration {
+        if self.reduced_motion_enabled() {
+            std::time::Duration::ZERO
+        } else {
+            std::time::Duration::from_millis(default_ms)
+        }
+    }
+
     pub(super) fn open_settings_action(
         &mut self,
         _: &OpenSettings,
@@ -141,18 +148,6 @@ impl DiffViewer {
                 window,
                 cx,
             ),
-            next_bookmark_revision: settings_shortcut_input(
-                &self.config.keyboard_shortcuts.next_bookmark_revision,
-                "Comma-separated shortcuts, e.g. alt-right",
-                window,
-                cx,
-            ),
-            previous_bookmark_revision: settings_shortcut_input(
-                &self.config.keyboard_shortcuts.previous_bookmark_revision,
-                "Comma-separated shortcuts, e.g. alt-left",
-                window,
-                cx,
-            ),
             toggle_sidebar_tree: settings_shortcut_input(
                 &self.config.keyboard_shortcuts.toggle_sidebar_tree,
                 "Comma-separated shortcuts, e.g. cmd-b, ctrl-b",
@@ -171,8 +166,8 @@ impl DiffViewer {
                 window,
                 cx,
             ),
-            switch_to_graph_view: settings_shortcut_input(
-                &self.config.keyboard_shortcuts.switch_to_graph_view,
+            switch_to_git_view: settings_shortcut_input(
+                &self.config.keyboard_shortcuts.switch_to_git_view,
                 "Comma-separated shortcuts, e.g. cmd-3, ctrl-3",
                 window,
                 cx,
@@ -383,14 +378,6 @@ impl DiffViewer {
                 previous_hunk: read_shortcut_input(&settings.shortcuts.previous_hunk, cx),
                 next_file: read_shortcut_input(&settings.shortcuts.next_file, cx),
                 previous_file: read_shortcut_input(&settings.shortcuts.previous_file, cx),
-                next_bookmark_revision: read_shortcut_input(
-                    &settings.shortcuts.next_bookmark_revision,
-                    cx,
-                ),
-                previous_bookmark_revision: read_shortcut_input(
-                    &settings.shortcuts.previous_bookmark_revision,
-                    cx,
-                ),
                 toggle_sidebar_tree: read_shortcut_input(
                     &settings.shortcuts.toggle_sidebar_tree,
                     cx,
@@ -403,8 +390,8 @@ impl DiffViewer {
                     &settings.shortcuts.switch_to_review_view,
                     cx,
                 ),
-                switch_to_graph_view: read_shortcut_input(
-                    &settings.shortcuts.switch_to_graph_view,
+                switch_to_git_view: read_shortcut_input(
+                    &settings.shortcuts.switch_to_git_view,
                     cx,
                 ),
                 switch_to_ai_view: self.config.keyboard_shortcuts.switch_to_ai_view.clone(),

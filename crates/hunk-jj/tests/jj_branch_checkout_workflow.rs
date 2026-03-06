@@ -7,9 +7,9 @@ use hunk_domain::config::{ReviewProviderKind, ReviewProviderMapping};
 use hunk_jj::jj::{
     abandon_bookmark_head, checkout_or_create_bookmark,
     checkout_or_create_bookmark_with_change_transfer, commit_staged, describe_bookmark_head,
-    load_snapshot, move_bookmark_to_revision, rename_bookmark, reorder_bookmark_tip_older,
-    restore_working_copy_from_revision, review_url_for_bookmark,
-    review_url_for_bookmark_with_provider_map, squash_bookmark_head_into_parent,
+    load_snapshot, rename_bookmark, reorder_bookmark_tip_older, restore_working_copy_from_revision,
+    review_url_for_bookmark, review_url_for_bookmark_with_provider_map,
+    squash_bookmark_head_into_parent,
 };
 
 #[test]
@@ -941,8 +941,17 @@ fn reorder_bookmark_tip_with_cli_equivalent(repo_root: &Path, bookmark_name: &st
     )
     .trim()
     .to_string();
-    move_bookmark_to_revision(repo_root, bookmark_name, wc_parent.as_str())
-        .expect("bookmark should move to parent of working copy after CLI reorder");
+    run_jj(
+        repo_root,
+        [
+            "bookmark",
+            "set",
+            bookmark_name,
+            "-r",
+            wc_parent.as_str(),
+            "--allow-backwards",
+        ],
+    );
 }
 
 fn root_revision_id(repo_root: &Path) -> String {

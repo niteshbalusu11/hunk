@@ -619,7 +619,7 @@ impl DiffViewer {
                                     .child(
                                         "Diffs refresh immediately on file events. The app also performs \
                             a background periodic check as a fallback if file events are missed. \
-                            Reduced Motion disables JJ graph transition/pulse animations.",
+                            Reduced Motion disables animated transitions in the Git workspace.",
                                     ),
                             ),
                     ),

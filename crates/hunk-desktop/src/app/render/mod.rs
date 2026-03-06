@@ -15,7 +15,6 @@ use hunk_codex::state::{ItemStatus, ThreadLifecycleStatus};
 use hunk_domain::markdown_preview::{
     MarkdownCodeTokenKind, MarkdownInlineSpan, MarkdownPreviewBlock,
 };
-use hunk_jj::jj_graph_tree::GraphLaneRow;
 
 fn change_status_label_color(
     status: FileStatus,
@@ -37,11 +36,9 @@ include!("toolbar.rs");
 include!("tree.rs");
 include!("commit.rs");
 include!("commit_bookmark_picker.rs");
-include!("jj_graph_loading.rs");
-include!("jj_graph_right_pane_v2.rs");
-include!("jj_graph.rs");
-include!("jj_graph_inspector.rs");
-include!("jj_graph_focus_strip.rs");
+include!("jj_workspace_loading.rs");
+include!("jj_workspace_panel.rs");
+include!("jj_workspace.rs");
 include!("file_banner.rs");
 include!("file_status.rs");
 include!("comments.rs");

@@ -38,14 +38,14 @@ impl DiffViewer {
         self.set_workspace_view_mode(WorkspaceSwitchAction::Review.target_mode(), cx);
     }
 
-    pub(super) fn switch_to_graph_view_action(
+    pub(super) fn switch_to_git_view_action(
         &mut self,
-        _: &SwitchToGraphView,
+        _: &SwitchToGitView,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.focus_handle.focus(window, cx);
-        self.set_workspace_view_mode(WorkspaceSwitchAction::Graph.target_mode(), cx);
+        self.set_workspace_view_mode(WorkspaceSwitchAction::Git.target_mode(), cx);
     }
 
     pub(super) fn switch_to_ai_view_action(

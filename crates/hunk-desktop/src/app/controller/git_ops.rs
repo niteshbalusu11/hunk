@@ -53,7 +53,7 @@ impl DiffViewer {
         if self.files.is_empty() {
             return None;
         }
-        let source_revision_id = self.graph_working_copy_commit_id.clone()?;
+        let source_revision_id = self.working_copy_commit_id.clone()?;
         let source_bookmark = self
             .checked_out_bookmark_name()
             .unwrap_or(self.branch_name.as_str())
@@ -632,41 +632,6 @@ impl DiffViewer {
         );
     }
 
-    pub(super) fn open_selected_graph_bookmark_review_url(&mut self, cx: &mut Context<Self>) {
-        if let Some(reason) = self.selected_graph_review_action_blocker() {
-            let message = format!("Open PR/MR unavailable: {reason}");
-            self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, cx);
-            cx.notify();
-            return;
-        };
-        let Some(bookmark_name) = self.selected_local_graph_bookmark_name() else {
-            return;
-        };
-        self.run_review_url_action_for_bookmark(bookmark_name, ReviewUrlAction::Open, cx);
-    }
-
-    pub(super) fn copy_selected_graph_bookmark_review_url(&mut self, cx: &mut Context<Self>) {
-        if let Some(reason) = self.selected_graph_review_action_blocker() {
-            let message = format!("Copy review URL unavailable: {reason}");
-            self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, cx);
-            cx.notify();
-            return;
-        };
-        let Some(bookmark_name) = self.selected_local_graph_bookmark_name() else {
-            return;
-        };
-        self.run_review_url_action_for_bookmark(bookmark_name, ReviewUrlAction::Copy, cx);
-    }
-
-    fn selected_local_graph_bookmark_name(&self) -> Option<String> {
-        self.graph_selected_bookmark
-            .as_ref()
-            .filter(|bookmark| bookmark.scope == GraphBookmarkScope::Local)
-            .map(|bookmark| bookmark.name.clone())
-    }
-
     fn run_review_url_action_for_bookmark(
         &mut self,
         bookmark_name: String,
@@ -769,20 +734,6 @@ impl DiffViewer {
                 .first()
                 .map(|revision| revision.subject.as_str())
                 .and_then(normalized_review_title_subject)
-        {
-            return subject;
-        }
-
-        if let Some(subject) = self
-            .graph_nodes
-            .iter()
-            .find(|node| {
-                node.bookmarks.iter().any(|bookmark| {
-                    bookmark.scope == GraphBookmarkScope::Local && bookmark.name == bookmark_name
-                })
-            })
-            .map(|node| node.subject.as_str())
-            .and_then(normalized_review_title_subject)
         {
             return subject;
         }

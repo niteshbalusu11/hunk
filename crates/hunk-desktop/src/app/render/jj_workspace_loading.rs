@@ -57,51 +57,8 @@ fn render_jj_workspace_loading_overlay(
         .into_any_element()
 }
 
-fn render_jj_graph_canvas_loading_skeleton(
-    is_dark: bool,
-    cx: &mut Context<DiffViewer>,
-) -> AnyElement {
-    v_flex()
-        .w_full()
-        .gap_1()
-        .children((0..9).map(|_| {
-            v_flex()
-                .w_full()
-                .gap_1()
-                .rounded_md()
-                .border_1()
-                .border_color(cx.theme().border)
-                .bg(cx.theme().background.blend(cx.theme().muted.opacity(if is_dark {
-                    0.14
-                } else {
-                    0.20
-                })))
-                .px_3()
-                .py_2()
-                .child(jj_loading_skeleton_block(
-                    120.0,
-                    10.0,
-                    is_dark,
-                    cx,
-                ))
-                .child(jj_loading_skeleton_block(
-                    420.0,
-                    12.0,
-                    is_dark,
-                    cx,
-                ))
-                .child(jj_loading_skeleton_block(
-                    300.0,
-                    11.0,
-                    is_dark,
-                    cx,
-                ))
-        }))
-        .into_any_element()
-}
-
 impl DiffViewer {
-    fn jj_workflow_ready_for_right_panel(&self) -> bool {
+    fn jj_workflow_ready_for_panel(&self) -> bool {
         self.repo_root.is_some()
             || self.branch_name != "unknown"
             || !self.branches.is_empty()
@@ -110,7 +67,7 @@ impl DiffViewer {
             || self.last_commit_subject.is_some()
     }
 
-    fn render_jj_graph_right_panel_loading_skeleton(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_jj_workspace_panel_loading_skeleton(&self, cx: &mut Context<Self>) -> AnyElement {
         let is_dark = cx.theme().mode.is_dark();
 
         v_flex()

@@ -307,65 +307,6 @@ pub(super) fn move_bookmark_to_parent_of_working_copy(
     Ok(true)
 }
 
-pub(super) fn set_local_bookmark_target_revision(
-    context: &mut RepoContext,
-    branch_name: &str,
-    revision_id: &str,
-    require_existing_bookmark: bool,
-) -> Result<()> {
-    let revision_id = revision_id.trim();
-    let Some(target_commit_id) = jj_lib::backend::CommitId::try_from_hex(revision_id) else {
-        return Err(anyhow!("invalid revision id '{revision_id}'"));
-    };
-    context
-        .repo
-        .store()
-        .get_commit(&target_commit_id)
-        .with_context(|| format!("failed to load target revision '{revision_id}'"))?;
-    ensure_revision_is_not_working_copy_commit(context, branch_name, &target_commit_id)?;
-
-    let bookmark_target = context
-        .repo
-        .view()
-        .get_local_bookmark(RefName::new(branch_name));
-    if require_existing_bookmark && !bookmark_target.is_present() {
-        return Err(anyhow!("bookmark '{branch_name}' does not exist"));
-    }
-    if !require_existing_bookmark && bookmark_target.is_present() {
-        return Err(anyhow!("bookmark '{branch_name}' already exists"));
-    }
-    if bookmark_target.as_normal() == Some(&target_commit_id) {
-        return Ok(());
-    }
-
-    let mut tx = context.repo.start_transaction();
-    tx.repo_mut().set_local_bookmark_target(
-        RefName::new(branch_name),
-        RefTarget::normal(target_commit_id),
-    );
-    let repo = tx
-        .commit(format!("set bookmark {branch_name} to revision {revision_id}"))
-        .with_context(|| format!("failed to update bookmark '{branch_name}'"))?;
-    persist_working_copy_state(context, repo, "after setting bookmark target")
-}
-
-fn ensure_revision_is_not_working_copy_commit(
-    context: &RepoContext,
-    branch_name: &str,
-    target_commit_id: &jj_lib::backend::CommitId,
-) -> Result<()> {
-    let wc_commit = current_wc_commit(context)?;
-    if wc_commit.id() != target_commit_id {
-        return Ok(());
-    }
-
-    let short_id = target_commit_id.hex().chars().take(12).collect::<String>();
-    Err(anyhow!(
-        "cannot point bookmark '{branch_name}' to mutable working-copy revision {short_id}; \
-select a committed revision instead"
-    ))
-}
-
 pub(super) fn checkout_existing_bookmark(
     context: &mut RepoContext,
     branch_name: &str,

@@ -1,5 +1,5 @@
 impl DiffViewer {
-    fn render_jj_graph_operations_panel_v2(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_jj_workspace_operations_panel_v2(&self, cx: &mut Context<Self>) -> AnyElement {
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
         let activate_bookmark_loading = self.git_action_loading_named("Activate bookmark");

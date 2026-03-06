@@ -10,7 +10,7 @@ pub(super) enum WorkspaceViewMode {
 pub(super) enum WorkspaceSwitchAction {
     Files,
     Review,
-    Graph,
+    Git,
     Ai,
 }
 
@@ -29,7 +29,7 @@ impl WorkspaceSwitchAction {
         match self {
             Self::Files => WorkspaceViewMode::Files,
             Self::Review => WorkspaceViewMode::Diff,
-            Self::Graph => WorkspaceViewMode::JjWorkspace,
+            Self::Git => WorkspaceViewMode::JjWorkspace,
             Self::Ai => WorkspaceViewMode::Ai,
         }
     }

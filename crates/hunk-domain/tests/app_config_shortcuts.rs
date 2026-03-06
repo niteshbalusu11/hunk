@@ -43,14 +43,6 @@ fn app_config_defaults_include_existing_keyboard_shortcuts() {
         strings(&["alt-up"])
     );
     assert_eq!(
-        config.keyboard_shortcuts.next_bookmark_revision,
-        strings(&["alt-right"])
-    );
-    assert_eq!(
-        config.keyboard_shortcuts.previous_bookmark_revision,
-        strings(&["alt-left"])
-    );
-    assert_eq!(
         config.keyboard_shortcuts.toggle_sidebar_tree,
         strings(&["cmd-b", "ctrl-b"])
     );
@@ -63,7 +55,7 @@ fn app_config_defaults_include_existing_keyboard_shortcuts() {
         strings(&["cmd-2", "ctrl-2"])
     );
     assert_eq!(
-        config.keyboard_shortcuts.switch_to_graph_view,
+        config.keyboard_shortcuts.switch_to_git_view,
         strings(&["cmd-3", "ctrl-3"])
     );
     assert_eq!(
@@ -146,14 +138,6 @@ next_hunk = ["f8"]
         strings(&["cmd-s", "ctrl-s"])
     );
     assert_eq!(
-        config.keyboard_shortcuts.next_bookmark_revision,
-        strings(&["alt-right"])
-    );
-    assert_eq!(
-        config.keyboard_shortcuts.previous_bookmark_revision,
-        strings(&["alt-left"])
-    );
-    assert_eq!(
         config.keyboard_shortcuts.toggle_sidebar_tree,
         strings(&["cmd-b", "ctrl-b"])
     );
@@ -166,7 +150,7 @@ next_hunk = ["f8"]
         strings(&["cmd-2", "ctrl-2"])
     );
     assert_eq!(
-        config.keyboard_shortcuts.switch_to_graph_view,
+        config.keyboard_shortcuts.switch_to_git_view,
         strings(&["cmd-3", "ctrl-3"])
     );
     assert_eq!(
@@ -205,7 +189,7 @@ quit_app = []
         strings(&["cmd-2", "ctrl-2"])
     );
     assert_eq!(
-        config.keyboard_shortcuts.switch_to_graph_view,
+        config.keyboard_shortcuts.switch_to_git_view,
         strings(&["cmd-3", "ctrl-3"])
     );
     assert_eq!(
@@ -247,5 +231,19 @@ provider = "github"
     assert_eq!(
         config.review_provider_mappings[1].provider,
         ReviewProviderKind::GitHub
+    );
+}
+
+#[test]
+fn app_config_accepts_legacy_switch_to_graph_view_alias() {
+    let raw = r#"
+[keyboard_shortcuts]
+switch_to_graph_view = ["cmd-9"]
+"#;
+    let config: AppConfig = toml::from_str(raw).expect("legacy graph shortcut alias should parse");
+
+    assert_eq!(
+        config.keyboard_shortcuts.switch_to_git_view,
+        strings(&["cmd-9"])
     );
 }

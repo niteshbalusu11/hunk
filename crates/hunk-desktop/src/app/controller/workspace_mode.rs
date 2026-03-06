@@ -24,7 +24,6 @@ impl DiffViewer {
             cx.notify();
             return;
         }
-        self.graph_right_panel_mode = GraphRightPanelMode::ActiveWorkflow;
 
         let source_bookmark = self
             .checked_out_bookmark_name()
@@ -46,7 +45,6 @@ impl DiffViewer {
                 changed_file_count: self.files.len(),
                 unix_time: Self::now_unix_seconds(),
             });
-            self.graph_right_panel_mode = GraphRightPanelMode::ActiveWorkflow;
             self.git_status_message = Some(format!(
                 "Switching {} -> {} with {} local files. Choose move or snapshot before switching.",
                 source_bookmark,
@@ -67,7 +65,6 @@ impl DiffViewer {
             cx.notify();
             return;
         };
-        self.graph_right_panel_mode = GraphRightPanelMode::ActiveWorkflow;
         self.activate_or_create_bookmark(pending.target_bookmark, true, cx);
     }
 
@@ -77,7 +74,6 @@ impl DiffViewer {
             cx.notify();
             return;
         };
-        self.graph_right_panel_mode = GraphRightPanelMode::ActiveWorkflow;
         self.activate_or_create_bookmark(pending.target_bookmark, false, cx);
     }
 
@@ -113,18 +109,6 @@ impl DiffViewer {
         cx.notify();
     }
 
-    pub(super) fn request_activate_selected_graph_bookmark(&mut self, cx: &mut Context<Self>) {
-        let Some(bookmark_name) = self.selected_local_graph_bookmark_name() else {
-            let message = "Select a local bookmark before activating it.".to_string();
-            self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, cx);
-            cx.notify();
-            return;
-        };
-
-        self.request_activate_or_create_bookmark_with_dirty_guard(bookmark_name, cx);
-    }
-
     pub(super) fn active_review_action_blocker(&self) -> Option<String> {
         if self.git_action_loading {
             return Some("Another workspace action is in progress.".to_string());
@@ -133,25 +117,6 @@ impl DiffViewer {
             return Some("Activate a bookmark before opening PR/MR.".to_string());
         }
         if !self.branch_has_upstream {
-            return Some("Publish this bookmark before opening PR/MR.".to_string());
-        }
-        None
-    }
-
-    pub(super) fn selected_graph_review_action_blocker(&self) -> Option<String> {
-        if self.git_action_loading {
-            return Some("Another workspace action is in progress.".to_string());
-        }
-        let Some(bookmark) = self.graph_selected_bookmark_ref() else {
-            return Some("Select a bookmark in the graph first.".to_string());
-        };
-        if bookmark.scope != GraphBookmarkScope::Local {
-            return Some("Select a local bookmark to open PR/MR.".to_string());
-        }
-        if bookmark.conflicted {
-            return Some("Resolve bookmark conflicts before opening PR/MR.".to_string());
-        }
-        if !bookmark.tracked {
             return Some("Publish this bookmark before opening PR/MR.".to_string());
         }
         None

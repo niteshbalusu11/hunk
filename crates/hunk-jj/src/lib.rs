@@ -3,4 +3,3 @@ pub mod config {
 }
 
 pub mod jj;
-pub mod jj_graph_tree;

@@ -116,7 +116,6 @@ pub(super) fn load_repo_context_at_root(
 
 include!("backend/settings.rs");
 include!("backend/snapshot_diff.rs");
-include!("backend/graph.rs");
 include!("backend/operation_history.rs");
 include!("backend/operations.rs");
 include!("backend/workspace.rs");
@@ -128,9 +127,7 @@ mod parity_tests {
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use crate::jj::{
-        checkout_or_create_bookmark, commit_staged, load_snapshot, move_bookmark_to_revision,
-    };
+    use crate::jj::{checkout_or_create_bookmark, commit_staged, load_snapshot};
 
     use super::*;
 
@@ -350,8 +347,17 @@ mod parity_tests {
         )
         .trim()
         .to_string();
-        move_bookmark_to_revision(repo_root, bookmark_name, wc_parent.as_str())
-            .expect("bookmark should move to parent of working copy after CLI reorder");
+        run_jj(
+            repo_root,
+            [
+                "bookmark",
+                "set",
+                bookmark_name,
+                "-r",
+                wc_parent.as_str(),
+                "--allow-backwards",
+            ],
+        );
     }
 
     fn root_revision_id(repo_root: &Path) -> String {

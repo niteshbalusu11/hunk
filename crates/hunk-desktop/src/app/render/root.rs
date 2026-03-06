@@ -102,15 +102,14 @@ impl DiffViewer {
         }
 
         let is_dark = cx.theme().mode.is_dark();
-        let show_loading_overlay =
-            self.workflow_loading && !self.jj_workflow_ready_for_right_panel();
+        let show_loading_overlay = self.workflow_loading && !self.jj_workflow_ready_for_panel();
 
         div()
             .size_full()
             .min_h_0()
             .relative()
             .pb(px(APP_BOTTOM_SAFE_INSET))
-            .child(self.render_jj_workspace_graph_shell(cx))
+            .child(self.render_jj_workspace_panel(cx))
             .when(show_loading_overlay, |this| {
                 this.child(render_jj_workspace_loading_overlay(is_dark, cx))
             })
@@ -127,7 +126,7 @@ impl DiffViewer {
         let workspace_label = if ai_selected {
             "Codex AI Workspace"
         } else if jj_selected {
-            "JJ Graph Workspace"
+            "Git Workspace"
         } else if files_selected {
             "Files Workspace"
         } else {
@@ -242,7 +241,7 @@ impl DiffViewer {
                             .label("Git (JJ)")
                             .min_w(px(52.0))
                             .h(px(28.0))
-                            .tooltip("Switch to JJ graph workspace (Cmd/Ctrl+3)")
+                            .tooltip("Switch to Git workspace (Cmd/Ctrl+3)")
                             .on_click(move |_, window, cx| {
                                 view.update(cx, |this, cx| {
                                     this.set_workspace_view_mode(
@@ -332,12 +331,10 @@ impl Render for DiffViewer {
             .on_action(cx.listener(Self::previous_hunk_action))
             .on_action(cx.listener(Self::next_file_action))
             .on_action(cx.listener(Self::previous_file_action))
-            .on_action(cx.listener(Self::next_bookmark_revision_action))
-            .on_action(cx.listener(Self::previous_bookmark_revision_action))
             .on_action(cx.listener(Self::toggle_sidebar_tree_action))
             .on_action(cx.listener(Self::switch_to_files_view_action))
             .on_action(cx.listener(Self::switch_to_review_view_action))
-            .on_action(cx.listener(Self::switch_to_graph_view_action))
+            .on_action(cx.listener(Self::switch_to_git_view_action))
             .on_action(cx.listener(Self::switch_to_ai_view_action))
             .on_action(cx.listener(Self::ai_new_thread_action))
             .on_action(cx.listener(Self::open_project_action))

@@ -1,28 +1,8 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SnapshotRefreshScope {
-    Full,
-    WorkflowOnly,
-}
-
-impl SnapshotRefreshScope {
-    fn includes_graph(self) -> bool {
-        matches!(self, SnapshotRefreshScope::Full)
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            SnapshotRefreshScope::Full => "full",
-            SnapshotRefreshScope::WorkflowOnly => "workflow-only",
-        }
-    }
-}
-
 impl DiffViewer {
     const AUTO_REFRESH_MAX_INTERVAL_MS: u64 = 60_000;
     const AUTO_REFRESH_QUICK_PROBE_MS: u64 = 3_000;
     const AUTO_REFRESH_BACKOFF_STEPS: u32 = 6;
     const REPO_WATCH_DEBOUNCE: Duration = Duration::from_millis(150);
-    const GRAPH_REFRESH_DEBOUNCE: Duration = Duration::from_millis(280);
 
     fn load_app_config() -> (Option<ConfigStore>, AppConfig) {
         let store = match ConfigStore::new() {
@@ -359,9 +339,6 @@ impl DiffViewer {
                 .rows(4)
                 .placeholder("Ask for follow-up changes")
         });
-        let graph_action_input_state = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Bookmark name for create/fork/rename")
-        });
         let in_app_menu_bar = (!cfg!(target_os = "macos")).then(|| AppMenuBar::new(cx));
 
         let mut view = Self {
@@ -386,25 +363,12 @@ impl DiffViewer {
             branch_name: "unknown".to_string(),
             branch_has_upstream: false,
             branch_ahead_count: 0,
+            working_copy_commit_id: None,
             can_undo_operation: false,
             can_redo_operation: false,
             branches: Vec::new(),
             bookmark_revisions: Vec::new(),
-            graph_nodes: Vec::new(),
-            graph_edges: Vec::new(),
-            graph_lane_rows: Vec::new(),
-            graph_has_more: false,
-            graph_next_offset: None,
-            graph_active_bookmark: None,
-            graph_working_copy_commit_id: None,
-            graph_working_copy_parent_commit_id: None,
-            graph_selected_node_id: None,
-            graph_selected_bookmark: None,
-            graph_list_state: ListState::new(0, ListAlignment::Top, px(30.0)),
-            graph_right_panel_scroll_handle: ScrollHandle::default(),
-            graph_action_input_state,
-            graph_pending_confirmation: None,
-            graph_right_panel_mode: GraphRightPanelMode::ActiveWorkflow,
+            jj_workspace_scroll_handle: ScrollHandle::default(),
             pending_bookmark_switch: None,
             show_jj_terms_glossary: false,
             workspace_view_mode: WorkspaceViewMode::JjWorkspace,
@@ -488,13 +452,10 @@ impl DiffViewer {
             repo_watch_task: Task::ready(()),
             repo_watch_refresh_epoch: 0,
             repo_watch_refresh_task: Task::ready(()),
-            graph_refresh_epoch: 0,
-            graph_refresh_task: Task::ready(()),
             snapshot_epoch: 0,
             snapshot_task: Task::ready(()),
             snapshot_loading: false,
             workflow_loading: false,
-            graph_loading: false,
             line_stats_loading: false,
             snapshot_refresh_pending_force: false,
             last_snapshot_fingerprint: None,
@@ -606,7 +567,7 @@ impl DiffViewer {
         force: bool,
         cx: &mut Context<Self>,
     ) {
-        self.request_snapshot_refresh_with_scope(force, SnapshotRefreshScope::WorkflowOnly, cx);
+        self.request_snapshot_refresh_internal(force, cx);
     }
 
     fn maybe_run_pending_snapshot_refresh(&mut self, cx: &mut Context<Self>) {
@@ -621,15 +582,10 @@ impl DiffViewer {
     }
 
     pub(super) fn request_snapshot_refresh_internal(&mut self, force: bool, cx: &mut Context<Self>) {
-        self.request_snapshot_refresh_with_scope(force, SnapshotRefreshScope::Full, cx);
+        self.request_snapshot_refresh_with_scope(force, cx);
     }
 
-    fn request_snapshot_refresh_with_scope(
-        &mut self,
-        force: bool,
-        scope: SnapshotRefreshScope,
-        cx: &mut Context<Self>,
-    ) {
+    fn request_snapshot_refresh_with_scope(&mut self, force: bool, cx: &mut Context<Self>) {
         if self.snapshot_loading {
             if force {
                 self.snapshot_refresh_pending_force = true;
@@ -638,9 +594,6 @@ impl DiffViewer {
         }
         if force {
             self.auto_refresh_unmodified_streak = 0;
-        }
-        if scope.includes_graph() {
-            self.cancel_pending_graph_refresh();
         }
         let cold_start = self.last_snapshot_fingerprint.is_none();
 
@@ -667,7 +620,6 @@ impl DiffViewer {
         let epoch = self.next_snapshot_epoch();
         self.snapshot_loading = true;
         self.workflow_loading = true;
-        self.graph_loading = scope.includes_graph();
         self.line_stats_loading = true;
         let refresh_root = self
             .project_path
@@ -675,10 +627,9 @@ impl DiffViewer {
             .or_else(|| self.repo_root.clone())
             .unwrap_or_else(|| PathBuf::from("."));
         info!(
-            "git workspace refresh start: epoch={} force={} scope={} cold_start={} root={}",
+            "git workspace refresh start: epoch={} force={} cold_start={} root={}",
             epoch,
             force,
-            scope.label(),
             cold_start,
             refresh_root.display()
         );
@@ -783,14 +734,12 @@ impl DiffViewer {
 
                             this.snapshot_loading = false;
                             this.workflow_loading = false;
-                            this.graph_loading = false;
                             this.line_stats_loading = false;
                             let elapsed = started_at.elapsed();
                             info!(
-                                "git workspace refresh skipped: epoch={} force={} scope={} cold_start={} elapsed_ms={} (no repo changes)",
+                                "git workspace refresh skipped: epoch={} force={} cold_start={} elapsed_ms={} (no repo changes)",
                                 epoch,
                                 force,
-                                scope.label(),
                                 cold_start,
                                 elapsed.as_millis()
                             );
@@ -812,14 +761,12 @@ impl DiffViewer {
 
                             this.snapshot_loading = false;
                             this.workflow_loading = false;
-                            this.graph_loading = false;
                             this.line_stats_loading = false;
                             let elapsed = started_at.elapsed();
                             error!(
-                                "git workspace refresh failed: epoch={} force={} scope={} cold_start={} elapsed_ms={} err={err:#}",
+                                "git workspace refresh failed: epoch={} force={} cold_start={} elapsed_ms={} err={err:#}",
                                 epoch,
                                 force,
-                                scope.label(),
                                 cold_start,
                                 elapsed.as_millis()
                             );
@@ -837,10 +784,9 @@ impl DiffViewer {
             let workflow_ready_elapsed = started_at.elapsed();
             let should_run_cold_start_reconcile = cold_start && loaded_without_refresh;
             info!(
-                "git workspace workflow ready: epoch={} force={} scope={} elapsed_ms={} files={} branches={} bookmark_revisions={} cold_start={}",
+                "git workspace workflow ready: epoch={} force={} elapsed_ms={} files={} branches={} bookmark_revisions={} cold_start={}",
                 epoch,
                 force,
-                scope.label(),
                 workflow_ready_elapsed.as_millis(),
                 workflow_file_count,
                 workflow_branch_count,
@@ -863,107 +809,32 @@ impl DiffViewer {
                 return;
             }
 
-            let graph_repo_root = repo_root.clone();
             let line_stats_repo_root = repo_root.clone();
             let reconcile_repo_root = repo_root;
-            // Stage B: load aggregate line-stats and optionally graph after workflow is visible.
+            // Stage B: load aggregate line stats after workflow data is visible.
             let line_stats_task = cx.background_executor().spawn(async move {
                 let stage_started_at = Instant::now();
                 let result = load_repo_line_stats_without_refresh(&line_stats_repo_root);
                 (stage_started_at.elapsed(), result)
             });
 
-            if scope.includes_graph() {
-                let graph_task = cx.background_executor().spawn(async move {
-                    let stage_started_at = Instant::now();
-                    let result = load_graph_snapshot_without_refresh(
-                        &graph_repo_root,
-                        GraphSnapshotOptions::default(),
-                    );
-                    (stage_started_at.elapsed(), result)
-                });
-                let (graph_elapsed, graph_result) = graph_task.await;
-                match &graph_result {
-                    Ok(graph_snapshot) => {
-                        info!(
-                            "git workspace graph ready: epoch={} force={} scope={} elapsed_ms={} nodes={} edges={} has_more={} cold_start={}",
-                            epoch,
-                            force,
-                            scope.label(),
-                            graph_elapsed.as_millis(),
-                            graph_snapshot.nodes.len(),
-                            graph_snapshot.edges.len(),
-                            graph_snapshot.has_more,
-                            cold_start
-                        );
-                    }
-                    Err(err) => {
-                        error!(
-                            "git workspace graph load failed: epoch={} force={} scope={} elapsed_ms={} cold_start={} err={err:#}",
-                            epoch,
-                            force,
-                            scope.label(),
-                            graph_elapsed.as_millis(),
-                            cold_start
-                        );
-                    }
-                }
-
-                if let Some(this) = this.upgrade() {
-                    this.update(cx, move |this, cx| {
-                        if epoch != this.snapshot_epoch {
-                            return;
-                        }
-
-                        this.snapshot_loading = false;
-                        this.graph_loading = false;
-                        match graph_result {
-                            Ok(graph_snapshot) => {
-                                this.apply_graph_snapshot(graph_snapshot, cx);
-                            }
-                            Err(_) => {
-                                this.git_status_message = Some(
-                                    "Loaded workflow data, but graph refresh failed.".to_string(),
-                                );
-                            }
-                        }
-                        let elapsed = started_at.elapsed();
-                        info!(
-                            "git workspace refresh complete: epoch={} force={} scope={} total_elapsed_ms={} cold_start={} line_stats_pending={}",
-                            epoch,
-                            force,
-                            scope.label(),
-                            elapsed.as_millis(),
-                            cold_start,
-                            this.line_stats_loading
-                        );
-
-                        cx.notify();
-                        this.maybe_run_pending_snapshot_refresh(cx);
-                    });
-                } else {
-                    return;
-                }
-            } else if let Some(this) = this.upgrade() {
+            if let Some(this) = this.upgrade() {
                 this.update(cx, move |this, cx| {
                     if epoch != this.snapshot_epoch {
                         return;
                     }
 
                     this.snapshot_loading = false;
-                    this.graph_loading = false;
                     let elapsed = started_at.elapsed();
                     info!(
-                        "git workspace refresh complete: epoch={} force={} scope={} total_elapsed_ms={} cold_start={} graph_skipped=true line_stats_pending={}",
+                        "git workspace refresh complete: epoch={} force={} total_elapsed_ms={} cold_start={} line_stats_pending={}",
                         epoch,
                         force,
-                        scope.label(),
                         elapsed.as_millis(),
                         cold_start,
                         this.line_stats_loading
                     );
 
-                    this.schedule_background_graph_refresh(cx);
                     cx.notify();
                     this.maybe_run_pending_snapshot_refresh(cx);
                 });
@@ -976,10 +847,9 @@ impl DiffViewer {
             match &line_stats_result {
                 Ok(line_stats) => {
                     info!(
-                        "git workspace line stats ready: epoch={} force={} scope={} elapsed_ms={} added={} removed={} changed={} cold_start={}",
+                        "git workspace line stats ready: epoch={} force={} elapsed_ms={} added={} removed={} changed={} cold_start={}",
                         epoch,
                         force,
-                        scope.label(),
                         line_stats_elapsed.as_millis(),
                         line_stats.added,
                         line_stats.removed,
@@ -989,10 +859,9 @@ impl DiffViewer {
                 }
                 Err(err) => {
                     error!(
-                        "git workspace line stats load failed: epoch={} force={} scope={} elapsed_ms={} cold_start={} err={err:#}",
+                        "git workspace line stats load failed: epoch={} force={} elapsed_ms={} cold_start={} err={err:#}",
                         epoch,
                         force,
-                        scope.label(),
                         line_stats_elapsed.as_millis(),
                         cold_start
                     );
@@ -1027,20 +896,18 @@ impl DiffViewer {
             match &reconcile_result {
                 Ok(_) => {
                     info!(
-                        "git workspace cold-start reconcile probe complete: epoch={} force={} scope={} elapsed_ms={} cold_start={}",
+                        "git workspace cold-start reconcile probe complete: epoch={} force={} elapsed_ms={} cold_start={}",
                         epoch,
                         force,
-                        scope.label(),
                         reconcile_started_at.elapsed().as_millis(),
                         cold_start
                     );
                 }
                 Err(err) => {
                     warn!(
-                        "git workspace cold-start reconcile probe failed: epoch={} force={} scope={} elapsed_ms={} cold_start={} err={err:#}",
+                        "git workspace cold-start reconcile probe failed: epoch={} force={} elapsed_ms={} cold_start={} err={err:#}",
                         epoch,
                         force,
-                        scope.label(),
                         reconcile_started_at.elapsed().as_millis(),
                         cold_start
                     );
@@ -1061,10 +928,9 @@ impl DiffViewer {
                     }
 
                     info!(
-                        "git workspace cold-start reconcile detected drift: epoch={} force={} scope={} cold_start={} -> scheduling foreground refresh",
+                        "git workspace cold-start reconcile detected drift: epoch={} force={} cold_start={} -> scheduling foreground refresh",
                         epoch,
                         force,
-                        scope.label(),
                         cold_start
                     );
                     this.request_snapshot_refresh_internal(false, cx);
@@ -1122,49 +988,6 @@ impl DiffViewer {
         });
     }
 
-    fn apply_graph_snapshot(&mut self, graph_snapshot: GraphSnapshot, cx: &mut Context<Self>) {
-        let GraphSnapshot {
-            root,
-            active_bookmark: graph_active_bookmark,
-            working_copy_commit_id,
-            working_copy_parent_commit_id,
-            nodes: graph_nodes,
-            edges: graph_edges,
-            has_more: graph_has_more,
-            next_offset: graph_next_offset,
-            ..
-        } = graph_snapshot;
-
-        info!("loaded graph snapshot from {}", root.display());
-        let root_changed = self.repo_root.as_ref() != Some(&root);
-
-        let previous_graph_len = self.graph_nodes.len();
-
-        self.project_path = Some(root.clone());
-        self.set_last_project_path(Some(root.clone()));
-        self.repo_root = Some(root);
-        self.ai_sync_workspace_preferences(cx);
-        self.graph_nodes = graph_nodes;
-        self.graph_edges = graph_edges;
-        self.graph_lane_rows =
-            hunk_jj::jj_graph_tree::build_graph_lane_rows(&self.graph_nodes, &self.graph_edges);
-        self.graph_has_more = graph_has_more;
-        self.graph_next_offset = graph_next_offset;
-        self.graph_active_bookmark = graph_active_bookmark;
-        self.graph_working_copy_commit_id = Some(working_copy_commit_id);
-        self.graph_working_copy_parent_commit_id = working_copy_parent_commit_id;
-        if root_changed || previous_graph_len != self.graph_nodes.len() {
-            self.graph_list_state.reset(self.graph_nodes.len());
-        }
-        self.graph_pending_confirmation = None;
-        self.pending_bookmark_switch = None;
-        self.reconcile_graph_selection_after_snapshot();
-        self.repo_discovery_failed = false;
-        self.error_message = None;
-
-        cx.notify();
-    }
-
     fn apply_workflow_snapshot(
         &mut self,
         snapshot: WorkflowSnapshot,
@@ -1173,6 +996,7 @@ impl DiffViewer {
     ) {
         let WorkflowSnapshot {
             root,
+            working_copy_commit_id,
             branch_name,
             branch_has_upstream,
             branch_ahead_count,
@@ -1194,6 +1018,7 @@ impl DiffViewer {
         self.set_last_project_path(Some(root.clone()));
         self.repo_root = Some(root);
         self.ai_sync_workspace_preferences(cx);
+        self.working_copy_commit_id = Some(working_copy_commit_id);
         self.branch_name = branch_name;
         self.branch_has_upstream = branch_has_upstream;
         self.branch_ahead_count = branch_ahead_count;
@@ -1269,7 +1094,7 @@ impl DiffViewer {
                 self.request_repo_tree_reload(cx);
             }
 
-            // Avoid expensive diff reload churn while using graph/AI modes.
+            // Avoid expensive diff reload churn while using non-diff workspace modes.
             if !self.workspace_view_mode.supports_diff_stream() {
                 self.scroll_selected_after_reload = false;
             } else {
@@ -1290,10 +1115,8 @@ impl DiffViewer {
         let error_message = Self::format_error_chain(&err);
         self.snapshot_loading = false;
         self.workflow_loading = false;
-        self.graph_loading = false;
         self.line_stats_loading = false;
         self.snapshot_refresh_pending_force = false;
-        self.cancel_pending_graph_refresh();
 
         if !missing_repository {
             self.repo_discovery_failed = false;
@@ -1308,23 +1131,11 @@ impl DiffViewer {
         self.branch_name = "unknown".to_string();
         self.branch_has_upstream = false;
         self.branch_ahead_count = 0;
+        self.working_copy_commit_id = None;
         self.can_undo_operation = false;
         self.can_redo_operation = false;
         self.branches.clear();
         self.bookmark_revisions.clear();
-        self.graph_nodes.clear();
-        self.graph_edges.clear();
-        self.graph_lane_rows.clear();
-        self.graph_has_more = false;
-        self.graph_next_offset = None;
-        self.graph_active_bookmark = None;
-        self.graph_working_copy_commit_id = None;
-        self.graph_working_copy_parent_commit_id = None;
-        self.graph_selected_node_id = None;
-        self.graph_selected_bookmark = None;
-        self.graph_list_state.reset(0);
-        self.graph_pending_confirmation = None;
-        self.graph_right_panel_mode = GraphRightPanelMode::ActiveWorkflow;
         self.pending_bookmark_switch = None;
         self.show_jj_terms_glossary = false;
         self.git_action_label = None;

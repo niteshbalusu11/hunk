@@ -32,7 +32,7 @@ fn ai_controller_switch_action_targets_ai_mode() {
         WorkspaceViewMode::Diff
     );
     assert_eq!(
-        WorkspaceSwitchAction::Graph.target_mode(),
+        WorkspaceSwitchAction::Git.target_mode(),
         WorkspaceViewMode::JjWorkspace
     );
 }

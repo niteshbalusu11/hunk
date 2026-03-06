@@ -40,10 +40,8 @@ use hunk_domain::state::{
     CachedChangedFileState, CachedLocalBranchState, CachedWorkflowState,
 };
 use hunk_jj::jj::{
-    BookmarkRevision, ChangedFile, FileStatus, GraphBookmarkRef, GraphBookmarkScope, GraphEdge,
-    GraphNode, LineStats, LocalBranch, RepoSnapshotFingerprint,
+    BookmarkRevision, ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFingerprint,
 };
-use hunk_jj::jj_graph_tree::GraphLaneRow;
 
 use ai_runtime::AiApprovalDecision;
 use ai_runtime::AiApprovalKind;
@@ -87,27 +85,6 @@ const COMMENT_FUZZY_MATCH_MIN_SCORE: i32 = 6;
 const COMMENT_FUZZY_RENAME_MATCH_MIN_SCORE: i32 = 11;
 const AI_TIMELINE_DEFAULT_VISIBLE_TURNS: usize = 80;
 const AI_TIMELINE_TURN_PAGE_SIZE: usize = 80;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct GraphBookmarkSelection {
-    name: String,
-    remote: Option<String>,
-    scope: GraphBookmarkScope,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum GraphPendingConfirmation {
-    MoveBookmarkTarget {
-        bookmark: GraphBookmarkSelection,
-        target_node_id: String,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum GraphRightPanelMode {
-    ActiveWorkflow,
-    SelectedBookmark,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RepoTreePromptAction {
@@ -183,12 +160,10 @@ actions!(
         PreviousHunk,
         NextFile,
         PreviousFile,
-        NextBookmarkRevision,
-        PreviousBookmarkRevision,
         ToggleSidebarTree,
         SwitchToFilesView,
         SwitchToReviewView,
-        SwitchToGraphView,
+        SwitchToGitView,
         SwitchToAiView,
         AiNewThread,
         AiInterruptSelectedTurn,
@@ -475,16 +450,6 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
             .iter()
             .map(|shortcut| KeyBinding::new(shortcut.as_str(), PreviousFile, Some("DiffViewer"))),
     );
-    bindings.extend(shortcuts.next_bookmark_revision.iter().map(|shortcut| {
-        KeyBinding::new(shortcut.as_str(), NextBookmarkRevision, Some("DiffViewer"))
-    }));
-    bindings.extend(shortcuts.previous_bookmark_revision.iter().map(|shortcut| {
-        KeyBinding::new(
-            shortcut.as_str(),
-            PreviousBookmarkRevision,
-            Some("DiffViewer"),
-        )
-    }));
     bindings.extend(
         shortcuts.toggle_sidebar_tree.iter().map(|shortcut| {
             KeyBinding::new(shortcut.as_str(), ToggleSidebarTree, Some("DiffViewer"))
@@ -504,9 +469,9 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
     );
     bindings.extend(
         shortcuts
-            .switch_to_graph_view
+            .switch_to_git_view
             .iter()
-            .map(|shortcut| KeyBinding::new(shortcut.as_str(), SwitchToGraphView, None)),
+            .map(|shortcut| KeyBinding::new(shortcut.as_str(), SwitchToGitView, None)),
     );
     bindings.extend(
         shortcuts
@@ -662,12 +627,10 @@ struct SettingsShortcutInputs {
     previous_hunk: Entity<InputState>,
     next_file: Entity<InputState>,
     previous_file: Entity<InputState>,
-    next_bookmark_revision: Entity<InputState>,
-    previous_bookmark_revision: Entity<InputState>,
     toggle_sidebar_tree: Entity<InputState>,
     switch_to_files_view: Entity<InputState>,
     switch_to_review_view: Entity<InputState>,
-    switch_to_graph_view: Entity<InputState>,
+    switch_to_git_view: Entity<InputState>,
     open_project: Entity<InputState>,
     save_current_file: Entity<InputState>,
     open_settings: Entity<InputState>,
@@ -741,18 +704,6 @@ impl SettingsShortcutInputs {
                 input_state: self.previous_file.clone(),
             },
             SettingsShortcutRow {
-                id: "next-bookmark-revision",
-                label: "Next Bookmark Revision",
-                hint: "Moves to the next focused bookmark revision.",
-                input_state: self.next_bookmark_revision.clone(),
-            },
-            SettingsShortcutRow {
-                id: "previous-bookmark-revision",
-                label: "Previous Bookmark Revision",
-                hint: "Moves to the previous focused bookmark revision.",
-                input_state: self.previous_bookmark_revision.clone(),
-            },
-            SettingsShortcutRow {
                 id: "toggle-sidebar-tree",
                 label: "Toggle File Tree",
                 hint: "Collapses or expands the left file tree pane.",
@@ -771,10 +722,10 @@ impl SettingsShortcutInputs {
                 input_state: self.switch_to_review_view.clone(),
             },
             SettingsShortcutRow {
-                id: "switch-to-graph-view",
-                label: "Switch to Graph View",
-                hint: "Switches the workspace to the JJ graph view.",
-                input_state: self.switch_to_graph_view.clone(),
+                id: "switch-to-git-view",
+                label: "Switch to Git View",
+                hint: "Switches the workspace to the Git workflow view.",
+                input_state: self.switch_to_git_view.clone(),
             },
             SettingsShortcutRow {
                 id: "open-project",
@@ -948,25 +899,12 @@ struct DiffViewer {
     branch_name: String,
     branch_has_upstream: bool,
     branch_ahead_count: usize,
+    working_copy_commit_id: Option<String>,
     can_undo_operation: bool,
     can_redo_operation: bool,
     branches: Vec<LocalBranch>,
     bookmark_revisions: Vec<BookmarkRevision>,
-    graph_nodes: Vec<GraphNode>,
-    graph_edges: Vec<GraphEdge>,
-    graph_lane_rows: Vec<GraphLaneRow>,
-    graph_has_more: bool,
-    graph_next_offset: Option<usize>,
-    graph_active_bookmark: Option<String>,
-    graph_working_copy_commit_id: Option<String>,
-    graph_working_copy_parent_commit_id: Option<String>,
-    graph_selected_node_id: Option<String>,
-    graph_selected_bookmark: Option<GraphBookmarkSelection>,
-    graph_list_state: ListState,
-    graph_right_panel_scroll_handle: ScrollHandle,
-    graph_action_input_state: Entity<InputState>,
-    graph_pending_confirmation: Option<GraphPendingConfirmation>,
-    graph_right_panel_mode: GraphRightPanelMode,
+    jj_workspace_scroll_handle: ScrollHandle,
     pending_bookmark_switch: Option<PendingBookmarkSwitch>,
     show_jj_terms_glossary: bool,
     workspace_view_mode: WorkspaceViewMode,
@@ -1050,13 +988,10 @@ struct DiffViewer {
     repo_watch_task: Task<()>,
     repo_watch_refresh_epoch: usize,
     repo_watch_refresh_task: Task<()>,
-    graph_refresh_epoch: usize,
-    graph_refresh_task: Task<()>,
     snapshot_epoch: usize,
     snapshot_task: Task<()>,
     snapshot_loading: bool,
     workflow_loading: bool,
-    graph_loading: bool,
     line_stats_loading: bool,
     snapshot_refresh_pending_force: bool,
     last_snapshot_fingerprint: Option<RepoSnapshotFingerprint>,

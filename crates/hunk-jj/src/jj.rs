@@ -15,10 +15,9 @@ mod backend;
 
 use backend::{
     abandon_bookmark_head as abandon_local_bookmark_head, bookmark_remote_sync_state,
-    bookmark_review_url, build_graph_snapshot_from_context, can_redo_operation, can_undo_operation,
-    checkout_existing_bookmark, checkout_existing_bookmark_with_change_transfer,
-    collect_materialized_diff_entries_for_paths, commit_working_copy_changes,
-    commit_working_copy_selected_paths, conflict_materialize_options,
+    bookmark_review_url, can_redo_operation, can_undo_operation, checkout_existing_bookmark,
+    checkout_existing_bookmark_with_change_transfer, collect_materialized_diff_entries_for_paths,
+    commit_working_copy_changes, commit_working_copy_selected_paths, conflict_materialize_options,
     create_bookmark_at_working_copy, current_bookmarks_from_context,
     current_commit_id_from_context, describe_bookmark_head as describe_local_bookmark_head,
     discover_repo_root, git_head_branch_name_from_context, last_commit_subject_from_context,
@@ -32,7 +31,6 @@ use backend::{
     restore_all_working_copy_changes as restore_all_wc_changes,
     restore_working_copy_from_revision as restore_wc_from_revision,
     restore_working_copy_selected_paths as restore_wc_selected_paths,
-    set_local_bookmark_target_revision,
     squash_bookmark_head_into_parent as squash_local_bookmark_head_into_parent,
     sync_bookmark_from_remote, undo_last_operation as undo_last_operation_in_context,
     walk_repo_tree,
@@ -124,6 +122,7 @@ pub struct RepoSnapshot {
 #[derive(Debug, Clone)]
 pub struct WorkflowSnapshot {
     pub root: PathBuf,
+    pub working_copy_commit_id: String,
     pub branch_name: String,
     pub branch_has_upstream: bool,
     pub branch_ahead_count: usize,
@@ -133,177 +132,6 @@ pub struct WorkflowSnapshot {
     pub bookmark_revisions: Vec<BookmarkRevision>,
     pub files: Vec<ChangedFile>,
     pub last_commit_subject: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GraphBookmarkScope {
-    Local,
-    Remote,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GraphBookmarkRef {
-    pub name: String,
-    pub remote: Option<String>,
-    pub scope: GraphBookmarkScope,
-    pub is_active: bool,
-    pub tracked: bool,
-    pub needs_push: bool,
-    pub conflicted: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GraphNode {
-    pub id: String,
-    pub subject: String,
-    pub unix_time: i64,
-    pub bookmarks: Vec<GraphBookmarkRef>,
-    pub is_working_copy_parent: bool,
-    pub is_active_bookmark_target: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GraphEdge {
-    pub from: String,
-    pub to: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct GraphSnapshotOptions {
-    pub max_nodes: usize,
-    pub offset: usize,
-    pub include_remote_bookmarks: bool,
-}
-
-impl Default for GraphSnapshotOptions {
-    fn default() -> Self {
-        Self {
-            max_nodes: 250,
-            offset: 0,
-            include_remote_bookmarks: true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GraphSnapshot {
-    pub root: PathBuf,
-    pub active_bookmark: Option<String>,
-    pub working_copy_commit_id: String,
-    pub working_copy_parent_commit_id: Option<String>,
-    pub nodes: Vec<GraphNode>,
-    pub edges: Vec<GraphEdge>,
-    pub has_more: bool,
-    pub next_offset: Option<usize>,
-}
-
-pub fn graph_bookmark_revision_chain(
-    nodes: &[GraphNode],
-    edges: &[GraphEdge],
-    bookmark_name: &str,
-    bookmark_remote: Option<&str>,
-    bookmark_scope: GraphBookmarkScope,
-) -> Vec<String> {
-    let Some(tip_node_id) =
-        graph_bookmark_tip_node_id(nodes, bookmark_name, bookmark_remote, bookmark_scope)
-    else {
-        return Vec::new();
-    };
-
-    let node_ids = nodes
-        .iter()
-        .map(|node| node.id.as_str())
-        .collect::<BTreeSet<_>>();
-    let mut stack = vec![tip_node_id.to_string()];
-    let mut visited = BTreeSet::new();
-
-    while let Some(node_id) = stack.pop() {
-        if !visited.insert(node_id.clone()) {
-            continue;
-        }
-
-        for edge in edges.iter().filter(|edge| edge.from == node_id) {
-            if !node_ids.contains(edge.to.as_str()) {
-                continue;
-            }
-            if !visited.contains(edge.to.as_str()) {
-                stack.push(edge.to.clone());
-            }
-        }
-    }
-
-    let mut chain_nodes = visited
-        .into_iter()
-        .filter_map(|id| {
-            nodes
-                .iter()
-                .find(|node| node.id == id)
-                .map(|node| (node.unix_time, node.id.clone()))
-        })
-        .collect::<Vec<_>>();
-    chain_nodes.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
-
-    chain_nodes
-        .into_iter()
-        .map(|(_, node_id)| node_id)
-        .collect()
-}
-
-pub fn graph_bookmark_drop_validation(
-    nodes: &[GraphNode],
-    bookmark_name: &str,
-    bookmark_remote: Option<&str>,
-    bookmark_scope: GraphBookmarkScope,
-    target_node_id: &str,
-) -> std::result::Result<(), String> {
-    if bookmark_scope != GraphBookmarkScope::Local {
-        return Err("Only local bookmarks can be moved by drag-and-drop.".to_string());
-    }
-    if !nodes.iter().any(|node| node.id == target_node_id) {
-        return Err("Drop target revision is not in the current graph window.".to_string());
-    }
-    let Some(source_node_id) =
-        graph_bookmark_tip_node_id(nodes, bookmark_name, bookmark_remote, bookmark_scope)
-    else {
-        return Err(format!(
-            "Bookmark '{}' is not present in the current graph window.",
-            bookmark_name
-        ));
-    };
-    if source_node_id == target_node_id {
-        return Err("Bookmark is already targeting that revision.".to_string());
-    }
-    Ok(())
-}
-
-fn graph_bookmark_tip_node_id<'a>(
-    nodes: &'a [GraphNode],
-    bookmark_name: &str,
-    bookmark_remote: Option<&str>,
-    bookmark_scope: GraphBookmarkScope,
-) -> Option<&'a str> {
-    nodes
-        .iter()
-        .filter(|node| {
-            node.bookmarks.iter().any(|bookmark| {
-                graph_bookmark_matches(bookmark, bookmark_name, bookmark_remote, bookmark_scope)
-            })
-        })
-        .max_by(|left, right| {
-            left.unix_time
-                .cmp(&right.unix_time)
-                .then_with(|| right.id.cmp(&left.id))
-        })
-        .map(|node| node.id.as_str())
-}
-
-fn graph_bookmark_matches(
-    bookmark: &GraphBookmarkRef,
-    name: &str,
-    remote: Option<&str>,
-    scope: GraphBookmarkScope,
-) -> bool {
-    bookmark.name == name && bookmark.scope == scope && bookmark.remote.as_deref() == remote
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -340,6 +168,8 @@ const RESERVED_BOOKMARK_NAMES: &[&str] = &["detached", "unknown"];
 
 fn load_workflow_snapshot_from_context(context: &backend::RepoContext) -> Result<WorkflowSnapshot> {
     let files = load_changed_files_from_context(context)?;
+    let working_copy_commit_id = current_commit_id_from_context(context)?
+        .ok_or_else(|| anyhow!("failed to resolve working-copy commit id"))?;
     let current_bookmarks = current_bookmarks_from_context(context)?;
     let active_bookmark = load_active_bookmark_preference(&context.root);
     let git_head_branch = git_head_branch_name_from_context(context);
@@ -362,6 +192,7 @@ fn load_workflow_snapshot_from_context(context: &backend::RepoContext) -> Result
 
     Ok(WorkflowSnapshot {
         root: context.root.clone(),
+        working_copy_commit_id,
         branch_name,
         branch_has_upstream,
         branch_ahead_count,
@@ -402,20 +233,6 @@ pub fn load_workflow_snapshot_with_fingerprint_without_refresh(
     cwd: &Path,
 ) -> Result<(RepoSnapshotFingerprint, WorkflowSnapshot)> {
     load_workflow_snapshot_with_fingerprint_with_refresh(cwd, false)
-}
-
-pub fn load_graph_snapshot(
-    repo_root: &Path,
-    options: GraphSnapshotOptions,
-) -> Result<GraphSnapshot> {
-    load_graph_snapshot_with_refresh(repo_root, options, true)
-}
-
-pub fn load_graph_snapshot_without_refresh(
-    repo_root: &Path,
-    options: GraphSnapshotOptions,
-) -> Result<GraphSnapshot> {
-    load_graph_snapshot_with_refresh(repo_root, options, false)
 }
 
 pub fn load_snapshot_fingerprint(cwd: &Path) -> Result<RepoSnapshotFingerprint> {
@@ -471,15 +288,6 @@ fn load_snapshot_from_context(context: &backend::RepoContext) -> Result<RepoSnap
         line_stats,
         last_commit_subject: workflow.last_commit_subject,
     })
-}
-
-fn load_graph_snapshot_with_refresh(
-    repo_root: &Path,
-    options: GraphSnapshotOptions,
-    refresh_snapshot: bool,
-) -> Result<GraphSnapshot> {
-    let context = load_repo_context_at_root(repo_root, refresh_snapshot)?;
-    build_graph_snapshot_from_context(&context, options)
 }
 
 fn load_repo_line_stats_with_refresh(cwd: &Path, refresh_snapshot: bool) -> Result<LineStats> {
@@ -745,50 +553,6 @@ pub fn can_redo_last_operation(repo_root: &Path) -> Result<bool> {
 pub fn redo_last_operation(repo_root: &Path) -> Result<()> {
     let mut context = load_repo_context_at_root(repo_root, true)?;
     redo_last_operation_in_context(&mut context)
-}
-
-pub fn create_bookmark_at_revision(
-    repo_root: &Path,
-    bookmark_name: &str,
-    revision_id: &str,
-) -> Result<()> {
-    let bookmark_name = bookmark_name.trim();
-    if bookmark_name.is_empty() {
-        return Err(anyhow!("bookmark name cannot be empty"));
-    }
-    if !is_valid_bookmark_name(bookmark_name) {
-        return Err(anyhow!("invalid bookmark name: {bookmark_name}"));
-    }
-
-    let revision_id = revision_id.trim();
-    if revision_id.is_empty() {
-        return Err(anyhow!("revision id cannot be empty"));
-    }
-
-    let mut context = load_repo_context_at_root(repo_root, true)?;
-    set_local_bookmark_target_revision(&mut context, bookmark_name, revision_id, false)
-}
-
-pub fn move_bookmark_to_revision(
-    repo_root: &Path,
-    bookmark_name: &str,
-    revision_id: &str,
-) -> Result<()> {
-    let bookmark_name = bookmark_name.trim();
-    if bookmark_name.is_empty() {
-        return Err(anyhow!("bookmark name cannot be empty"));
-    }
-    if bookmark_name == "detached" {
-        return Err(anyhow!("cannot move detached bookmark"));
-    }
-
-    let revision_id = revision_id.trim();
-    if revision_id.is_empty() {
-        return Err(anyhow!("revision id cannot be empty"));
-    }
-
-    let mut context = load_repo_context_at_root(repo_root, true)?;
-    set_local_bookmark_target_revision(&mut context, bookmark_name, revision_id, true)
 }
 
 pub fn rename_bookmark(

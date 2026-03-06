@@ -80,8 +80,8 @@ impl DiffViewer {
             .into_any_element()
     }
 
-    fn render_jj_graph_operations_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        self.render_jj_graph_operations_panel_v2(cx)
+    fn render_jj_workspace_operations_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        self.render_jj_workspace_operations_panel_v2(cx)
     }
 
     fn render_revision_stack_panel(&self, cx: &mut Context<Self>) -> AnyElement {
