@@ -78,6 +78,10 @@ impl DiffViewer {
         let (connection_label, connection_color) = ai_connection_label(self.ai_connection_state, cx);
         let composer_attachment_paths = self.current_ai_composer_local_images();
         let composer_attachment_count = composer_attachment_paths.len();
+        let composer_interrupt_available = selected_thread_id
+            .as_deref()
+            .and_then(|thread_id| self.current_ai_in_progress_turn_id(thread_id))
+            .is_some();
         let model_supports_image_inputs = self.current_ai_model_supports_image_inputs();
         let review_action_enabled = selected_thread_id.is_some();
         let composer_drop_border_color = if model_supports_image_inputs {
@@ -289,18 +293,33 @@ impl DiffViewer {
                                             })
                                             .child({
                                                 let view = view.clone();
-                                                Button::new("ai-send-prompt")
-                                                    .compact()
-                                                    .primary()
-                                                    .rounded(px(999.0))
-                                                    .with_size(gpui_component::Size::Small)
-                                                    .icon(Icon::new(IconName::ArrowUp).size(px(16.0)))
-                                                    .tooltip("Send prompt")
-                                                    .on_click(move |_, window, cx| {
-                                                        view.update(cx, |this, cx| {
-                                                            this.ai_send_prompt_action(window, cx);
-                                                        });
-                                                    })
+                                                if composer_interrupt_available {
+                                                    Button::new("ai-interrupt-turn")
+                                                        .compact()
+                                                        .primary()
+                                                        .rounded(px(999.0))
+                                                        .with_size(gpui_component::Size::Small)
+                                                        .icon(Icon::new(IconName::Close).size(px(16.0)))
+                                                        .tooltip("Interrupt run")
+                                                        .on_click(move |_, _, cx| {
+                                                            view.update(cx, |this, cx| {
+                                                                this.ai_interrupt_turn_action(cx);
+                                                            });
+                                                        })
+                                                } else {
+                                                    Button::new("ai-send-prompt")
+                                                        .compact()
+                                                        .primary()
+                                                        .rounded(px(999.0))
+                                                        .with_size(gpui_component::Size::Small)
+                                                        .icon(Icon::new(IconName::ArrowUp).size(px(16.0)))
+                                                        .tooltip("Send prompt")
+                                                        .on_click(move |_, window, cx| {
+                                                            view.update(cx, |this, cx| {
+                                                                this.ai_send_prompt_action(window, cx);
+                                                            });
+                                                        })
+                                                }
                                             }),
                                     ),
                             ),
