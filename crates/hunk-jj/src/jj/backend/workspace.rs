@@ -108,6 +108,10 @@ pub(super) fn cached_nested_repo_roots_from_fs(root: &Path) -> Result<BTreeSet<S
     Ok(roots)
 }
 
+pub(super) fn invalidate_cached_nested_repo_roots(root: &Path) {
+    nested_repo_roots_cache_guard().remove(root);
+}
+
 fn nested_repo_roots_cache_guard(
 ) -> std::sync::MutexGuard<'static, HashMap<PathBuf, BTreeSet<String>>> {
     match NESTED_REPO_ROOTS_CACHE.lock() {

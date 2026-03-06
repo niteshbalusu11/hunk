@@ -22,9 +22,10 @@ use backend::{
     create_bookmark_at_working_copy, current_bookmarks_from_context,
     current_commit_id_from_context, describe_bookmark_head as describe_local_bookmark_head,
     discover_repo_root, git_head_branch_name_from_context, has_changed_files_from_context,
-    last_commit_subject_from_context, list_bookmark_revisions_from_context,
-    list_local_branches_from_context, load_changed_files_from_context, load_repo_context,
-    load_repo_context_at_root, load_tracked_paths_from_context, materialized_entry_matches_path,
+    invalidate_cached_nested_repo_roots, last_commit_subject_from_context,
+    list_bookmark_revisions_from_context, list_local_branches_from_context,
+    load_changed_files_from_context, load_repo_context, load_repo_context_at_root,
+    load_tracked_paths_from_context, materialized_entry_matches_path,
     move_bookmark_to_parent_of_working_copy, normalize_path, push_bookmark,
     redo_last_operation as redo_last_operation_in_context,
     rename_bookmark as rename_local_bookmark, render_patch_for_entry,
@@ -373,6 +374,10 @@ pub fn load_repo_file_line_stats_for_paths_without_refresh(
     paths: &BTreeSet<String>,
 ) -> Result<std::collections::BTreeMap<String, LineStats>> {
     load_repo_file_line_stats_for_paths_with_refresh(cwd, paths, false)
+}
+
+pub fn invalidate_repo_metadata_caches(repo_root: &Path) {
+    invalidate_cached_nested_repo_roots(repo_root);
 }
 
 fn load_snapshot_with_refresh(cwd: &Path, refresh_snapshot: bool) -> Result<RepoSnapshot> {
@@ -850,19 +855,6 @@ pub fn checkout_or_create_bookmark_with_change_transfer(
     )
 }
 
-pub fn checkout_or_create_bookmark_with_change_transfer_without_refresh(
-    repo_root: &Path,
-    bookmark_name: &str,
-    move_changes_to_bookmark: bool,
-) -> Result<()> {
-    checkout_or_create_bookmark_with_change_transfer_with_refresh(
-        repo_root,
-        bookmark_name,
-        move_changes_to_bookmark,
-        false,
-    )
-}
-
 fn checkout_or_create_bookmark_with_change_transfer_with_refresh(
     repo_root: &Path,
     bookmark_name: &str,
@@ -926,10 +918,6 @@ pub fn push_current_bookmark(repo_root: &Path, bookmark_name: &str, _: bool) -> 
 
 pub fn sync_current_bookmark(repo_root: &Path, bookmark_name: &str) -> Result<()> {
     sync_current_bookmark_with_refresh(repo_root, bookmark_name, true)
-}
-
-pub fn sync_current_bookmark_without_refresh(repo_root: &Path, bookmark_name: &str) -> Result<()> {
-    sync_current_bookmark_with_refresh(repo_root, bookmark_name, false)
 }
 
 fn sync_current_bookmark_with_refresh(

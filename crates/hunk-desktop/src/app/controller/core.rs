@@ -452,6 +452,7 @@ impl DiffViewer {
             auto_refresh_task: Task::ready(()),
             repo_watch_task: Task::ready(()),
             repo_watch_refresh_epoch: 0,
+            repo_watch_refresh_force: false,
             repo_watch_refresh_task: Task::ready(()),
             snapshot_epoch: 0,
             snapshot_task: Task::ready(()),
@@ -461,6 +462,7 @@ impl DiffViewer {
             line_stats_epoch: 0,
             line_stats_task: Task::ready(()),
             line_stats_loading: false,
+            pending_line_stats_refresh: None,
             pending_snapshot_refresh: None,
             pending_dirty_paths: BTreeSet::new(),
             last_snapshot_fingerprint: None,
@@ -601,6 +603,31 @@ impl DiffViewer {
         self.snapshot_active_request = None;
     }
 
+    fn enqueue_line_stats_refresh(&mut self, refresh: PendingLineStatsRefresh) {
+        self.pending_line_stats_refresh = Some(
+            self.pending_line_stats_refresh
+                .take()
+                .map_or(refresh.clone(), |pending| pending.merge(refresh)),
+        );
+    }
+
+    fn maybe_run_pending_line_stats_refresh(&mut self, cx: &mut Context<Self>) {
+        if self.line_stats_loading {
+            return;
+        }
+        let Some(refresh) = self.pending_line_stats_refresh.take() else {
+            return;
+        };
+        self.schedule_line_stats_refresh(
+            refresh.repo_root,
+            refresh.request,
+            refresh.scope,
+            refresh.snapshot_epoch,
+            refresh.cold_start,
+            cx,
+        );
+    }
+
     fn schedule_line_stats_refresh(
         &mut self,
         repo_root: PathBuf,
@@ -610,10 +637,30 @@ impl DiffViewer {
         cold_start: bool,
         cx: &mut Context<Self>,
     ) {
-        let epoch = self.next_line_stats_epoch();
         let refresh_root = repo_root.display().to_string();
         let scope_label = scope.label();
         let path_count = scope.path_count();
+        let queued_refresh = PendingLineStatsRefresh {
+            repo_root: repo_root.clone(),
+            request,
+            scope: scope.clone(),
+            snapshot_epoch,
+            cold_start,
+        };
+        if self.line_stats_loading {
+            self.enqueue_line_stats_refresh(queued_refresh);
+            debug!(
+                "git workspace line stats refresh deferred: snapshot_epoch={} force={} priority={} scope={} path_count={} cold_start={}",
+                snapshot_epoch,
+                request.force,
+                request.priority.as_str(),
+                scope_label,
+                path_count,
+                cold_start
+            );
+            return;
+        }
+        let epoch = self.next_line_stats_epoch();
         let scope_for_load = scope.clone();
         let debounce = (request.priority == SnapshotRefreshPriority::Background)
             .then_some(Self::LINE_STATS_BACKGROUND_DEBOUNCE);
@@ -637,18 +684,27 @@ impl DiffViewer {
             }
 
             let (result_tx, result_rx) = oneshot::channel();
-            std::thread::spawn(move || {
-                let result = match &scope_for_load {
-                    LineStatsRefreshScope::Full => load_repo_file_line_stats_without_refresh(&repo_root),
-                    LineStatsRefreshScope::Paths(paths) => {
-                        load_repo_file_line_stats_for_paths_without_refresh(&repo_root, paths)
-                    }
-                };
-                let _ = result_tx.send(result);
-            });
-            let result = match result_rx.await {
-                Ok(result) => result,
-                Err(_) => return,
+            let spawn_result = std::thread::Builder::new()
+                .name("hunk-line-stats".to_string())
+                .spawn(move || {
+                    let result = match &scope_for_load {
+                        LineStatsRefreshScope::Full => {
+                            load_repo_file_line_stats_without_refresh(&repo_root)
+                        }
+                        LineStatsRefreshScope::Paths(paths) => {
+                            load_repo_file_line_stats_for_paths_without_refresh(&repo_root, paths)
+                        }
+                    };
+                    let _ = result_tx.send(result);
+                });
+            let result = match spawn_result {
+                Ok(_) => match result_rx.await {
+                    Ok(result) => result,
+                    Err(err) => Err(anyhow::anyhow!(
+                        "line stats worker exited before reporting a result: {err}"
+                    )),
+                },
+                Err(err) => Err(anyhow::anyhow!("failed to spawn line stats worker: {err}")),
             };
 
             match &result {
@@ -692,6 +748,7 @@ impl DiffViewer {
                     }
 
                     this.line_stats_loading = false;
+                    this.line_stats_task = Task::ready(());
                     if let Ok(file_line_stats) = result {
                         match scope {
                             LineStatsRefreshScope::Full => {
@@ -707,6 +764,7 @@ impl DiffViewer {
                         this.recompute_overall_line_stats_from_file_stats();
                     }
                     cx.notify();
+                    this.maybe_run_pending_line_stats_refresh(cx);
                 });
             }
         });

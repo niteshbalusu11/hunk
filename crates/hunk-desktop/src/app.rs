@@ -159,6 +159,13 @@ impl SnapshotRefreshRequest {
         }
     }
 
+    const fn background_force() -> Self {
+        Self {
+            force: true,
+            priority: SnapshotRefreshPriority::Background,
+        }
+    }
+
     fn merge(self, other: Self) -> Self {
         Self {
             force: self.force || other.force,
@@ -194,6 +201,42 @@ impl LineStatsRefreshScope {
         match self {
             Self::Full => 0,
             Self::Paths(paths) => paths.len(),
+        }
+    }
+
+    fn merge(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Full, _) | (_, Self::Full) => Self::Full,
+            (Self::Paths(mut left), Self::Paths(right)) => {
+                left.extend(right);
+                Self::Paths(left)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PendingLineStatsRefresh {
+    repo_root: PathBuf,
+    request: SnapshotRefreshRequest,
+    scope: LineStatsRefreshScope,
+    snapshot_epoch: usize,
+    cold_start: bool,
+}
+
+impl PendingLineStatsRefresh {
+    fn merge(self, newer: Self) -> Self {
+        let scope = if self.repo_root == newer.repo_root {
+            self.scope.merge(newer.scope)
+        } else {
+            newer.scope
+        };
+        Self {
+            repo_root: newer.repo_root,
+            request: self.request.merge(newer.request),
+            scope,
+            snapshot_epoch: newer.snapshot_epoch,
+            cold_start: newer.cold_start,
         }
     }
 }
@@ -1062,6 +1105,7 @@ struct DiffViewer {
     auto_refresh_task: Task<()>,
     repo_watch_task: Task<()>,
     repo_watch_refresh_epoch: usize,
+    repo_watch_refresh_force: bool,
     repo_watch_refresh_task: Task<()>,
     snapshot_epoch: usize,
     snapshot_task: Task<()>,
@@ -1071,6 +1115,7 @@ struct DiffViewer {
     line_stats_epoch: usize,
     line_stats_task: Task<()>,
     line_stats_loading: bool,
+    pending_line_stats_refresh: Option<PendingLineStatsRefresh>,
     pending_snapshot_refresh: Option<SnapshotRefreshRequest>,
     pending_dirty_paths: BTreeSet<String>,
     last_snapshot_fingerprint: Option<RepoSnapshotFingerprint>,

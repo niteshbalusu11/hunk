@@ -215,11 +215,7 @@ impl DiffViewer {
                     true,
                 )?;
             } else {
-                checkout_or_create_bookmark_with_change_transfer_without_refresh(
-                    &repo_root,
-                    &branch_name,
-                    false,
-                )?;
+                checkout_or_create_bookmark_with_change_transfer(&repo_root, &branch_name, false)?;
             }
             let message = if move_changes_to_new_bookmark {
                 format!(
@@ -627,7 +623,7 @@ impl DiffViewer {
         let branch_name = self.branch_name.clone();
 
         self.run_git_action("Sync bookmark", cx, move |repo_root| {
-            sync_current_bookmark_without_refresh(&repo_root, &branch_name)?;
+            sync_current_bookmark(&repo_root, &branch_name)?;
             Ok(format!("Synced bookmark {}", branch_name))
         });
     }
