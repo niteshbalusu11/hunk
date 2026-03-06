@@ -5,6 +5,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow};
 use futures::executor::{block_on, block_on_stream};
@@ -41,6 +42,7 @@ use jj_lib::signing::SignBehavior;
 use jj_lib::str_util::StringExpression;
 use jj_lib::working_copy::SnapshotOptions;
 use jj_lib::workspace::{Workspace, default_working_copy_factories};
+use tracing::info;
 
 use super::*;
 
@@ -89,17 +91,22 @@ pub(super) fn load_repo_context_at_root(
     repo_root: &Path,
     refresh_snapshot: bool,
 ) -> Result<RepoContext> {
+    let started_at = Instant::now();
     let root = discover_repo_root(repo_root)?;
     let settings = load_user_settings(Some(&root))?;
     let store_factories = StoreFactories::default();
     let working_copy_factories = default_working_copy_factories();
 
+    let workspace_started_at = Instant::now();
     let workspace = Workspace::load(&settings, &root, &store_factories, &working_copy_factories)
         .with_context(|| format!("failed to load jj workspace at {}", root.display()))?;
+    let workspace_elapsed = workspace_started_at.elapsed();
+    let repo_started_at = Instant::now();
     let repo = workspace
         .repo_loader()
         .load_at_head()
         .context("failed to load jj repository")?;
+    let repo_elapsed = repo_started_at.elapsed();
 
     let mut context = RepoContext {
         root,
@@ -108,9 +115,22 @@ pub(super) fn load_repo_context_at_root(
         repo,
         nested_repo_roots_cache: OnceCell::new(),
     };
-    if refresh_snapshot {
+    let refresh_elapsed = if refresh_snapshot {
+        let refresh_started_at = Instant::now();
         refresh_working_copy_snapshot(&mut context)?;
-    }
+        Some(refresh_started_at.elapsed())
+    } else {
+        None
+    };
+    info!(
+        "jj load repo context complete: refresh_snapshot={} root={} workspace_load_ms={} repo_load_ms={} refresh_ms={} total_ms={}",
+        refresh_snapshot,
+        context.root.display(),
+        workspace_elapsed.as_millis(),
+        repo_elapsed.as_millis(),
+        refresh_elapsed.map_or(0, |elapsed| elapsed.as_millis()),
+        started_at.elapsed().as_millis()
+    );
     Ok(context)
 }
 

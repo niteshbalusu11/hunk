@@ -1,6 +1,11 @@
 fn refresh_working_copy_snapshot(context: &mut RepoContext) -> Result<()> {
+    let started_at = Instant::now();
+    let import_head_started_at = Instant::now();
     import_git_head_for_snapshot(context)?;
+    let import_head_elapsed = import_head_started_at.elapsed();
+    let ensure_bookmark_started_at = Instant::now();
     ensure_local_bookmark_for_git_head(context)?;
+    let ensure_bookmark_elapsed = ensure_bookmark_started_at.elapsed();
 
     let workspace_name = context.workspace.workspace_name().to_owned();
     let wc_commit =
@@ -20,11 +25,15 @@ fn refresh_working_copy_snapshot(context: &mut RepoContext) -> Result<()> {
         max_new_file_size: u64::MAX,
     };
 
+    let snapshot_started_at = Instant::now();
     let (new_tree, _) = block_on(locked_workspace.locked_wc().snapshot(&snapshot_options))
         .context("failed to snapshot jj working copy")?;
+    let snapshot_elapsed = snapshot_started_at.elapsed();
 
     let mut repo = context.repo.clone();
-    if new_tree.tree_ids_and_labels() != old_tree.tree_ids_and_labels() {
+    let tree_changed = new_tree.tree_ids_and_labels() != old_tree.tree_ids_and_labels();
+    let snapshot_commit_elapsed = if tree_changed {
+        let snapshot_commit_started_at = Instant::now();
         let mut tx = repo.start_transaction();
         let rewritten_wc = tx
             .repo_mut()
@@ -44,14 +53,33 @@ fn refresh_working_copy_snapshot(context: &mut RepoContext) -> Result<()> {
         repo = tx
             .commit("snapshot working copy")
             .context("failed to finalize working-copy snapshot")?;
-    }
+        Some(snapshot_commit_started_at.elapsed())
+    } else {
+        None
+    };
 
+    let finish_started_at = Instant::now();
     locked_workspace
         .finish(repo.op_id().clone())
         .context("failed to persist jj working-copy state")?;
+    let finish_elapsed = finish_started_at.elapsed();
     context.repo = repo;
 
+    let import_refs_started_at = Instant::now();
     import_git_refs_for_snapshot(context)?;
+    let import_refs_elapsed = import_refs_started_at.elapsed();
+    info!(
+        "jj refresh working-copy snapshot complete: root={} import_head_ms={} ensure_bookmark_ms={} snapshot_ms={} tree_changed={} snapshot_commit_ms={} finish_ms={} import_refs_ms={} total_ms={}",
+        context.root.display(),
+        import_head_elapsed.as_millis(),
+        ensure_bookmark_elapsed.as_millis(),
+        snapshot_elapsed.as_millis(),
+        tree_changed,
+        snapshot_commit_elapsed.map_or(0, |elapsed| elapsed.as_millis()),
+        finish_elapsed.as_millis(),
+        import_refs_elapsed.as_millis(),
+        started_at.elapsed().as_millis()
+    );
     Ok(())
 }
 
