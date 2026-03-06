@@ -3,6 +3,7 @@ impl DiffViewer {
     const AUTO_REFRESH_QUICK_PROBE_MS: u64 = 3_000;
     const AUTO_REFRESH_BACKOFF_STEPS: u32 = 6;
     const REPO_WATCH_DEBOUNCE: Duration = Duration::from_millis(150);
+    const LINE_STATS_BACKGROUND_DEBOUNCE: Duration = Duration::from_millis(350);
 
     fn load_app_config() -> (Option<ConfigStore>, AppConfig) {
         let store = match ConfigStore::new() {
@@ -191,7 +192,7 @@ impl DiffViewer {
             .and_then(|selected| self.status_for_path(selected));
         self.repo_discovery_failed = false;
         self.error_message = None;
-        info!(
+        debug!(
             "hydrated git workflow cache for {} (files={} branches={} revisions={})",
             root.display(),
             self.files.len(),
@@ -451,13 +452,19 @@ impl DiffViewer {
             auto_refresh_task: Task::ready(()),
             repo_watch_task: Task::ready(()),
             repo_watch_refresh_epoch: 0,
+            repo_watch_refresh_force: false,
             repo_watch_refresh_task: Task::ready(()),
             snapshot_epoch: 0,
             snapshot_task: Task::ready(()),
             snapshot_loading: false,
+            snapshot_active_request: None,
             workflow_loading: false,
+            line_stats_epoch: 0,
+            line_stats_task: Task::ready(()),
             line_stats_loading: false,
-            snapshot_refresh_pending_force: false,
+            pending_line_stats_refresh: None,
+            pending_snapshot_refresh: None,
+            pending_dirty_paths: BTreeSet::new(),
             last_snapshot_fingerprint: None,
             open_project_task: Task::ready(()),
             patch_epoch: 0,
@@ -559,7 +566,7 @@ impl DiffViewer {
     }
 
     pub(super) fn request_snapshot_refresh(&mut self, cx: &mut Context<Self>) {
-        self.request_snapshot_refresh_internal(false, cx);
+        self.request_snapshot_refresh_internal(SnapshotRefreshRequest::user(false), cx);
     }
 
     pub(super) fn request_snapshot_refresh_workflow_only(
@@ -567,32 +574,317 @@ impl DiffViewer {
         force: bool,
         cx: &mut Context<Self>,
     ) {
-        self.request_snapshot_refresh_internal(force, cx);
+        let request = if force {
+            SnapshotRefreshRequest::user(true)
+        } else {
+            SnapshotRefreshRequest::background()
+        };
+        self.request_snapshot_refresh_internal(request, cx);
+    }
+
+    fn enqueue_snapshot_refresh(&mut self, request: SnapshotRefreshRequest) {
+        self.pending_snapshot_refresh = Some(
+            self.pending_snapshot_refresh
+                .map_or(request, |pending| pending.merge(request)),
+        );
+    }
+
+    fn active_snapshot_refresh_request(&self) -> SnapshotRefreshRequest {
+        self.snapshot_active_request
+            .unwrap_or(SnapshotRefreshRequest::background())
+    }
+
+    fn should_preempt_active_snapshot_refresh(&self, request: SnapshotRefreshRequest) -> bool {
+        self.snapshot_loading && request.is_more_urgent_than(self.active_snapshot_refresh_request())
+    }
+
+    fn finish_snapshot_refresh_loading(&mut self) {
+        self.snapshot_loading = false;
+        self.snapshot_active_request = None;
+    }
+
+    fn enqueue_line_stats_refresh(&mut self, refresh: PendingLineStatsRefresh) {
+        self.pending_line_stats_refresh = Some(
+            self.pending_line_stats_refresh
+                .take()
+                .map_or(refresh.clone(), |pending| pending.merge(refresh)),
+        );
+    }
+
+    fn maybe_run_pending_line_stats_refresh(&mut self, cx: &mut Context<Self>) {
+        if self.line_stats_loading {
+            return;
+        }
+        let Some(refresh) = self.pending_line_stats_refresh.take() else {
+            return;
+        };
+        self.schedule_line_stats_refresh(
+            refresh.repo_root,
+            refresh.request,
+            refresh.scope,
+            refresh.snapshot_epoch,
+            refresh.cold_start,
+            cx,
+        );
+    }
+
+    fn schedule_line_stats_refresh(
+        &mut self,
+        repo_root: PathBuf,
+        request: SnapshotRefreshRequest,
+        scope: LineStatsRefreshScope,
+        snapshot_epoch: usize,
+        cold_start: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let refresh_root = repo_root.display().to_string();
+        let scope_label = scope.label();
+        let path_count = scope.path_count();
+        let queued_refresh = PendingLineStatsRefresh {
+            repo_root: repo_root.clone(),
+            request,
+            scope: scope.clone(),
+            snapshot_epoch,
+            cold_start,
+        };
+        if self.line_stats_loading {
+            self.enqueue_line_stats_refresh(queued_refresh);
+            debug!(
+                "git workspace line stats refresh deferred: snapshot_epoch={} force={} priority={} scope={} path_count={} cold_start={}",
+                snapshot_epoch,
+                request.force,
+                request.priority.as_str(),
+                scope_label,
+                path_count,
+                cold_start
+            );
+            return;
+        }
+        let epoch = self.next_line_stats_epoch();
+        let scope_for_load = scope.clone();
+        let debounce = (request.priority == SnapshotRefreshPriority::Background)
+            .then_some(Self::LINE_STATS_BACKGROUND_DEBOUNCE);
+        self.line_stats_loading = true;
+        debug!(
+            "git workspace line stats refresh start: epoch={} snapshot_epoch={} force={} priority={} scope={} path_count={} cold_start={} root={}",
+            epoch,
+            snapshot_epoch,
+            request.force,
+            request.priority.as_str(),
+            scope_label,
+            path_count,
+            cold_start,
+            refresh_root
+        );
+
+        self.line_stats_task = cx.spawn(async move |this, cx| {
+            let started_at = Instant::now();
+            if let Some(delay) = debounce {
+                cx.background_executor().timer(delay).await;
+            }
+
+            let (result_tx, result_rx) = oneshot::channel();
+            let spawn_result = std::thread::Builder::new()
+                .name("hunk-line-stats".to_string())
+                .spawn(move || {
+                    let result = match &scope_for_load {
+                        LineStatsRefreshScope::Full => {
+                            load_repo_file_line_stats_without_refresh(&repo_root)
+                        }
+                        LineStatsRefreshScope::Paths(paths) => {
+                            load_repo_file_line_stats_for_paths_without_refresh(&repo_root, paths)
+                        }
+                    };
+                    let _ = result_tx.send(result);
+                });
+            let result = match spawn_result {
+                Ok(_) => match result_rx.await {
+                    Ok(result) => result,
+                    Err(err) => Err(anyhow::anyhow!(
+                        "line stats worker exited before reporting a result: {err}"
+                    )),
+                },
+                Err(err) => Err(anyhow::anyhow!("failed to spawn line stats worker: {err}")),
+            };
+
+            match &result {
+                Ok(file_line_stats) => {
+                    let line_stats = Self::sum_line_stats(file_line_stats.values().copied());
+                    debug!(
+                        "git workspace line stats ready: epoch={} snapshot_epoch={} force={} priority={} scope={} path_count={} elapsed_ms={} files={} added={} removed={} changed={} cold_start={}",
+                        epoch,
+                        snapshot_epoch,
+                        request.force,
+                        request.priority.as_str(),
+                        scope_label,
+                        path_count,
+                        started_at.elapsed().as_millis(),
+                        file_line_stats.len(),
+                        line_stats.added,
+                        line_stats.removed,
+                        line_stats.changed(),
+                        cold_start
+                    );
+                }
+                Err(err) => {
+                    error!(
+                        "git workspace line stats load failed: epoch={} snapshot_epoch={} force={} priority={} scope={} path_count={} elapsed_ms={} cold_start={} err={err:#}",
+                        epoch,
+                        snapshot_epoch,
+                        request.force,
+                        request.priority.as_str(),
+                        scope_label,
+                        path_count,
+                        started_at.elapsed().as_millis(),
+                        cold_start
+                    );
+                }
+            }
+
+            if let Some(this) = this.upgrade() {
+                this.update(cx, move |this, cx| {
+                    if epoch != this.line_stats_epoch {
+                        return;
+                    }
+
+                    this.line_stats_loading = false;
+                    this.line_stats_task = Task::ready(());
+                    if let Ok(file_line_stats) = result {
+                        match scope {
+                            LineStatsRefreshScope::Full => {
+                                this.file_line_stats = file_line_stats;
+                            }
+                            LineStatsRefreshScope::Paths(paths) => {
+                                for path in paths {
+                                    this.file_line_stats.remove(path.as_str());
+                                }
+                                this.file_line_stats.extend(file_line_stats);
+                            }
+                        }
+                        this.recompute_overall_line_stats_from_file_stats();
+                    }
+                    cx.notify();
+                    this.maybe_run_pending_line_stats_refresh(cx);
+                });
+            }
+        });
+    }
+
+    fn take_line_stats_refresh_scope(
+        &mut self,
+        request: SnapshotRefreshRequest,
+    ) -> Option<LineStatsRefreshScope> {
+        if self.files.is_empty() {
+            self.pending_dirty_paths.clear();
+            return None;
+        }
+
+        if request.priority == SnapshotRefreshPriority::Background {
+            let pending_dirty_paths = std::mem::take(&mut self.pending_dirty_paths);
+            if !pending_dirty_paths.is_empty() {
+                let dirty_paths = self
+                    .files
+                    .iter()
+                    .filter(|file| {
+                        pending_dirty_paths.iter().any(|dirty_path| {
+                            file.path == *dirty_path
+                                || file
+                                    .path
+                                    .strip_prefix(dirty_path.as_str())
+                                    .is_some_and(|suffix| suffix.starts_with('/'))
+                        })
+                    })
+                    .map(|file| file.path.clone())
+                    .collect::<BTreeSet<_>>();
+                if !dirty_paths.is_empty() {
+                    return Some(LineStatsRefreshScope::Paths(dirty_paths));
+                }
+                return None;
+            }
+        } else {
+            self.pending_dirty_paths.clear();
+        }
+
+        Some(LineStatsRefreshScope::Full)
+    }
+
+    fn sum_line_stats<I>(stats: I) -> LineStats
+    where
+        I: IntoIterator<Item = LineStats>,
+    {
+        let mut total = LineStats::default();
+        for line_stats in stats {
+            total.added = total.added.saturating_add(line_stats.added);
+            total.removed = total.removed.saturating_add(line_stats.removed);
+        }
+        total
+    }
+
+    fn recompute_overall_line_stats_from_file_stats(&mut self) {
+        self.overall_line_stats = Self::sum_line_stats(
+            self.files
+                .iter()
+                .filter_map(|file| self.file_line_stats.get(file.path.as_str()).copied()),
+        );
     }
 
     fn maybe_run_pending_snapshot_refresh(&mut self, cx: &mut Context<Self>) {
         if self.snapshot_loading {
             return;
         }
-        if !std::mem::take(&mut self.snapshot_refresh_pending_force) {
+        let Some(request) = self.pending_snapshot_refresh.take() else {
             return;
-        }
-        info!("git workspace running queued forced refresh");
-        self.request_snapshot_refresh_internal(true, cx);
+        };
+        debug!(
+            "git workspace running queued refresh: force={} priority={}",
+            request.force,
+            request.priority.as_str()
+        );
+        self.request_snapshot_refresh_internal(request, cx);
     }
 
-    pub(super) fn request_snapshot_refresh_internal(&mut self, force: bool, cx: &mut Context<Self>) {
-        self.request_snapshot_refresh_with_scope(force, cx);
+    pub(super) fn request_snapshot_refresh_internal(
+        &mut self,
+        request: SnapshotRefreshRequest,
+        cx: &mut Context<Self>,
+    ) {
+        self.request_snapshot_refresh_with_scope(request, cx);
     }
 
-    fn request_snapshot_refresh_with_scope(&mut self, force: bool, cx: &mut Context<Self>) {
+    fn request_snapshot_refresh_with_scope(
+        &mut self,
+        request: SnapshotRefreshRequest,
+        cx: &mut Context<Self>,
+    ) {
+        let request = self
+            .pending_snapshot_refresh
+            .take()
+            .map_or(request, |pending| request.merge(pending));
+
         if self.snapshot_loading {
-            if force {
-                self.snapshot_refresh_pending_force = true;
+            if self.should_preempt_active_snapshot_refresh(request) {
+                let active = self.active_snapshot_refresh_request();
+                debug!(
+                    "git workspace refresh preempted: epoch={} active_priority={} next_priority={} force={}",
+                    self.snapshot_epoch,
+                    active.priority.as_str(),
+                    request.priority.as_str(),
+                    request.force
+                );
+                self.snapshot_task = Task::ready(());
+                self.snapshot_active_request = None;
+            } else {
+                self.enqueue_snapshot_refresh(request);
+                tracing::debug!(
+                    "git workspace refresh deferred: queued refresh while epoch={} is still loading (force={} priority={})",
+                    self.snapshot_epoch,
+                    request.force,
+                    request.priority.as_str()
+                );
+                return;
             }
-            return;
         }
-        if force {
+        if request.force {
             self.auto_refresh_unmodified_streak = 0;
         }
         let cold_start = self.last_snapshot_fingerprint.is_none();
@@ -611,25 +903,26 @@ impl DiffViewer {
             .clone()
             .map(Ok)
             .unwrap_or_else(|| std::env::current_dir().context("failed to resolve current directory"));
-        let previous_fingerprint = if force {
+        let previous_fingerprint = if request.force {
             None
         } else {
             self.last_snapshot_fingerprint.clone()
         };
-        let prefer_stale_first = cold_start && !force;
+        let prefer_stale_first = cold_start && !request.force;
         let epoch = self.next_snapshot_epoch();
         self.snapshot_loading = true;
+        self.snapshot_active_request = Some(request);
         self.workflow_loading = true;
-        self.line_stats_loading = true;
         let refresh_root = self
             .project_path
             .clone()
             .or_else(|| self.repo_root.clone())
             .unwrap_or_else(|| PathBuf::from("."));
-        info!(
-            "git workspace refresh start: epoch={} force={} cold_start={} root={}",
+        debug!(
+            "git workspace refresh start: epoch={} force={} priority={} cold_start={} root={}",
             epoch,
-            force,
+            request.force,
+            request.priority.as_str(),
             cold_start,
             refresh_root.display()
         );
@@ -655,17 +948,18 @@ impl DiffViewer {
                                     });
                                 }
 
-                                let fingerprint = load_snapshot_fingerprint(&source_dir)?;
-                                if previous_fingerprint.as_ref() == Some(&fingerprint) {
-                                    return Ok(SnapshotRefreshStageA::Unchanged(fingerprint));
+                                let (fingerprint, workflow) = load_workflow_snapshot_if_changed(
+                                    &source_dir,
+                                    previous_fingerprint.as_ref(),
+                                )?;
+                                match workflow {
+                                    Some(workflow) => Ok(SnapshotRefreshStageA::Loaded {
+                                        fingerprint,
+                                        workflow: Box::new(workflow),
+                                        loaded_without_refresh: false,
+                                    }),
+                                    None => Ok(SnapshotRefreshStageA::Unchanged(fingerprint)),
                                 }
-
-                                let workflow = load_workflow_snapshot(&source_dir)?;
-                                Ok(SnapshotRefreshStageA::Loaded {
-                                    fingerprint,
-                                    workflow: Box::new(workflow),
-                                    loaded_without_refresh: false,
-                                })
                             };
 
                             match load_once() {
@@ -688,21 +982,21 @@ impl DiffViewer {
                                             });
                                         }
 
-                                        let fingerprint =
-                                            load_snapshot_fingerprint_without_refresh(&source_dir)?;
-                                        if previous_fingerprint.as_ref() == Some(&fingerprint) {
-                                            return Ok(SnapshotRefreshStageA::Unchanged(
+                                        let (fingerprint, workflow) =
+                                            load_workflow_snapshot_if_changed_without_refresh(
+                                                &source_dir,
+                                                previous_fingerprint.as_ref(),
+                                            )?;
+                                        match workflow {
+                                            Some(workflow) => Ok(SnapshotRefreshStageA::Loaded {
                                                 fingerprint,
-                                            ));
+                                                workflow: Box::new(workflow),
+                                                loaded_without_refresh: true,
+                                            }),
+                                            None => {
+                                                Ok(SnapshotRefreshStageA::Unchanged(fingerprint))
+                                            }
                                         }
-
-                                        let workflow =
-                                            load_workflow_snapshot_without_refresh(&source_dir)?;
-                                        Ok(SnapshotRefreshStageA::Loaded {
-                                            fingerprint,
-                                            workflow: Box::new(workflow),
-                                            loaded_without_refresh: true,
-                                        })
                                     };
 
                                     match fallback() {
@@ -732,14 +1026,14 @@ impl DiffViewer {
                                 return;
                             }
 
-                            this.snapshot_loading = false;
+                            this.finish_snapshot_refresh_loading();
                             this.workflow_loading = false;
-                            this.line_stats_loading = false;
                             let elapsed = started_at.elapsed();
-                            info!(
-                                "git workspace refresh skipped: epoch={} force={} cold_start={} elapsed_ms={} (no repo changes)",
+                            debug!(
+                                "git workspace refresh skipped: epoch={} force={} priority={} cold_start={} elapsed_ms={} (no repo changes)",
                                 epoch,
-                                force,
+                                request.force,
+                                request.priority.as_str(),
                                 cold_start,
                                 elapsed.as_millis()
                             );
@@ -759,14 +1053,14 @@ impl DiffViewer {
                                 return;
                             }
 
-                            this.snapshot_loading = false;
+                            this.finish_snapshot_refresh_loading();
                             this.workflow_loading = false;
-                            this.line_stats_loading = false;
                             let elapsed = started_at.elapsed();
                             error!(
-                                "git workspace refresh failed: epoch={} force={} cold_start={} elapsed_ms={} err={err:#}",
+                                "git workspace refresh failed: epoch={} force={} priority={} cold_start={} elapsed_ms={} err={err:#}",
                                 epoch,
-                                force,
+                                request.force,
+                                request.priority.as_str(),
                                 cold_start,
                                 elapsed.as_millis()
                             );
@@ -783,10 +1077,11 @@ impl DiffViewer {
             let workflow_revision_count = workflow_snapshot.bookmark_revisions.len();
             let workflow_ready_elapsed = started_at.elapsed();
             let should_run_cold_start_reconcile = cold_start && loaded_without_refresh;
-            info!(
-                "git workspace workflow ready: epoch={} force={} elapsed_ms={} files={} branches={} bookmark_revisions={} cold_start={}",
+            debug!(
+                "git workspace workflow ready: epoch={} force={} priority={} elapsed_ms={} files={} branches={} bookmark_revisions={} cold_start={}",
                 epoch,
-                force,
+                request.force,
+                request.priority.as_str(),
                 workflow_ready_elapsed.as_millis(),
                 workflow_file_count,
                 workflow_branch_count,
@@ -795,6 +1090,7 @@ impl DiffViewer {
             );
 
             let repo_root = workflow_snapshot.root.clone();
+            let line_stats_repo_root = repo_root.clone();
             if let Some(this) = this.upgrade() {
                 this.update(cx, move |this, cx| {
                     if epoch != this.snapshot_epoch {
@@ -804,32 +1100,37 @@ impl DiffViewer {
                     this.last_snapshot_fingerprint = Some(fingerprint);
                     this.workflow_loading = false;
                     this.apply_workflow_snapshot(*workflow_snapshot, true, cx);
+                    if let Some(line_stats_scope) = this.take_line_stats_refresh_scope(request) {
+                        this.schedule_line_stats_refresh(
+                            line_stats_repo_root.clone(),
+                            request,
+                            line_stats_scope,
+                            epoch,
+                            cold_start,
+                            cx,
+                        );
+                    } else {
+                        this.cancel_line_stats_refresh();
+                    }
                 });
             } else {
                 return;
             }
 
-            let line_stats_repo_root = repo_root.clone();
             let reconcile_repo_root = repo_root;
-            // Stage B: load aggregate line stats after workflow data is visible.
-            let line_stats_task = cx.background_executor().spawn(async move {
-                let stage_started_at = Instant::now();
-                let result = load_repo_line_stats_without_refresh(&line_stats_repo_root);
-                (stage_started_at.elapsed(), result)
-            });
-
             if let Some(this) = this.upgrade() {
                 this.update(cx, move |this, cx| {
                     if epoch != this.snapshot_epoch {
                         return;
                     }
 
-                    this.snapshot_loading = false;
+                    this.finish_snapshot_refresh_loading();
                     let elapsed = started_at.elapsed();
-                    info!(
-                        "git workspace refresh complete: epoch={} force={} total_elapsed_ms={} cold_start={} line_stats_pending={}",
+                    debug!(
+                        "git workspace refresh complete: epoch={} force={} priority={} total_elapsed_ms={} cold_start={} line_stats_pending={}",
                         epoch,
-                        force,
+                        request.force,
+                        request.priority.as_str(),
                         elapsed.as_millis(),
                         cold_start,
                         this.line_stats_loading
@@ -840,47 +1141,6 @@ impl DiffViewer {
                 });
             } else {
                 return;
-            }
-
-            let (line_stats_elapsed, line_stats_result) = line_stats_task.await;
-
-            match &line_stats_result {
-                Ok(line_stats) => {
-                    info!(
-                        "git workspace line stats ready: epoch={} force={} elapsed_ms={} added={} removed={} changed={} cold_start={}",
-                        epoch,
-                        force,
-                        line_stats_elapsed.as_millis(),
-                        line_stats.added,
-                        line_stats.removed,
-                        line_stats.changed(),
-                        cold_start
-                    );
-                }
-                Err(err) => {
-                    error!(
-                        "git workspace line stats load failed: epoch={} force={} elapsed_ms={} cold_start={} err={err:#}",
-                        epoch,
-                        force,
-                        line_stats_elapsed.as_millis(),
-                        cold_start
-                    );
-                }
-            }
-
-            if let Some(this) = this.upgrade() {
-                this.update(cx, move |this, cx| {
-                    if epoch != this.snapshot_epoch {
-                        return;
-                    }
-
-                    this.line_stats_loading = false;
-                    if let Ok(line_stats) = line_stats_result {
-                        this.overall_line_stats = line_stats;
-                    }
-
-                    cx.notify();
-                });
             }
 
             if !should_run_cold_start_reconcile {
@@ -895,19 +1155,21 @@ impl DiffViewer {
 
             match &reconcile_result {
                 Ok(_) => {
-                    info!(
-                        "git workspace cold-start reconcile probe complete: epoch={} force={} elapsed_ms={} cold_start={}",
+                    debug!(
+                        "git workspace cold-start reconcile probe complete: epoch={} force={} priority={} elapsed_ms={} cold_start={}",
                         epoch,
-                        force,
+                        request.force,
+                        request.priority.as_str(),
                         reconcile_started_at.elapsed().as_millis(),
                         cold_start
                     );
                 }
                 Err(err) => {
                     warn!(
-                        "git workspace cold-start reconcile probe failed: epoch={} force={} elapsed_ms={} cold_start={} err={err:#}",
+                        "git workspace cold-start reconcile probe failed: epoch={} force={} priority={} elapsed_ms={} cold_start={} err={err:#}",
                         epoch,
-                        force,
+                        request.force,
+                        request.priority.as_str(),
                         reconcile_started_at.elapsed().as_millis(),
                         cold_start
                     );
@@ -927,13 +1189,17 @@ impl DiffViewer {
                         return;
                     }
 
-                    info!(
-                        "git workspace cold-start reconcile detected drift: epoch={} force={} cold_start={} -> scheduling foreground refresh",
+                    debug!(
+                        "git workspace cold-start reconcile detected drift: epoch={} force={} priority={} cold_start={} -> scheduling foreground refresh",
                         epoch,
-                        force,
+                        request.force,
+                        request.priority.as_str(),
                         cold_start
                     );
-                    this.request_snapshot_refresh_internal(false, cx);
+                    this.request_snapshot_refresh_internal(
+                        SnapshotRefreshRequest::user(false),
+                        cx,
+                    );
                 });
             }
         });
@@ -981,7 +1247,10 @@ impl DiffViewer {
                     this.set_last_project_path(Some(selected_path));
                     this.git_status_message = None;
                     this.start_repo_watch(cx);
-                    this.request_snapshot_refresh_internal(true, cx);
+                    this.request_snapshot_refresh_internal(
+                        SnapshotRefreshRequest::user(true),
+                        cx,
+                    );
                     cx.notify();
                 });
             }
@@ -1008,7 +1277,7 @@ impl DiffViewer {
             last_commit_subject,
         } = snapshot;
 
-        info!("loaded workflow snapshot from {}", root.display());
+        debug!("loaded workflow snapshot from {}", root.display());
         let root_changed = self.repo_root.as_ref() != Some(&root);
         let previous_selected_path = self.selected_path.clone();
         let previous_selected_status = self.selected_status;
@@ -1033,6 +1302,9 @@ impl DiffViewer {
             .iter()
             .map(|file| (file.path.clone(), file.status))
             .collect();
+        self.file_line_stats
+            .retain(|path, _| self.files.iter().any(|file| file.path == *path));
+        self.recompute_overall_line_stats_from_file_stats();
         self.commit_excluded_files
             .retain(|path| self.files.iter().any(|file| file.path == *path));
         self.last_commit_subject = last_commit_subject;
@@ -1113,10 +1385,8 @@ impl DiffViewer {
     fn apply_snapshot_error(&mut self, err: anyhow::Error, cx: &mut Context<Self>) {
         let missing_repository = Self::is_missing_repository_error(&err);
         let error_message = Self::format_error_chain(&err);
-        self.snapshot_loading = false;
+        self.finish_snapshot_refresh_loading();
         self.workflow_loading = false;
-        self.line_stats_loading = false;
-        self.snapshot_refresh_pending_force = false;
 
         if !missing_repository {
             self.repo_discovery_failed = false;
@@ -1125,7 +1395,9 @@ impl DiffViewer {
             return;
         }
 
+        self.cancel_line_stats_refresh();
         self.cancel_patch_reload();
+        self.pending_dirty_paths.clear();
         self.last_snapshot_fingerprint = None;
         self.repo_root = None;
         self.branch_name = "unknown".to_string();
@@ -1256,6 +1528,7 @@ impl DiffViewer {
             self.sync_diff_list_state();
             self.file_row_ranges.clear();
             self.file_line_stats.clear();
+            self.recompute_overall_line_stats_from_file_stats();
             self.recompute_diff_layout();
             return;
         };
@@ -1274,6 +1547,7 @@ impl DiffViewer {
             self.sync_diff_list_state();
             self.file_row_ranges.clear();
             self.file_line_stats.clear();
+            self.recompute_overall_line_stats_from_file_stats();
             self.recompute_diff_layout();
             self.reconcile_comments_with_loaded_diff();
             cx.notify();
@@ -1312,7 +1586,6 @@ impl DiffViewer {
             self.diff_visible_file_header_lookup.clear();
             self.diff_visible_hunk_header_lookup.clear();
             self.file_row_ranges.clear();
-            self.file_line_stats.clear();
             self.selection_anchor_row = None;
             self.selection_head_row = None;
             self.drag_selecting_rows = false;
@@ -1321,141 +1594,82 @@ impl DiffViewer {
             cx.notify();
         }
 
+        enum PatchProgressUpdate {
+            Loaded {
+                batch_ix: Option<usize>,
+                total_batches: usize,
+                elapsed: Duration,
+                stream: DiffStream,
+                pending_files: usize,
+                finished: bool,
+            },
+            Error {
+                batch_ix: Option<usize>,
+                total_batches: usize,
+                elapsed: Duration,
+                err: anyhow::Error,
+            },
+        }
+
         self.patch_task = cx.spawn(async move |this, cx| {
-            if initial_files.is_empty() {
-                let stream = build_diff_stream_from_patch_map(
-                    &files,
-                    &collapsed_files,
-                    &previous_file_line_stats,
-                    &BTreeMap::new(),
-                    &BTreeSet::new(),
-                );
-                if let Some(this) = this.upgrade() {
-                    this.update(cx, |this, cx| {
-                        if epoch != this.patch_epoch {
-                            return;
-                        }
-                        this.patch_loading = false;
-                        this.apply_loaded_diff_stream(stream);
-                        cx.notify();
-                    });
-                }
-                return;
-            }
-
-            let mut loaded_patches = BTreeMap::new();
-            let mut loading_paths = remaining_files
-                .iter()
-                .map(|file| file.path.clone())
-                .collect::<BTreeSet<_>>();
-
-            let initial_stage_started_at = Instant::now();
-            let initial_stage_result = cx
-                .background_executor()
-                .spawn({
-                    let repo_root = repo_root.clone();
-                    let files = files.clone();
-                    let collapsed_files = collapsed_files.clone();
-                    let previous_file_line_stats = previous_file_line_stats.clone();
-                    let initial_files = initial_files.clone();
-                    let stage_loaded_patches = loaded_patches;
-                    let stage_loading_paths = loading_paths;
-                    async move {
-                        let mut loaded_patches = stage_loaded_patches;
-                        let mut loading_paths = stage_loading_paths;
-                        let stage_patches = load_patches_for_files(&repo_root, &initial_files)?;
-                        loaded_patches.extend(stage_patches);
-                        for file in &initial_files {
-                            loading_paths.remove(file.path.as_str());
-                        }
+            let (progress_tx, mut progress_rx) = mpsc::unbounded::<PatchProgressUpdate>();
+            let patch_loader_task = cx.background_executor().spawn({
+                let repo_root = repo_root.clone();
+                let files = files.clone();
+                let collapsed_files = collapsed_files.clone();
+                let previous_file_line_stats = previous_file_line_stats.clone();
+                let initial_files = initial_files.clone();
+                let remaining_files = remaining_files.clone();
+                async move {
+                    let total_batches = remaining_files.len().div_ceil(DIFF_PROGRESSIVE_BATCH_FILES);
+                    if initial_files.is_empty() {
                         let stream = build_diff_stream_from_patch_map(
                             &files,
                             &collapsed_files,
                             &previous_file_line_stats,
-                            &loaded_patches,
-                            &loading_paths,
+                            &BTreeMap::new(),
+                            &BTreeSet::new(),
                         );
-                        Ok::<_, anyhow::Error>((loaded_patches, loading_paths, stream))
-                    }
-                })
-                .await;
-
-            let (next_loaded_patches, next_loading_paths, initial_stream) = match initial_stage_result {
-                Ok(result) => result,
-                Err(err) => {
-                    if let Some(this) = this.upgrade() {
-                        this.update(cx, |this, cx| {
-                            if epoch != this.patch_epoch {
-                                return;
-                            }
-
-                            this.patch_loading = false;
-                            let elapsed = initial_stage_started_at.elapsed();
-                            error!("initial diff stage failed after {:?}: {err:#}", elapsed);
-                            this.apply_diff_stream_error(err);
-                            cx.notify();
-                        });
-                    }
-                    return;
-                }
-            };
-            loaded_patches = next_loaded_patches;
-            loading_paths = next_loading_paths;
-
-            if let Some(this) = this.upgrade() {
-                this.update(cx, |this, cx| {
-                    if epoch != this.patch_epoch {
+                        progress_tx
+                            .unbounded_send(PatchProgressUpdate::Loaded {
+                                batch_ix: None,
+                                total_batches,
+                                elapsed: Duration::ZERO,
+                                stream,
+                                pending_files: 0,
+                                finished: true,
+                            })
+                            .ok();
                         return;
                     }
 
-                    let elapsed = initial_stage_started_at.elapsed();
-                    info!(
-                        "initial diff stream loaded in {:?} (rows={}, files={})",
-                        elapsed,
-                        initial_stream.rows.len(),
-                        initial_stream.file_ranges.len()
-                    );
-                    this.apply_loaded_diff_stream(initial_stream);
-                    cx.notify();
-                });
-            }
-
-            if remaining_files.is_empty() {
-                if let Some(this) = this.upgrade() {
-                    this.update(cx, |this, cx| {
-                        if epoch != this.patch_epoch {
+                    let session_started_at = Instant::now();
+                    let session = match open_patch_session(&repo_root) {
+                        Ok(session) => session,
+                        Err(err) => {
+                            progress_tx
+                                .unbounded_send(PatchProgressUpdate::Error {
+                                    batch_ix: None,
+                                    total_batches,
+                                    elapsed: session_started_at.elapsed(),
+                                    err,
+                                })
+                                .ok();
                             return;
                         }
-                        this.patch_loading = false;
-                        this.reconcile_comments_with_loaded_diff();
-                        cx.notify();
-                    });
-                }
-                return;
-            }
+                    };
 
-            let total_batches = remaining_files.len().div_ceil(DIFF_PROGRESSIVE_BATCH_FILES);
-            for (batch_ix, batch) in remaining_files
-                .chunks(DIFF_PROGRESSIVE_BATCH_FILES)
-                .enumerate()
-            {
-                let stage_started_at = Instant::now();
-                let stage_files = batch.to_vec();
-                let stage_result = cx
-                    .background_executor()
-                    .spawn({
-                        let repo_root = repo_root.clone();
-                        let files = files.clone();
-                        let collapsed_files = collapsed_files.clone();
-                        let previous_file_line_stats = previous_file_line_stats.clone();
-                        let stage_loaded_patches = loaded_patches;
-                        let stage_loading_paths = loading_paths;
-                        async move {
-                            let mut loaded_patches = stage_loaded_patches;
-                            let mut loading_paths = stage_loading_paths;
-                            let stage_patches = load_patches_for_files(&repo_root, &stage_files)?;
+                    let mut loaded_patches = BTreeMap::new();
+                    let mut loading_paths = remaining_files
+                        .iter()
+                        .map(|file| file.path.clone())
+                        .collect::<BTreeSet<_>>();
+
+                    let initial_stage_started_at = Instant::now();
+                    match load_patches_for_files_from_session(&session, &initial_files) {
+                        Ok(stage_patches) => {
                             loaded_patches.extend(stage_patches);
-                            for file in &stage_files {
+                            for file in &initial_files {
                                 loading_paths.remove(file.path.as_str());
                             }
                             let stream = build_diff_stream_from_patch_map(
@@ -1465,61 +1679,149 @@ impl DiffViewer {
                                 &loaded_patches,
                                 &loading_paths,
                             );
-                            Ok::<_, anyhow::Error>((loaded_patches, loading_paths, stream))
-                        }
-                    })
-                    .await;
-
-                let (next_loaded_patches, next_loading_paths, stream) = match stage_result {
-                    Ok(result) => result,
-                    Err(err) => {
-                        if let Some(this) = this.upgrade() {
-                            this.update(cx, |this, cx| {
-                                if epoch != this.patch_epoch {
-                                    return;
-                                }
-
-                                this.patch_loading = false;
-                                let elapsed = stage_started_at.elapsed();
-                                error!(
-                                    "progressive diff batch {}/{} failed after {:?}: {err:#}",
-                                    batch_ix.saturating_add(1),
+                            progress_tx
+                                .unbounded_send(PatchProgressUpdate::Loaded {
+                                    batch_ix: None,
                                     total_batches,
-                                    elapsed
-                                );
-                                this.apply_diff_stream_error(err);
-                                cx.notify();
-                            });
+                                    elapsed: initial_stage_started_at.elapsed(),
+                                    stream,
+                                    pending_files: loading_paths.len(),
+                                    finished: remaining_files.is_empty(),
+                                })
+                                .ok();
                         }
-                        return;
-                    }
-                };
-                loaded_patches = next_loaded_patches;
-                loading_paths = next_loading_paths;
-
-                if let Some(this) = this.upgrade() {
-                    this.update(cx, |this, cx| {
-                        if epoch != this.patch_epoch {
+                        Err(err) => {
+                            progress_tx
+                                .unbounded_send(PatchProgressUpdate::Error {
+                                    batch_ix: None,
+                                    total_batches,
+                                    elapsed: initial_stage_started_at.elapsed(),
+                                    err,
+                                })
+                                .ok();
                             return;
                         }
+                    }
 
-                        let elapsed = stage_started_at.elapsed();
-                        info!(
-                            "progressive diff batch {}/{} loaded in {:?} (rows={}, pending_files={})",
-                            batch_ix.saturating_add(1),
+                    for (batch_ix, batch) in remaining_files
+                        .chunks(DIFF_PROGRESSIVE_BATCH_FILES)
+                        .enumerate()
+                    {
+                        let stage_started_at = Instant::now();
+                        let stage_files = batch.to_vec();
+                        match load_patches_for_files_from_session(&session, &stage_files) {
+                            Ok(stage_patches) => {
+                                loaded_patches.extend(stage_patches);
+                                for file in &stage_files {
+                                    loading_paths.remove(file.path.as_str());
+                                }
+                                let stream = build_diff_stream_from_patch_map(
+                                    &files,
+                                    &collapsed_files,
+                                    &previous_file_line_stats,
+                                    &loaded_patches,
+                                    &loading_paths,
+                                );
+                                progress_tx
+                                    .unbounded_send(PatchProgressUpdate::Loaded {
+                                        batch_ix: Some(batch_ix),
+                                        total_batches,
+                                        elapsed: stage_started_at.elapsed(),
+                                        stream,
+                                        pending_files: loading_paths.len(),
+                                        finished: batch_ix.saturating_add(1) == total_batches,
+                                    })
+                                    .ok();
+                            }
+                            Err(err) => {
+                                progress_tx
+                                    .unbounded_send(PatchProgressUpdate::Error {
+                                        batch_ix: Some(batch_ix),
+                                        total_batches,
+                                        elapsed: stage_started_at.elapsed(),
+                                        err,
+                                    })
+                                    .ok();
+                                return;
+                            }
+                        }
+                    }
+                }
+            });
+
+            while let Some(update) = progress_rx.next().await {
+                let Some(this) = this.upgrade() else {
+                    break;
+                };
+                this.update(cx, move |this, cx| {
+                    if epoch != this.patch_epoch {
+                        return;
+                    }
+
+                    match update {
+                        PatchProgressUpdate::Loaded {
+                            batch_ix,
                             total_batches,
                             elapsed,
-                            stream.rows.len(),
-                            loading_paths.len()
-                        );
-                        if batch_ix.saturating_add(1) == total_batches {
-                            this.patch_loading = false;
+                            stream,
+                            pending_files,
+                            finished,
+                        } => {
+                            match batch_ix {
+                                Some(batch_ix) => {
+                                    debug!(
+                                        "progressive diff batch {}/{} loaded in {:?} (rows={}, pending_files={})",
+                                        batch_ix.saturating_add(1),
+                                        total_batches,
+                                        elapsed,
+                                        stream.rows.len(),
+                                        pending_files
+                                    );
+                                }
+                                None => {
+                                    debug!(
+                                        "initial diff stream loaded in {:?} (rows={}, files={})",
+                                        elapsed,
+                                        stream.rows.len(),
+                                        stream.file_ranges.len()
+                                    );
+                                }
+                            }
+
+                            if finished {
+                                this.patch_loading = false;
+                            }
+                            this.apply_loaded_diff_stream(stream);
+                            cx.notify();
                         }
-                        this.apply_loaded_diff_stream(stream);
-                        cx.notify();
-                    });
-                }
+                        PatchProgressUpdate::Error {
+                            batch_ix,
+                            total_batches,
+                            elapsed,
+                            err,
+                        } => {
+                            this.patch_loading = false;
+                            match batch_ix {
+                                Some(batch_ix) => {
+                                    error!(
+                                        "progressive diff batch {}/{} failed after {:?}: {err:#}",
+                                        batch_ix.saturating_add(1),
+                                        total_batches,
+                                        elapsed
+                                    );
+                                }
+                                None => {
+                                    error!("initial diff stage failed after {:?}: {err:#}", elapsed);
+                                }
+                            }
+                            this.apply_diff_stream_error(err);
+                            cx.notify();
+                        }
+                    }
+                });
             }
+
+            patch_loader_task.await;
         });
     }
 
@@ -1551,6 +1853,9 @@ impl DiffViewer {
         self.sync_diff_list_state();
         self.file_row_ranges = stream.file_ranges;
         self.file_line_stats = stream.file_line_stats;
+        if !self.patch_loading || !self.line_stats_loading {
+            self.recompute_overall_line_stats_from_file_stats();
+        }
         self.recompute_diff_layout();
 
         if self.workspace_view_mode == WorkspaceViewMode::Files {
@@ -1599,7 +1904,6 @@ impl DiffViewer {
         self.drag_selecting_rows = false;
         self.sync_diff_list_state();
         self.file_row_ranges.clear();
-        self.file_line_stats.clear();
         self.recompute_diff_layout();
         self.diff_visible_file_header_lookup.clear();
         self.diff_visible_hunk_header_lookup.clear();

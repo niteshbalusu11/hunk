@@ -613,7 +613,7 @@ impl DiffViewer {
     }
 
     fn refresh_after_repo_tree_fs_mutation(&mut self, cx: &mut Context<Self>) {
-        self.request_snapshot_refresh_internal(true, cx);
+        self.request_snapshot_refresh_internal(SnapshotRefreshRequest::user(true), cx);
         self.request_repo_tree_reload(cx);
     }
 

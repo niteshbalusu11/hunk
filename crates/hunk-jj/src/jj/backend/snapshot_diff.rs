@@ -1,6 +1,11 @@
 fn refresh_working_copy_snapshot(context: &mut RepoContext) -> Result<()> {
+    let started_at = Instant::now();
+    let import_head_started_at = Instant::now();
     import_git_head_for_snapshot(context)?;
+    let import_head_elapsed = import_head_started_at.elapsed();
+    let ensure_bookmark_started_at = Instant::now();
     ensure_local_bookmark_for_git_head(context)?;
+    let ensure_bookmark_elapsed = ensure_bookmark_started_at.elapsed();
 
     let workspace_name = context.workspace.workspace_name().to_owned();
     let wc_commit =
@@ -20,11 +25,15 @@ fn refresh_working_copy_snapshot(context: &mut RepoContext) -> Result<()> {
         max_new_file_size: u64::MAX,
     };
 
+    let snapshot_started_at = Instant::now();
     let (new_tree, _) = block_on(locked_workspace.locked_wc().snapshot(&snapshot_options))
         .context("failed to snapshot jj working copy")?;
+    let snapshot_elapsed = snapshot_started_at.elapsed();
 
     let mut repo = context.repo.clone();
-    if new_tree.tree_ids_and_labels() != old_tree.tree_ids_and_labels() {
+    let tree_changed = new_tree.tree_ids_and_labels() != old_tree.tree_ids_and_labels();
+    let snapshot_commit_elapsed = if tree_changed {
+        let snapshot_commit_started_at = Instant::now();
         let mut tx = repo.start_transaction();
         let rewritten_wc = tx
             .repo_mut()
@@ -44,15 +53,63 @@ fn refresh_working_copy_snapshot(context: &mut RepoContext) -> Result<()> {
         repo = tx
             .commit("snapshot working copy")
             .context("failed to finalize working-copy snapshot")?;
-    }
+        Some(snapshot_commit_started_at.elapsed())
+    } else {
+        None
+    };
 
+    let finish_started_at = Instant::now();
     locked_workspace
         .finish(repo.op_id().clone())
         .context("failed to persist jj working-copy state")?;
+    let finish_elapsed = finish_started_at.elapsed();
     context.repo = repo;
 
+    let import_refs_started_at = Instant::now();
     import_git_refs_for_snapshot(context)?;
+    let import_refs_elapsed = import_refs_started_at.elapsed();
+    debug!(
+        "jj refresh working-copy snapshot complete: root={} import_head_ms={} ensure_bookmark_ms={} snapshot_ms={} tree_changed={} snapshot_commit_ms={} finish_ms={} import_refs_ms={} total_ms={}",
+        context.root.display(),
+        import_head_elapsed.as_millis(),
+        ensure_bookmark_elapsed.as_millis(),
+        snapshot_elapsed.as_millis(),
+        tree_changed,
+        snapshot_commit_elapsed.map_or(0, |elapsed| elapsed.as_millis()),
+        finish_elapsed.as_millis(),
+        import_refs_elapsed.as_millis(),
+        started_at.elapsed().as_millis()
+    );
     Ok(())
+}
+
+fn working_copy_trees(context: &RepoContext) -> Result<(MergedTree, MergedTree)> {
+    let wc_commit = current_wc_commit(context)?;
+    let base_tree = wc_commit.parent_tree(context.repo.as_ref())?;
+    let current_tree = wc_commit.tree();
+    Ok((base_tree, current_tree))
+}
+
+pub(super) fn has_changed_files_from_context(context: &RepoContext) -> Result<bool> {
+    let (base_tree, current_tree) = working_copy_trees(context)?;
+    if base_tree.tree_ids_and_labels() == current_tree.tree_ids_and_labels() {
+        return Ok(false);
+    }
+
+    let nested_repo_roots = nested_repo_roots_for_context(context)?;
+    if nested_repo_roots.is_empty() {
+        return Ok(true);
+    }
+
+    for entry in block_on_stream(base_tree.diff_stream(&current_tree, &EverythingMatcher)) {
+        let path = normalize_path(entry.path.as_internal_file_string());
+        if path.is_empty() || path_is_within_nested_repo(path.as_str(), nested_repo_roots) {
+            continue;
+        }
+        return Ok(true);
+    }
+
+    Ok(false)
 }
 
 fn import_git_head_for_snapshot(context: &mut RepoContext) -> Result<()> {
@@ -189,9 +246,10 @@ fn persist_working_copy_state(
 }
 
 pub(super) fn load_changed_files_from_context(context: &RepoContext) -> Result<Vec<ChangedFile>> {
-    let wc_commit = current_wc_commit(context)?;
-    let base_tree = wc_commit.parent_tree(context.repo.as_ref())?;
-    let current_tree = wc_commit.tree();
+    let (base_tree, current_tree) = working_copy_trees(context)?;
+    if base_tree.tree_ids_and_labels() == current_tree.tree_ids_and_labels() {
+        return Ok(Vec::new());
+    }
     let nested_repo_roots = nested_repo_roots_for_context(context)?;
 
     let mut file_map = BTreeMap::<String, ChangedFile>::new();
@@ -479,12 +537,14 @@ pub(super) fn last_commit_subject_from_context(context: &RepoContext) -> Result<
 }
 
 pub(super) fn repo_line_stats_from_context(context: &RepoContext) -> Result<LineStats> {
+    if !has_changed_files_from_context(context)? {
+        return Ok(LineStats::default());
+    }
+
     let materialize_options = conflict_materialize_options(context);
     let nested_repo_roots = nested_repo_roots_for_context(context)?;
     let mut stats = LineStats::default();
-    let wc_commit = current_wc_commit(context)?;
-    let base_tree = wc_commit.parent_tree(context.repo.as_ref())?;
-    let current_tree = wc_commit.tree();
+    let (base_tree, current_tree) = working_copy_trees(context)?;
     let copy_records = CopyRecords::default();
     let stream = materialized_diff_stream(
         context.repo.store().as_ref(),
@@ -504,12 +564,91 @@ pub(super) fn repo_line_stats_from_context(context: &RepoContext) -> Result<Line
     Ok(stats)
 }
 
+pub(super) fn repo_file_line_stats_from_context(
+    context: &RepoContext,
+) -> Result<BTreeMap<String, LineStats>> {
+    if !has_changed_files_from_context(context)? {
+        return Ok(BTreeMap::new());
+    }
+
+    let materialize_options = conflict_materialize_options(context);
+    let nested_repo_roots = nested_repo_roots_for_context(context)?;
+    let mut stats_by_path = BTreeMap::new();
+    let (base_tree, current_tree) = working_copy_trees(context)?;
+    let copy_records = CopyRecords::default();
+    let stream = materialized_diff_stream(
+        context.repo.store().as_ref(),
+        base_tree.diff_stream_with_copies(&current_tree, &EverythingMatcher, &copy_records),
+        Diff::new(base_tree.labels(), current_tree.labels()),
+    );
+
+    for entry in block_on_stream(stream) {
+        if materialized_entry_within_nested_repo(&entry, nested_repo_roots) {
+            continue;
+        }
+
+        let path = materialized_entry_display_path(&entry);
+        if path.is_empty() {
+            continue;
+        }
+
+        let entry_stats = line_stats_for_entry(entry, &materialize_options)?;
+        stats_by_path
+            .entry(path)
+            .and_modify(|stats: &mut LineStats| {
+                stats.added = stats.added.saturating_add(entry_stats.added);
+                stats.removed = stats.removed.saturating_add(entry_stats.removed);
+            })
+            .or_insert(entry_stats);
+    }
+
+    Ok(stats_by_path)
+}
+
+pub(super) fn repo_file_line_stats_for_paths_from_context(
+    context: &RepoContext,
+    paths: &BTreeSet<String>,
+) -> Result<BTreeMap<String, LineStats>> {
+    if paths.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    if !has_changed_files_from_context(context)? {
+        return Ok(BTreeMap::new());
+    }
+
+    let materialize_options = conflict_materialize_options(context);
+    let nested_repo_roots = nested_repo_roots_for_context(context)?;
+    let mut stats_by_path = BTreeMap::new();
+
+    for entry in collect_materialized_diff_entries_for_paths(context, paths)? {
+        if materialized_entry_within_nested_repo(&entry, nested_repo_roots) {
+            continue;
+        }
+
+        let path = materialized_entry_display_path(&entry);
+        if path.is_empty() || !paths.contains(path.as_str()) {
+            continue;
+        }
+
+        let entry_stats = line_stats_for_entry(entry, &materialize_options)?;
+        stats_by_path
+            .entry(path)
+            .and_modify(|stats: &mut LineStats| {
+                stats.added = stats.added.saturating_add(entry_stats.added);
+                stats.removed = stats.removed.saturating_add(entry_stats.removed);
+            })
+            .or_insert(entry_stats);
+    }
+
+    Ok(stats_by_path)
+}
+
 fn nested_repo_roots_for_context(context: &RepoContext) -> Result<&BTreeSet<String>> {
     if let Some(cached) = context.nested_repo_roots_cache.get() {
         return Ok(cached);
     }
 
-    let roots = nested_repo_roots_from_fs(&context.root)?;
+    let roots = cached_nested_repo_roots_from_fs(&context.root)?;
     let _ = context.nested_repo_roots_cache.set(roots);
     context
         .nested_repo_roots_cache
@@ -750,6 +889,15 @@ fn path_is_within_nested_repo(path: &str, nested_repo_roots: &BTreeSet<String>) 
         path.strip_prefix(nested_root.as_str())
             .is_some_and(|suffix| suffix.starts_with('/'))
     })
+}
+
+fn materialized_entry_display_path(entry: &MaterializedTreeDiffEntry) -> String {
+    let target = normalize_path(entry.path.target().as_internal_file_string());
+    if !target.is_empty() {
+        return target;
+    }
+
+    normalize_path(entry.path.source().as_internal_file_string())
 }
 
 fn line_stats_from_hunks(hunks: &[UnifiedDiffHunk<'_>]) -> LineStats {

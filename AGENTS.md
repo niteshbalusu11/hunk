@@ -18,5 +18,3 @@ Hunk is a fast diff viewer that is extremely simple written in Rust.
 - GPUI text https://gpui-ce.github.io/examples/text/
 - GPUI shadow https://gpui-ce.github.io/examples/shadow/
 - GPUI paths bench https://gpui-ce.github.io/examples/paths-bench/
-
-Use GPUI Skills whenever needed

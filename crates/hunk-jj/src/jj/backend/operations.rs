@@ -1,19 +1,24 @@
 pub(super) fn commit_working_copy_changes(context: &mut RepoContext, message: &str) -> Result<()> {
+    let started_at = Instant::now();
     let workspace_name = context.workspace.workspace_name().to_owned();
     let wc_commit = current_wc_commit(context)?;
 
     let mut tx = context.repo.start_transaction();
+    let rewrite_started_at = Instant::now();
     let committed = tx
         .repo_mut()
         .rewrite_commit(&wc_commit)
         .set_description(message)
         .write()
         .context("failed to create committed revision")?;
+    let rewrite_elapsed = rewrite_started_at.elapsed();
+    let new_wc_started_at = Instant::now();
     let new_wc = tx
         .repo_mut()
         .new_commit(vec![committed.id().clone()], committed.tree())
         .write()
         .context("failed to create next working-copy revision")?;
+    let new_wc_elapsed = new_wc_started_at.elapsed();
     tx.repo_mut()
         .set_wc_commit(workspace_name.clone(), new_wc.id().clone())
         .context("failed to update working-copy commit")?;
@@ -21,10 +26,22 @@ pub(super) fn commit_working_copy_changes(context: &mut RepoContext, message: &s
         .rebase_descendants()
         .context("failed to rebase descendants after commit")?;
 
+    let tx_commit_started_at = Instant::now();
     let repo = tx
         .commit(format!("commit: {message}"))
         .context("failed to finalize commit")?;
-    persist_working_copy_state(context, repo, "after commit")
+    let tx_commit_elapsed = tx_commit_started_at.elapsed();
+    let persist_started_at = Instant::now();
+    persist_working_copy_state(context, repo, "after commit")?;
+    debug!(
+        "jj commit working-copy changes complete: rewrite_ms={} new_wc_ms={} tx_commit_ms={} persist_ms={} total_ms={}",
+        rewrite_elapsed.as_millis(),
+        new_wc_elapsed.as_millis(),
+        tx_commit_elapsed.as_millis(),
+        persist_started_at.elapsed().as_millis(),
+        started_at.elapsed().as_millis()
+    );
+    Ok(())
 }
 
 pub(super) fn commit_working_copy_selected_paths(
@@ -32,6 +49,7 @@ pub(super) fn commit_working_copy_selected_paths(
     message: &str,
     selected_paths: &[String],
 ) -> Result<usize> {
+    let started_at = Instant::now();
     if selected_paths.is_empty() {
         return Err(anyhow!("no files selected for commit"));
     }
@@ -61,6 +79,7 @@ pub(super) fn commit_working_copy_selected_paths(
     }
 
     let matcher = jj_lib::matchers::FilesMatcher::new(repo_paths.iter());
+    let select_tree_started_at = Instant::now();
     let selected_tree = block_on(restore_tree(
         &wc_tree,
         &base_tree,
@@ -69,12 +88,14 @@ pub(super) fn commit_working_copy_selected_paths(
         &matcher,
     ))
     .context("failed to select files for commit")?;
+    let select_tree_elapsed = select_tree_started_at.elapsed();
 
     if selected_tree.tree_ids_and_labels() == base_tree.tree_ids_and_labels() {
         return Err(anyhow!("selected files have no changes to commit"));
     }
 
     let mut tx = context.repo.start_transaction();
+    let rewrite_started_at = Instant::now();
     let committed = tx
         .repo_mut()
         .rewrite_commit(&wc_commit)
@@ -82,11 +103,14 @@ pub(super) fn commit_working_copy_selected_paths(
         .set_tree(selected_tree)
         .write()
         .context("failed to create commit for selected files")?;
+    let rewrite_elapsed = rewrite_started_at.elapsed();
+    let new_wc_started_at = Instant::now();
     let new_wc = tx
         .repo_mut()
         .new_commit(vec![committed.id().clone()], wc_tree)
         .write()
         .context("failed to create next working-copy revision after partial commit")?;
+    let new_wc_elapsed = new_wc_started_at.elapsed();
     tx.repo_mut()
         .set_wc_commit(workspace_name.clone(), new_wc.id().clone())
         .context("failed to update working-copy commit after partial commit")?;
@@ -94,10 +118,23 @@ pub(super) fn commit_working_copy_selected_paths(
         .rebase_descendants()
         .context("failed to rebase descendants after partial commit")?;
 
+    let tx_commit_started_at = Instant::now();
     let repo = tx
         .commit(format!("commit selected paths: {message}"))
         .context("failed to finalize partial commit")?;
+    let tx_commit_elapsed = tx_commit_started_at.elapsed();
+    let persist_started_at = Instant::now();
     persist_working_copy_state(context, repo, "after partial commit")?;
+    debug!(
+        "jj commit selected paths complete: selected_paths={} select_tree_ms={} rewrite_ms={} new_wc_ms={} tx_commit_ms={} persist_ms={} total_ms={}",
+        repo_paths.len(),
+        select_tree_elapsed.as_millis(),
+        rewrite_elapsed.as_millis(),
+        new_wc_elapsed.as_millis(),
+        tx_commit_elapsed.as_millis(),
+        persist_started_at.elapsed().as_millis(),
+        started_at.elapsed().as_millis()
+    );
     Ok(repo_paths.len())
 }
 
@@ -284,6 +321,7 @@ pub(super) fn move_bookmark_to_parent_of_working_copy(
     context: &mut RepoContext,
     branch_name: &str,
 ) -> Result<bool> {
+    let started_at = Instant::now();
     let bookmark_target = context
         .repo
         .view()
@@ -300,10 +338,20 @@ pub(super) fn move_bookmark_to_parent_of_working_copy(
     let mut tx = context.repo.start_transaction();
     tx.repo_mut()
         .set_local_bookmark_target(RefName::new(branch_name), RefTarget::normal(parent_id));
+    let tx_commit_started_at = Instant::now();
     let repo = tx
         .commit(format!("move bookmark {branch_name} to committed revision"))
         .with_context(|| format!("failed to advance bookmark '{branch_name}'"))?;
+    let tx_commit_elapsed = tx_commit_started_at.elapsed();
+    let persist_started_at = Instant::now();
     persist_working_copy_state(context, repo, "after moving bookmark")?;
+    debug!(
+        "jj move bookmark to parent complete: branch={} tx_commit_ms={} persist_ms={} total_ms={}",
+        branch_name,
+        tx_commit_elapsed.as_millis(),
+        persist_started_at.elapsed().as_millis(),
+        started_at.elapsed().as_millis()
+    );
     Ok(true)
 }
 
@@ -311,6 +359,7 @@ pub(super) fn checkout_existing_bookmark(
     context: &mut RepoContext,
     branch_name: &str,
 ) -> Result<()> {
+    let started_at = Instant::now();
     let workspace_name = context.workspace.workspace_name().to_owned();
     let bookmark_target = context
         .repo
@@ -332,29 +381,46 @@ pub(super) fn checkout_existing_bookmark(
         .context("failed to lock working copy for bookmark checkout")?;
 
     let mut tx = context.repo.start_transaction();
+    let create_wc_started_at = Instant::now();
     let new_wc = tx
         .repo_mut()
         .new_commit(vec![target_commit.id().clone()], target_commit.tree())
         .write()
         .with_context(|| format!("failed to create working-copy commit for '{branch_name}'"))?;
+    let create_wc_elapsed = create_wc_started_at.elapsed();
     tx.repo_mut()
         .set_wc_commit(workspace_name.clone(), new_wc.id().clone())
         .with_context(|| format!("failed to set working-copy commit for '{branch_name}'"))?;
     tx.repo_mut()
         .rebase_descendants()
         .context("failed to rebase descendants after bookmark checkout")?;
+    let tx_commit_started_at = Instant::now();
     let repo = tx
         .commit(format!("checkout bookmark {branch_name}"))
         .context("failed to finalize bookmark checkout")?;
+    let tx_commit_elapsed = tx_commit_started_at.elapsed();
 
     let new_wc_commit = current_wc_commit_with_repo(repo.as_ref(), &workspace_name)?;
+    let checkout_started_at = Instant::now();
     block_on(locked_workspace.locked_wc().check_out(&new_wc_commit))
         .context("failed to update working-copy files for bookmark checkout")?;
+    let checkout_elapsed = checkout_started_at.elapsed();
+    let finish_started_at = Instant::now();
     locked_workspace
         .finish(repo.op_id().clone())
         .context("failed to persist working-copy state after bookmark checkout")?;
+    let finish_elapsed = finish_started_at.elapsed();
 
     context.repo = repo;
+    debug!(
+        "jj checkout bookmark complete: branch={} create_wc_ms={} tx_commit_ms={} checkout_ms={} finish_ms={} total_ms={}",
+        branch_name,
+        create_wc_elapsed.as_millis(),
+        tx_commit_elapsed.as_millis(),
+        checkout_elapsed.as_millis(),
+        finish_elapsed.as_millis(),
+        started_at.elapsed().as_millis()
+    );
     Ok(())
 }
 
@@ -894,7 +960,8 @@ pub(super) fn sync_bookmark_from_remote(
     context: &mut RepoContext,
     branch_name: &str,
 ) -> Result<()> {
-    if !load_changed_files_from_context(context)?.is_empty() {
+    let started_at = Instant::now();
+    if has_changed_files_from_context(context)? {
         return Err(anyhow!(
             "cannot sync while the working copy has uncommitted changes"
         ));
@@ -915,6 +982,7 @@ pub(super) fn sync_bookmark_from_remote(
     .with_context(|| format!("failed to prepare fetch refspecs for bookmark '{branch_name}'"))?;
 
     let mut tx = context.repo.start_transaction();
+    let fetch_started_at = Instant::now();
     {
         let mut fetcher = git::GitFetch::new(tx.repo_mut(), subprocess_options, &import_options)
             .context("failed to initialize Git fetch operation")?;
@@ -928,15 +996,34 @@ pub(super) fn sync_bookmark_from_remote(
             .import_refs()
             .context("failed to import fetched refs into JJ view")?;
     }
+    let fetch_elapsed = fetch_started_at.elapsed();
 
+    let tx_commit_started_at = Instant::now();
     let repo = tx
         .commit(format!("sync bookmark {branch_name} from {remote_name}"))
         .context("failed to finalize sync operation")?;
+    let tx_commit_elapsed = tx_commit_started_at.elapsed();
+    let persist_started_at = Instant::now();
     persist_working_copy_state(context, repo, "after sync")?;
+    let persist_elapsed = persist_started_at.elapsed();
 
+    let tracking_started_at = Instant::now();
     ensure_remote_bookmark_is_tracked(context, branch_name, remote, remote_name.as_str())?;
+    let tracking_elapsed = tracking_started_at.elapsed();
+    let checkout_started_at = Instant::now();
     checkout_existing_bookmark(context, branch_name)
         .with_context(|| format!("failed to refresh working copy for '{branch_name}'"))?;
+    let checkout_elapsed = checkout_started_at.elapsed();
+    debug!(
+        "jj sync bookmark complete: branch={} fetch_ms={} tx_commit_ms={} persist_ms={} tracking_ms={} checkout_ms={} total_ms={}",
+        branch_name,
+        fetch_elapsed.as_millis(),
+        tx_commit_elapsed.as_millis(),
+        persist_elapsed.as_millis(),
+        tracking_elapsed.as_millis(),
+        checkout_elapsed.as_millis(),
+        started_at.elapsed().as_millis()
+    );
 
     Ok(())
 }

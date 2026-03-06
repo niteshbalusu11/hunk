@@ -141,9 +141,17 @@ impl DiffViewer {
         };
 
         let epoch = self.begin_git_action(action_name, cx);
+        let started_at = Instant::now();
 
         self.git_action_task = cx.spawn(async move |this, cx| {
-            let result = cx.background_executor().spawn(async move { action(repo_root) }).await;
+            let (execution_elapsed, result) = cx
+                .background_executor()
+                .spawn(async move {
+                    let execution_started_at = Instant::now();
+                    let result = action(repo_root);
+                    (execution_started_at.elapsed(), result)
+                })
+                .await;
 
             if let Some(this) = this.upgrade() {
                 this.update(cx, |this, cx| {
@@ -151,9 +159,17 @@ impl DiffViewer {
                         return;
                     }
 
+                    let total_elapsed = started_at.elapsed();
                     this.finish_git_action();
                     match result {
                         Ok(message) => {
+                            debug!(
+                                "git action complete: epoch={} action={} exec_elapsed_ms={} total_elapsed_ms={}",
+                                epoch,
+                                action_name,
+                                execution_elapsed.as_millis(),
+                                total_elapsed.as_millis()
+                            );
                             this.git_status_message = if message.is_empty() {
                                 None
                             } else {
@@ -162,7 +178,13 @@ impl DiffViewer {
                             this.refresh_after_git_action(cx);
                         }
                         Err(err) => {
-                            error!("{action_name} failed: {err:#}");
+                            error!(
+                                "git action failed: epoch={} action={} exec_elapsed_ms={} total_elapsed_ms={} err={err:#}",
+                                epoch,
+                                action_name,
+                                execution_elapsed.as_millis(),
+                                total_elapsed.as_millis()
+                            );
                             let summary = err.to_string();
                             this.git_status_message = Some(format!("JJ error: {err:#}"));
                             Self::push_error_notification(
@@ -186,11 +208,15 @@ impl DiffViewer {
         cx: &mut Context<Self>,
     ) {
         self.run_git_action("Activate bookmark", cx, move |repo_root| {
-            checkout_or_create_bookmark_with_change_transfer(
-                &repo_root,
-                &branch_name,
-                move_changes_to_new_bookmark,
-            )?;
+            if move_changes_to_new_bookmark {
+                checkout_or_create_bookmark_with_change_transfer(
+                    &repo_root,
+                    &branch_name,
+                    true,
+                )?;
+            } else {
+                checkout_or_create_bookmark_with_change_transfer(&repo_root, &branch_name, false)?;
+            }
             let message = if move_changes_to_new_bookmark {
                 format!(
                     "Activated bookmark {} and moved changes",
@@ -656,16 +682,21 @@ impl DiffViewer {
             ReviewUrlAction::Open => "Open PR/MR",
             ReviewUrlAction::Copy => "Copy PR/MR URL",
         }, cx);
+        let started_at = Instant::now();
 
         self.git_action_task = cx.spawn(async move |this, cx| {
-            let result = cx.background_executor().spawn(async move {
-                review_url_for_bookmark_with_provider_map(
-                    &repo_root,
-                    &bookmark_for_task,
-                    &provider_mappings,
-                )
-            });
-            let result = result.await;
+            let (execution_elapsed, result) = cx
+                .background_executor()
+                .spawn(async move {
+                    let execution_started_at = Instant::now();
+                    let result = review_url_for_bookmark_with_provider_map(
+                        &repo_root,
+                        &bookmark_for_task,
+                        &provider_mappings,
+                    );
+                    (execution_started_at.elapsed(), result)
+                })
+                .await;
 
             if let Some(this) = this.upgrade() {
                 this.update(cx, |this, cx| {
@@ -673,9 +704,20 @@ impl DiffViewer {
                         return;
                     }
 
+                    let total_elapsed = started_at.elapsed();
                     this.finish_git_action();
                     match result {
                         Ok(Some(url)) => {
+                            debug!(
+                                "git action complete: epoch={} action={} lookup_elapsed_ms={} total_elapsed_ms={}",
+                                epoch,
+                                match action {
+                                    ReviewUrlAction::Open => "Open PR/MR",
+                                    ReviewUrlAction::Copy => "Copy PR/MR URL",
+                                },
+                                execution_elapsed.as_millis(),
+                                total_elapsed.as_millis()
+                            );
                             let url = with_review_title_prefill(url, review_title_for_task.as_str());
                             match action {
                                 ReviewUrlAction::Copy => {
@@ -707,11 +749,30 @@ impl DiffViewer {
                                 "No review URL found for {}. Add review_provider_mappings in ~/.hunkdiff/config.toml for self-hosted remotes.",
                                 bookmark_name
                             );
+                            debug!(
+                                "git action complete: epoch={} action={} lookup_elapsed_ms={} total_elapsed_ms={} result=missing_url",
+                                epoch,
+                                match action {
+                                    ReviewUrlAction::Open => "Open PR/MR",
+                                    ReviewUrlAction::Copy => "Copy PR/MR URL",
+                                },
+                                execution_elapsed.as_millis(),
+                                total_elapsed.as_millis()
+                            );
                             this.git_status_message = Some(message.clone());
                             Self::push_warning_notification(message, cx);
                         }
                         Err(err) => {
-                            error!("Build review URL failed: {err:#}");
+                            error!(
+                                "git action failed: epoch={} action={} lookup_elapsed_ms={} total_elapsed_ms={} err={err:#}",
+                                epoch,
+                                match action {
+                                    ReviewUrlAction::Open => "Open PR/MR",
+                                    ReviewUrlAction::Copy => "Copy PR/MR URL",
+                                },
+                                execution_elapsed.as_millis(),
+                                total_elapsed.as_millis()
+                            );
                             let summary = err.to_string();
                             this.git_status_message = Some(format!("JJ error: {err:#}"));
                             Self::push_error_notification(
@@ -768,17 +829,27 @@ impl DiffViewer {
         let partial_commit = selected_paths.len() != self.files.len();
 
         let epoch = self.begin_git_action("Create revision", cx);
+        let started_at = Instant::now();
 
         self.git_action_task = cx.spawn(async move |this, cx| {
-            let result = cx.background_executor().spawn(async move {
-                if partial_commit {
-                    commit_selected_paths(&repo_root, &message, &selected_paths)?;
-                } else {
-                    commit_staged(&repo_root, &message)?;
-                }
-                Ok::<String, anyhow::Error>(message.trim_end().to_string())
-            });
-            let result = result.await;
+            let (execution_elapsed, result) = cx
+                .background_executor()
+                .spawn(async move {
+                    let execution_started_at = Instant::now();
+                    let result = if partial_commit {
+                        match commit_selected_paths(&repo_root, &message, &selected_paths) {
+                            Ok(_) => Ok::<String, anyhow::Error>(message.trim_end().to_string()),
+                            Err(err) => Err(err),
+                        }
+                    } else {
+                        match commit_staged(&repo_root, &message) {
+                            Ok(()) => Ok::<String, anyhow::Error>(message.trim_end().to_string()),
+                            Err(err) => Err(err),
+                        }
+                    };
+                    (execution_started_at.elapsed(), result)
+                })
+                .await;
 
             if let Some(this) = this.upgrade() {
                 this.update(cx, |this, cx| {
@@ -786,9 +857,17 @@ impl DiffViewer {
                         return;
                     }
 
+                    let total_elapsed = started_at.elapsed();
                     this.finish_git_action();
                     match result {
                         Ok(subject) => {
+                            debug!(
+                                "git action complete: epoch={} action=Create revision exec_elapsed_ms={} total_elapsed_ms={} partial_commit={}",
+                                epoch,
+                                execution_elapsed.as_millis(),
+                                total_elapsed.as_millis(),
+                                partial_commit
+                            );
                             this.commit_excluded_files.clear();
                             this.git_status_message = Some("Created commit".to_string());
                             this.last_commit_subject = Some(subject);
@@ -807,7 +886,13 @@ impl DiffViewer {
                             this.refresh_after_git_action(cx);
                         }
                         Err(err) => {
-                            error!("Commit failed: {err:#}");
+                            error!(
+                                "git action failed: epoch={} action=Create revision exec_elapsed_ms={} total_elapsed_ms={} partial_commit={} err={err:#}",
+                                epoch,
+                                execution_elapsed.as_millis(),
+                                total_elapsed.as_millis(),
+                                partial_commit
+                            );
                             this.git_status_message = Some(format!("JJ error: {err:#}"));
                             Self::push_error_notification(
                                 format!("Commit failed: {}", err),

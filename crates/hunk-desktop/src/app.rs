@@ -123,6 +123,124 @@ struct PendingBookmarkSwitch {
     unix_time: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum SnapshotRefreshPriority {
+    Background,
+    UserInitiated,
+}
+
+impl SnapshotRefreshPriority {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Background => "background",
+            Self::UserInitiated => "user",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SnapshotRefreshRequest {
+    force: bool,
+    priority: SnapshotRefreshPriority,
+}
+
+impl SnapshotRefreshRequest {
+    const fn user(force: bool) -> Self {
+        Self {
+            force,
+            priority: SnapshotRefreshPriority::UserInitiated,
+        }
+    }
+
+    const fn background() -> Self {
+        Self {
+            force: false,
+            priority: SnapshotRefreshPriority::Background,
+        }
+    }
+
+    const fn background_force() -> Self {
+        Self {
+            force: true,
+            priority: SnapshotRefreshPriority::Background,
+        }
+    }
+
+    fn merge(self, other: Self) -> Self {
+        Self {
+            force: self.force || other.force,
+            priority: if self.priority >= other.priority {
+                self.priority
+            } else {
+                other.priority
+            },
+        }
+    }
+
+    fn is_more_urgent_than(self, other: Self) -> bool {
+        self.priority > other.priority
+            || (self.priority == other.priority && self.force && !other.force)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LineStatsRefreshScope {
+    Full,
+    Paths(BTreeSet<String>),
+}
+
+impl LineStatsRefreshScope {
+    const fn label(&self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Paths(_) => "paths",
+        }
+    }
+
+    fn path_count(&self) -> usize {
+        match self {
+            Self::Full => 0,
+            Self::Paths(paths) => paths.len(),
+        }
+    }
+
+    fn merge(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Full, _) | (_, Self::Full) => Self::Full,
+            (Self::Paths(mut left), Self::Paths(right)) => {
+                left.extend(right);
+                Self::Paths(left)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PendingLineStatsRefresh {
+    repo_root: PathBuf,
+    request: SnapshotRefreshRequest,
+    scope: LineStatsRefreshScope,
+    snapshot_epoch: usize,
+    cold_start: bool,
+}
+
+impl PendingLineStatsRefresh {
+    fn merge(self, newer: Self) -> Self {
+        let scope = if self.repo_root == newer.repo_root {
+            self.scope.merge(newer.scope)
+        } else {
+            newer.scope
+        };
+        Self {
+            repo_root: newer.repo_root,
+            request: self.request.merge(newer.request),
+            scope,
+            snapshot_epoch: newer.snapshot_epoch,
+            cold_start: newer.cold_start,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum AiTimelineRowSource {
     Item { item_key: String },
@@ -987,13 +1105,19 @@ struct DiffViewer {
     auto_refresh_task: Task<()>,
     repo_watch_task: Task<()>,
     repo_watch_refresh_epoch: usize,
+    repo_watch_refresh_force: bool,
     repo_watch_refresh_task: Task<()>,
     snapshot_epoch: usize,
     snapshot_task: Task<()>,
     snapshot_loading: bool,
+    snapshot_active_request: Option<SnapshotRefreshRequest>,
     workflow_loading: bool,
+    line_stats_epoch: usize,
+    line_stats_task: Task<()>,
     line_stats_loading: bool,
-    snapshot_refresh_pending_force: bool,
+    pending_line_stats_refresh: Option<PendingLineStatsRefresh>,
+    pending_snapshot_refresh: Option<SnapshotRefreshRequest>,
+    pending_dirty_paths: BTreeSet<String>,
     last_snapshot_fingerprint: Option<RepoSnapshotFingerprint>,
     open_project_task: Task<()>,
     patch_epoch: usize,

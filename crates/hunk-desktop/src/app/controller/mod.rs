@@ -1,8 +1,8 @@
 use anyhow::Context as _;
 use futures::StreamExt;
-use futures::channel::mpsc;
+use futures::channel::{mpsc, oneshot};
 use notify::Watcher;
-use tracing::{error, info, warn};
+use tracing::{debug, error, warn};
 
 use super::data::{
     DiffSegmentQuality, DiffStream, DiffStreamRowKind, RepoTreeNodeKind,
@@ -16,14 +16,15 @@ use super::*;
 use hunk_jj::jj::{
     WorkflowSnapshot, abandon_bookmark_head, checkout_or_create_bookmark_with_change_transfer,
     commit_selected_paths, commit_staged, count_non_ignored_repo_tree_entries,
-    describe_bookmark_head, load_patches_for_files, load_repo_line_stats_without_refresh,
-    load_repo_tree, load_snapshot_fingerprint, load_snapshot_fingerprint_without_refresh,
-    load_workflow_snapshot, load_workflow_snapshot_with_fingerprint,
-    load_workflow_snapshot_with_fingerprint_without_refresh,
-    load_workflow_snapshot_without_refresh, push_current_bookmark,
-    redo_last_operation as redo_last_jj_operation, rename_bookmark, reorder_bookmark_tip_older,
-    restore_all_working_copy_changes, restore_working_copy_from_revision,
-    restore_working_copy_paths, review_url_for_bookmark_with_provider_map, sanitize_bookmark_name,
+    describe_bookmark_head, invalidate_repo_metadata_caches, load_patches_for_files_from_session,
+    load_repo_file_line_stats_for_paths_without_refresh, load_repo_file_line_stats_without_refresh,
+    load_repo_tree, load_snapshot_fingerprint, load_workflow_snapshot_if_changed,
+    load_workflow_snapshot_if_changed_without_refresh, load_workflow_snapshot_with_fingerprint,
+    load_workflow_snapshot_with_fingerprint_without_refresh, open_patch_session,
+    push_current_bookmark, redo_last_operation as redo_last_jj_operation, rename_bookmark,
+    reorder_bookmark_tip_older, restore_all_working_copy_changes,
+    restore_working_copy_from_revision, restore_working_copy_paths,
+    review_url_for_bookmark_with_provider_map, sanitize_bookmark_name,
     squash_bookmark_head_into_parent, sync_current_bookmark,
     undo_last_operation as undo_last_jj_operation,
 };

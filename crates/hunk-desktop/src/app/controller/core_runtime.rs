@@ -69,6 +69,18 @@ impl DiffViewer {
         self.snapshot_epoch
     }
 
+    fn next_line_stats_epoch(&mut self) -> usize {
+        self.line_stats_epoch = self.line_stats_epoch.saturating_add(1);
+        self.line_stats_epoch
+    }
+
+    fn cancel_line_stats_refresh(&mut self) {
+        self.next_line_stats_epoch();
+        self.line_stats_task = Task::ready(());
+        self.line_stats_loading = false;
+        self.pending_line_stats_refresh = None;
+    }
+
     fn auto_refresh_interval(&self) -> Duration {
         if self.config.auto_refresh_interval_ms == 0 {
             return Duration::ZERO;
@@ -95,14 +107,47 @@ impl DiffViewer {
 
         relative_path.components().any(|component| {
             let component = component.as_os_str();
-            if component == ".jj" || component == ".git" {
-                return true;
-            }
-
             component
                 .to_str()
                 .is_some_and(Self::is_hunk_temp_save_component)
         })
+    }
+
+    fn is_repo_watch_metadata_path(path: &std::path::Path, repo_root: &std::path::Path) -> bool {
+        let Ok(relative_path) = path.strip_prefix(repo_root) else {
+            return false;
+        };
+
+        relative_path.components().any(|component| {
+            let component = component.as_os_str();
+            component == ".jj" || component == ".git"
+        })
+    }
+
+    fn repo_watch_dirty_path(
+        path: &std::path::Path,
+        repo_root: &std::path::Path,
+    ) -> Option<String> {
+        let Ok(relative_path) = path.strip_prefix(repo_root) else {
+            return None;
+        };
+        if relative_path.as_os_str().is_empty() {
+            return None;
+        }
+        if Self::should_ignore_repo_watch_path(path, repo_root)
+            || Self::is_repo_watch_metadata_path(path, repo_root)
+        {
+            return None;
+        }
+
+        Some(relative_path.to_string_lossy().replace('\\', "/"))
+    }
+
+    fn queue_dirty_paths<I>(&mut self, paths: I)
+    where
+        I: IntoIterator<Item = String>,
+    {
+        self.pending_dirty_paths.extend(paths);
     }
 
     fn is_hunk_temp_save_component(name: &str) -> bool {
@@ -130,6 +175,7 @@ impl DiffViewer {
         self.repo_watch_task = Task::ready(());
         self.repo_watch_refresh_task = Task::ready(());
         self.repo_watch_refresh_epoch = 0;
+        self.repo_watch_refresh_force = false;
 
         let Some(repo_root) = self.repo_root.clone().or_else(|| self.project_path.clone()) else {
             return;
@@ -160,17 +206,35 @@ impl DiffViewer {
                     continue;
                 };
 
-                if event
+                if event.paths.iter().all(|path| {
+                    Self::should_ignore_repo_watch_path(path, &repo_root_path)
+                }) {
+                    continue;
+                }
+
+                let metadata_changed = event
                     .paths
                     .iter()
-                    .all(|path| Self::should_ignore_repo_watch_path(path, &repo_root_path))
-                {
+                    .any(|path| Self::is_repo_watch_metadata_path(path, &repo_root_path));
+                let dirty_paths = event
+                    .paths
+                    .iter()
+                    .filter_map(|path| Self::repo_watch_dirty_path(path, &repo_root_path))
+                    .collect::<BTreeSet<_>>();
+                if dirty_paths.is_empty() && !metadata_changed {
                     continue;
                 }
 
                 if let Some(this) = this.upgrade() {
-                    this.update(cx, |this, cx| {
-                        this.schedule_repo_watch_refresh(cx);
+                    let repo_root = repo_root_path.clone();
+                    this.update(cx, move |this, cx| {
+                        if metadata_changed {
+                            invalidate_repo_metadata_caches(repo_root.as_path());
+                        }
+                        if !dirty_paths.is_empty() {
+                            this.queue_dirty_paths(dirty_paths);
+                        }
+                        this.schedule_repo_watch_refresh(metadata_changed, cx);
                     });
                 }
             }
@@ -183,7 +247,8 @@ impl DiffViewer {
         self.repo_watch_refresh_epoch
     }
 
-    fn schedule_repo_watch_refresh(&mut self, cx: &mut Context<Self>) {
+    fn schedule_repo_watch_refresh(&mut self, force: bool, cx: &mut Context<Self>) {
+        self.repo_watch_refresh_force |= force;
         let epoch = self.next_repo_watch_refresh_epoch();
         self.repo_watch_refresh_task = cx.spawn(async move |this, cx| {
             cx.background_executor()
@@ -194,7 +259,12 @@ impl DiffViewer {
                     if epoch != this.repo_watch_refresh_epoch {
                         return;
                     }
-                    this.request_snapshot_refresh_workflow_only(false, cx);
+                    let request = if std::mem::take(&mut this.repo_watch_refresh_force) {
+                        SnapshotRefreshRequest::background_force()
+                    } else {
+                        SnapshotRefreshRequest::background()
+                    };
+                    this.request_snapshot_refresh_internal(request, cx);
                 });
             }
         });
@@ -301,14 +371,41 @@ mod tests {
     #[test]
     fn ignores_internal_vcs_paths_for_repo_watch() {
         let repo_root = fixture_repo_root();
-        assert!(DiffViewer::should_ignore_repo_watch_path(
+        assert!(!DiffViewer::should_ignore_repo_watch_path(
             repo_root.join(".jj/working_copy").as_path(),
             repo_root.as_path()
         ));
-        assert!(DiffViewer::should_ignore_repo_watch_path(
+        assert!(!DiffViewer::should_ignore_repo_watch_path(
             repo_root.join(".git/index").as_path(),
             repo_root.as_path()
         ));
+        assert!(DiffViewer::is_repo_watch_metadata_path(
+            repo_root.join(".jj/working_copy").as_path(),
+            repo_root.as_path()
+        ));
+        assert!(DiffViewer::is_repo_watch_metadata_path(
+            repo_root.join(".git/index").as_path(),
+            repo_root.as_path()
+        ));
+    }
+
+    #[test]
+    fn excludes_internal_vcs_paths_from_dirty_file_tracking() {
+        let repo_root = fixture_repo_root();
+        assert_eq!(
+            DiffViewer::repo_watch_dirty_path(
+                repo_root.join(".jj/working_copy").as_path(),
+                repo_root.as_path()
+            ),
+            None
+        );
+        assert_eq!(
+            DiffViewer::repo_watch_dirty_path(
+                repo_root.join(".git/index").as_path(),
+                repo_root.as_path()
+            ),
+            None
+        );
     }
 
     #[test]
