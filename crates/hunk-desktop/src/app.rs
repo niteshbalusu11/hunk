@@ -123,6 +123,18 @@ struct PendingBookmarkSwitch {
     unix_time: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum AiComposerDraftKey {
+    Thread(String),
+    Workspace(String),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct AiComposerDraft {
+    prompt: String,
+    local_images: Vec<PathBuf>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum SnapshotRefreshPriority {
     Background,
@@ -1070,7 +1082,7 @@ struct DiffViewer {
     ai_worker_thread: Option<JoinHandle<()>>,
     ai_command_tx: Option<mpsc::Sender<AiWorkerCommand>>,
     ai_composer_input_state: Entity<InputState>,
-    ai_composer_local_images: Vec<PathBuf>,
+    ai_composer_drafts: BTreeMap<AiComposerDraftKey, AiComposerDraft>,
     files: Vec<ChangedFile>,
     file_status_by_path: BTreeMap<String, FileStatus>,
     revision_stack_collapsed: bool,

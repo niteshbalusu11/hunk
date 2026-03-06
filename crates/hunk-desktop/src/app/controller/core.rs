@@ -417,7 +417,7 @@ impl DiffViewer {
             ai_worker_thread: None,
             ai_command_tx: None,
             ai_composer_input_state,
-            ai_composer_local_images: Vec::new(),
+            ai_composer_drafts: BTreeMap::new(),
             files: Vec::new(),
             file_status_by_path: BTreeMap::new(),
             revision_stack_collapsed: true,
@@ -520,6 +520,9 @@ impl DiffViewer {
 
         let ai_composer_state = view.ai_composer_input_state.clone();
         cx.subscribe(&ai_composer_state, |this, _, event, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.sync_ai_visible_composer_prompt_to_draft(cx);
+            }
             if should_send_ai_prompt_from_input_event(event) {
                 this.ai_send_prompt_action_from_keyboard(cx);
             }

@@ -92,7 +92,7 @@ impl DiffViewer {
     fn apply_ai_worker_event(&mut self, event: AiWorkerEvent, cx: &mut Context<Self>) {
         match event {
             AiWorkerEvent::Snapshot(snapshot) => {
-                self.apply_ai_snapshot(*snapshot);
+                self.apply_ai_snapshot(*snapshot, cx);
                 self.ai_connection_state = AiConnectionState::Ready;
                 self.ai_error_message = None;
             }
@@ -137,8 +137,10 @@ impl DiffViewer {
         }
     }
 
-    fn apply_ai_snapshot(&mut self, snapshot: AiSnapshot) {
+    fn apply_ai_snapshot(&mut self, snapshot: AiSnapshot, cx: &mut Context<Self>) {
         let previous_selected_thread = self.ai_selected_thread_id.clone();
+        let previous_draft_key = self.current_ai_composer_draft_key();
+        self.sync_ai_visible_composer_prompt_to_draft(cx);
         let previous_visible_row_ids = previous_selected_thread
             .as_deref()
             .map(|thread_id| current_ai_renderable_visible_row_ids(self, thread_id))
@@ -268,6 +270,10 @@ impl DiffViewer {
             );
         }
 
+        self.prune_ai_composer_drafts();
+        if previous_draft_key != self.current_ai_composer_draft_key() {
+            self.restore_ai_visible_composer_from_current_draft(cx);
+        }
         self.sync_ai_session_selection_from_state();
     }
 
@@ -288,6 +294,80 @@ impl DiffViewer {
 
         self.ai_in_progress_turn_started_at
             .retain(|key, _| in_progress_turn_keys.contains(key));
+    }
+
+    fn current_ai_composer_draft_key(&self) -> Option<AiComposerDraftKey> {
+        let current_thread_id = self.current_ai_thread_id();
+        let workspace_key = self.ai_workspace_key();
+        ai_composer_draft_key(current_thread_id.as_deref(), workspace_key.as_deref())
+    }
+
+    fn current_ai_composer_draft(&self) -> Option<&AiComposerDraft> {
+        let key = self.current_ai_composer_draft_key()?;
+        self.ai_composer_drafts.get(&key)
+    }
+
+    fn current_ai_composer_draft_mut(&mut self) -> Option<&mut AiComposerDraft> {
+        let key = self.current_ai_composer_draft_key()?;
+        Some(self.ai_composer_drafts.entry(key).or_default())
+    }
+
+    pub(crate) fn current_ai_composer_local_images(&self) -> Vec<PathBuf> {
+        self.current_ai_composer_draft()
+            .map(|draft| draft.local_images.clone())
+            .unwrap_or_default()
+    }
+
+    fn sync_ai_visible_composer_prompt_to_draft(&mut self, cx: &Context<Self>) {
+        let prompt = self.ai_composer_input_state.read(cx).value().to_string();
+        if let Some(draft) = self.current_ai_composer_draft_mut() {
+            draft.prompt = prompt;
+        }
+    }
+
+    fn restore_ai_visible_composer_from_current_draft(&mut self, cx: &mut Context<Self>) {
+        let prompt = ai_composer_prompt_for_target(
+            &self.ai_composer_drafts,
+            self.current_ai_composer_draft_key().as_ref(),
+        );
+        let ai_composer_state = self.ai_composer_input_state.clone();
+        let Some(window_handle) = cx.windows().into_iter().next() else {
+            return;
+        };
+        if let Err(error) = cx.update_window(window_handle, move |_, window, cx| {
+            ai_composer_state.update(cx, |state, cx| {
+                state.set_value(prompt.clone(), window, cx);
+            });
+        }) {
+            error!("failed to restore AI composer input after thread change: {error:#}");
+        }
+    }
+
+    fn restore_ai_visible_composer_from_current_draft_in_window(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let prompt = ai_composer_prompt_for_target(
+            &self.ai_composer_drafts,
+            self.current_ai_composer_draft_key().as_ref(),
+        );
+        self.ai_composer_input_state.update(cx, |state, cx| {
+            state.set_value(prompt, window, cx);
+        });
+    }
+
+    fn prune_ai_composer_drafts(&mut self) {
+        let thread_ids = self
+            .ai_state_snapshot
+            .threads
+            .keys()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        self.ai_composer_drafts.retain(|key, _| match key {
+            AiComposerDraftKey::Thread(thread_id) => thread_ids.contains(thread_id),
+            AiComposerDraftKey::Workspace(_) => true,
+        });
     }
 
     fn current_ai_composer_activity_elapsed_second(&self) -> Option<u64> {
@@ -351,7 +431,7 @@ impl DiffViewer {
 
     fn send_current_ai_prompt(&mut self, cx: &mut Context<Self>) -> bool {
         let prompt = self.ai_composer_input_state.read(cx).value().trim().to_string();
-        let local_image_paths = self.ai_composer_local_images.clone();
+        let local_image_paths = self.current_ai_composer_local_images();
         if prompt.is_empty() && local_image_paths.is_empty() {
             self.ai_status_message = Some("Prompt cannot be empty.".to_string());
             cx.notify();
@@ -441,7 +521,10 @@ impl DiffViewer {
     }
 
     fn clear_ai_composer_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.ai_composer_local_images.clear();
+        if let Some(draft) = self.current_ai_composer_draft_mut() {
+            draft.prompt.clear();
+            draft.local_images.clear();
+        }
         self.ai_composer_input_state.update(cx, |state, cx| {
             state.set_value("", window, cx);
         });

@@ -25,6 +25,27 @@ fn workspace_include_hidden_models(state: &AppState, workspace_key: Option<&str>
         .unwrap_or(true)
 }
 
+fn ai_composer_draft_key(
+    thread_id: Option<&str>,
+    workspace_key: Option<&str>,
+) -> Option<AiComposerDraftKey> {
+    thread_id
+        .map(|thread_id| AiComposerDraftKey::Thread(thread_id.to_string()))
+        .or_else(|| {
+            workspace_key.map(|workspace| AiComposerDraftKey::Workspace(workspace.to_string()))
+        })
+}
+
+fn ai_composer_prompt_for_target(
+    drafts: &BTreeMap<AiComposerDraftKey, AiComposerDraft>,
+    target_key: Option<&AiComposerDraftKey>,
+) -> String {
+    target_key
+        .and_then(|key| drafts.get(key))
+        .map(|draft| draft.prompt.clone())
+        .unwrap_or_default()
+}
+
 fn reasoning_effort_key(effort: &codex_protocol::openai_models::ReasoningEffort) -> String {
     serde_json::to_value(effort)
         .ok()

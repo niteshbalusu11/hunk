@@ -93,7 +93,7 @@ impl DiffViewer {
     ) {
         let prompt = self.ai_composer_input_state.read(cx).value().trim().to_string();
         let prompt = (!prompt.is_empty()).then_some(prompt);
-        let local_image_paths = self.ai_composer_local_images.clone();
+        let local_image_paths = self.current_ai_composer_local_images();
         if !local_image_paths.is_empty() && !self.current_ai_model_supports_image_inputs() {
             self.ai_status_message = Some(
                 "Selected model does not support image attachments. Remove attachments or switch models."
@@ -143,8 +143,11 @@ impl DiffViewer {
         if !self.send_current_ai_prompt(cx) {
             return;
         }
-        self.ai_composer_local_images.clear();
         let ai_composer_state = self.ai_composer_input_state.clone();
+        if let Some(draft) = self.current_ai_composer_draft_mut() {
+            draft.prompt.clear();
+            draft.local_images.clear();
+        }
         let Some(window_handle) = cx.windows().into_iter().next() else {
             return;
         };
@@ -209,9 +212,13 @@ impl DiffViewer {
         path: std::path::PathBuf,
         cx: &mut Context<Self>,
     ) {
-        let before = self.ai_composer_local_images.len();
-        self.ai_composer_local_images.retain(|existing| existing != &path);
-        if self.ai_composer_local_images.len() != before {
+        let mut removed = false;
+        if let Some(draft) = self.current_ai_composer_draft_mut() {
+            let before = draft.local_images.len();
+            draft.local_images.retain(|existing| existing != &path);
+            removed = draft.local_images.len() != before;
+        }
+        if removed {
             cx.notify();
         }
     }
@@ -424,12 +431,18 @@ impl DiffViewer {
     pub(super) fn ai_select_thread(
         &mut self,
         thread_id: String,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let previous_draft_key = self.current_ai_composer_draft_key();
+        self.sync_ai_visible_composer_prompt_to_draft(cx);
         self.ai_timeline_follow_output = true;
         self.ai_scroll_timeline_to_bottom = true;
         self.ai_expanded_timeline_row_ids.clear();
         self.ai_selected_thread_id = Some(thread_id.clone());
+        if previous_draft_key != self.current_ai_composer_draft_key() {
+            self.restore_ai_visible_composer_from_current_draft_in_window(window, cx);
+        }
         let visible_row_ids = current_ai_renderable_visible_row_ids(self, thread_id.as_str());
         reset_ai_timeline_list_measurements(self, visible_row_ids.len());
         self.sync_ai_session_selection_from_state();
@@ -989,20 +1002,19 @@ impl DiffViewer {
         I: IntoIterator<Item = std::path::PathBuf>,
     {
         let mut added = 0;
+        let Some(draft) = self.current_ai_composer_draft_mut() else {
+            return 0;
+        };
 
         for path in paths {
             let normalized = std::fs::canonicalize(path.as_path()).unwrap_or(path);
             if !normalized.is_file() || !is_supported_ai_image_path(normalized.as_path()) {
                 continue;
             }
-            if self
-                .ai_composer_local_images
-                .iter()
-                .any(|existing| existing == &normalized)
-            {
+            if draft.local_images.iter().any(|existing| existing == &normalized) {
                 continue;
             }
-            self.ai_composer_local_images.push(normalized);
+            draft.local_images.push(normalized);
             added += 1;
         }
 

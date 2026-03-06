@@ -9,6 +9,8 @@ fn item_status_chip(status: hunk_codex::state::ItemStatus) -> &'static str {
 
 #[cfg(test)]
 mod ai_tests {
+    use super::ai_composer_draft_key;
+    use super::ai_composer_prompt_for_target;
     use super::ai_attachment_status_message;
     use super::bundled_codex_executable_candidates;
     use super::codex_runtime_binary_name;
@@ -32,6 +34,8 @@ mod ai_tests {
     use super::thread_latest_timeline_sequence;
     use super::workspace_include_hidden_models;
     use super::workspace_mad_max_mode;
+    use crate::app::AiComposerDraft;
+    use crate::app::AiComposerDraftKey;
     use crate::app::AiTimelineRow;
     use crate::app::AiTimelineRowSource;
     use crate::app::ai_runtime::AiPendingUserInputQuestion;
@@ -113,6 +117,63 @@ mod ai_tests {
         let sorted = sorted_threads(&state);
         assert_eq!(sorted[0].id, "thread-z");
         assert_eq!(sorted[1].id, "thread-a");
+    }
+
+    #[test]
+    fn ai_composer_draft_key_prefers_thread_over_workspace() {
+        assert_eq!(
+            ai_composer_draft_key(Some("thread-a"), Some("/repo")),
+            Some(AiComposerDraftKey::Thread("thread-a".to_string()))
+        );
+        assert_eq!(
+            ai_composer_draft_key(None, Some("/repo")),
+            Some(AiComposerDraftKey::Workspace("/repo".to_string()))
+        );
+        assert_eq!(ai_composer_draft_key(None, None), None);
+    }
+
+    #[test]
+    fn ai_composer_prompt_for_target_is_scoped_to_each_thread() {
+        let drafts = BTreeMap::from([
+            (
+                AiComposerDraftKey::Thread("thread-a".to_string()),
+                AiComposerDraft {
+                    prompt: "draft-a".to_string(),
+                    local_images: vec![PathBuf::from("/tmp/a.png")],
+                },
+            ),
+            (
+                AiComposerDraftKey::Thread("thread-b".to_string()),
+                AiComposerDraft {
+                    prompt: "draft-b".to_string(),
+                    local_images: vec![PathBuf::from("/tmp/b.png")],
+                },
+            ),
+            (
+                AiComposerDraftKey::Workspace("/repo".to_string()),
+                AiComposerDraft {
+                    prompt: "workspace-draft".to_string(),
+                    local_images: Vec::new(),
+                },
+            ),
+        ]);
+
+        let thread_a = ai_composer_draft_key(Some("thread-a"), Some("/repo")).expect("thread key");
+        let thread_b = ai_composer_draft_key(Some("thread-b"), Some("/repo")).expect("thread key");
+        let workspace = ai_composer_draft_key(None, Some("/repo")).expect("workspace key");
+
+        assert_eq!(
+            ai_composer_prompt_for_target(&drafts, Some(&thread_a)),
+            "draft-a"
+        );
+        assert_eq!(
+            ai_composer_prompt_for_target(&drafts, Some(&thread_b)),
+            "draft-b"
+        );
+        assert_eq!(
+            ai_composer_prompt_for_target(&drafts, Some(&workspace)),
+            "workspace-draft"
+        );
     }
 
     #[test]

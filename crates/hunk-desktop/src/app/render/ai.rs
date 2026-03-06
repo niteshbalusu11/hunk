@@ -76,7 +76,7 @@ impl DiffViewer {
             show_global_loading_overlay && selected_thread_id.is_some() && timeline_visible_row_ids.is_empty();
         let ai_timeline_list_state = self.ai_timeline_list_state.clone();
         let (connection_label, connection_color) = ai_connection_label(self.ai_connection_state, cx);
-        let composer_attachment_paths = self.ai_composer_local_images.clone();
+        let composer_attachment_paths = self.current_ai_composer_local_images();
         let composer_attachment_count = composer_attachment_paths.len();
         let model_supports_image_inputs = self.current_ai_model_supports_image_inputs();
         let review_action_enabled = selected_thread_id.is_some();
@@ -628,9 +628,9 @@ impl DiffViewer {
                                                                             .hover(move |style| {
                                                                                 style.bg(thread_hover_bg).cursor_pointer()
                                                                             })
-                                                                            .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                                                                            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                                                                                 select_view.update(cx, |this, cx| {
-                                                                                    this.ai_select_thread(thread_id.clone(), cx);
+                                                                                    this.ai_select_thread(thread_id.clone(), window, cx);
                                                                                 });
                                                                             })
                                                                             .child(
