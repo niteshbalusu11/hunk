@@ -64,6 +64,7 @@ use hunk_codex::tools::DynamicToolRegistry;
 use hunk_codex::ws_client::JsonRpcSession;
 use hunk_codex::ws_client::WebSocketEndpoint;
 
+use crate::app::ai_paths::default_codex_home_path;
 use crate::app::ai_rollout_fallback::find_rollout_path_for_thread;
 use crate::app::ai_rollout_fallback::parse_rollout_fallback;
 
@@ -711,16 +712,14 @@ impl AiWorkerRuntime {
                 Err(_) => None,
             };
         if rollout_path.is_none()
-            && let Some(home) = std::env::var_os("HOME")
+            && let Some(home_codex) = default_codex_home_path()
+            && home_codex != self.codex_home
         {
-            let home_codex = PathBuf::from(home).join(".codex");
-            if home_codex != self.codex_home {
-                rollout_path = match find_rollout_path_for_thread(home_codex.as_path(), thread_id) {
-                    Ok(Some(path)) => Some(path),
-                    Ok(None) => None,
-                    Err(_) => None,
-                };
-            }
+            rollout_path = match find_rollout_path_for_thread(home_codex.as_path(), thread_id) {
+                Ok(Some(path)) => Some(path),
+                Ok(None) => None,
+                Err(_) => None,
+            };
         }
         let Some(rollout_path) = rollout_path else {
             return;

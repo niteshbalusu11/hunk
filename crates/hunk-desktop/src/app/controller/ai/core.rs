@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use crate::app::ai_paths::resolve_codex_home_path;
 use hunk_domain::state::AiCollaborationModeSelection;
 use hunk_domain::state::AiServiceTierSelection;
 use hunk_domain::state::AiThreadSessionState;
@@ -30,10 +31,10 @@ impl DiffViewer {
         };
         let worker_workspace_key = cwd.to_string_lossy().to_string();
 
-        let Some(codex_home) = Self::resolve_codex_home_path() else {
+        let Some(codex_home) = resolve_codex_home_path() else {
             self.ai_connection_state = AiConnectionState::Failed;
             self.ai_bootstrap_loading = false;
-            self.ai_error_message = Some("Unable to resolve ~/.codex home directory.".to_string());
+            self.ai_error_message = Some("Unable to resolve the Codex home directory.".to_string());
             cx.notify();
             return;
         };
@@ -973,14 +974,6 @@ impl DiffViewer {
             }
         }
         Ok(())
-    }
-
-    fn resolve_codex_home_path() -> Option<std::path::PathBuf> {
-        if let Some(path) = std::env::var_os("CODEX_HOME") {
-            return Some(std::path::PathBuf::from(path));
-        }
-
-        std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".codex"))
     }
 
     pub(super) fn shutdown_ai_worker_blocking(&mut self) {

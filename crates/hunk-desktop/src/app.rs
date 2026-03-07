@@ -92,6 +92,7 @@ const COMMENT_FUZZY_RENAME_MATCH_MIN_SCORE: i32 = 11;
 const AI_TIMELINE_DEFAULT_VISIBLE_TURNS: usize = 80;
 const AI_TIMELINE_TURN_PAGE_SIZE: usize = 80;
 
+mod ai_paths;
 mod refresh_policy;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

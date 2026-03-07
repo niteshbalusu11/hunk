@@ -4201,6 +4201,7 @@ dependencies = [
  "codex-app-server-protocol",
  "codex-protocol",
  "ctrlc",
+ "dirs 6.0.0",
  "futures",
  "gpui",
  "gpui-component",
