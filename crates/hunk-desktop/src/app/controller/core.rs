@@ -147,6 +147,7 @@ impl DiffViewer {
         };
         self.branch_has_upstream = cache.branch_has_upstream;
         self.branch_ahead_count = cache.branch_ahead_count;
+        self.branch_behind_count = cache.branch_behind_count;
         self.branches = cache
             .branches
             .into_iter()
@@ -202,6 +203,7 @@ impl DiffViewer {
             branch_name: self.branch_name.clone(),
             branch_has_upstream: self.branch_has_upstream,
             branch_ahead_count: self.branch_ahead_count,
+            branch_behind_count: self.branch_behind_count,
             branches: self
                 .branches
                 .iter()
@@ -343,9 +345,10 @@ impl DiffViewer {
             branch_name: "unknown".to_string(),
             branch_has_upstream: false,
             branch_ahead_count: 0,
+            branch_behind_count: 0,
             working_copy_commit_id: None,
             branches: Vec::new(),
-            git_workspace_scroll_handle: ScrollHandle::default(),
+            git_working_tree_scroll_handle: ScrollHandle::default(),
             workspace_view_mode: WorkspaceViewMode::GitWorkspace,
             ai_connection_state: AiConnectionState::Disconnected,
             ai_bootstrap_loading: false,
@@ -400,7 +403,7 @@ impl DiffViewer {
             file_status_by_path: BTreeMap::new(),
             branch_input_state,
             commit_input_state,
-            commit_excluded_files: BTreeSet::new(),
+            staged_commit_files: BTreeSet::new(),
             last_commit_subject: None,
             git_action_epoch: 0,
             git_action_task: Task::ready(()),
@@ -1302,7 +1305,7 @@ impl DiffViewer {
             branch_name,
             branch_has_upstream,
             branch_ahead_count,
-            branch_behind_count: _,
+            branch_behind_count,
             branches,
             files,
             last_commit_subject,
@@ -1325,6 +1328,7 @@ impl DiffViewer {
         self.branch_name = branch_name;
         self.branch_has_upstream = branch_has_upstream;
         self.branch_ahead_count = branch_ahead_count;
+        self.branch_behind_count = branch_behind_count;
         self.branches = branches;
         self.files = files;
         self.file_status_by_path = self
@@ -1335,7 +1339,7 @@ impl DiffViewer {
         self.file_line_stats
             .retain(|path, _| self.files.iter().any(|file| file.path == *path));
         self.recompute_overall_line_stats_from_file_stats();
-        self.commit_excluded_files
+        self.staged_commit_files
             .retain(|path| self.files.iter().any(|file| file.path == *path));
         self.last_commit_subject = last_commit_subject;
         self.repo_discovery_failed = false;
@@ -1345,7 +1349,7 @@ impl DiffViewer {
         }
         if root_changed {
             self.start_repo_watch(cx);
-            self.commit_excluded_files.clear();
+            self.staged_commit_files.clear();
             if full_refresh {
                 self.repo_tree.nodes.clear();
                 self.repo_tree.rows.clear();
@@ -1444,13 +1448,14 @@ impl DiffViewer {
         self.branch_name = "unknown".to_string();
         self.branch_has_upstream = false;
         self.branch_ahead_count = 0;
+        self.branch_behind_count = 0;
         self.working_copy_commit_id = None;
         self.branches.clear();
         self.git_action_label = None;
         self.files.clear();
         self.file_status_by_path.clear();
         self.last_commit_subject = None;
-        self.commit_excluded_files.clear();
+        self.staged_commit_files.clear();
         self.selected_path = None;
         self.selected_status = None;
         self.overall_line_stats = LineStats::default();

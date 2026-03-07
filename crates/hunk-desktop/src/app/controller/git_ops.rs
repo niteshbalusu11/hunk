@@ -181,33 +181,38 @@ impl DiffViewer {
         self.request_activate_or_create_branch_with_dirty_guard(branch_name, cx);
     }
 
-    pub(super) fn toggle_commit_file_included(
+    pub(super) fn toggle_commit_file_staged(
         &mut self,
         file_path: String,
-        include: bool,
+        staged: bool,
         cx: &mut Context<Self>,
     ) {
-        if include {
-            self.commit_excluded_files.remove(file_path.as_str());
+        if staged {
+            self.staged_commit_files.insert(file_path);
         } else {
-            self.commit_excluded_files.insert(file_path);
+            self.staged_commit_files.remove(file_path.as_str());
         }
         cx.notify();
     }
 
-    pub(super) fn include_all_files_for_commit(&mut self, cx: &mut Context<Self>) {
-        if self.commit_excluded_files.is_empty() {
+    pub(super) fn stage_all_files_for_commit(&mut self, cx: &mut Context<Self>) {
+        if self.staged_commit_files.len() == self.files.len() {
             return;
         }
-        self.commit_excluded_files.clear();
+        self.staged_commit_files = self.files.iter().map(|file| file.path.clone()).collect();
         cx.notify();
     }
 
-    pub(super) fn included_commit_file_count(&self) -> usize {
-        self.files
-            .iter()
-            .filter(|file| !self.commit_excluded_files.contains(file.path.as_str()))
-            .count()
+    pub(super) fn unstage_all_files_for_commit(&mut self, cx: &mut Context<Self>) {
+        if self.staged_commit_files.is_empty() {
+            return;
+        }
+        self.staged_commit_files.clear();
+        cx.notify();
+    }
+
+    pub(super) fn staged_commit_file_count(&self) -> usize {
+        self.staged_commit_files.len()
     }
 
     pub(super) fn branch_syncable(&self) -> bool {
@@ -267,10 +272,10 @@ impl DiffViewer {
             && !self.git_action_loading
     }
 
-    fn selected_commit_paths(&self) -> Vec<String> {
+    fn staged_commit_paths(&self) -> Vec<String> {
         self.files
             .iter()
-            .filter(|file| !self.commit_excluded_files.contains(file.path.as_str()))
+            .filter(|file| self.staged_commit_files.contains(file.path.as_str()))
             .map(|file| file.path.clone())
             .collect()
     }
@@ -627,14 +632,14 @@ impl DiffViewer {
             cx.notify();
             return;
         };
-        let selected_paths = self.selected_commit_paths();
-        if selected_paths.is_empty() {
+        let staged_paths = self.staged_commit_paths();
+        if staged_paths.is_empty() {
             self.git_status_message =
-                Some("Select at least one file to include in commit.".to_string());
+                Some("Stage at least one file before creating a commit.".to_string());
             cx.notify();
             return;
         }
-        let partial_commit = selected_paths.len() != self.files.len();
+        let partial_commit = staged_paths.len() != self.files.len();
 
         let epoch = self.begin_git_action("Create commit", cx);
         let started_at = Instant::now();
@@ -645,7 +650,7 @@ impl DiffViewer {
                 .spawn(async move {
                     let execution_started_at = Instant::now();
                     let result = if partial_commit {
-                        match commit_selected_paths(&repo_root, &message, &selected_paths) {
+                        match commit_selected_paths(&repo_root, &message, &staged_paths) {
                             Ok(_) => Ok::<String, anyhow::Error>(message.trim_end().to_string()),
                             Err(err) => Err(err),
                         }
@@ -676,7 +681,7 @@ impl DiffViewer {
                                 total_elapsed.as_millis(),
                                 partial_commit
                             );
-                            this.commit_excluded_files.clear();
+                            this.staged_commit_files.clear();
                             this.git_status_message = Some("Created commit".to_string());
                             this.last_commit_subject = Some(subject);
 
