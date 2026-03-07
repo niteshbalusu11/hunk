@@ -38,6 +38,7 @@ include!("tree.rs");
 include!("commit.rs");
 include!("workspace_change_row.rs");
 include!("git_workspace_loading.rs");
+include!("git_recent_commits.rs");
 include!("git_workspace_panel.rs");
 include!("git_workspace.rs");
 include!("file_banner.rs");

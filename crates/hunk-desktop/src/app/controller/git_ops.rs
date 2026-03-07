@@ -77,8 +77,11 @@ impl DiffViewer {
         self.git_action_label = None;
     }
 
-    fn refresh_after_git_action(&mut self, cx: &mut Context<Self>) {
+    fn refresh_after_git_action(&mut self, action_name: &'static str, cx: &mut Context<Self>) {
         self.request_snapshot_refresh_workflow_only(true, cx);
+        if action_name == "Sync branch" {
+            self.request_recent_commits_refresh(true, cx);
+        }
     }
 
     fn apply_optimistic_commit_success(
@@ -180,7 +183,7 @@ impl DiffViewer {
                             } else {
                                 Some(message)
                             };
-                            this.refresh_after_git_action(cx);
+                            this.refresh_after_git_action(action_name, cx);
                         }
                         Err(err) => {
                             error!(
@@ -711,15 +714,10 @@ impl DiffViewer {
                 .spawn(async move {
                     let execution_started_at = Instant::now();
                     let result = if partial_commit {
-                        match commit_selected_paths(&repo_root, &message, &staged_paths) {
-                            Ok(_) => Ok::<String, anyhow::Error>(message.trim_end().to_string()),
-                            Err(err) => Err(err),
-                        }
+                        commit_selected_paths_with_details(&repo_root, &message, &staged_paths)
+                            .map(|(_, commit)| commit)
                     } else {
-                        match commit_staged(&repo_root, &message) {
-                            Ok(()) => Ok::<String, anyhow::Error>(message.trim_end().to_string()),
-                            Err(err) => Err(err),
-                        }
+                        commit_staged_with_details(&repo_root, &message)
                     };
                     (execution_started_at.elapsed(), result)
                 })
@@ -734,7 +732,7 @@ impl DiffViewer {
                     let total_elapsed = started_at.elapsed();
                     this.finish_git_action();
                     match result {
-                        Ok(subject) => {
+                        Ok(created_commit) => {
                             debug!(
                                 "git action complete: epoch={} action=Create commit exec_elapsed_ms={} total_elapsed_ms={} partial_commit={}",
                                 epoch,
@@ -745,8 +743,9 @@ impl DiffViewer {
                             this.git_status_message = Some("Created commit".to_string());
                             this.apply_optimistic_commit_success(
                                 staged_paths_for_ui.as_slice(),
-                                subject.as_str(),
+                                created_commit.subject.as_str(),
                             );
+                            this.apply_optimistic_recent_commit(&created_commit);
 
                             let commit_input_state = this.commit_input_state.clone();
                             if let Some(window_handle) = cx.windows().into_iter().next()
@@ -759,7 +758,8 @@ impl DiffViewer {
                                 error!("failed to clear commit input after commit: {err:#}");
                             }
 
-                            this.refresh_after_git_action(cx);
+                            this.request_recent_commits_refresh(true, cx);
+                            this.refresh_after_git_action("Create commit", cx);
                         }
                         Err(err) => {
                             error!(

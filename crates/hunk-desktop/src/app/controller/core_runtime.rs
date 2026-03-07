@@ -175,6 +175,7 @@ impl DiffViewer {
         self.repo_watch_refresh_task = Task::ready(());
         self.repo_watch_refresh_epoch = 0;
         self.repo_watch_pending_refresh = None;
+        self.repo_watch_pending_recent_commits_refresh = false;
 
         let Some(repo_root) = self.repo_root.clone().or_else(|| self.project_path.clone()) else {
             return;
@@ -232,6 +233,7 @@ impl DiffViewer {
                     this.update(cx, move |this, cx| {
                         if metadata_changed {
                             invalidate_repo_metadata_caches(repo_root.as_path());
+                            this.repo_watch_pending_recent_commits_refresh = true;
                         }
                         if !dirty_paths.is_empty() {
                             this.queue_dirty_paths(dirty_paths);
@@ -272,7 +274,12 @@ impl DiffViewer {
                         .repo_watch_pending_refresh
                         .take()
                         .unwrap_or_else(SnapshotRefreshRequest::background);
+                    let refresh_recent_commits =
+                        std::mem::take(&mut this.repo_watch_pending_recent_commits_refresh);
                     this.request_snapshot_refresh_internal(request, cx);
+                    if refresh_recent_commits {
+                        this.request_recent_commits_refresh(false, cx);
+                    }
                 });
             }
         });
@@ -352,6 +359,7 @@ impl DiffViewer {
 
                     if this.project_path.is_some() {
                         this.request_snapshot_refresh_workflow_only(false, cx);
+                        this.request_recent_commits_refresh(false, cx);
                     }
 
                     let next_delay = this.auto_refresh_interval();

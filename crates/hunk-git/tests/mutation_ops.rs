@@ -5,7 +5,8 @@ use anyhow::Result;
 use git2::{BranchType, IndexAddOption, Repository, Signature, build::CheckoutBuilder};
 use hunk_git::git::load_workflow_snapshot;
 use hunk_git::mutation::{
-    activate_or_create_branch, commit_all, commit_selected_paths, restore_working_copy_paths,
+    activate_or_create_branch, commit_all, commit_all_with_details, commit_selected_paths,
+    commit_selected_paths_with_details, restore_working_copy_paths,
 };
 use tempfile::TempDir;
 
@@ -117,6 +118,58 @@ fn commit_selected_paths_leaves_excluded_changes_dirty() -> Result<()> {
     assert_eq!(snapshot.last_commit_subject.as_deref(), Some("partial"));
     assert_eq!(snapshot.files.len(), 1);
     assert_eq!(snapshot.files[0].path, "README.md");
+    Ok(())
+}
+
+#[test]
+fn commit_all_with_details_returns_created_commit_metadata() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.configure_signature()?;
+    fixture.write_file("tracked.txt", "base\n")?;
+    fixture.commit_all_git2("initial")?;
+    fixture.write_file("tracked.txt", "changed\n")?;
+
+    let created = commit_all_with_details(fixture.root(), "record all")?;
+
+    assert_eq!(created.subject, "record all");
+    assert!(created.committed_unix_time.is_some());
+    assert_eq!(created.commit_id.len(), 40);
+    Ok(())
+}
+
+#[test]
+fn commit_selected_paths_with_details_returns_count_and_commit_metadata() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.configure_signature()?;
+    fixture.write_file("src/lib.rs", "one\n")?;
+    fixture.write_file("README.md", "hello\n")?;
+    fixture.commit_all_git2("initial")?;
+    fixture.write_file("src/lib.rs", "one\ntwo\n")?;
+    fixture.write_file("README.md", "hello\nworld\n")?;
+
+    let (count, created) = commit_selected_paths_with_details(
+        fixture.root(),
+        "partial",
+        &[String::from("src/lib.rs")],
+    )?;
+
+    assert_eq!(count, 1);
+    assert_eq!(created.subject, "partial");
+    assert_eq!(created.commit_id.len(), 40);
+    Ok(())
+}
+
+#[test]
+fn commit_details_use_the_commit_subject_for_multiline_messages() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.configure_signature()?;
+    fixture.write_file("tracked.txt", "base\n")?;
+    fixture.commit_all_git2("initial")?;
+    fixture.write_file("tracked.txt", "changed\n")?;
+
+    let created = commit_all_with_details(fixture.root(), "subject line\n\nbody line")?;
+
+    assert_eq!(created.subject, "subject line");
     Ok(())
 }
 

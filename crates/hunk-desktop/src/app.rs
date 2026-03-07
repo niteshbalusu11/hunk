@@ -36,9 +36,13 @@ use hunk_domain::diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
 use hunk_domain::markdown_preview::MarkdownPreviewBlock;
 use hunk_domain::state::{
     AiCollaborationModeSelection, AiServiceTierSelection, AppState, AppStateStore,
-    CachedChangedFileState, CachedLocalBranchState, CachedWorkflowState,
+    CachedChangedFileState, CachedLocalBranchState, CachedRecentCommitState,
+    CachedRecentCommitsState, CachedWorkflowState,
 };
 use hunk_git::git::{ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFingerprint};
+use hunk_git::history::{
+    DEFAULT_RECENT_AUTHORED_COMMIT_LIMIT, RecentCommitSummary, RecentCommitsFingerprint,
+};
 
 use ai_runtime::AiApprovalDecision;
 use ai_runtime::AiApprovalKind;
@@ -98,6 +102,59 @@ enum RepoTreePromptAction {
     CreateFile { base_dir: Option<String> },
     CreateFolder { base_dir: Option<String> },
     RenameFile { path: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum RecentCommitsRefreshPriority {
+    Background,
+    UserInitiated,
+}
+
+impl RecentCommitsRefreshPriority {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Background => "background",
+            Self::UserInitiated => "user",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RecentCommitsRefreshRequest {
+    force: bool,
+    priority: RecentCommitsRefreshPriority,
+}
+
+impl RecentCommitsRefreshRequest {
+    const fn background() -> Self {
+        Self {
+            force: false,
+            priority: RecentCommitsRefreshPriority::Background,
+        }
+    }
+
+    const fn user(force: bool) -> Self {
+        Self {
+            force,
+            priority: RecentCommitsRefreshPriority::UserInitiated,
+        }
+    }
+
+    fn merge(self, other: Self) -> Self {
+        Self {
+            force: self.force || other.force,
+            priority: if self.priority >= other.priority {
+                self.priority
+            } else {
+                other.priority
+            },
+        }
+    }
+
+    fn is_more_urgent_than(self, other: Self) -> bool {
+        self.priority > other.priority
+            || (self.priority == other.priority && self.force && !other.force)
+    }
 }
 
 #[derive(Clone)]
@@ -994,6 +1051,7 @@ struct DiffViewer {
     working_copy_commit_id: Option<String>,
     branches: Vec<LocalBranch>,
     git_working_tree_scroll_handle: ScrollHandle,
+    recent_commits_scroll_handle: ScrollHandle,
     workspace_view_mode: WorkspaceViewMode,
     ai_connection_state: AiConnectionState,
     ai_bootstrap_loading: bool,
@@ -1051,6 +1109,9 @@ struct DiffViewer {
     commit_input_state: Entity<InputState>,
     staged_commit_files: BTreeSet<String>,
     last_commit_subject: Option<String>,
+    recent_commits: Vec<RecentCommitSummary>,
+    recent_commits_author_label: Option<String>,
+    recent_commits_error: Option<String>,
     git_action_epoch: usize,
     git_action_task: Task<()>,
     git_action_loading: bool,
@@ -1078,6 +1139,7 @@ struct DiffViewer {
     repo_watch_task: Task<()>,
     repo_watch_refresh_epoch: usize,
     repo_watch_pending_refresh: Option<SnapshotRefreshRequest>,
+    repo_watch_pending_recent_commits_refresh: bool,
     repo_watch_refresh_task: Task<()>,
     snapshot_epoch: usize,
     snapshot_task: Task<()>,
@@ -1089,6 +1151,12 @@ struct DiffViewer {
     line_stats_loading: bool,
     pending_line_stats_refresh: Option<PendingLineStatsRefresh>,
     pending_snapshot_refresh: Option<SnapshotRefreshRequest>,
+    recent_commits_epoch: usize,
+    recent_commits_task: Task<()>,
+    recent_commits_loading: bool,
+    recent_commits_active_request: Option<RecentCommitsRefreshRequest>,
+    pending_recent_commits_refresh: Option<RecentCommitsRefreshRequest>,
+    last_recent_commits_fingerprint: Option<RecentCommitsFingerprint>,
     pending_dirty_paths: BTreeSet<String>,
     last_snapshot_fingerprint: Option<RepoSnapshotFingerprint>,
     open_project_task: Task<()>,
