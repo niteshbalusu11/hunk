@@ -147,8 +147,6 @@ impl DiffViewer {
         };
         self.branch_has_upstream = cache.branch_has_upstream;
         self.branch_ahead_count = cache.branch_ahead_count;
-        self.can_undo_operation = cache.can_undo_operation;
-        self.can_redo_operation = cache.can_redo_operation;
         self.branches = cache
             .branches
             .into_iter()
@@ -156,15 +154,6 @@ impl DiffViewer {
                 name: branch.name,
                 is_current: branch.is_current,
                 tip_unix_time: branch.tip_unix_time,
-            })
-            .collect();
-        self.bookmark_revisions = cache
-            .bookmark_revisions
-            .into_iter()
-            .map(|revision| BookmarkRevision {
-                id: revision.id,
-                subject: revision.subject,
-                unix_time: revision.unix_time,
             })
             .collect();
         self.files = cache
@@ -195,11 +184,10 @@ impl DiffViewer {
         self.repo_discovery_failed = false;
         self.error_message = None;
         debug!(
-            "hydrated git workflow cache for {} (files={} branches={} revisions={})",
+            "hydrated git workflow cache for {} (files={} branches={})",
             root.display(),
             self.files.len(),
             self.branches.len(),
-            self.bookmark_revisions.len()
         );
         cx.notify();
     }
@@ -214,8 +202,6 @@ impl DiffViewer {
             branch_name: self.branch_name.clone(),
             branch_has_upstream: self.branch_has_upstream,
             branch_ahead_count: self.branch_ahead_count,
-            can_undo_operation: self.can_undo_operation,
-            can_redo_operation: self.can_redo_operation,
             branches: self
                 .branches
                 .iter()
@@ -223,15 +209,6 @@ impl DiffViewer {
                     name: branch.name.clone(),
                     is_current: branch.is_current,
                     tip_unix_time: branch.tip_unix_time,
-                })
-                .collect(),
-            bookmark_revisions: self
-                .bookmark_revisions
-                .iter()
-                .map(|revision| CachedBookmarkRevisionState {
-                    id: revision.id.clone(),
-                    subject: revision.subject.clone(),
-                    unix_time: revision.unix_time,
                 })
                 .collect(),
             files: self
@@ -367,10 +344,7 @@ impl DiffViewer {
             branch_has_upstream: false,
             branch_ahead_count: 0,
             working_copy_commit_id: None,
-            can_undo_operation: false,
-            can_redo_operation: false,
             branches: Vec::new(),
-            bookmark_revisions: Vec::new(),
             jj_workspace_scroll_handle: ScrollHandle::default(),
             workspace_view_mode: WorkspaceViewMode::GitWorkspace,
             ai_connection_state: AiConnectionState::Disconnected,
@@ -1125,7 +1099,6 @@ impl DiffViewer {
 
             let workflow_file_count = workflow_snapshot.files.len();
             let workflow_branch_count = workflow_snapshot.branches.len();
-            let workflow_revision_count = workflow_snapshot.bookmark_revisions.len();
             let workflow_ready_elapsed = started_at.elapsed();
             let should_run_cold_start_reconcile = should_run_cold_start_reconcile(
                 cold_start,
@@ -1133,7 +1106,7 @@ impl DiffViewer {
                 request.behavior,
             );
             debug!(
-                "git workspace workflow ready: epoch={} force={} priority={} behavior={} elapsed_ms={} files={} branches={} bookmark_revisions={} cold_start={}",
+                "git workspace workflow ready: epoch={} force={} priority={} behavior={} elapsed_ms={} files={} branches={} cold_start={}",
                 epoch,
                 request.force,
                 request.priority.as_str(),
@@ -1141,7 +1114,6 @@ impl DiffViewer {
                 workflow_ready_elapsed.as_millis(),
                 workflow_file_count,
                 workflow_branch_count,
-                workflow_revision_count,
                 cold_start
             );
 
@@ -1339,10 +1311,7 @@ impl DiffViewer {
             branch_has_upstream,
             branch_ahead_count,
             branch_behind_count: _,
-            can_undo_operation,
-            can_redo_operation,
             branches,
-            bookmark_revisions,
             files,
             last_commit_subject,
         } = snapshot;
@@ -1364,10 +1333,7 @@ impl DiffViewer {
         self.branch_name = branch_name;
         self.branch_has_upstream = branch_has_upstream;
         self.branch_ahead_count = branch_ahead_count;
-        self.can_undo_operation = can_undo_operation;
-        self.can_redo_operation = can_redo_operation;
         self.branches = branches;
-        self.bookmark_revisions = bookmark_revisions;
         self.files = files;
         self.file_status_by_path = self
             .files
@@ -1487,10 +1453,7 @@ impl DiffViewer {
         self.branch_has_upstream = false;
         self.branch_ahead_count = 0;
         self.working_copy_commit_id = None;
-        self.can_undo_operation = false;
-        self.can_redo_operation = false;
         self.branches.clear();
-        self.bookmark_revisions.clear();
         self.git_action_label = None;
         self.files.clear();
         self.file_status_by_path.clear();

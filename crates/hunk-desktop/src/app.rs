@@ -36,12 +36,9 @@ use hunk_domain::diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
 use hunk_domain::markdown_preview::MarkdownPreviewBlock;
 use hunk_domain::state::{
     AiCollaborationModeSelection, AiServiceTierSelection, AppState, AppStateStore,
-    CachedBookmarkRevisionState, CachedChangedFileState, CachedLocalBranchState,
-    CachedWorkflowState,
+    CachedChangedFileState, CachedLocalBranchState, CachedWorkflowState,
 };
-use hunk_git::git::{
-    BookmarkRevision, ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFingerprint,
-};
+use hunk_git::git::{ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFingerprint};
 
 use ai_runtime::AiApprovalDecision;
 use ai_runtime::AiApprovalKind;
@@ -993,10 +990,7 @@ struct DiffViewer {
     branch_has_upstream: bool,
     branch_ahead_count: usize,
     working_copy_commit_id: Option<String>,
-    can_undo_operation: bool,
-    can_redo_operation: bool,
     branches: Vec<LocalBranch>,
-    bookmark_revisions: Vec<BookmarkRevision>,
     jj_workspace_scroll_handle: ScrollHandle,
     workspace_view_mode: WorkspaceViewMode,
     ai_connection_state: AiConnectionState,

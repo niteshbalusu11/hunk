@@ -57,13 +57,6 @@ impl ChangedFile {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BookmarkRevision {
-    pub id: String,
-    pub subject: String,
-    pub unix_time: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalBranch {
     pub name: String,
     pub is_current: bool,
@@ -103,10 +96,7 @@ pub struct RepoSnapshot {
     pub branch_has_upstream: bool,
     pub branch_ahead_count: usize,
     pub branch_behind_count: usize,
-    pub can_undo_operation: bool,
-    pub can_redo_operation: bool,
     pub branches: Vec<LocalBranch>,
-    pub bookmark_revisions: Vec<BookmarkRevision>,
     pub files: Vec<ChangedFile>,
     pub line_stats: LineStats,
     pub last_commit_subject: Option<String>,
@@ -120,10 +110,7 @@ pub struct WorkflowSnapshot {
     pub branch_has_upstream: bool,
     pub branch_ahead_count: usize,
     pub branch_behind_count: usize,
-    pub can_undo_operation: bool,
-    pub can_redo_operation: bool,
     pub branches: Vec<LocalBranch>,
-    pub bookmark_revisions: Vec<BookmarkRevision>,
     pub files: Vec<ChangedFile>,
     pub last_commit_subject: Option<String>,
 }
@@ -431,10 +418,7 @@ fn load_snapshot_internal(path: &Path) -> Result<RepoSnapshot> {
         branch_has_upstream: seed.branch_has_upstream,
         branch_ahead_count: seed.branch_ahead_count,
         branch_behind_count: seed.branch_behind_count,
-        can_undo_operation: false,
-        can_redo_operation: false,
         branches: seed.branches,
-        bookmark_revisions: Vec::new(),
         files,
         line_stats,
         last_commit_subject: seed.last_commit_subject,
@@ -464,10 +448,7 @@ fn load_workflow_snapshot_internal(
         branch_has_upstream: seed.branch_has_upstream,
         branch_ahead_count: seed.branch_ahead_count,
         branch_behind_count: seed.branch_behind_count,
-        can_undo_operation: false,
-        can_redo_operation: false,
         branches: seed.branches,
-        bookmark_revisions: Vec::new(),
         files: snapshot_files(seed.entries.values()),
         last_commit_subject: seed.last_commit_subject,
     };

@@ -62,23 +62,12 @@ pub struct CachedLocalBranchState {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct CachedBookmarkRevisionState {
-    pub id: String,
-    pub subject: String,
-    pub unix_time: i64,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
 pub struct CachedWorkflowState {
     pub root: Option<PathBuf>,
     pub branch_name: String,
     pub branch_has_upstream: bool,
     pub branch_ahead_count: usize,
-    pub can_undo_operation: bool,
-    pub can_redo_operation: bool,
     pub branches: Vec<CachedLocalBranchState>,
-    pub bookmark_revisions: Vec<CachedBookmarkRevisionState>,
     pub files: Vec<CachedChangedFileState>,
     pub last_commit_subject: Option<String>,
     pub cached_unix_time: i64,

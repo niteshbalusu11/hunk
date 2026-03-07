@@ -253,70 +253,70 @@ Phase completion rule:
 
 ### Phase 0: Contract and Perf Baseline
 
-- [ ] Create this migration plan and lock the Git v1 scope.
+- [x] Create this migration plan and lock the Git v1 scope.
 - [ ] Record current performance numbers for the large-diff harness.
 - [ ] Record current refresh timing logs for snapshot load, line stats, and patch loading.
-- [ ] Identify all production `hunk-jj` imports and classify them as:
+- [x] Identify all production `hunk-jj` imports and classify them as:
   - read path
   - diff path
   - write path
   - JJ-only
-- [ ] Define the initial `hunk-git` façade API.
+- [x] Define the initial `hunk-git` façade API.
 - [ ] Deep code review (phase gate):
   - [ ] Verify scope does not accidentally preserve revision-stack behavior.
-  - [ ] Verify planned API contains only v1 Git features.
+  - [x] Verify planned API contains only v1 Git features.
   - [ ] Verify performance baseline is captured before backend work starts.
 
 ### Phase 1: Create `hunk-git` Crate Skeleton
 
-- [ ] Add `crates/hunk-git` to the workspace.
-- [ ] Create the Git-native core types needed by desktop.
-- [ ] Add crate-level `tests/` scaffolding for backend integration tests.
-- [ ] Implement repo discovery and repository-open helpers.
-- [ ] Implement a minimal snapshot fingerprint shape.
-- [ ] Keep `hunk-desktop` untouched in this phase.
-- [ ] Deep code review (phase gate):
-  - [ ] Check type names and field names use Git terminology.
-  - [ ] Remove any accidental JJ noun leakage.
-  - [ ] Ensure the crate API is smaller than the current `hunk-jj` API.
+- [x] Add `crates/hunk-git` to the workspace.
+- [x] Create the Git-native core types needed by desktop.
+- [x] Add crate-level `tests/` scaffolding for backend integration tests.
+- [x] Implement repo discovery and repository-open helpers.
+- [x] Implement a minimal snapshot fingerprint shape.
+- [x] Keep `hunk-desktop` untouched in this phase.
+- [x] Deep code review (phase gate):
+  - [x] Check type names and field names use Git terminology.
+  - [x] Remove any accidental JJ noun leakage.
+  - [x] Ensure the crate API is smaller than the current `hunk-jj` API.
 
 ### Phase 2: Implement Git Read Path Parity
 
-- [ ] Implement workflow snapshot loading in `hunk-git`.
-- [ ] Implement changed-file status loading.
-- [ ] Implement repo line stats and per-file line stats.
-- [ ] Implement repo tree loading.
-- [ ] Implement patch session and patch-map loading for changed files.
-- [ ] Implement snapshot fingerprint comparison for refresh decisions.
-- [ ] Implement branch/upstream/ahead-behind calculation.
+- [x] Implement workflow snapshot loading in `hunk-git`.
+- [x] Implement changed-file status loading.
+- [x] Implement repo line stats and per-file line stats.
+- [x] Implement repo tree loading.
+- [x] Implement patch session and patch-map loading for changed files.
+- [x] Implement snapshot fingerprint comparison for refresh decisions.
+- [x] Implement branch/upstream/ahead-behind calculation.
 - [ ] Add backend tests for:
-  - [ ] repo discovery
-  - [ ] clean repo snapshot
-  - [ ] dirty repo snapshot
+  - [x] repo discovery
+  - [x] clean repo snapshot
+  - [x] dirty repo snapshot
   - [ ] renamed/deleted/untracked file handling
-  - [ ] ahead/behind behavior
-  - [ ] repo tree listing
-  - [ ] patch loading
-- [ ] Deep code review (phase gate):
-  - [ ] Verify repeated refreshes do not reopen/recompute more than necessary.
-  - [ ] Verify patch generation is not duplicated per file when one pass will do.
-  - [ ] Verify the line-counter path stays lightweight.
-  - [ ] Refactor any duplicated snapshot/diff helpers before UI adoption.
+  - [x] ahead/behind behavior
+  - [x] repo tree listing
+  - [x] patch loading
+- [x] Deep code review (phase gate):
+  - [x] Verify repeated refreshes do not reopen/recompute more than necessary.
+  - [x] Verify patch generation is not duplicated per file when one pass will do.
+  - [x] Verify the line-counter path stays lightweight.
+  - [x] Refactor any duplicated snapshot/diff helpers before UI adoption.
 
 ### Phase 3: Switch `Files` and `Review` To `hunk-git`
 
-- [ ] Change `hunk-desktop` imports so read-path snapshot, patch, tree, and line-stat loading come from `hunk-git`.
-- [ ] Keep the current refresh policy and background task scheduling.
-- [ ] Keep the current progressive diff-loading architecture.
-- [ ] Make the toolbar line-change counter use `hunk-git` line stats.
+- [x] Change `hunk-desktop` imports so read-path snapshot, patch, tree, and line-stat loading come from `hunk-git`.
+- [x] Keep the current refresh policy and background task scheduling.
+- [x] Keep the current progressive diff-loading architecture.
+- [x] Make the toolbar line-change counter use `hunk-git` line stats.
 - [ ] Remove JJ-specific user-facing copy from Files and Review surfaces.
 - [ ] Do not switch Git-tab actions yet.
 - [ ] Run the perf harness and compare to the Phase 0 baseline.
-- [ ] Deep code review (phase gate):
-  - [ ] Review all touched refresh paths for stale-state bugs.
-  - [ ] Review visible-row, prefetch, and sticky-header interactions for regressions.
-  - [ ] Review render hot paths for new allocations.
-  - [ ] Refactor any desktop/backend glue that became repetitive during the switch.
+- [x] Deep code review (phase gate):
+  - [x] Review all touched refresh paths for stale-state bugs.
+  - [x] Review visible-row, prefetch, and sticky-header interactions for regressions.
+  - [x] Review render hot paths for new allocations.
+  - [x] Refactor any desktop/backend glue that became repetitive during the switch.
 
 ### Phase 4: Replace Git Tab With A Simpler Git Workflow
 
@@ -346,54 +346,54 @@ Phase completion rule:
 
 ### Phase 5: Implement Git Write Actions
 
-- [ ] Implement branch create/switch/rename in `hunk-git`.
-- [ ] Implement commit creation.
-- [ ] Implement publish as push with upstream configuration.
-- [ ] Implement push for the current branch.
-- [ ] Implement sync with a strict v1 policy:
-  - [ ] fetch
-  - [ ] fast-forward only update when safe
-  - [ ] explicit error for divergence
-- [ ] Implement review URL generation from Git remotes.
+- [x] Implement branch create/switch/rename in `hunk-git`.
+- [x] Implement commit creation.
+- [x] Implement publish as push with upstream configuration.
+- [x] Implement push for the current branch.
+- [x] Implement sync with a strict v1 policy:
+  - [x] fetch
+  - [x] fast-forward only update when safe
+  - [x] explicit error for divergence
+- [x] Implement review URL generation from Git remotes.
 - [ ] Add backend tests for:
-  - [ ] create branch
-  - [ ] switch branch in clean repo
-  - [ ] rename branch
-  - [ ] commit changes
-  - [ ] publish branch
-  - [ ] push branch
-  - [ ] sync fast-forward only
-  - [ ] divergence error behavior
-- [ ] Deep code review (phase gate):
-  - [ ] Review ref update correctness.
-  - [ ] Review upstream selection correctness.
-  - [ ] Review push/sync failure handling and user messaging.
-  - [ ] Verify no Git CLI usage was introduced.
-  - [ ] Verify any non-`gix` fallback is isolated, justified, and documented.
-  - [ ] Refactor write-path helpers if any action logic duplicated transport/ref code.
+  - [x] create branch
+  - [x] switch branch in clean repo
+  - [x] rename branch
+  - [x] commit changes
+  - [x] publish branch
+  - [x] push branch
+  - [x] sync fast-forward only
+  - [x] divergence error behavior
+- [x] Deep code review (phase gate):
+  - [x] Review ref update correctness.
+  - [x] Review upstream selection correctness.
+  - [x] Review push/sync failure handling and user messaging.
+  - [x] Verify no Git CLI usage was introduced.
+  - [x] Verify any non-`gix` fallback is isolated, justified, and documented.
+  - [x] Refactor write-path helpers if any action logic duplicated transport/ref code.
 
 ### Phase 6: Migrate Desktop State and Comment Scoping
 
-- [ ] Remove JJ-specific cached workflow fields from `hunk-domain` state.
-- [ ] Replace cached revision-stack data with Git-native snapshot state only.
+- [x] Remove JJ-specific cached workflow fields from `hunk-domain` state.
+- [x] Replace cached revision-stack data with Git-native snapshot state only.
 - [ ] Rename comment scope fields from `bookmark_name` to `branch_name` or `ref_name`.
 - [ ] Update desktop comment scope logic to Git naming.
 - [ ] Hard-break old persisted state and old comment schema as needed.
 - [ ] Add tests for:
-  - [ ] app-state load/save with new workflow cache shape
+  - [x] app-state load/save with new workflow cache shape
   - [ ] comment scoping by branch/ref
   - [ ] detached-head comment scope behavior
-- [ ] Deep code review (phase gate):
-  - [ ] Review all remaining persisted-state names for JJ leakage.
+- [x] Deep code review (phase gate):
+  - [x] Review all remaining persisted-state names for JJ leakage.
   - [ ] Review all comment queries for stale schema assumptions.
   - [ ] Refactor migration-time compatibility code aggressively instead of carrying it forward.
 
 ### Phase 7: Delete `hunk-jj`
 
-- [ ] Remove all production imports of `hunk-jj`.
+- [x] Remove all production imports of `hunk-jj`.
 - [ ] Remove `crates/hunk-jj` from the workspace.
 - [ ] Delete JJ-only tests, docs, and strings that no longer apply.
-- [ ] Remove JJ-specific controller and render code.
+- [x] Remove JJ-specific controller and render code.
 - [ ] Rename any remaining legacy identifiers that still contain `jj`.
 - [ ] Deep code review (phase gate):
   - [ ] Search the tree for remaining JJ terms and remove intentional leftovers or rename them.

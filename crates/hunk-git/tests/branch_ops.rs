@@ -1,0 +1,302 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use anyhow::Result;
+use git2::{BranchType, IndexAddOption, Repository, Signature, build::CheckoutBuilder};
+use hunk_domain::config::{ReviewProviderKind, ReviewProviderMapping};
+use hunk_git::branch::{
+    rename_branch, review_url_for_branch, review_url_for_branch_with_provider_map,
+    sanitize_branch_name,
+};
+use hunk_git::git::load_workflow_snapshot;
+use tempfile::TempDir;
+
+#[test]
+fn sanitize_branch_name_normalizes_invalid_input() {
+    assert_eq!(
+        sanitize_branch_name(" Feature / My branch "),
+        "feature/my-branch"
+    );
+    assert_eq!(sanitize_branch_name("HEAD"), "head-branch");
+    assert_eq!(sanitize_branch_name("   "), "branch");
+    assert_eq!(sanitize_branch_name("detached"), "detached-branch");
+}
+
+#[test]
+fn rename_branch_updates_head_and_clears_upstream_tracking() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.write_file("tracked.txt", "line one\n")?;
+    fixture.commit_all("initial")?;
+    fixture.checkout_branch("feature-old")?;
+    fixture.create_bare_remote("origin")?;
+    fixture.push_current_branch("origin", "feature-old")?;
+    fixture.set_upstream("feature-old", "origin/feature-old")?;
+
+    rename_branch(fixture.root(), "feature-old", "feature-new")?;
+
+    let snapshot = load_workflow_snapshot(fixture.root())?;
+    assert_eq!(snapshot.branch_name, "feature-new");
+    assert!(!snapshot.branch_has_upstream);
+    assert!(
+        snapshot
+            .branches
+            .iter()
+            .any(|branch| { branch.name == "feature-new" && branch.is_current })
+    );
+    assert!(
+        snapshot
+            .branches
+            .iter()
+            .all(|branch| branch.name != "feature-old")
+    );
+    Ok(())
+}
+
+#[test]
+fn rename_branch_rejects_existing_target() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.write_file("tracked.txt", "line one\n")?;
+    fixture.commit_all("initial")?;
+    fixture.checkout_branch("feature-old")?;
+    fixture.checkout_branch("feature-existing")?;
+
+    let err = rename_branch(fixture.root(), "feature-old", "feature-existing")
+        .expect_err("existing destination should fail");
+    assert!(err.to_string().contains("already exists"));
+    Ok(())
+}
+
+#[test]
+fn review_url_for_github_remote_uses_compare_link() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.write_file("tracked.txt", "line one\n")?;
+    fixture.commit_all("initial")?;
+    fixture.checkout_branch("feature/review-url")?;
+    fixture.add_remote("origin", "https://github.com/example-org/hunk.git")?;
+
+    let review_url = review_url_for_branch(fixture.root(), "feature/review-url")?
+        .expect("github remote should produce a review URL");
+
+    assert_eq!(
+        review_url,
+        "https://github.com/example-org/hunk/compare/feature%2Freview-url?expand=1"
+    );
+    Ok(())
+}
+
+#[test]
+fn review_url_for_provider_mapping_uses_self_hosted_gitlab() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.write_file("tracked.txt", "line one\n")?;
+    fixture.commit_all("initial")?;
+    fixture.checkout_branch("feature/self-hosted")?;
+    fixture.add_remote(
+        "origin",
+        "https://git.company.internal/example-org/hunk.git",
+    )?;
+
+    let review_url = review_url_for_branch_with_provider_map(
+        fixture.root(),
+        "feature/self-hosted",
+        &[ReviewProviderMapping {
+            host: "git.company.internal".to_string(),
+            provider: ReviewProviderKind::GitLab,
+        }],
+    )?
+    .expect("provider mapping should produce a review URL");
+
+    assert_eq!(
+        review_url,
+        "https://git.company.internal/example-org/hunk/-/merge_requests/new?merge_request[source_branch]=feature%2Fself-hosted"
+    );
+    Ok(())
+}
+
+#[test]
+fn review_url_preserves_non_default_port_for_self_hosted_remote() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.write_file("tracked.txt", "line one\n")?;
+    fixture.commit_all("initial")?;
+    fixture.checkout_branch("feature/port")?;
+    fixture.add_remote(
+        "origin",
+        "https://git.company.internal:8443/example-org/hunk.git",
+    )?;
+
+    let review_url = review_url_for_branch_with_provider_map(
+        fixture.root(),
+        "feature/port",
+        &[ReviewProviderMapping {
+            host: "git.company.internal".to_string(),
+            provider: ReviewProviderKind::GitLab,
+        }],
+    )?
+    .expect("provider mapping should produce a review URL");
+
+    assert_eq!(
+        review_url,
+        "https://git.company.internal:8443/example-org/hunk/-/merge_requests/new?merge_request[source_branch]=feature%2Fport"
+    );
+    Ok(())
+}
+
+#[test]
+fn review_url_normalizes_ssh_and_strips_credentials() -> Result<()> {
+    let ssh_fixture = TempGitRepo::new()?;
+    ssh_fixture.write_file("tracked.txt", "line one\n")?;
+    ssh_fixture.commit_all("initial")?;
+    ssh_fixture.checkout_branch("feature/ssh")?;
+    ssh_fixture.add_remote("origin", "ssh://git@github.com/example-org/hunk.git")?;
+
+    let ssh_url = review_url_for_branch(ssh_fixture.root(), "feature/ssh")?
+        .expect("ssh remote should produce a review URL");
+    assert_eq!(
+        ssh_url,
+        "https://github.com/example-org/hunk/compare/feature%2Fssh?expand=1"
+    );
+
+    let creds_fixture = TempGitRepo::new()?;
+    creds_fixture.write_file("tracked.txt", "line one\n")?;
+    creds_fixture.commit_all("initial")?;
+    creds_fixture.checkout_branch("feature/creds")?;
+    creds_fixture.add_remote(
+        "origin",
+        "https://user:secret-token@github.com/example-org/hunk.git",
+    )?;
+
+    let creds_url = review_url_for_branch(creds_fixture.root(), "feature/creds")?
+        .expect("credentialed remote should produce a review URL");
+    assert_eq!(
+        creds_url,
+        "https://github.com/example-org/hunk/compare/feature%2Fcreds?expand=1"
+    );
+    Ok(())
+}
+
+#[test]
+fn review_url_for_path_remote_returns_none() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.write_file("tracked.txt", "line one\n")?;
+    fixture.commit_all("initial")?;
+    fixture.checkout_branch("feature/path")?;
+    fixture.add_remote("origin", "../local-bare-remote")?;
+
+    let review_url = review_url_for_branch(fixture.root(), "feature/path")?;
+    assert!(review_url.is_none());
+    Ok(())
+}
+
+struct TempGitRepo {
+    tempdir: TempDir,
+    root: PathBuf,
+}
+
+impl TempGitRepo {
+    fn new() -> Result<Self> {
+        let tempdir = tempfile::tempdir()?;
+        let root = tempdir.path().join("repo");
+        let repo = Repository::init(root.as_path())?;
+        drop(repo);
+        Ok(Self {
+            root: fs::canonicalize(root)?,
+            tempdir,
+        })
+    }
+
+    fn root(&self) -> &Path {
+        &self.root
+    }
+
+    fn repository(&self) -> Result<Repository> {
+        Ok(Repository::open(self.root.as_path())?)
+    }
+
+    fn write_file(&self, relative: &str, contents: &str) -> Result<()> {
+        let path = self.root.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, contents)?;
+        Ok(())
+    }
+
+    fn commit_all(&self, message: &str) -> Result<git2::Oid> {
+        let repo = self.repository()?;
+        let mut index = repo.index()?;
+        index.add_all(["*"].iter(), IndexAddOption::DEFAULT, None)?;
+        index.write()?;
+        let tree_id = index.write_tree()?;
+        let tree = repo.find_tree(tree_id)?;
+        let signature = test_signature()?;
+        let parents = self.head_commits(&repo)?;
+        let parent_refs = parents.iter().collect::<Vec<_>>();
+        Ok(repo.commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            message,
+            &tree,
+            parent_refs.as_slice(),
+        )?)
+    }
+
+    fn checkout_branch(&self, name: &str) -> Result<()> {
+        let repo = self.repository()?;
+        let head_commit = repo.head()?.peel_to_commit()?;
+        if repo.find_branch(name, BranchType::Local).is_err() {
+            repo.branch(name, &head_commit, false)?;
+        }
+        repo.set_head(&format!("refs/heads/{name}"))?;
+        let mut checkout = CheckoutBuilder::new();
+        checkout.force();
+        repo.checkout_head(Some(&mut checkout))?;
+        Ok(())
+    }
+
+    fn add_remote(&self, name: &str, url: &str) -> Result<()> {
+        let repo = self.repository()?;
+        if repo.find_remote(name).is_err() {
+            repo.remote(name, url)?;
+        }
+        Ok(())
+    }
+
+    fn create_bare_remote(&self, name: &str) -> Result<PathBuf> {
+        let remote_root = self.tempdir.path().join(format!("{name}.git"));
+        Repository::init_bare(remote_root.as_path())?;
+        self.add_remote(name, remote_root.to_string_lossy().as_ref())?;
+        Ok(remote_root)
+    }
+
+    fn push_current_branch(&self, remote_name: &str, branch_name: &str) -> Result<()> {
+        let repo = self.repository()?;
+        let mut remote = repo.find_remote(remote_name)?;
+        remote.push(
+            &[format!("refs/heads/{branch_name}:refs/heads/{branch_name}")],
+            None,
+        )?;
+        Ok(())
+    }
+
+    fn set_upstream(&self, branch_name: &str, upstream: &str) -> Result<()> {
+        let repo = self.repository()?;
+        let mut branch = repo.find_branch(branch_name, BranchType::Local)?;
+        branch.set_upstream(Some(upstream))?;
+        Ok(())
+    }
+
+    fn head_commits<'repo>(&self, repo: &'repo Repository) -> Result<Vec<git2::Commit<'repo>>> {
+        let head = match repo.head() {
+            Ok(head) => head,
+            Err(_) => return Ok(Vec::new()),
+        };
+        let Some(target) = head.target() else {
+            return Ok(Vec::new());
+        };
+        Ok(vec![repo.find_commit(target)?])
+    }
+}
+
+fn test_signature() -> Result<Signature<'static>> {
+    Ok(Signature::now("Hunk", "hunk@example.com")?)
+}

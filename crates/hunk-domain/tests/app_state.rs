@@ -4,7 +4,6 @@ use hunk_domain::state::AiCollaborationModeSelection;
 use hunk_domain::state::AiServiceTierSelection;
 use hunk_domain::state::AiThreadSessionState;
 use hunk_domain::state::AppState;
-use hunk_domain::state::CachedBookmarkRevisionState;
 use hunk_domain::state::CachedChangedFileState;
 use hunk_domain::state::CachedLocalBranchState;
 use hunk_domain::state::CachedWorkflowState;
@@ -54,17 +53,10 @@ fn app_state_round_trips_last_project_path() {
             branch_name: "main".to_string(),
             branch_has_upstream: true,
             branch_ahead_count: 2,
-            can_undo_operation: true,
-            can_redo_operation: false,
             branches: vec![CachedLocalBranchState {
                 name: "main".to_string(),
                 is_current: true,
                 tip_unix_time: Some(1_711_111_111),
-            }],
-            bookmark_revisions: vec![CachedBookmarkRevisionState {
-                id: "abc123".to_string(),
-                subject: "cached commit".to_string(),
-                unix_time: 1_711_111_111,
             }],
             files: vec![CachedChangedFileState {
                 path: "src/main.rs".to_string(),

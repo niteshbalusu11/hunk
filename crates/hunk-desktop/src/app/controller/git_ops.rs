@@ -259,7 +259,7 @@ impl DiffViewer {
             && !self.git_action_loading
     }
 
-    pub(super) fn can_push_current_bookmark_revisions(&self) -> bool {
+    pub(super) fn can_push_current_branch(&self) -> bool {
         self.can_run_active_bookmark_actions()
             && self.branch_has_upstream
             && self.branch_ahead_count > 0
@@ -363,7 +363,7 @@ impl DiffViewer {
         });
     }
 
-    pub(super) fn push_current_bookmark_revisions(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn push_current_branch(&mut self, cx: &mut Context<Self>) {
         if !self.can_run_active_bookmark_actions() {
             let message = "Activate a branch before pushing.".to_string();
             self.git_status_message = Some(message.clone());

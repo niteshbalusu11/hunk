@@ -13,7 +13,7 @@ impl DiffViewer {
         let branch_syncable = self.can_run_active_bookmark_actions();
         let sync_disabled = !self.can_sync_current_bookmark();
         let publish_disabled = !self.can_publish_current_bookmark();
-        let push_available = self.can_push_current_bookmark_revisions() || push_loading;
+        let push_available = self.can_push_current_branch() || push_loading;
         let push_disabled = !push_available || (self.git_action_loading && !push_loading);
         let sync_tooltip = if !branch_syncable {
             "Activate a branch before syncing."
@@ -430,7 +430,7 @@ impl DiffViewer {
                                     .disabled(push_disabled)
                                     .on_click(move |_, _, cx| {
                                         view.update(cx, |this, cx| {
-                                            this.push_current_bookmark_revisions(cx);
+                                            this.push_current_branch(cx);
                                         });
                                     })
                             }),

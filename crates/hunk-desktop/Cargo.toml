@@ -6,8 +6,8 @@ edition = "2024"
 [package.metadata.bundle]
 name = "Hunk"
 identifier = "com.prodata.hunk"
-short_description = "Fast JJ diff viewer."
-long_description = "A fast, simple JJ diff viewer built with GPUI."
+short_description = "Fast Git diff viewer."
+long_description = "A fast, simple Git diff viewer built with GPUI."
 category = "public.app-category.developer-tools"
 icon = ["assets/icons/Hunk.icns"]
 resources = ["../../assets/codex-runtime"]
@@ -37,7 +37,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 hunk-domain = { path = "../hunk-domain" }
 hunk-git = { path = "../hunk-git" }
-hunk-jj = { path = "../hunk-jj" }
 hunk-codex = { path = "../hunk-codex" }
 codex-app-server-protocol = { git = "https://github.com/openai/codex.git", tag = "rust-v0.111.0" }
 codex-protocol = { git = "https://github.com/openai/codex.git", tag = "rust-v0.111.0" }

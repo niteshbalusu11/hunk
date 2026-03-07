@@ -13,6 +13,11 @@ use super::data::{
     save_file_editor_document,
 };
 use super::*;
+use hunk_git::branch::{
+    rename_branch as rename_bookmark,
+    review_url_for_branch_with_provider_map as review_url_for_bookmark_with_provider_map,
+    sanitize_branch_name as sanitize_bookmark_name,
+};
 use hunk_git::git::{
     WorkflowSnapshot, count_non_ignored_repo_tree_entries, invalidate_repo_metadata_caches,
     load_patches_for_files_from_session, load_repo_file_line_stats_for_paths_without_refresh,
@@ -21,10 +26,13 @@ use hunk_git::git::{
     load_workflow_snapshot_with_fingerprint,
     load_workflow_snapshot_with_fingerprint_without_refresh, open_patch_session,
 };
-use hunk_jj::jj::{
-    checkout_or_create_bookmark_with_change_transfer, commit_selected_paths, commit_staged,
-    push_current_bookmark, rename_bookmark, restore_working_copy_paths,
-    review_url_for_bookmark_with_provider_map, sanitize_bookmark_name, sync_current_bookmark,
+use hunk_git::mutation::{
+    activate_or_create_branch as checkout_or_create_bookmark_with_change_transfer,
+    commit_all as commit_staged, commit_selected_paths, restore_working_copy_paths,
+};
+use hunk_git::network::{
+    push_current_branch as push_current_bookmark,
+    sync_current_branch as sync_current_bookmark,
 };
 
 include!("core.rs");

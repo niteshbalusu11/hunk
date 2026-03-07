@@ -58,7 +58,6 @@ impl DiffViewer {
         self.repo_root.is_some()
             || self.branch_name != "unknown"
             || !self.branches.is_empty()
-            || !self.bookmark_revisions.is_empty()
             || !self.files.is_empty()
             || self.last_commit_subject.is_some()
     }
