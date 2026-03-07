@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/hunk-domain",
+  "crates/hunk-git",
   "crates/hunk-jj",
   "crates/hunk-desktop",
   "crates/hunk-codex",

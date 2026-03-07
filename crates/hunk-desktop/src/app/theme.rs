@@ -3,7 +3,7 @@ use std::rc::Rc;
 use super::{preferred_mono_font_family, preferred_ui_font_family};
 use gpui::{App, Hsla};
 use gpui_component::{Colorize as _, Theme, ThemeMode, highlighter::HighlightThemeStyle};
-use hunk_jj::jj::FileStatus;
+use hunk_git::git::FileStatus;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct HunkSurfaceColors {

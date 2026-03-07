@@ -1342,6 +1342,7 @@ impl DiffViewer {
             branch_name,
             branch_has_upstream,
             branch_ahead_count,
+            branch_behind_count: _,
             can_undo_operation,
             can_redo_operation,
             branches,

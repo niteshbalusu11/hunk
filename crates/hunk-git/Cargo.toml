@@ -1,0 +1,13 @@
+[package]
+name = "hunk-git"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0"
+gix = { version = "0.78.0", default-features = false, features = ["parallel", "revision", "status"] }
+hunk-domain = { path = "../hunk-domain" }
+
+[dev-dependencies]
+git2 = "0.20"
+tempfile = "3.17"

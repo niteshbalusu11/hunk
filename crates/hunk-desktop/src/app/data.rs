@@ -18,7 +18,7 @@ use super::highlight::{
 pub(super) use super::workspace_view::{WorkspaceSwitchAction, WorkspaceViewMode};
 use super::*;
 use hunk_domain::diff::parse_patch_side_by_side;
-use hunk_jj::jj::{RepoTreeEntry, RepoTreeEntryKind};
+use hunk_git::git::{RepoTreeEntry, RepoTreeEntryKind};
 
 #[derive(Default)]
 struct RepoTreeFolder {

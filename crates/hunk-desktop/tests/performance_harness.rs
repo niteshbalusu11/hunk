@@ -9,7 +9,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow};
 use hunk_domain::diff::{DiffCellKind, DiffRowKind, parse_patch_side_by_side};
-use hunk_jj::jj::{ChangedFile, load_patches_for_files, load_snapshot};
+use hunk_git::git::{ChangedFile, load_patches_for_files, load_snapshot};
 
 const DEFAULT_LANG: &str = "ts";
 const DEFAULT_FILES: usize = 50;

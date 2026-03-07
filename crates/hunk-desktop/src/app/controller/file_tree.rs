@@ -740,7 +740,7 @@ impl DiffViewer {
 
 fn apply_repo_tree_reload(
     this: &mut DiffViewer,
-    result: anyhow::Result<Vec<hunk_jj::jj::RepoTreeEntry>>,
+    result: anyhow::Result<Vec<hunk_git::git::RepoTreeEntry>>,
     cx: &mut Context<DiffViewer>,
 ) {
     this.repo_tree.loading = false;

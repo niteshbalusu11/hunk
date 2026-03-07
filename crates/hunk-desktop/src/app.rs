@@ -39,7 +39,7 @@ use hunk_domain::state::{
     CachedBookmarkRevisionState, CachedChangedFileState, CachedLocalBranchState,
     CachedWorkflowState,
 };
-use hunk_jj::jj::{
+use hunk_git::git::{
     BookmarkRevision, ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFingerprint,
 };
 
