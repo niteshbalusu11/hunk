@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod ai_tests {
     use std::collections::HashMap;
+    use std::sync::mpsc;
 
     use codex_app_server_protocol::AccountLoginCompletedNotification;
     use codex_app_server_protocol::AskForApproval;
@@ -20,15 +21,18 @@ mod ai_tests {
 
     use super::AiApprovalDecision;
     use super::AiWorkerCommand;
+    use super::AiWorkerEvent;
     use super::AiTurnSessionOverrides;
     use super::apply_login_completed_state;
     use super::apply_thread_start_policy;
     use super::apply_thread_start_session_overrides;
     use super::apply_turn_start_policy;
     use super::command_can_retry_after_reconnect;
+    use super::dispatch_ai_worker_result;
     use super::reconnect_backoff;
     use super::map_command_approval_decision;
     use super::map_file_change_approval_decision;
+    use super::panic_payload_message;
     use super::preferred_rate_limit_snapshot;
     use super::request_id_key;
     use super::selected_ai_service_tier;
@@ -431,5 +435,26 @@ mod ai_tests {
         assert_eq!(reconnect_backoff(2), std::time::Duration::from_millis(500));
         assert_eq!(reconnect_backoff(3), std::time::Duration::from_millis(1_000));
         assert_eq!(reconnect_backoff(9), std::time::Duration::from_millis(64_000));
+    }
+
+    #[test]
+    fn panic_payload_message_prefers_string_payloads() {
+        assert_eq!(panic_payload_message(Box::new("boom")), "boom");
+        assert_eq!(panic_payload_message(Box::new("kaboom".to_string())), "kaboom");
+    }
+
+    #[test]
+    fn dispatch_ai_worker_result_reports_panics_as_fatal_events() {
+        let (event_tx, event_rx) = mpsc::channel();
+
+        dispatch_ai_worker_result(Err(Box::new("panic payload")), &event_tx);
+
+        let event = event_rx.recv().expect("panic event should be emitted");
+        match event {
+            AiWorkerEvent::Fatal(message) => {
+                assert_eq!(message, "AI worker panicked: panic payload");
+            }
+            other => panic!("expected fatal event, got {other:?}"),
+        }
     }
 }

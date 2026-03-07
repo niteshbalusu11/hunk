@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -254,10 +255,39 @@ pub fn spawn_ai_worker(
     event_tx: Sender<AiWorkerEvent>,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
-        if let Err(error) = run_ai_worker(config, command_rx, &event_tx) {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_ai_worker(config, command_rx, &event_tx)
+        }));
+        dispatch_ai_worker_result(result, &event_tx);
+    })
+}
+
+fn dispatch_ai_worker_result(
+    result: std::thread::Result<Result<(), CodexIntegrationError>>,
+    event_tx: &Sender<AiWorkerEvent>,
+) {
+    match result {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
             let _ = event_tx.send(AiWorkerEvent::Fatal(error.to_string()));
         }
-    })
+        Err(payload) => {
+            let _ = event_tx.send(AiWorkerEvent::Fatal(format!(
+                "AI worker panicked: {}",
+                panic_payload_message(payload)
+            )));
+        }
+    }
+}
+
+fn panic_payload_message(payload: Box<dyn Any + Send>) -> String {
+    match payload.downcast::<String>() {
+        Ok(message) => *message,
+        Err(payload) => match payload.downcast::<&'static str>() {
+            Ok(message) => (*message).to_string(),
+            Err(_) => "unknown panic payload".to_string(),
+        },
+    }
 }
 
 struct AiWorkerRuntime {

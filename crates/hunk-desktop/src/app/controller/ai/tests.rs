@@ -15,6 +15,7 @@ mod ai_tests {
     use super::bundled_codex_executable_candidates;
     use super::codex_runtime_binary_name;
     use super::codex_runtime_platform_dir;
+    use super::drain_ai_worker_events;
     use super::group_ai_timeline_rows_for_thread;
     use super::item_status_chip;
     use super::is_supported_ai_image_path;
@@ -23,6 +24,10 @@ mod ai_tests {
     use super::normalized_user_input_answers;
     use super::resolve_bundled_codex_executable_from_exe;
     use super::resolved_ai_workspace_cwd;
+    #[cfg(target_os = "windows")]
+    use super::resolve_windows_command_path;
+    #[cfg(target_os = "windows")]
+    use super::resolve_windows_command_path_from_env;
     use super::should_follow_timeline_output;
     use super::should_reset_ai_timeline_measurements;
     use super::should_scroll_timeline_to_bottom_on_new_activity;
@@ -56,8 +61,16 @@ mod ai_tests {
     use hunk_domain::state::AppState;
     use std::collections::{BTreeMap, BTreeSet};
     use std::env;
+    #[cfg(target_os = "windows")]
+    use std::ffi::OsString;
     use std::path::PathBuf;
+    use std::sync::mpsc;
     use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+    #[cfg(target_os = "windows")]
+    fn write_fake_windows_pe(path: &std::path::Path) {
+        std::fs::write(path, b"MZfake-pe").expect("fake PE should be written");
+    }
 
     #[allow(clippy::too_many_arguments)]
     fn timeline_tool_item(
@@ -1376,6 +1389,26 @@ mod ai_tests {
     }
 
     #[test]
+    fn drain_ai_worker_events_preserves_final_fatal_before_disconnect() {
+        let (event_tx, event_rx) = mpsc::channel();
+        event_tx
+            .send(crate::app::ai_runtime::AiWorkerEvent::Fatal(
+                "boom".to_string(),
+            ))
+            .expect("fatal event should send");
+        drop(event_tx);
+
+        let (events, disconnected) = drain_ai_worker_events(&event_rx);
+        assert!(disconnected);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            events.first(),
+            Some(crate::app::ai_runtime::AiWorkerEvent::Fatal(message))
+                if message == "boom"
+        ));
+    }
+
+    #[test]
     fn normalized_thread_session_state_drops_empty_entries() {
         assert_eq!(
             normalized_thread_session_state(AiThreadSessionState::default()),
@@ -1445,6 +1478,56 @@ mod ai_tests {
         assert!(!is_command_name_without_path(std::path::Path::new("/usr/bin/codex")));
     }
 
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_command_resolution_prefers_spawnable_launcher_on_path() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be monotonic")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("hunk-codex-cmd-{unique}"));
+        let bin_dir = root.join("bin");
+        std::fs::create_dir_all(&bin_dir).expect("bin dir should be created");
+        std::fs::write(bin_dir.join("codex"), "#!/bin/sh\n").expect("unix shim should be written");
+        let launcher_path = bin_dir.join("codex.cmd");
+        std::fs::write(&launcher_path, "@echo off\r\n").expect("fake launcher should be written");
+
+        let resolved = resolve_windows_command_path_from_env(
+            std::path::Path::new("codex"),
+            Some(std::env::join_paths([bin_dir.as_path()]).expect("path should join")),
+            Some(OsString::from(".COM;.EXE;.BAT;.CMD")),
+        );
+
+        assert_eq!(
+            resolved.map(|path| path.to_string_lossy().to_ascii_lowercase()),
+            Some(launcher_path.to_string_lossy().to_ascii_lowercase()),
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_explicit_command_path_prefers_adjacent_launcher_over_unix_shim() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be monotonic")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("hunk-codex-explicit-{unique}"));
+        std::fs::create_dir_all(&root).expect("root dir should be created");
+        let unix_shim_path = root.join("codex");
+        std::fs::write(&unix_shim_path, "#!/bin/sh\n").expect("unix shim should be written");
+        let launcher_path = root.join("codex.cmd");
+        std::fs::write(&launcher_path, "@echo off\r\n").expect("fake launcher should be written");
+
+        let resolved = resolve_windows_command_path(unix_shim_path.as_path());
+
+        assert_eq!(
+            resolved.map(|path| path.to_string_lossy().to_ascii_lowercase()),
+            Some(launcher_path.to_string_lossy().to_ascii_lowercase()),
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn bundled_codex_resolution_picks_existing_runtime_candidate() {
         let unique = SystemTime::now()
@@ -1467,6 +1550,9 @@ mod ai_tests {
                 .expect("runtime parent should exist"),
         )
         .expect("runtime dir should be created");
+        #[cfg(target_os = "windows")]
+        write_fake_windows_pe(runtime_path.as_path());
+        #[cfg(not(target_os = "windows"))]
         std::fs::write(&runtime_path, "").expect("runtime binary should be written");
 
         let resolved = resolve_bundled_codex_executable_from_exe(exe_path.as_path());

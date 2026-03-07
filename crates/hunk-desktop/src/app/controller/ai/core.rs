@@ -937,16 +937,35 @@ impl DiffViewer {
     fn resolve_codex_executable_path() -> std::path::PathBuf {
         std::env::var_os("HUNK_CODEX_EXECUTABLE")
             .map(std::path::PathBuf::from)
+            .map(Self::resolve_windows_codex_command_path)
             .or_else(|| {
                 std::env::current_exe()
                     .ok()
                     .and_then(|path| resolve_bundled_codex_executable_from_exe(path.as_path()))
+            })
+            .or_else(|| {
+                #[cfg(target_os = "windows")]
+                {
+                    resolve_windows_command_path(std::path::Path::new("codex"))
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    None
+                }
             })
             .unwrap_or_else(|| std::path::PathBuf::from("codex"))
     }
 
     fn validate_codex_executable_path(path: &std::path::Path) -> Result<(), String> {
         if is_command_name_without_path(path) {
+            #[cfg(target_os = "windows")]
+            {
+                return Err(format!(
+                    "Unable to find a spawnable Codex executable for '{}'. Install Codex so that 'codex.cmd' or 'codex.exe' is on PATH, or set HUNK_CODEX_EXECUTABLE to the full launcher path.",
+                    path.display()
+                ));
+            }
+            #[cfg(not(target_os = "windows"))]
             return Ok(());
         }
         if !path.exists() {
@@ -961,6 +980,15 @@ impl DiffViewer {
                 path.display()
             ));
         }
+        #[cfg(target_os = "windows")]
+        {
+            if !windows_path_is_spawnable(path) {
+                return Err(format!(
+                    "Codex executable is not spawnable on Windows: {}. Point HUNK_CODEX_EXECUTABLE at a real '.cmd' or '.exe' launcher, not the Unix shim.",
+                    path.display()
+                ));
+            }
+        }
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -974,6 +1002,17 @@ impl DiffViewer {
             }
         }
         Ok(())
+    }
+
+    fn resolve_windows_codex_command_path(path: std::path::PathBuf) -> std::path::PathBuf {
+        #[cfg(target_os = "windows")]
+        {
+            resolve_windows_command_path(path.as_path()).unwrap_or(path)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            path
+        }
     }
 
     pub(super) fn shutdown_ai_worker_blocking(&mut self) {
