@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Component, Path};
 
 use anyhow::{Context as _, Result, anyhow};
 
@@ -78,7 +78,7 @@ pub fn commit_selected_paths(
     message: &str,
     selected_paths: &[String],
 ) -> Result<usize> {
-    let selected_paths = normalize_selected_paths(selected_paths);
+    let selected_paths = normalize_selected_paths(selected_paths)?;
     if selected_paths.is_empty() {
         return Err(anyhow!("no files selected for commit"));
     }
@@ -87,7 +87,7 @@ pub fn commit_selected_paths(
 }
 
 pub fn restore_working_copy_paths(repo_root: &Path, paths: &[String]) -> Result<usize> {
-    let selected_paths = normalize_selected_paths(paths);
+    let selected_paths = normalize_selected_paths(paths)?;
     if selected_paths.is_empty() {
         return Err(anyhow!("no files selected to restore"));
     }
@@ -331,17 +331,47 @@ fn current_head_commit(repo: &git2::Repository) -> Result<Option<git2::Commit<'_
     }
 }
 
-fn normalize_selected_paths(paths: &[String]) -> BTreeSet<String> {
-    paths
-        .iter()
-        .map(String::as_str)
-        .map(normalize_repo_path)
-        .filter(|path| !path.is_empty())
-        .collect()
+fn normalize_selected_paths(paths: &[String]) -> Result<BTreeSet<String>> {
+    let mut normalized = BTreeSet::new();
+    for path in paths {
+        let path = normalize_repo_path(path.as_str())?;
+        if !path.is_empty() {
+            normalized.insert(path);
+        }
+    }
+    Ok(normalized)
 }
 
-fn normalize_repo_path(path: &str) -> String {
-    path.trim().replace('\\', "/")
+fn normalize_repo_path(path: &str) -> Result<String> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Ok(String::new());
+    }
+
+    let normalized = path.replace('\\', "/");
+    let mut components = Vec::new();
+    for component in Path::new(normalized.as_str()).components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => {
+                let part = part
+                    .to_str()
+                    .ok_or_else(|| anyhow!("path '{}' is not valid UTF-8", path))?;
+                components.push(part.to_string());
+            }
+            Component::ParentDir => {
+                return Err(anyhow!("path '{}' escapes the repository root", path));
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(anyhow!(
+                    "path '{}' must be relative to the repository root",
+                    path
+                ));
+            }
+        }
+    }
+
+    Ok(components.join("/"))
 }
 
 fn path_to_repo_string(path: &Path) -> String {

@@ -179,6 +179,20 @@ fn restore_working_copy_paths_clears_staged_new_file_from_index() -> Result<()> 
     Ok(())
 }
 
+#[test]
+fn restore_working_copy_paths_rejects_paths_outside_repo_root() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    let outside_path = fixture._tempdir.path().join("outside.txt");
+    fs::write(outside_path.as_path(), "outside\n")?;
+
+    let err = restore_working_copy_paths(fixture.root(), &[String::from("../outside.txt")])
+        .expect_err("restore should reject paths that escape the repository root");
+
+    assert!(err.to_string().contains("escapes the repository root"));
+    assert_eq!(fs::read_to_string(outside_path)?, "outside\n");
+    Ok(())
+}
+
 struct TempGitRepo {
     _tempdir: TempDir,
     root: PathBuf,

@@ -200,7 +200,10 @@ pub fn review_url_for_branch_with_provider_map(
 
     let repo = open_repo_at_root(repo_root)?;
     let remote = resolve_review_remote(repo.repository(), branch_name)?;
-    let Some(remote_url) = remote.url(gix::remote::Direction::Fetch) else {
+    let Some(remote_url) = remote
+        .url(gix::remote::Direction::Push)
+        .or_else(|| remote.url(gix::remote::Direction::Fetch))
+    else {
         return Ok(None);
     };
     let remote_url = remote_url.to_string();
@@ -258,14 +261,19 @@ fn review_url_for_remote(
 }
 
 fn normalized_remote_base_url(remote_url: &str) -> Option<(String, String)> {
-    if let Some((authority, path)) = remote_url
+    if let Some((scheme, rest)) = remote_url
         .strip_prefix("https://")
-        .or_else(|| remote_url.strip_prefix("http://"))
-        .and_then(split_authority_and_path)
+        .map(|rest| ("https", rest))
+        .or_else(|| {
+            remote_url
+                .strip_prefix("http://")
+                .map(|rest| ("http", rest))
+        })
+        && let Some((authority, path)) = split_authority_and_path(rest)
     {
         let (host, authority) = sanitize_authority(authority)?;
         let clean_path = trim_remote_path(path);
-        return Some((host, format!("https://{authority}/{}", clean_path)));
+        return Some((host, format!("{scheme}://{authority}/{}", clean_path)));
     }
 
     if let Some(stripped) = remote_url.strip_prefix("ssh://") {

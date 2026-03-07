@@ -141,6 +141,60 @@ fn review_url_preserves_non_default_port_for_self_hosted_remote() -> Result<()> 
 }
 
 #[test]
+fn review_url_prefers_push_url_over_fetch_url() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.write_file("tracked.txt", "line one\n")?;
+    fixture.commit_all("initial")?;
+    fixture.checkout_branch("feature/pushurl")?;
+    fixture.add_remote("origin", "https://github.com/example-org/hunk.git")?;
+    fixture.set_push_url(
+        "origin",
+        "https://git.company.internal/example-org/hunk.git",
+    )?;
+
+    let review_url = review_url_for_branch_with_provider_map(
+        fixture.root(),
+        "feature/pushurl",
+        &[ReviewProviderMapping {
+            host: "git.company.internal".to_string(),
+            provider: ReviewProviderKind::GitLab,
+        }],
+    )?
+    .expect("pushurl should be used when generating a review URL");
+
+    assert_eq!(
+        review_url,
+        "https://git.company.internal/example-org/hunk/-/merge_requests/new?merge_request[source_branch]=feature%2Fpushurl"
+    );
+    Ok(())
+}
+
+#[test]
+fn review_url_preserves_plain_http_remotes() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.write_file("tracked.txt", "line one\n")?;
+    fixture.commit_all("initial")?;
+    fixture.checkout_branch("feature/http")?;
+    fixture.add_remote("origin", "http://git.company.internal/example-org/hunk.git")?;
+
+    let review_url = review_url_for_branch_with_provider_map(
+        fixture.root(),
+        "feature/http",
+        &[ReviewProviderMapping {
+            host: "git.company.internal".to_string(),
+            provider: ReviewProviderKind::GitLab,
+        }],
+    )?
+    .expect("plain-http remote should produce a review URL");
+
+    assert_eq!(
+        review_url,
+        "http://git.company.internal/example-org/hunk/-/merge_requests/new?merge_request[source_branch]=feature%2Fhttp"
+    );
+    Ok(())
+}
+
+#[test]
 fn review_url_normalizes_ssh_and_strips_credentials() -> Result<()> {
     let ssh_fixture = TempGitRepo::new()?;
     ssh_fixture.write_file("tracked.txt", "line one\n")?;
@@ -258,6 +312,12 @@ impl TempGitRepo {
         if repo.find_remote(name).is_err() {
             repo.remote(name, url)?;
         }
+        Ok(())
+    }
+
+    fn set_push_url(&self, name: &str, url: &str) -> Result<()> {
+        let repo = self.repository()?;
+        repo.remote_set_pushurl(name, Some(url))?;
         Ok(())
     }
 

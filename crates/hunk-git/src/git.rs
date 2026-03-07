@@ -156,6 +156,9 @@ pub struct GitPatchSession {
 struct CandidateFile {
     staged_status: Option<FileStatus>,
     worktree_status: Option<FileStatus>,
+    staged_rename_from: Option<String>,
+    worktree_rename_from: Option<String>,
+    rename_from: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -196,6 +199,7 @@ struct SnapshotSeed {
 #[derive(Debug, Clone)]
 struct ResolvedWorkspaceFile {
     path: String,
+    rename_from: Option<String>,
     status: FileStatus,
     staged: bool,
     untracked: bool,
@@ -617,7 +621,12 @@ fn resolve_workspace_files(
     let mut resolved = Vec::with_capacity(candidates.len());
 
     for (path, candidate) in candidates {
-        let old_state = head_file_state(repo, head_tree.as_ref(), path.as_str())?;
+        let rename_from = candidate.rename_from.clone();
+        let old_state = head_file_state(
+            repo,
+            head_tree.as_ref(),
+            rename_from.as_deref().unwrap_or(path.as_str()),
+        )?;
         let new_state =
             worktree_file_state(repo, root, &mut filter_pipeline, index, path.as_str())?;
         let index_has_entry = index.entry_by_path(path.as_bytes().as_bstr()).is_some();
@@ -626,7 +635,12 @@ fn resolve_workspace_files(
         {
             Some(FileStatus::Conflicted)
         } else {
-            aggregate_file_status(old_state.as_ref(), new_state.as_ref(), index_has_entry)
+            aggregate_file_status(
+                old_state.as_ref(),
+                new_state.as_ref(),
+                index_has_entry,
+                rename_from.as_deref(),
+            )
         };
         let Some(status) = status else {
             continue;
@@ -635,6 +649,7 @@ fn resolve_workspace_files(
             staged: candidate.staged_status.is_some(),
             untracked: matches!(status, FileStatus::Untracked),
             path,
+            rename_from,
             status,
             old_state,
             new_state,
@@ -656,7 +671,8 @@ fn collect_candidate_files(
     let iter = repo
         .status(gix::progress::Discard)?
         .index_worktree_submodules(None)
-        .tree_index_track_renames(gix::status::tree_index::TrackRenames::Disabled)
+        .index_worktree_rewrites(Some(Default::default()))
+        .tree_index_track_renames(gix::status::tree_index::TrackRenames::AsConfigured)
         .untracked_files(gix::status::UntrackedFiles::Files)
         .into_iter(Vec::<gix::bstr::BString>::new())?;
 
@@ -675,22 +691,67 @@ fn collect_candidate_files(
 
         match item {
             gix::status::Item::TreeIndex(change) => {
-                let status = map_tree_index_status(&change);
+                let (status, rename_from) = map_tree_index_status(&change);
                 let candidate = files.entry(path).or_default();
                 candidate.staged_status = merge_candidate_status(candidate.staged_status, status);
+                merge_candidate_rename_from(&mut candidate.staged_rename_from, rename_from);
             }
             gix::status::Item::IndexWorktree(change) => {
-                let Some(status) = map_index_worktree_status(&change) else {
+                let Some((status, rename_from)) = map_index_worktree_status(&change) else {
                     continue;
                 };
                 let candidate = files.entry(path).or_default();
                 candidate.worktree_status =
                     merge_candidate_status(candidate.worktree_status, status);
+                merge_candidate_rename_from(&mut candidate.worktree_rename_from, rename_from);
             }
         }
     }
 
+    resolve_candidate_rename_sources(&mut files);
     Ok(files)
+}
+
+fn merge_candidate_rename_from(slot: &mut Option<String>, rename_from: Option<String>) {
+    if slot.is_none() {
+        *slot = rename_from;
+    }
+}
+
+fn resolve_candidate_rename_sources(files: &mut BTreeMap<String, CandidateFile>) {
+    let snapshot = files.clone();
+    for (path, candidate) in files.iter_mut() {
+        candidate.rename_from = resolve_candidate_rename_source(&snapshot, path.as_str());
+    }
+}
+
+fn resolve_candidate_rename_source(
+    files: &BTreeMap<String, CandidateFile>,
+    path: &str,
+) -> Option<String> {
+    let mut seen = BTreeSet::new();
+    let mut current = path;
+    let mut rename_from = None;
+
+    loop {
+        let Some(candidate) = files.get(current) else {
+            break;
+        };
+        let Some(next) = candidate
+            .staged_rename_from
+            .as_deref()
+            .or(candidate.worktree_rename_from.as_deref())
+        else {
+            break;
+        };
+        if !seen.insert(next.to_string()) {
+            break;
+        }
+        rename_from = Some(next.to_string());
+        current = next;
+    }
+
+    rename_from
 }
 
 fn current_branch_tracking(
@@ -900,7 +961,12 @@ fn aggregate_file_status(
     old_state: Option<&FileState>,
     new_state: Option<&FileState>,
     index_has_entry: bool,
+    rename_from: Option<&str>,
 ) -> Option<FileStatus> {
+    if rename_from.is_some() && old_state.is_some() {
+        return Some(FileStatus::Renamed);
+    }
+
     match (old_state, new_state) {
         (None, None) => None,
         (None, Some(_)) => Some(if index_has_entry {
@@ -933,6 +999,7 @@ fn workspace_entry_signature(
     index_has_entry.hash(&mut hasher);
     candidate.staged_status.hash(&mut hasher);
     candidate.worktree_status.hash(&mut hasher);
+    candidate.rename_from.hash(&mut hasher);
     hash_file_state(old_state, &mut hasher);
     hash_file_state(new_state, &mut hasher);
     hasher.finish()
@@ -1026,9 +1093,22 @@ fn patchable_bytes<'a>(
 }
 
 fn render_patch_for_resolved_file(file: &ResolvedWorkspaceFile) -> Result<String> {
-    let old_label = patch_side_label("a", &file.path, file.old_state.is_some());
+    let old_path = file.rename_from.as_deref().unwrap_or(file.path.as_str());
+    let old_label = patch_side_label("a", old_path, file.old_state.is_some());
     let new_label = patch_side_label("b", &file.path, file.new_state.is_some());
-    let mut patch = format!("diff --git a/{path} b/{path}\n", path = file.path);
+    let mut patch = format!(
+        "diff --git a/{old_path} b/{new_path}\n",
+        new_path = file.path
+    );
+
+    if let Some(rename_from) = file.rename_from.as_deref()
+        && rename_from != file.path.as_str()
+    {
+        patch.push_str(&format!(
+            "rename from {rename_from}\nrename to {}\n",
+            file.path
+        ));
+    }
 
     match (file.old_state.as_ref(), file.new_state.as_ref()) {
         (None, Some(new_state)) => {
@@ -1395,10 +1475,10 @@ where
     Ok(bytes)
 }
 
-fn map_tree_index_status(change: &gix::diff::index::Change) -> FileStatus {
+fn map_tree_index_status(change: &gix::diff::index::Change) -> (FileStatus, Option<String>) {
     match change {
-        gix::diff::index::Change::Addition { .. } => FileStatus::Added,
-        gix::diff::index::Change::Deletion { .. } => FileStatus::Deleted,
+        gix::diff::index::Change::Addition { .. } => (FileStatus::Added, None),
+        gix::diff::index::Change::Deletion { .. } => (FileStatus::Deleted, None),
         gix::diff::index::Change::Modification {
             previous_entry_mode,
             entry_mode,
@@ -1413,26 +1493,43 @@ fn map_tree_index_status(change: &gix::diff::index::Change) -> FileStatus {
                 .map(|mode| mode.kind())
                 .unwrap_or(gix::objs::tree::EntryKind::Blob);
             if file_kind_class(previous_kind) != file_kind_class(current_kind) {
-                FileStatus::TypeChange
+                (FileStatus::TypeChange, None)
             } else {
-                FileStatus::Modified
+                (FileStatus::Modified, None)
             }
         }
-        gix::diff::index::Change::Rewrite { .. } => FileStatus::Renamed,
+        gix::diff::index::Change::Rewrite {
+            source_location, ..
+        } => (
+            FileStatus::Renamed,
+            normalized_optional_path(normalize_bstr_path(source_location.as_ref())),
+        ),
     }
 }
 
-fn map_index_worktree_status(change: &gix::status::index_worktree::Item) -> Option<FileStatus> {
+fn map_index_worktree_status(
+    change: &gix::status::index_worktree::Item,
+) -> Option<(FileStatus, Option<String>)> {
     use gix::status::index_worktree::iter::Summary;
 
-    Some(match change.summary()? {
-        Summary::Added | Summary::IntentToAdd => FileStatus::Untracked,
-        Summary::Removed => FileStatus::Deleted,
-        Summary::Modified => FileStatus::Modified,
-        Summary::Renamed | Summary::Copied => FileStatus::Renamed,
-        Summary::TypeChange => FileStatus::TypeChange,
-        Summary::Conflict => FileStatus::Conflicted,
-    })
+    if let gix::status::index_worktree::Item::Rewrite { source, .. } = change {
+        return Some((
+            FileStatus::Renamed,
+            normalized_optional_path(normalize_bstr_path(source.rela_path())),
+        ));
+    }
+
+    Some((
+        match change.summary()? {
+            Summary::Added | Summary::IntentToAdd => FileStatus::Untracked,
+            Summary::Removed => FileStatus::Deleted,
+            Summary::Modified => FileStatus::Modified,
+            Summary::Renamed | Summary::Copied => FileStatus::Renamed,
+            Summary::TypeChange => FileStatus::TypeChange,
+            Summary::Conflict => FileStatus::Conflicted,
+        },
+        None,
+    ))
 }
 
 fn merge_candidate_status(
@@ -1472,6 +1569,10 @@ fn repo_root_from_repository(repo: &gix::Repository) -> Result<PathBuf> {
 
 fn normalize_bstr_path(path: &BStr) -> String {
     normalize_path(String::from_utf8_lossy(path.as_ref()).as_ref())
+}
+
+fn normalized_optional_path(path: String) -> Option<String> {
+    (!path.is_empty()).then_some(path)
 }
 
 fn normalize_path(path: &str) -> String {

@@ -308,6 +308,55 @@ fn patch_session_renders_unified_diff_for_requested_files() -> Result<()> {
 }
 
 #[test]
+fn workflow_snapshot_reports_unstaged_rename_as_single_entry() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.write_file("src/old_name.rs", "one\ntwo\n")?;
+    fixture.commit_all("initial")?;
+    fixture.rename_path("src/old_name.rs", "src/new_name.rs")?;
+
+    let workflow = load_workflow_snapshot(fixture.root())?;
+    assert_eq!(workflow.files.len(), 1);
+    assert_eq!(workflow.files[0].path, "src/new_name.rs");
+    assert_eq!(workflow.files[0].status, FileStatus::Renamed);
+    assert!(!workflow.files[0].staged);
+
+    let patch = load_patch(
+        fixture.root(),
+        workflow.files[0].path.as_str(),
+        workflow.files[0].status,
+    )?;
+    assert!(patch.contains("diff --git a/src/old_name.rs b/src/new_name.rs"));
+    assert!(patch.contains("rename from src/old_name.rs"));
+    assert!(patch.contains("rename to src/new_name.rs"));
+    Ok(())
+}
+
+#[test]
+fn patch_session_uses_source_path_for_staged_rename() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.write_file("src/old_name.rs", "one\ntwo\n")?;
+    fixture.commit_all("initial")?;
+    fixture.rename_path("src/old_name.rs", "src/new_name.rs")?;
+    fixture.stage_rename("src/old_name.rs", "src/new_name.rs")?;
+
+    let workflow = load_workflow_snapshot(fixture.root())?;
+    assert_eq!(workflow.files.len(), 1);
+    assert_eq!(workflow.files[0].path, "src/new_name.rs");
+    assert_eq!(workflow.files[0].status, FileStatus::Renamed);
+    assert!(workflow.files[0].staged);
+
+    let session = open_patch_session(fixture.root())?;
+    let patches = load_patches_for_files_from_session(&session, &workflow.files)?;
+    let patch = patches
+        .get("src/new_name.rs")
+        .expect("rename patch should be present");
+    assert!(patch.contains("diff --git a/src/old_name.rs b/src/new_name.rs"));
+    assert!(patch.contains("rename from src/old_name.rs"));
+    assert!(patch.contains("rename to src/new_name.rs"));
+    Ok(())
+}
+
+#[test]
 fn load_patch_marks_binary_diffs_without_preview_hunks() -> Result<()> {
     let fixture = TempGitRepo::new()?;
     fixture.write_bytes("image.bin", b"\0before")?;
@@ -387,6 +436,15 @@ impl TempGitRepo {
         Ok(())
     }
 
+    fn rename_path(&self, from: &str, to: &str) -> Result<()> {
+        let destination = self.root.join(to);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::rename(self.root.join(from), destination)?;
+        Ok(())
+    }
+
     fn commit_all(&self, message: &str) -> Result<git2::Oid> {
         let repo = self.repository()?;
         let mut index = repo.index()?;
@@ -411,6 +469,15 @@ impl TempGitRepo {
         let repo = self.repository()?;
         let mut index = repo.index()?;
         index.add_path(Path::new(relative))?;
+        index.write()?;
+        Ok(())
+    }
+
+    fn stage_rename(&self, from: &str, to: &str) -> Result<()> {
+        let repo = self.repository()?;
+        let mut index = repo.index()?;
+        index.remove_path(Path::new(from))?;
+        index.add_path(Path::new(to))?;
         index.write()?;
         Ok(())
     }
