@@ -349,6 +349,7 @@ impl DiffViewer {
             working_copy_commit_id: None,
             branches: Vec::new(),
             git_working_tree_scroll_handle: ScrollHandle::default(),
+            recent_commits_scroll_handle: ScrollHandle::default(),
             workspace_view_mode: WorkspaceViewMode::GitWorkspace,
             ai_connection_state: AiConnectionState::Disconnected,
             ai_bootstrap_loading: false,
@@ -406,6 +407,9 @@ impl DiffViewer {
             commit_input_state,
             staged_commit_files: BTreeSet::new(),
             last_commit_subject: None,
+            recent_commits: Vec::new(),
+            recent_commits_author_label: None,
+            recent_commits_error: None,
             git_action_epoch: 0,
             git_action_task: Task::ready(()),
             git_action_loading: false,
@@ -433,6 +437,7 @@ impl DiffViewer {
             repo_watch_task: Task::ready(()),
             repo_watch_refresh_epoch: 0,
             repo_watch_pending_refresh: None,
+            repo_watch_pending_recent_commits_refresh: false,
             repo_watch_refresh_task: Task::ready(()),
             snapshot_epoch: 0,
             snapshot_task: Task::ready(()),
@@ -444,6 +449,12 @@ impl DiffViewer {
             line_stats_loading: false,
             pending_line_stats_refresh: None,
             pending_snapshot_refresh: None,
+            recent_commits_epoch: 0,
+            recent_commits_task: Task::ready(()),
+            recent_commits_loading: false,
+            recent_commits_active_request: None,
+            pending_recent_commits_refresh: None,
+            last_recent_commits_fingerprint: None,
             pending_dirty_paths: BTreeSet::new(),
             last_snapshot_fingerprint: None,
             open_project_task: Task::ready(()),
@@ -526,7 +537,9 @@ impl DiffViewer {
         .detach();
 
         view.hydrate_workflow_cache_if_available(cx);
+        view.hydrate_recent_commits_cache_if_available(cx);
         view.request_snapshot_refresh(cx);
+        view.request_recent_commits_refresh(false, cx);
         view.start_auto_refresh(cx);
         view.start_repo_watch(cx);
         view.start_fps_monitor(cx);
@@ -1293,11 +1306,14 @@ impl DiffViewer {
                     this.set_last_project_path(Some(selected_path));
                     this.ai_handle_workspace_change(previous_ai_workspace_key, cx);
                     this.git_status_message = None;
+                    this.reset_recent_commits_state();
+                    this.hydrate_recent_commits_cache_if_available(cx);
                     this.start_repo_watch(cx);
                     this.request_snapshot_refresh_internal(
                         SnapshotRefreshRequest::user(true),
                         cx,
                     );
+                    this.request_recent_commits_refresh(true, cx);
                     cx.notify();
                 });
             }
@@ -1452,6 +1468,7 @@ impl DiffViewer {
         self.cancel_patch_reload();
         self.pending_dirty_paths.clear();
         self.last_snapshot_fingerprint = None;
+        self.reset_recent_commits_state();
         let previous_ai_workspace_key = self.ai_workspace_key();
         self.sync_ai_visible_composer_prompt_to_draft(cx);
         self.repo_root = None;
@@ -1510,6 +1527,7 @@ impl DiffViewer {
             self.state.git_workflow_cache = None;
             self.persist_state();
         }
+        self.clear_recent_commits_cache();
         cx.notify();
     }
 

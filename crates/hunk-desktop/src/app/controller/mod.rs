@@ -24,15 +24,21 @@ use hunk_git::git::{
     load_workflow_snapshot_with_fingerprint,
     load_workflow_snapshot_with_fingerprint_without_refresh, open_patch_session,
 };
+use hunk_git::history::{
+    DEFAULT_RECENT_AUTHORED_COMMIT_LIMIT, load_recent_authored_commits_if_changed,
+    load_recent_authored_commits_with_fingerprint,
+};
 use hunk_git::mutation::{
     activate_or_create_branch as checkout_or_create_branch_with_change_transfer,
-    commit_all as commit_staged, commit_selected_paths, restore_working_copy_paths,
+    commit_all_with_details as commit_staged_with_details, commit_selected_paths_with_details,
+    restore_working_copy_paths,
 };
 use hunk_git::network::{push_current_branch, sync_current_branch};
 
 include!("core.rs");
 include!("core_runtime.rs");
 include!("git_ops.rs");
+include!("recent_commits.rs");
 include!("workspace_mode.rs");
 include!("ai.rs");
 include!("file_tree.rs");

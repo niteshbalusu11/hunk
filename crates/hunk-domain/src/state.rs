@@ -76,12 +76,30 @@ pub struct CachedWorkflowState {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+pub struct CachedRecentCommitState {
+    pub commit_id: String,
+    pub subject: String,
+    pub committed_unix_time: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CachedRecentCommitsState {
+    pub root: Option<PathBuf>,
+    pub author_label: Option<String>,
+    pub commits: Vec<CachedRecentCommitState>,
+    pub cached_unix_time: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppState {
     pub last_project_path: Option<PathBuf>,
     pub ai_workspace_mad_max: BTreeMap<String, bool>,
     pub ai_workspace_include_hidden_models: BTreeMap<String, bool>,
     pub ai_workspace_session_overrides: BTreeMap<String, AiThreadSessionState>,
     pub git_workflow_cache: Option<CachedWorkflowState>,
+    pub git_recent_commits_cache: Option<CachedRecentCommitsState>,
 }
 
 #[derive(Debug, Clone)]

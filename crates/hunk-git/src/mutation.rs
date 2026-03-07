@@ -11,6 +11,13 @@ enum WorktreeChange {
     Remove,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreatedCommit {
+    pub commit_id: String,
+    pub subject: String,
+    pub committed_unix_time: Option<i64>,
+}
+
 // `gix` is still the primary backend for the hot read path. We isolate local worktree/index
 // mutation here until it exposes a stable public checkout/index-editing surface we can rely on.
 pub fn activate_or_create_branch(
@@ -73,11 +80,29 @@ pub fn commit_all(repo_root: &Path, message: &str) -> Result<()> {
     commit_paths_internal(repo_root, message, None).map(|_| ())
 }
 
+pub fn commit_all_with_details(repo_root: &Path, message: &str) -> Result<CreatedCommit> {
+    let (_, commit) = commit_paths_internal(repo_root, message, None)?;
+    Ok(commit)
+}
+
 pub fn commit_selected_paths(
     repo_root: &Path,
     message: &str,
     selected_paths: &[String],
 ) -> Result<usize> {
+    let selected_paths = normalize_selected_paths(selected_paths)?;
+    if selected_paths.is_empty() {
+        return Err(anyhow!("no files selected for commit"));
+    }
+
+    commit_paths_internal(repo_root, message, Some(&selected_paths)).map(|(count, _)| count)
+}
+
+pub fn commit_selected_paths_with_details(
+    repo_root: &Path,
+    message: &str,
+    selected_paths: &[String],
+) -> Result<(usize, CreatedCommit)> {
     let selected_paths = normalize_selected_paths(selected_paths)?;
     if selected_paths.is_empty() {
         return Err(anyhow!("no files selected for commit"));
@@ -134,7 +159,7 @@ fn commit_paths_internal(
     repo_root: &Path,
     message: &str,
     selected_paths: Option<&BTreeSet<String>>,
-) -> Result<usize> {
+) -> Result<(usize, CreatedCommit)> {
     let message = message.trim();
     if message.is_empty() {
         return Err(anyhow!("commit message cannot be empty"));
@@ -151,8 +176,8 @@ fn commit_paths_internal(
     }
 
     stage_changes(&repo, &changes)?;
-    create_commit_from_index(&repo, message)?;
-    Ok(changes.len())
+    let commit_id = create_commit_from_index(&repo, message)?;
+    Ok((changes.len(), created_commit(&repo, commit_id, message)?))
 }
 
 fn open_repo(repo_root: &Path) -> Result<git2::Repository> {
@@ -307,6 +332,29 @@ fn create_commit_from_index(repo: &git2::Repository, message: &str) -> Result<gi
         &tree,
         parent_refs.as_slice(),
     )?)
+}
+
+fn created_commit(
+    repo: &git2::Repository,
+    commit_id: git2::Oid,
+    subject: &str,
+) -> Result<CreatedCommit> {
+    let commit = repo
+        .find_commit(commit_id)
+        .with_context(|| format!("failed to load created commit {commit_id}"))?;
+    Ok(CreatedCommit {
+        commit_id: commit_id.to_string(),
+        subject: commit_subject(subject),
+        committed_unix_time: Some(commit.time().seconds()),
+    })
+}
+
+fn commit_subject(message: &str) -> String {
+    message
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| line.trim().to_string())
+        .unwrap_or_default()
 }
 
 fn current_head_tree(repo: &git2::Repository) -> Result<Option<git2::Tree<'_>>> {

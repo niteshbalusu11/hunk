@@ -25,6 +25,15 @@ impl DiffViewer {
                             .child(self.render_workspace_changes_panel(cx)),
                     )
                     .child(
+                        div()
+                            .flex_none()
+                            .w(px(GIT_RECENT_COMMITS_PANEL_WIDTH))
+                            .min_w(px(GIT_RECENT_COMMITS_PANEL_WIDTH))
+                            .h_full()
+                            .min_h_0()
+                            .child(self.render_git_recent_commits_panel(cx)),
+                    )
+                    .child(
                         v_flex()
                             .flex_none()
                             .w(px(GIT_WORKSPACE_RAIL_MAX_WIDTH))

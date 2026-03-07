@@ -6,6 +6,8 @@ use hunk_domain::state::AiThreadSessionState;
 use hunk_domain::state::AppState;
 use hunk_domain::state::CachedChangedFileState;
 use hunk_domain::state::CachedLocalBranchState;
+use hunk_domain::state::CachedRecentCommitState;
+use hunk_domain::state::CachedRecentCommitsState;
 use hunk_domain::state::CachedWorkflowState;
 
 #[test]
@@ -16,6 +18,7 @@ fn app_state_defaults_last_project_path_to_none() {
     assert!(state.ai_workspace_include_hidden_models.is_empty());
     assert!(state.ai_workspace_session_overrides.is_empty());
     assert!(state.git_workflow_cache.is_none());
+    assert!(state.git_recent_commits_cache.is_none());
 }
 
 #[test]
@@ -27,6 +30,7 @@ fn app_state_parses_without_last_project_path_field() {
     assert!(state.ai_workspace_include_hidden_models.is_empty());
     assert!(state.ai_workspace_session_overrides.is_empty());
     assert!(state.git_workflow_cache.is_none());
+    assert!(state.git_recent_commits_cache.is_none());
 }
 
 #[test]
@@ -67,6 +71,16 @@ fn app_state_round_trips_last_project_path() {
             }],
             last_commit_subject: Some("cached".to_string()),
             cached_unix_time: 1_711_111_111,
+        }),
+        git_recent_commits_cache: Some(CachedRecentCommitsState {
+            root: Some(PathBuf::from("/tmp/hunk-repo")),
+            author_label: Some("Hunk <hunk@example.com>".to_string()),
+            commits: vec![CachedRecentCommitState {
+                commit_id: "0123456789abcdef0123456789abcdef01234567".to_string(),
+                subject: "recent".to_string(),
+                committed_unix_time: Some(1_711_111_222),
+            }],
+            cached_unix_time: 1_711_111_222,
         }),
     };
 
