@@ -1,4 +1,4 @@
-fn jj_loading_skeleton_block(
+fn git_loading_skeleton_block(
     width_px: f32,
     height_px: f32,
     is_dark: bool,
@@ -13,7 +13,7 @@ fn jj_loading_skeleton_block(
         .into_any_element()
 }
 
-fn render_jj_workspace_loading_overlay(
+fn render_git_workspace_loading_overlay(
     is_dark: bool,
     cx: &mut Context<DiffViewer>,
 ) -> AnyElement {
@@ -54,7 +54,7 @@ fn render_jj_workspace_loading_overlay(
 }
 
 impl DiffViewer {
-    fn jj_workflow_ready_for_panel(&self) -> bool {
+    fn git_workflow_ready_for_panel(&self) -> bool {
         self.repo_root.is_some()
             || self.branch_name != "unknown"
             || !self.branches.is_empty()
@@ -62,7 +62,7 @@ impl DiffViewer {
             || self.last_commit_subject.is_some()
     }
 
-    fn render_jj_workspace_panel_loading_skeleton(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_git_workspace_panel_loading_skeleton(&self, cx: &mut Context<Self>) -> AnyElement {
         let is_dark = cx.theme().mode.is_dark();
 
         v_flex()
@@ -78,19 +78,19 @@ impl DiffViewer {
                     .bg(hunk_blend(cx.theme().background, cx.theme().muted, is_dark, 0.16, 0.24))
                     .px_3()
                     .py_2()
-                    .child(jj_loading_skeleton_block(
+                    .child(git_loading_skeleton_block(
                         180.0,
                         11.0,
                         is_dark,
                         cx,
                     ))
-                    .child(jj_loading_skeleton_block(
+                    .child(git_loading_skeleton_block(
                         360.0,
                         10.0,
                         is_dark,
                         cx,
                     ))
-                    .child(jj_loading_skeleton_block(
+                    .child(git_loading_skeleton_block(
                         300.0,
                         10.0,
                         is_dark,

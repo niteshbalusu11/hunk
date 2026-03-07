@@ -1,7 +1,7 @@
 impl DiffViewer {
     fn render_workspace_change_row(
         &self,
-        row_id: usize,
+        row_ix: usize,
         file: &ChangedFile,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -31,7 +31,7 @@ impl DiffViewer {
         let path = file.path.clone();
 
         h_flex()
-            .id(("workspace-change-row", row_id))
+            .id(("workspace-change-row", row_ix))
             .w_full()
             .items_center()
             .gap_1()

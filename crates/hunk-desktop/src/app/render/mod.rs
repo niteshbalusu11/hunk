@@ -36,10 +36,10 @@ fn change_status_label_color(
 include!("toolbar.rs");
 include!("tree.rs");
 include!("commit.rs");
-include!("commit_bookmark_picker.rs");
-include!("jj_workspace_loading.rs");
-include!("jj_workspace_panel.rs");
-include!("jj_workspace.rs");
+include!("workspace_change_row.rs");
+include!("git_workspace_loading.rs");
+include!("git_workspace_panel.rs");
+include!("git_workspace.rs");
 include!("file_banner.rs");
 include!("file_status.rs");
 include!("comments.rs");

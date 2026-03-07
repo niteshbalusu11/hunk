@@ -1,11 +1,11 @@
 impl DiffViewer {
-    fn render_jj_workspace_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_git_workspace_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let is_dark = cx.theme().mode.is_dark();
-        let show_workflow_skeleton = self.workflow_loading && !self.jj_workflow_ready_for_panel();
+        let show_workflow_skeleton = self.workflow_loading && !self.git_workflow_ready_for_panel();
         let panel_body = if show_workflow_skeleton {
-            self.render_jj_workspace_panel_loading_skeleton(cx)
+            self.render_git_workspace_panel_loading_skeleton(cx)
         } else {
-            self.render_jj_workspace_operations_panel(cx)
+            self.render_git_workspace_operations_panel(cx)
         };
 
         v_flex()
@@ -48,9 +48,9 @@ impl DiffViewer {
                     .relative()
                     .child(
                         div()
-                            .id("jj-workspace-scroll-area")
+                            .id("git-workspace-scroll-area")
                             .size_full()
-                            .track_scroll(&self.jj_workspace_scroll_handle)
+                            .track_scroll(&self.git_workspace_scroll_handle)
                             .overflow_y_scroll()
                             .child(v_flex().w_full().gap_2().pb_2().child(panel_body)),
                     )
@@ -62,7 +62,7 @@ impl DiffViewer {
                             .bottom_0()
                             .w(px(16.0))
                             .child(
-                                Scrollbar::vertical(&self.jj_workspace_scroll_handle)
+                                Scrollbar::vertical(&self.git_workspace_scroll_handle)
                                     .scrollbar_show(ScrollbarShow::Always),
                             ),
                     ),

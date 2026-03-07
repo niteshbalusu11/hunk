@@ -8,7 +8,7 @@ use super::sql;
 
 const DB_DIR_NAME: &str = ".hunkdiff";
 const DB_FILE_NAME: &str = "hunk.db";
-const DB_SCHEMA_VERSION: i64 = 1;
+const DB_SCHEMA_VERSION: i64 = 2;
 
 #[derive(Debug, Clone)]
 pub struct DatabaseStore {
@@ -67,11 +67,11 @@ fn run_migrations(conn: &Connection) -> Result<()> {
         ));
     }
 
-    if user_version < 1 {
-        conn.execute_batch(include_str!("migrations/0001_init.sql"))
-            .context("failed to run migration 0001_init.sql")?;
+    if user_version < 2 {
+        conn.execute_batch(include_str!("migrations/0002_branch_scope_reset.sql"))
+            .context("failed to run migration 0002_branch_scope_reset.sql")?;
         conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)
-            .context("failed to update sqlite user_version to schema version 1")?;
+            .context("failed to update sqlite user_version to schema version 2")?;
     }
 
     Ok(())

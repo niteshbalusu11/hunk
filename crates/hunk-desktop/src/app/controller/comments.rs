@@ -115,7 +115,7 @@ impl DiffViewer {
             .map(|path| path.to_string_lossy().to_string())
     }
 
-    fn comment_scope_bookmark_name(&self) -> String {
+    fn comment_scope_branch_name(&self) -> String {
         let name = self.branch_name.trim();
         if name.is_empty() || name == "unknown" {
             "detached".to_string()
@@ -135,9 +135,9 @@ impl DiffViewer {
             self.reset_comment_row_match_cache();
             return;
         };
-        let bookmark_name = self.comment_scope_bookmark_name();
+        let branch_name = self.comment_scope_branch_name();
 
-        match store.list_comments(repo_root.as_str(), bookmark_name.as_str(), true) {
+        match store.list_comments(repo_root.as_str(), branch_name.as_str(), true) {
             Ok(records) => {
                 self.comments_cache = records;
                 let open_ids = self
@@ -154,8 +154,8 @@ impl DiffViewer {
             }
             Err(err) => {
                 error!(
-                    "failed to load comments for repo '{}' bookmark '{}': {err:#}",
-                    repo_root, bookmark_name
+                    "failed to load comments for repo '{}' branch '{}': {err:#}",
+                    repo_root, branch_name
                 );
                 self.comments_cache.clear();
                 self.reset_comment_row_match_cache();
@@ -337,7 +337,7 @@ impl DiffViewer {
 
         let input = NewComment {
             repo_root,
-            bookmark_name: self.comment_scope_bookmark_name(),
+            branch_name: self.comment_scope_branch_name(),
             created_head_commit: None,
             file_path: anchor.file_path,
             line_side: anchor.line_side,

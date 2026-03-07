@@ -991,7 +991,7 @@ struct DiffViewer {
     branch_ahead_count: usize,
     working_copy_commit_id: Option<String>,
     branches: Vec<LocalBranch>,
-    jj_workspace_scroll_handle: ScrollHandle,
+    git_workspace_scroll_handle: ScrollHandle,
     workspace_view_mode: WorkspaceViewMode,
     ai_connection_state: AiConnectionState,
     ai_bootstrap_loading: bool,

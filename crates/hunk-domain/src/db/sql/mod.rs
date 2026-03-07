@@ -3,7 +3,7 @@ pub(crate) mod comments {
 INSERT INTO comments (
   id,
   repo_root,
-  bookmark_name,
+  branch_name,
   created_head_commit,
   status,
   file_path,
@@ -51,7 +51,7 @@ INSERT INTO comments (
 SELECT
   id,
   repo_root,
-  bookmark_name,
+  branch_name,
   created_head_commit,
   status,
   file_path,
@@ -78,7 +78,7 @@ WHERE id = ?1;
 SELECT
   id,
   repo_root,
-  bookmark_name,
+  branch_name,
   created_head_commit,
   status,
   file_path,
@@ -100,7 +100,7 @@ SELECT
 FROM comments
 WHERE
   repo_root = ?1
-  AND bookmark_name = ?2
+  AND branch_name = ?2
   AND (?3 = 1 OR status = 'open')
 ORDER BY updated_at_unix_ms DESC, created_at_unix_ms DESC, id DESC;
 "#;

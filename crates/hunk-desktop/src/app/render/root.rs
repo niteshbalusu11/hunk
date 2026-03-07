@@ -98,16 +98,16 @@ impl DiffViewer {
         }
 
         let is_dark = cx.theme().mode.is_dark();
-        let show_loading_overlay = self.workflow_loading && !self.jj_workflow_ready_for_panel();
+        let show_loading_overlay = self.workflow_loading && !self.git_workflow_ready_for_panel();
 
         div()
             .size_full()
             .min_h_0()
             .relative()
             .pb(px(APP_BOTTOM_SAFE_INSET))
-            .child(self.render_jj_workspace_panel(cx))
+            .child(self.render_git_workspace_panel(cx))
             .when(show_loading_overlay, |this| {
-                this.child(render_jj_workspace_loading_overlay(is_dark, cx))
+                this.child(render_git_workspace_loading_overlay(is_dark, cx))
             })
             .into_any_element()
     }
@@ -129,7 +129,7 @@ impl DiffViewer {
             "Review Workspace"
         };
         let active_branch = self
-            .checked_out_bookmark_name()
+            .checked_out_branch_name()
             .map_or_else(|| "detached".to_string(), ToOwned::to_owned);
 
         h_flex()

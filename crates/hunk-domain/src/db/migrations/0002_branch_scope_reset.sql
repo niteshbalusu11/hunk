@@ -1,4 +1,6 @@
-CREATE TABLE IF NOT EXISTS comments (
+DROP TABLE IF EXISTS comments;
+
+CREATE TABLE comments (
   id TEXT PRIMARY KEY,
   repo_root TEXT NOT NULL,
   branch_name TEXT NOT NULL,
@@ -27,11 +29,11 @@ CREATE TABLE IF NOT EXISTS comments (
   resolved_at_unix_ms INTEGER
 );
 
-CREATE INDEX IF NOT EXISTS comments_repo_branch_status_idx
+CREATE INDEX comments_repo_branch_status_idx
   ON comments (repo_root, branch_name, status);
 
-CREATE INDEX IF NOT EXISTS comments_repo_file_idx
+CREATE INDEX comments_repo_file_idx
   ON comments (repo_root, file_path);
 
-CREATE INDEX IF NOT EXISTS comments_status_updated_idx
+CREATE INDEX comments_status_updated_idx
   ON comments (status, updated_at_unix_ms);

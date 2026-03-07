@@ -118,10 +118,9 @@ impl DiffViewer {
             return false;
         };
 
-        relative_path.components().any(|component| {
-            let component = component.as_os_str();
-            component == ".jj" || component == ".git"
-        })
+        relative_path
+            .components()
+            .any(|component| component.as_os_str() == ".git")
     }
 
     fn repo_watch_dirty_path(
@@ -381,15 +380,7 @@ mod tests {
     fn ignores_internal_vcs_paths_for_repo_watch() {
         let repo_root = fixture_repo_root();
         assert!(!DiffViewer::should_ignore_repo_watch_path(
-            repo_root.join(".jj/working_copy").as_path(),
-            repo_root.as_path()
-        ));
-        assert!(!DiffViewer::should_ignore_repo_watch_path(
             repo_root.join(".git/index").as_path(),
-            repo_root.as_path()
-        ));
-        assert!(DiffViewer::is_repo_watch_metadata_path(
-            repo_root.join(".jj/working_copy").as_path(),
             repo_root.as_path()
         ));
         assert!(DiffViewer::is_repo_watch_metadata_path(
@@ -401,13 +392,6 @@ mod tests {
     #[test]
     fn excludes_internal_vcs_paths_from_dirty_file_tracking() {
         let repo_root = fixture_repo_root();
-        assert_eq!(
-            DiffViewer::repo_watch_dirty_path(
-                repo_root.join(".jj/working_copy").as_path(),
-                repo_root.as_path()
-            ),
-            None
-        );
         assert_eq!(
             DiffViewer::repo_watch_dirty_path(
                 repo_root.join(".git/index").as_path(),

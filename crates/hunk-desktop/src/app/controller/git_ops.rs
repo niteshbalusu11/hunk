@@ -146,39 +146,39 @@ impl DiffViewer {
         });
     }
 
-    fn checkout_or_create_bookmark_with_options(
+    fn checkout_or_create_branch_with_options(
         &mut self,
         branch_name: String,
         cx: &mut Context<Self>,
     ) {
         self.run_git_action("Activate branch", cx, move |repo_root| {
-            checkout_or_create_bookmark_with_change_transfer(&repo_root, &branch_name, false)?;
+            checkout_or_create_branch_with_change_transfer(&repo_root, &branch_name, false)?;
             Ok(format!("Activated branch {}", branch_name))
         });
     }
 
-    fn activate_or_create_bookmark(&mut self, branch_name: String, cx: &mut Context<Self>) {
+    fn activate_or_create_branch(&mut self, branch_name: String, cx: &mut Context<Self>) {
         let target_branch = branch_name.trim().to_string();
         if target_branch.is_empty() {
             self.git_status_message = Some("Branch name is required.".to_string());
             cx.notify();
             return;
         }
-        if self.checked_out_bookmark_name() == Some(target_branch.as_str()) {
+        if self.checked_out_branch_name() == Some(target_branch.as_str()) {
             self.git_status_message = Some(format!("Branch {} is already active.", target_branch));
             cx.notify();
             return;
         }
-        self.checkout_or_create_bookmark_with_options(target_branch, cx);
+        self.checkout_or_create_branch_with_options(target_branch, cx);
     }
 
-    pub(super) fn checkout_bookmark(
+    pub(super) fn checkout_branch(
         &mut self,
         branch_name: String,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.request_activate_or_create_bookmark_with_dirty_guard(branch_name, cx);
+        self.request_activate_or_create_branch_with_dirty_guard(branch_name, cx);
     }
 
     pub(super) fn toggle_commit_file_included(
@@ -210,13 +210,13 @@ impl DiffViewer {
             .count()
     }
 
-    pub(super) fn bookmark_syncable(&self) -> bool {
+    pub(super) fn branch_syncable(&self) -> bool {
         !self.branch_name.is_empty()
             && self.branch_name != "unknown"
             && self.branch_name != "detached"
     }
 
-    pub(super) fn checked_out_bookmark_name(&self) -> Option<&str> {
+    pub(super) fn checked_out_branch_name(&self) -> Option<&str> {
         if self
             .branches
             .iter()
@@ -231,36 +231,36 @@ impl DiffViewer {
             .map(|branch| branch.name.as_str())
     }
 
-    pub(super) fn active_bookmark_is_checked_out(&self) -> bool {
+    pub(super) fn active_branch_is_checked_out(&self) -> bool {
         self.branches
             .iter()
             .any(|branch| branch.is_current && branch.name == self.branch_name)
     }
 
-    pub(super) fn can_run_active_bookmark_actions(&self) -> bool {
-        self.bookmark_syncable() && self.active_bookmark_is_checked_out()
+    pub(super) fn can_run_active_branch_actions(&self) -> bool {
+        self.branch_syncable() && self.active_branch_is_checked_out()
     }
 
     fn tracking_area_clean(&self) -> bool {
         self.files.is_empty()
     }
 
-    pub(super) fn can_sync_current_bookmark(&self) -> bool {
-        self.can_run_active_bookmark_actions()
+    pub(super) fn can_sync_current_branch(&self) -> bool {
+        self.can_run_active_branch_actions()
             && self.branch_has_upstream
             && self.tracking_area_clean()
             && !self.git_action_loading
     }
 
-    pub(super) fn can_publish_current_bookmark(&self) -> bool {
-        self.can_run_active_bookmark_actions()
+    pub(super) fn can_publish_current_branch(&self) -> bool {
+        self.can_run_active_branch_actions()
             && !self.branch_has_upstream
             && self.tracking_area_clean()
             && !self.git_action_loading
     }
 
     pub(super) fn can_push_current_branch(&self) -> bool {
-        self.can_run_active_bookmark_actions()
+        self.can_run_active_branch_actions()
             && self.branch_has_upstream
             && self.branch_ahead_count > 0
             && self.tracking_area_clean()
@@ -275,7 +275,7 @@ impl DiffViewer {
             .collect()
     }
 
-    pub(super) fn create_or_switch_bookmark_from_input(
+    pub(super) fn create_or_switch_branch_from_input(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -287,19 +287,19 @@ impl DiffViewer {
             return;
         }
 
-        let sanitized = sanitize_bookmark_name(&raw_name);
+        let sanitized = sanitize_branch_name(&raw_name);
         self.branch_input_state.update(cx, |state, cx| {
             state.set_value("", window, cx);
         });
-        self.request_activate_or_create_bookmark_with_dirty_guard(sanitized, cx);
+        self.request_activate_or_create_branch_with_dirty_guard(sanitized, cx);
     }
 
-    pub(super) fn rename_current_bookmark_from_input(
+    pub(super) fn rename_current_branch_from_input(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.can_run_active_bookmark_actions() {
+        if !self.can_run_active_branch_actions() {
             self.git_status_message = Some("Activate a branch before renaming it.".to_string());
             cx.notify();
             return;
@@ -313,7 +313,7 @@ impl DiffViewer {
         }
 
         let current_branch = self.branch_name.clone();
-        let sanitized = sanitize_bookmark_name(&raw_name);
+        let sanitized = sanitize_branch_name(&raw_name);
         self.branch_input_state.update(cx, |state, cx| {
             state.set_value(sanitized.clone(), window, cx);
         });
@@ -325,13 +325,13 @@ impl DiffViewer {
         }
 
         self.run_git_action("Rename branch", cx, move |repo_root| {
-            rename_bookmark(&repo_root, &current_branch, &sanitized)?;
+            rename_branch(&repo_root, &current_branch, &sanitized)?;
             Ok(format!("Renamed branch {} to {}", current_branch, sanitized))
         });
     }
 
-    pub(super) fn publish_current_bookmark(&mut self, cx: &mut Context<Self>) {
-        if !self.can_run_active_bookmark_actions() {
+    pub(super) fn publish_current_branch(&mut self, cx: &mut Context<Self>) {
+        if !self.can_run_active_branch_actions() {
             let message = "Activate a branch before publishing.".to_string();
             self.git_status_message = Some(message.clone());
             Self::push_warning_notification(message, cx);
@@ -358,13 +358,13 @@ impl DiffViewer {
 
         let branch_name = self.branch_name.clone();
         self.run_git_action("Publish branch", cx, move |repo_root| {
-            push_current_bookmark(&repo_root, &branch_name, false)?;
+            push_current_branch(&repo_root, &branch_name, false)?;
             Ok(format!("Published branch {}", branch_name))
         });
     }
 
     pub(super) fn push_current_branch(&mut self, cx: &mut Context<Self>) {
-        if !self.can_run_active_bookmark_actions() {
+        if !self.can_run_active_branch_actions() {
             let message = "Activate a branch before pushing.".to_string();
             self.git_status_message = Some(message.clone());
             Self::push_warning_notification(message, cx);
@@ -398,13 +398,13 @@ impl DiffViewer {
 
         let branch_name = self.branch_name.clone();
         self.run_git_action("Push branch", cx, move |repo_root| {
-            push_current_bookmark(&repo_root, &branch_name, true)?;
+            push_current_branch(&repo_root, &branch_name, true)?;
             Ok(format!("Pushed branch {}", branch_name))
         });
     }
 
-    pub(super) fn sync_current_bookmark_from_remote(&mut self, cx: &mut Context<Self>) {
-        if !self.can_run_active_bookmark_actions() {
+    pub(super) fn sync_current_branch_from_remote(&mut self, cx: &mut Context<Self>) {
+        if !self.can_run_active_branch_actions() {
             let message = "Activate a branch before syncing.".to_string();
             self.git_status_message = Some(message.clone());
             Self::push_warning_notification(message, cx);
@@ -432,12 +432,12 @@ impl DiffViewer {
         let branch_name = self.branch_name.clone();
 
         self.run_git_action("Sync branch", cx, move |repo_root| {
-            sync_current_bookmark(&repo_root, &branch_name)?;
+            sync_current_branch(&repo_root, &branch_name)?;
             Ok(format!("Synced branch {}", branch_name))
         });
     }
 
-    pub(super) fn open_current_bookmark_review_url(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn open_current_branch_review_url(&mut self, cx: &mut Context<Self>) {
         if let Some(reason) = self.active_review_action_blocker() {
             let message = format!("Open PR/MR unavailable: {reason}");
             self.git_status_message = Some(message.clone());
@@ -445,14 +445,14 @@ impl DiffViewer {
             cx.notify();
             return;
         }
-        self.run_review_url_action_for_bookmark(
+        self.run_review_url_action_for_branch(
             self.branch_name.clone(),
             ReviewUrlAction::Open,
             cx,
         );
     }
 
-    pub(super) fn copy_current_bookmark_review_url(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn copy_current_branch_review_url(&mut self, cx: &mut Context<Self>) {
         if let Some(reason) = self.active_review_action_blocker() {
             let message = format!("Copy review URL unavailable: {reason}");
             self.git_status_message = Some(message.clone());
@@ -460,16 +460,16 @@ impl DiffViewer {
             cx.notify();
             return;
         }
-        self.run_review_url_action_for_bookmark(
+        self.run_review_url_action_for_branch(
             self.branch_name.clone(),
             ReviewUrlAction::Copy,
             cx,
         );
     }
 
-    fn run_review_url_action_for_bookmark(
+    fn run_review_url_action_for_branch(
         &mut self,
-        bookmark_name: String,
+        branch_name: String,
         action: ReviewUrlAction,
         cx: &mut Context<Self>,
     ) {
@@ -482,9 +482,9 @@ impl DiffViewer {
             cx.notify();
             return;
         };
-        let review_title = self.preferred_review_title_for_bookmark(bookmark_name.as_str());
+        let review_title = self.preferred_review_title_for_branch(branch_name.as_str());
         let provider_mappings = self.config.review_provider_mappings.clone();
-        let bookmark_for_task = bookmark_name.clone();
+        let branch_for_task = branch_name.clone();
         let review_title_for_task = review_title.clone();
 
         let epoch = self.begin_git_action(match action {
@@ -498,9 +498,9 @@ impl DiffViewer {
                 .background_executor()
                 .spawn(async move {
                     let execution_started_at = Instant::now();
-                    let result = review_url_for_bookmark_with_provider_map(
+                    let result = review_url_for_branch_with_provider_map(
                         &repo_root,
-                        &bookmark_for_task,
+                        &branch_for_task,
                         &provider_mappings,
                     );
                     (execution_started_at.elapsed(), result)
@@ -532,13 +532,13 @@ impl DiffViewer {
                                 ReviewUrlAction::Copy => {
                                     cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
                                     this.git_status_message =
-                                        Some(format!("Copied review URL for {}", bookmark_name));
+                                        Some(format!("Copied review URL for {}", branch_name));
                                 }
                                 ReviewUrlAction::Open => match open_url_in_browser(url.as_str()) {
                                     Ok(()) => {
                                         this.git_status_message = Some(format!(
                                             "Opened PR/MR in browser for {}",
-                                            bookmark_name
+                                            branch_name
                                         ));
                                     }
                                     Err(err) => {
@@ -556,7 +556,7 @@ impl DiffViewer {
                         Ok(None) => {
                             let message = format!(
                                 "No review URL found for {}. Add review_provider_mappings in ~/.hunkdiff/config.toml for self-hosted remotes.",
-                                bookmark_name
+                                branch_name
                             );
                             debug!(
                                 "git action complete: epoch={} action={} lookup_elapsed_ms={} total_elapsed_ms={} result=missing_url",
@@ -597,8 +597,8 @@ impl DiffViewer {
         });
     }
 
-    fn preferred_review_title_for_bookmark(&self, bookmark_name: &str) -> String {
-        if self.branch_name == bookmark_name
+    fn preferred_review_title_for_branch(&self, branch_name: &str) -> String {
+        if self.branch_name == branch_name
             && let Some(subject) = self
                 .last_commit_subject
                 .as_deref()
@@ -607,7 +607,7 @@ impl DiffViewer {
             return subject;
         }
 
-        bookmark_name.to_string()
+        branch_name.to_string()
     }
 
     pub(super) fn commit_from_input(&mut self, _: &mut Window, cx: &mut Context<Self>) {

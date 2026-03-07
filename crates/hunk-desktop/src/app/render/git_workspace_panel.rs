@@ -1,8 +1,8 @@
 impl DiffViewer {
-    fn render_jj_workspace_operations_panel_v2(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_git_workspace_operations_panel_v2(&self, cx: &mut Context<Self>) -> AnyElement {
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
-        let activate_bookmark_loading = self.git_action_loading_named("Activate branch");
+        let activate_branch_loading = self.git_action_loading_named("Activate branch");
         let sync_loading = self.git_action_loading_named("Sync branch");
         let publish_loading = self.git_action_loading_named("Publish branch");
         let rename_loading = self.git_action_loading_named("Rename branch");
@@ -10,9 +10,9 @@ impl DiffViewer {
         let copy_review_loading = self.git_action_loading_named("Copy PR/MR URL");
         let create_commit_loading = self.git_action_loading_named("Create commit");
         let push_loading = self.git_action_loading_named("Push branch");
-        let branch_syncable = self.can_run_active_bookmark_actions();
-        let sync_disabled = !self.can_sync_current_bookmark();
-        let publish_disabled = !self.can_publish_current_bookmark();
+        let branch_syncable = self.can_run_active_branch_actions();
+        let sync_disabled = !self.can_sync_current_branch();
+        let publish_disabled = !self.can_publish_current_branch();
         let push_available = self.can_push_current_branch() || push_loading;
         let push_disabled = !push_available || (self.git_action_loading && !push_loading);
         let sync_tooltip = if !branch_syncable {
@@ -47,10 +47,10 @@ impl DiffViewer {
             "Push all local commits on this branch."
         };
 
-        let active_bookmark_label = self
-            .checked_out_bookmark_name()
+        let active_branch_label = self
+            .checked_out_branch_name()
             .map_or_else(|| "detached".to_string(), ToOwned::to_owned);
-        let active_bookmark_chip_label = active_bookmark_label.clone();
+        let active_branch_chip_label = active_branch_label.clone();
         let sync_state_label = if !branch_syncable {
             "Detached".to_string()
         } else if self.branch_has_upstream {
@@ -90,10 +90,10 @@ impl DiffViewer {
             || included_count == 0
             || (self.git_action_loading && !create_commit_loading);
 
-        let bookmark_input_empty = self.branch_input_state.read(cx).value().trim().is_empty();
+        let branch_input_empty = self.branch_input_state.read(cx).value().trim().is_empty();
         let rename_disabled =
-            self.git_action_loading || bookmark_input_empty || !self.can_run_active_bookmark_actions();
-        let create_or_activate_disabled = self.git_action_loading || bookmark_input_empty;
+            self.git_action_loading || branch_input_empty || !self.can_run_active_branch_actions();
+        let create_or_activate_disabled = self.git_action_loading || branch_input_empty;
 
         v_flex()
             .w_full()
@@ -139,12 +139,12 @@ impl DiffViewer {
                             .gap_1()
                             .flex_wrap()
                             .child(
-                                Button::new("bookmark-selector-v2")
+                                Button::new("branch-selector-v2")
                                     .outline()
                                     .compact()
                                     .with_size(gpui_component::Size::Small)
                                     .rounded(px(7.0))
-                                    .loading(activate_bookmark_loading)
+                                    .loading(activate_branch_loading)
                                     .min_w(px(150.0))
                                     .bg(hunk_opacity(cx.theme().secondary, is_dark, 0.50, 0.70))
                                     .border_color(hunk_opacity(
@@ -153,7 +153,7 @@ impl DiffViewer {
                                         0.90,
                                         0.74,
                                     ))
-                                    .label(active_bookmark_chip_label)
+                                    .label(active_branch_chip_label)
                                     .dropdown_caret(true)
                                     .tooltip("Select a branch to activate it.")
                                     .disabled(self.git_action_loading)
@@ -169,8 +169,8 @@ impl DiffViewer {
                                                     PopupMenuItem::new(branch_label)
                                                         .checked(entry.1)
                                                         .on_click(move |_, window, cx| {
-                                                            view.update(cx, |this, cx| {
-                                                                this.checkout_bookmark(
+                                                                view.update(cx, |this, cx| {
+                                                                this.checkout_branch(
                                                                     branch_name.clone(),
                                                                     window,
                                                                     cx,
@@ -196,13 +196,13 @@ impl DiffViewer {
                                     .disabled(sync_disabled)
                                     .on_click(move |_, _, cx| {
                                         view.update(cx, |this, cx| {
-                                            this.sync_current_bookmark_from_remote(cx);
+                                            this.sync_current_branch_from_remote(cx);
                                         });
                                     })
                             })
                             .child({
                                 let view = view.clone();
-                                let mut button = Button::new("bookmark-publish-state-v2")
+                                let mut button = Button::new("branch-publish-state-v2")
                                     .compact()
                                     .with_size(gpui_component::Size::Small)
                                     .rounded(px(7.0))
@@ -217,7 +217,7 @@ impl DiffViewer {
                                     .disabled(self.branch_has_upstream || publish_disabled)
                                     .on_click(move |_, _, cx| {
                                         view.update(cx, |this, cx| {
-                                            this.publish_current_bookmark(cx);
+                                            this.publish_current_branch(cx);
                                         });
                                     });
                                 if self.branch_has_upstream {
@@ -256,24 +256,24 @@ impl DiffViewer {
                             .flex_wrap()
                             .child({
                                 let view = view.clone();
-                                Button::new("create-or-switch-bookmark-v2")
+                                Button::new("create-or-switch-branch-v2")
                                     .primary()
                                     .compact()
                                     .with_size(gpui_component::Size::Small)
                                     .rounded(px(7.0))
-                                    .loading(activate_bookmark_loading)
+                                    .loading(activate_branch_loading)
                                     .label("Create / Activate")
                                     .tooltip("Create a branch from the entered name or activate it if it already exists.")
                                     .disabled(create_or_activate_disabled)
                                     .on_click(move |_, window, cx| {
                                         view.update(cx, |this, cx| {
-                                            this.create_or_switch_bookmark_from_input(window, cx);
+                                            this.create_or_switch_branch_from_input(window, cx);
                                         });
                                     })
                             })
                             .child({
                                 let view = view.clone();
-                                Button::new("rename-active-bookmark-v2")
+                                Button::new("rename-active-branch-v2")
                                     .outline()
                                     .compact()
                                     .with_size(gpui_component::Size::Small)
@@ -284,7 +284,7 @@ impl DiffViewer {
                                     .disabled(rename_disabled)
                                     .on_click(move |_, window, cx| {
                                         view.update(cx, |this, cx| {
-                                            this.rename_current_bookmark_from_input(window, cx);
+                                            this.rename_current_branch_from_input(window, cx);
                                         });
                                     })
                             })
@@ -304,7 +304,7 @@ impl DiffViewer {
                                     .disabled(review_url_disabled)
                                     .on_click(move |_, _, cx| {
                                         view.update(cx, |this, cx| {
-                                            this.open_current_bookmark_review_url(cx);
+                                            this.open_current_branch_review_url(cx);
                                         });
                                     })
                             })
@@ -324,7 +324,7 @@ impl DiffViewer {
                                     .disabled(review_url_disabled)
                                     .on_click(move |_, _, cx| {
                                         view.update(cx, |this, cx| {
-                                            this.copy_current_bookmark_review_url(cx);
+                                            this.copy_current_branch_review_url(cx);
                                         });
                                     })
                             }),
@@ -417,7 +417,7 @@ impl DiffViewer {
                             })
                             .child({
                                 let view = view.clone();
-                                Button::new("push-bookmark-revisions-v2")
+                                Button::new("push-branch-v2")
                                     .outline()
                                     .rounded(px(7.0))
                                     .loading(push_loading)

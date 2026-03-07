@@ -6,7 +6,7 @@ fn sample_comment() -> CommentRecord {
     CommentRecord {
         id: "comment-1".to_string(),
         repo_root: "/repo".to_string(),
-        bookmark_name: "main".to_string(),
+        branch_name: "main".to_string(),
         created_head_commit: Some("abc123".to_string()),
         status: CommentStatus::Open,
         file_path: "src/lib.rs".to_string(),

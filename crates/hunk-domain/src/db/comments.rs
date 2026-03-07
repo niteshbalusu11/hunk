@@ -64,7 +64,7 @@ impl CommentLineSide {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewComment {
     pub repo_root: String,
-    pub bookmark_name: String,
+    pub branch_name: String,
     pub created_head_commit: Option<String>,
     pub file_path: String,
     pub line_side: CommentLineSide,
@@ -83,7 +83,7 @@ pub struct NewComment {
 pub struct CommentRecord {
     pub id: String,
     pub repo_root: String,
-    pub bookmark_name: String,
+    pub branch_name: String,
     pub created_head_commit: Option<String>,
     pub status: CommentStatus,
     pub file_path: String,
@@ -213,7 +213,7 @@ impl DatabaseStore {
             params![
                 id,
                 input.repo_root,
-                input.bookmark_name,
+                input.branch_name,
                 input.created_head_commit,
                 CommentStatus::Open.as_str(),
                 input.file_path,
@@ -252,7 +252,7 @@ impl DatabaseStore {
     pub fn list_comments(
         &self,
         repo_root: &str,
-        bookmark_name: &str,
+        branch_name: &str,
         include_non_open: bool,
     ) -> Result<Vec<CommentRecord>> {
         let conn = self.open_connection()?;
@@ -263,7 +263,7 @@ impl DatabaseStore {
         let include_non_open_flag = if include_non_open { 1_i64 } else { 0_i64 };
         let rows = stmt
             .query_map(
-                params![repo_root, bookmark_name, include_non_open_flag],
+                params![repo_root, branch_name, include_non_open_flag],
                 map_comment_row,
             )
             .context("failed to query comments by scope")?;
@@ -446,7 +446,7 @@ fn map_comment_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CommentRecord> {
     Ok(CommentRecord {
         id: row.get("id")?,
         repo_root: row.get("repo_root")?,
-        bookmark_name: row.get("bookmark_name")?,
+        branch_name: row.get("branch_name")?,
         created_head_commit: row.get("created_head_commit")?,
         status,
         file_path: row.get("file_path")?,

@@ -34,10 +34,10 @@ impl Drop for TempDb {
     }
 }
 
-fn new_comment(repo_root: &str, bookmark_name: &str, file_path: &str, text: &str) -> NewComment {
+fn new_comment(repo_root: &str, branch_name: &str, file_path: &str, text: &str) -> NewComment {
     NewComment {
         repo_root: repo_root.to_string(),
-        bookmark_name: bookmark_name.to_string(),
+        branch_name: branch_name.to_string(),
         created_head_commit: Some("abc123".to_string()),
         file_path: file_path.to_string(),
         line_side: CommentLineSide::Right,
@@ -68,7 +68,7 @@ fn sqlite_store_bootstraps_schema() {
     let user_version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("read sqlite user_version");
-    assert_eq!(user_version, 1);
+    assert_eq!(user_version, 2);
 }
 
 #[test]
@@ -82,7 +82,7 @@ fn create_and_list_comment_round_trip() {
 
     assert_eq!(created.status, CommentStatus::Open);
     assert_eq!(created.repo_root, "/repo");
-    assert_eq!(created.bookmark_name, "main");
+    assert_eq!(created.branch_name, "main");
     assert_eq!(created.file_path, "src/lib.rs");
     assert_eq!(created.old_line, Some(10));
     assert_eq!(created.new_line, Some(11));
@@ -97,7 +97,7 @@ fn create_and_list_comment_round_trip() {
 }
 
 #[test]
-fn scope_filtering_is_repo_and_bookmark_specific() {
+fn scope_filtering_is_repo_and_branch_specific() {
     let fixture = TempDb::new("comments-scope");
 
     fixture

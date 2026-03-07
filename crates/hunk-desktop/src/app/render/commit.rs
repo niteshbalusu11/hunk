@@ -76,8 +76,8 @@ impl DiffViewer {
             .into_any_element()
     }
 
-    fn render_jj_workspace_operations_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        self.render_jj_workspace_operations_panel_v2(cx)
+    fn render_git_workspace_operations_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        self.render_git_workspace_operations_panel_v2(cx)
     }
 
     fn render_workspace_changes_panel(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -146,7 +146,7 @@ impl DiffViewer {
                         .into_any_element()
                 } else {
                     v_flex()
-                        .id("jj-working-copy-scroll")
+                        .id("git-working-copy-scroll")
                         .size_full()
                         .overflow_y_scroll()
                         .occlude()

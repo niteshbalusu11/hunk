@@ -1166,7 +1166,7 @@ fn walk_repo_tree(
 
         let name = child.file_name();
         let name = name.to_string_lossy();
-        if name == ".git" || name == ".jj" {
+        if name == ".git" {
             continue;
         }
 
@@ -1265,7 +1265,7 @@ fn collect_nested_repo_roots(
 
         let name = child.file_name();
         let name = name.to_string_lossy();
-        if name == ".git" || name == ".jj" {
+        if name == ".git" {
             continue;
         }
 
@@ -1288,8 +1288,7 @@ fn collect_nested_repo_roots(
 
 fn directory_is_repo_root(path: &Path) -> bool {
     let git_marker = path.join(".git");
-    let jj_marker = path.join(".jj");
-    git_marker.is_dir() || git_marker.is_file() || jj_marker.is_dir()
+    git_marker.is_dir() || git_marker.is_file()
 }
 
 fn path_is_within_nested_repo(path: &str, nested_repo_roots: &BTreeSet<String>) -> bool {

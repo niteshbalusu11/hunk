@@ -29,7 +29,7 @@ impl DiffViewer {
         let show_global_loading_overlay = self.ai_bootstrap_loading;
         let threads_loading = show_global_loading_overlay && threads.is_empty();
         let active_branch = self
-            .checked_out_bookmark_name()
+            .checked_out_branch_name()
             .map_or_else(|| "detached".to_string(), ToOwned::to_owned);
         let pending_approvals = self.ai_visible_pending_approvals();
         let pending_approvals_for_timeline = pending_approvals.clone();

@@ -1,11 +1,11 @@
 impl DiffViewer {
-    pub(super) fn request_activate_or_create_bookmark_with_dirty_guard(
+    pub(super) fn request_activate_or_create_branch_with_dirty_guard(
         &mut self,
-        bookmark_name: String,
+        branch_name: String,
         cx: &mut Context<Self>,
     ) {
-        let target_bookmark = bookmark_name.trim().to_string();
-        if target_bookmark.is_empty() {
+        let target_branch = branch_name.trim().to_string();
+        if target_branch.is_empty() {
             self.git_status_message = Some("Branch name is required.".to_string());
             cx.notify();
             return;
@@ -17,12 +17,12 @@ impl DiffViewer {
             return;
         }
 
-        let source_bookmark = self
-            .checked_out_bookmark_name()
+        let source_branch = self
+            .checked_out_branch_name()
             .unwrap_or(self.branch_name.as_str())
             .to_string();
-        if source_bookmark == target_bookmark {
-            self.git_status_message = Some(format!("Branch {} is already active.", target_bookmark));
+        if source_branch == target_branch {
+            self.git_status_message = Some(format!("Branch {} is already active.", target_branch));
             cx.notify();
             return;
         }
@@ -31,21 +31,21 @@ impl DiffViewer {
             self.git_status_message = Some(format!(
                 "Commit or discard {} local files before switching {} -> {}.",
                 self.files.len(),
-                source_bookmark,
-                target_bookmark
+                source_branch,
+                target_branch
             ));
             cx.notify();
             return;
         }
 
-        self.activate_or_create_bookmark(target_bookmark, cx);
+        self.activate_or_create_branch(target_branch, cx);
     }
 
     pub(super) fn active_review_action_blocker(&self) -> Option<String> {
         if self.git_action_loading {
             return Some("Another workspace action is in progress.".to_string());
         }
-        if !self.can_run_active_bookmark_actions() {
+        if !self.can_run_active_branch_actions() {
             return Some("Activate a branch before opening PR/MR.".to_string());
         }
         if !self.branch_has_upstream {

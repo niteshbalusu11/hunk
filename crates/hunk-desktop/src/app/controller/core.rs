@@ -345,7 +345,7 @@ impl DiffViewer {
             branch_ahead_count: 0,
             working_copy_commit_id: None,
             branches: Vec::new(),
-            jj_workspace_scroll_handle: ScrollHandle::default(),
+            git_workspace_scroll_handle: ScrollHandle::default(),
             workspace_view_mode: WorkspaceViewMode::GitWorkspace,
             ai_connection_state: AiConnectionState::Disconnected,
             ai_bootstrap_loading: false,
@@ -1522,9 +1522,7 @@ impl DiffViewer {
     fn is_missing_repository_error(err: &anyhow::Error) -> bool {
         err.chain().any(|cause| {
             let message = cause.to_string();
-            message.contains("failed to discover jj repository")
-                || message.contains("there is no jj repo")
-                || message.contains("failed to discover git repository")
+            message.contains("failed to discover git repository")
                 || message.contains("could not find repository")
         })
     }
