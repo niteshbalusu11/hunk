@@ -540,6 +540,15 @@ impl ThreadService {
     fn replace_thread_turns_from_snapshot(&mut self, thread: &Thread) {
         let keep_turn_ids: BTreeSet<String> =
             thread.turns.iter().map(|turn| turn.id.clone()).collect();
+        let keep_item_keys: BTreeSet<String> = thread
+            .turns
+            .iter()
+            .flat_map(|turn| {
+                turn.items.iter().map(|item| {
+                    item_storage_key(thread.id.as_str(), turn.id.as_str(), item.id())
+                })
+            })
+            .collect();
         let removed_turn_keys: BTreeSet<String> = self
             .state
             .turns
@@ -554,7 +563,11 @@ impl ThreadService {
 
         self.state
             .items
-            .retain(|_, item| item.thread_id != thread.id || keep_turn_ids.contains(&item.turn_id));
+            .retain(|item_key, item| {
+                item.thread_id != thread.id
+                    || (keep_turn_ids.contains(item.turn_id.as_str())
+                        && keep_item_keys.contains(item_key.as_str()))
+            });
         self.state
             .turn_diffs
             .retain(|turn_key, _| !removed_turn_keys.contains(turn_key));
@@ -580,7 +593,8 @@ impl ThreadService {
             .filter(|(_, item)| {
                 is_rollout_fallback_item_id(item.id.as_str())
                     && item.kind == kind
-                    && item.content == content
+                    && normalized_item_content(item.content.as_str())
+                        == normalized_item_content(content)
             })
             .map(|(item_key, _)| item_key.clone())
             .collect::<Vec<_>>();
@@ -661,4 +675,8 @@ impl ThreadService {
 
 fn is_rollout_fallback_item_id(item_id: &str) -> bool {
     item_id.starts_with("rollout:")
+}
+
+fn normalized_item_content(content: &str) -> &str {
+    content.trim()
 }
