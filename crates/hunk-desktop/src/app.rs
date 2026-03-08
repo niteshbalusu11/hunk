@@ -99,6 +99,7 @@ const AI_TIMELINE_DEFAULT_VISIBLE_TURNS: usize = 80;
 const AI_TIMELINE_TURN_PAGE_SIZE: usize = 80;
 
 mod ai_paths;
+mod branch_activation;
 mod branch_picker;
 mod refresh_policy;
 

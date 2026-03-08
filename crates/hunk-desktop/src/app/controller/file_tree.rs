@@ -215,7 +215,7 @@ impl DiffViewer {
         let Some(path) = self.selected_path.clone() else {
             let message = "Select a file in the tree before renaming.".to_string();
             self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, cx);
+            Self::push_warning_notification(message, None, cx);
             cx.notify();
             return;
         };
@@ -405,14 +405,14 @@ impl DiffViewer {
         if self.workspace_view_mode != WorkspaceViewMode::Files {
             let message = "File management is only available in Files view.".to_string();
             self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, cx);
+            Self::push_warning_notification(message, None, cx);
             cx.notify();
             return false;
         }
         if self.repo_root.is_none() {
             let message = "No repository is open.".to_string();
             self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, cx);
+            Self::push_warning_notification(message, None, cx);
             cx.notify();
             return false;
         }
@@ -483,7 +483,7 @@ impl DiffViewer {
         if value.is_empty() {
             let message = "Path cannot be empty.".to_string();
             self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, cx);
+            Self::push_warning_notification(message, None, cx);
             cx.notify();
             return false;
         }
@@ -510,7 +510,7 @@ impl DiffViewer {
             Err(err) => {
                 let message = err.to_string();
                 self.git_status_message = Some(message.clone());
-                Self::push_warning_notification(message, cx);
+                Self::push_warning_notification(message, None, cx);
                 cx.notify();
                 false
             }

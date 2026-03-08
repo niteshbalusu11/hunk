@@ -1,4 +1,15 @@
 impl DiffViewer {
+    fn set_git_warning_message(
+        &mut self,
+        message: String,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
+        self.git_status_message = Some(message.clone());
+        Self::push_warning_notification(message, window, cx);
+        cx.notify();
+    }
+
     fn push_success_notification(message: String, cx: &mut Context<Self>) {
         let window_handles = cx.windows().into_iter().collect::<Vec<_>>();
         if window_handles.is_empty() {
@@ -39,7 +50,20 @@ impl DiffViewer {
         }
     }
 
-    fn push_warning_notification(message: String, cx: &mut Context<Self>) {
+    fn push_warning_notification(
+        message: String,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(window) = window {
+            gpui_component::WindowExt::push_notification(
+                window,
+                gpui_component::notification::Notification::warning(message),
+                cx,
+            );
+            return;
+        }
+
         let window_handles = cx.windows().into_iter().collect::<Vec<_>>();
         if window_handles.is_empty() {
             error!("cannot show git action warning notification: no windows available");
@@ -123,11 +147,16 @@ impl DiffViewer {
         }
     }
 
-    fn run_git_action<F>(&mut self, action_name: &'static str, cx: &mut Context<Self>, action: F)
+    fn run_git_action<F>(
+        &mut self,
+        action_name: &'static str,
+        cx: &mut Context<Self>,
+        action: F,
+    ) -> bool
     where
         F: FnOnce(std::path::PathBuf) -> anyhow::Result<String> + Send + 'static,
     {
-        self.run_git_action_with_refresh(action_name, cx, action);
+        self.run_git_action_with_refresh(action_name, cx, action)
     }
 
     fn run_git_action_with_refresh<F>(
@@ -135,17 +164,18 @@ impl DiffViewer {
         action_name: &'static str,
         cx: &mut Context<Self>,
         action: F,
-    ) where
+    ) -> bool
+    where
         F: FnOnce(std::path::PathBuf) -> anyhow::Result<String> + Send + 'static,
     {
         if self.git_action_loading {
-            return;
+            return false;
         }
 
         let Some(repo_root) = self.repo_root.clone() else {
             self.git_status_message = Some("No Git repository available.".to_string());
             cx.notify();
-            return;
+            return false;
         };
 
         let epoch = self.begin_git_action(action_name, cx);
@@ -199,6 +229,9 @@ impl DiffViewer {
                                 format!("{action_name} failed: {summary}"),
                                 cx,
                             );
+                            if action_name == "Activate branch" {
+                                this.sync_branch_picker_state(cx);
+                            }
                         }
                     }
 
@@ -206,36 +239,40 @@ impl DiffViewer {
                 });
             }
         });
+
+        true
     }
 
     fn checkout_or_create_branch_with_options(
         &mut self,
         branch_name: String,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         self.run_git_action("Activate branch", cx, move |repo_root| {
             checkout_or_create_branch_with_change_transfer(&repo_root, &branch_name, false)?;
             Ok(format!("Activated branch {}", branch_name))
-        });
+        })
     }
 
-    fn activate_or_create_branch(&mut self, branch_name: String, cx: &mut Context<Self>) {
+    fn activate_or_create_branch(&mut self, branch_name: String, cx: &mut Context<Self>) -> bool {
         let target_branch = branch_name.trim().to_string();
         if target_branch.is_empty() {
-            self.git_status_message = Some("Branch name is required.".to_string());
-            cx.notify();
-            return;
+            self.set_git_warning_message("Branch name is required.".to_string(), None, cx);
+            return false;
         }
         if self.checked_out_branch_name() == Some(target_branch.as_str()) {
-            self.git_status_message = Some(format!("Branch {} is already active.", target_branch));
-            cx.notify();
-            return;
+            self.set_git_warning_message(
+                format!("Branch {} is already active.", target_branch),
+                None,
+                cx,
+            );
+            return false;
         }
-        self.checkout_or_create_branch_with_options(target_branch, cx);
+        self.checkout_or_create_branch_with_options(target_branch, cx)
     }
 
     pub(super) fn checkout_branch(&mut self, branch_name: String, cx: &mut Context<Self>) {
-        self.request_activate_or_create_branch_with_dirty_guard(branch_name, cx);
+        self.request_activate_or_create_branch_with_dirty_guard(branch_name, None, cx);
     }
 
     pub(super) fn toggle_commit_file_staged(
@@ -344,16 +381,18 @@ impl DiffViewer {
     ) {
         let raw_name = self.branch_input_state.read(cx).value().to_string();
         if raw_name.trim().is_empty() {
-            self.git_status_message = Some("Branch name is required.".to_string());
-            cx.notify();
+            self.set_git_warning_message("Branch name is required.".to_string(), Some(window), cx);
             return;
         }
 
         let sanitized = sanitize_branch_name(&raw_name);
-        self.branch_input_state.update(cx, |state, cx| {
-            state.set_value("", window, cx);
-        });
-        self.request_activate_or_create_branch_with_dirty_guard(sanitized, cx);
+        let started =
+            self.request_activate_or_create_branch_with_dirty_guard(sanitized, Some(window), cx);
+        if started {
+            self.branch_input_state.update(cx, |state, cx| {
+                state.set_value("", window, cx);
+            });
+        }
     }
 
     pub(super) fn rename_current_branch_from_input(
@@ -396,21 +435,21 @@ impl DiffViewer {
         if !self.can_run_active_branch_actions() {
             let message = "Activate a branch before publishing.".to_string();
             self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, cx);
+            Self::push_warning_notification(message, None, cx);
             cx.notify();
             return;
         }
         if !self.tracking_area_clean() {
             let message = "Commit or discard working tree changes before publishing.".to_string();
             self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, cx);
+            Self::push_warning_notification(message, None, cx);
             cx.notify();
             return;
         }
         if self.branch_has_upstream {
             let message = "Branch is already published.".to_string();
             self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, cx);
+            Self::push_warning_notification(message, None, cx);
             cx.notify();
             return;
         }
@@ -429,28 +468,28 @@ impl DiffViewer {
         if !self.can_run_active_branch_actions() {
             let message = "Activate a branch before pushing.".to_string();
             self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, cx);
+            Self::push_warning_notification(message, None, cx);
             cx.notify();
             return;
         }
         if !self.branch_has_upstream {
             let message = "Publish this branch before pushing.".to_string();
             self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, cx);
+            Self::push_warning_notification(message, None, cx);
             cx.notify();
             return;
         }
         if !self.tracking_area_clean() {
             let message = "Commit or discard working tree changes before pushing.".to_string();
             self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, cx);
+            Self::push_warning_notification(message, None, cx);
             cx.notify();
             return;
         }
         if self.branch_ahead_count == 0 {
             let message = "No commits to push.".to_string();
             self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, cx);
+            Self::push_warning_notification(message, None, cx);
             cx.notify();
             return;
         }
@@ -469,21 +508,21 @@ impl DiffViewer {
         if !self.can_run_active_branch_actions() {
             let message = "Activate a branch before syncing.".to_string();
             self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, cx);
+            Self::push_warning_notification(message, None, cx);
             cx.notify();
             return;
         }
         if !self.branch_has_upstream {
             let message = "No upstream branch to sync from.".to_string();
             self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, cx);
+            Self::push_warning_notification(message, None, cx);
             cx.notify();
             return;
         }
         if !self.tracking_area_clean() {
             let message = "Commit or discard working tree changes before syncing.".to_string();
             self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, cx);
+            Self::push_warning_notification(message, None, cx);
             cx.notify();
             return;
         }
@@ -503,7 +542,7 @@ impl DiffViewer {
         if let Some(reason) = self.active_review_action_blocker() {
             let message = format!("Open PR/MR unavailable: {reason}");
             self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, cx);
+            Self::push_warning_notification(message, None, cx);
             cx.notify();
             return;
         }
@@ -518,7 +557,7 @@ impl DiffViewer {
         if let Some(reason) = self.active_review_action_blocker() {
             let message = format!("Copy review URL unavailable: {reason}");
             self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, cx);
+            Self::push_warning_notification(message, None, cx);
             cx.notify();
             return;
         }
@@ -632,7 +671,7 @@ impl DiffViewer {
                                 total_elapsed.as_millis()
                             );
                             this.git_status_message = Some(message.clone());
-                            Self::push_warning_notification(message, cx);
+                            Self::push_warning_notification(message, None, cx);
                         }
                         Err(err) => {
                             error!(
