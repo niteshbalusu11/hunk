@@ -218,6 +218,41 @@ fn out_of_order_and_duplicate_events_are_idempotent() {
 }
 
 #[test]
+fn thread_started_does_not_retarget_existing_thread_cwd() {
+    let mut state = AiState::default();
+
+    let first = state.apply_stream_event(event(
+        1,
+        Some("thread-start:t1"),
+        ReducerEvent::ThreadStarted {
+            thread_id: "t1".to_string(),
+            cwd: "/repo/main".to_string(),
+            title: Some("Main".to_string()),
+            created_at: Some(10),
+            updated_at: Some(10),
+        },
+    ));
+    let second = state.apply_stream_event(event(
+        2,
+        Some("thread-start:t1:retry"),
+        ReducerEvent::ThreadStarted {
+            thread_id: "t1".to_string(),
+            cwd: "/repo/worktree".to_string(),
+            title: Some("Retried".to_string()),
+            created_at: Some(10),
+            updated_at: Some(11),
+        },
+    ));
+
+    assert_eq!(first, ApplyOutcome::Applied);
+    assert_eq!(second, ApplyOutcome::Applied);
+    let thread = state.threads.get("t1").expect("thread must exist");
+    assert_eq!(thread.cwd, "/repo/main");
+    assert_eq!(thread.title.as_deref(), Some("Retried"));
+    assert_eq!(thread.updated_at, 11);
+}
+
+#[test]
 fn item_start_backfills_turn_association_after_delta_first() {
     let mut state = AiState::default();
 

@@ -32,6 +32,7 @@ fn workspace_include_hidden_models(state: &AppState, workspace_key: Option<&str>
         .unwrap_or(true)
 }
 
+#[cfg(test)]
 fn resolved_ai_workspace_cwd(
     project_path: Option<&std::path::Path>,
     repo_root: Option<&std::path::Path>,

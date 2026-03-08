@@ -16,6 +16,7 @@ use super::*;
 use hunk_git::branch::{
     rename_branch, review_url_for_branch_with_provider_map, sanitize_branch_name,
 };
+use hunk_git::compare::{CompareSource, load_compare_snapshot, resolve_default_base_branch_name};
 use hunk_git::git::{
     WorkflowSnapshot, count_non_ignored_repo_tree_entries, invalidate_repo_metadata_caches,
     load_patches_for_files_from_session, load_repo_file_line_stats_for_paths_without_refresh,
@@ -39,6 +40,7 @@ include!("core.rs");
 include!("core_runtime.rs");
 include!("git_ops.rs");
 include!("recent_commits.rs");
+include!("review_compare.rs");
 include!("workspace_mode.rs");
 include!("ai.rs");
 include!("file_tree.rs");

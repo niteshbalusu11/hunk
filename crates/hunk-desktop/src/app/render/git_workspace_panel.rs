@@ -265,10 +265,11 @@ impl DiffViewer {
         let publish_loading = self.git_action_loading_named("Publish branch");
         let push_loading = self.git_action_loading_named("Push branch");
         let open_review_loading = self.git_action_loading_named("Open PR/MR");
+        let git_controls_busy = self.git_controls_busy();
         let sync_disabled = !self.can_sync_current_branch();
         let publish_disabled = !self.can_publish_current_branch();
         let push_available = self.can_push_current_branch() || push_loading;
-        let push_disabled = !push_available || (self.git_action_loading && !push_loading);
+        let push_disabled = !push_available || (git_controls_busy && !push_loading);
         let sync_tooltip = if !branch_syncable {
             "Activate a branch before syncing."
         } else if !self.branch_has_upstream {
@@ -427,21 +428,39 @@ impl DiffViewer {
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
         let colors = hunk_git_workspace(cx.theme(), is_dark);
+        let create_worktree_loading = self.git_action_loading_named("Create worktree");
         let activate_branch_loading = self.git_action_loading_named("Activate branch");
         let sync_loading = self.git_action_loading_named("Sync branch");
         let publish_loading = self.git_action_loading_named("Publish branch");
         let rename_loading = self.git_action_loading_named("Rename branch");
         let open_review_loading = self.git_action_loading_named("Open PR/MR");
         let copy_review_loading = self.git_action_loading_named("Copy PR/MR URL");
+        let git_controls_busy = self.git_controls_busy();
+        let create_worktree_disabled = git_controls_busy
+            || !self.worktree_name_input_has_text
+            || !self.worktree_branch_input_has_text;
         let branch_syncable = self.can_run_active_branch_actions();
         let sync_disabled = !self.can_sync_current_branch();
         let publish_disabled = !self.can_publish_current_branch();
-        let rename_disabled = self.git_action_loading
+        let rename_disabled = git_controls_busy
             || !self.can_run_active_branch_actions()
             || !self.branch_input_has_text;
-        let create_or_activate_disabled = self.git_action_loading || !self.branch_input_has_text;
+        let create_or_activate_disabled = git_controls_busy || !self.branch_input_has_text;
         let active_review_blocker = self.active_review_action_blocker();
         let review_url_disabled = active_review_blocker.is_some();
+        let active_target_label = self
+            .workspace_targets
+            .iter()
+            .find(|target| self.active_workspace_target_id.as_deref() == Some(target.id.as_str()))
+            .map(|target| target.display_name.clone())
+            .or_else(|| {
+                self.repo_root.as_ref().and_then(|root| {
+                    root.file_name()
+                        .and_then(|name| name.to_str())
+                        .map(str::to_string)
+                })
+            })
+            .unwrap_or_else(|| "Project".to_string());
         let active_branch_label = self
             .checked_out_branch_name()
             .map_or_else(|| "detached".to_string(), ToOwned::to_owned);
@@ -493,7 +512,7 @@ impl DiffViewer {
                             .text_sm()
                             .font_semibold()
                             .text_color(cx.theme().foreground)
-                            .child("Branch Controls"),
+                            .child("Workspace & Branch Controls"),
                     )
                     .child(
                         div()
@@ -501,6 +520,101 @@ impl DiffViewer {
                             .text_color(cx.theme().muted_foreground)
                             .child(sync_state_label),
                     ),
+            )
+            .child(
+                v_flex()
+                    .w_full()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Workspace Target"),
+                    )
+                    .child(
+                        Select::new(&self.workspace_target_picker_state)
+                            .with_size(gpui_component::Size::Medium)
+                            .placeholder(active_target_label)
+                            .search_placeholder("Find a worktree or project")
+                            .rounded(px(8.0))
+                            .w_full()
+                            .bg(colors.muted_card.background)
+                            .border_color(colors.muted_card.border)
+                            .disabled(git_controls_busy || self.workspace_targets.is_empty())
+                            .empty(
+                                h_flex()
+                                    .h(px(84.0))
+                                    .justify_center()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("No workspace targets available."),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Create Managed Worktree"),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .min_h(px(36.0))
+                            .px_2p5()
+                            .py_1p5()
+                            .rounded(px(8.0))
+                            .border_1()
+                            .border_color(colors.muted_card.border)
+                            .bg(colors.muted_card.background)
+                            .child(
+                                Input::new(&self.worktree_name_input_state)
+                                    .appearance(false)
+                                    .bordered(false)
+                                    .focus_bordered(false)
+                                    .w_full()
+                                    .disabled(git_controls_busy),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .min_h(px(36.0))
+                            .px_2p5()
+                            .py_1p5()
+                            .rounded(px(8.0))
+                            .border_1()
+                            .border_color(colors.muted_card.border)
+                            .bg(colors.muted_card.background)
+                            .child(
+                                Input::new(&self.worktree_branch_input_state)
+                                    .appearance(false)
+                                    .bordered(false)
+                                    .focus_bordered(false)
+                                    .w_full()
+                                    .disabled(git_controls_busy),
+                            ),
+                    )
+                    .child({
+                        let view = view.clone();
+                        Button::new("git-create-managed-worktree")
+                            .primary()
+                            .compact()
+                            .with_size(gpui_component::Size::Small)
+                            .rounded(px(8.0))
+                            .loading(create_worktree_loading)
+                            .label("Create Worktree")
+                            .tooltip(
+                                "Create a managed worktree under .hunkdiff/worktrees and check out a new branch there.",
+                            )
+                            .disabled(create_worktree_disabled)
+                            .on_click(move |_, window, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.create_managed_worktree_from_input(window, cx);
+                                });
+                            })
+                    }),
             )
             .child(
                 h_flex()
@@ -549,7 +663,7 @@ impl DiffViewer {
                     .w_full()
                     .bg(colors.muted_card.background)
                     .border_color(colors.muted_card.border)
-                    .disabled(self.git_action_loading)
+                    .disabled(git_controls_busy)
                     .empty(
                         h_flex()
                             .h(px(84.0))
@@ -575,7 +689,7 @@ impl DiffViewer {
                             .bordered(false)
                             .focus_bordered(false)
                             .w_full()
-                            .disabled(self.git_action_loading),
+                            .disabled(git_controls_busy),
                     ),
             )
             .child(
@@ -729,8 +843,9 @@ impl DiffViewer {
         let colors = hunk_git_workspace(cx.theme(), is_dark);
         let create_commit_loading = self.git_action_loading_named("Create commit");
         let push_loading = self.git_action_loading_named("Push branch");
+        let git_controls_busy = self.git_controls_busy();
         let push_available = self.can_push_current_branch() || push_loading;
-        let push_disabled = !push_available || (self.git_action_loading && !push_loading);
+        let push_disabled = !push_available || (git_controls_busy && !push_loading);
         let push_tooltip = if !self.can_run_active_branch_actions() {
             "Activate a branch before pushing."
         } else if !self.branch_has_upstream {
@@ -744,7 +859,7 @@ impl DiffViewer {
         };
         let staged_count = self.staged_commit_file_count();
         let total_count = self.files.len();
-        let commit_disabled = staged_count == 0 || (self.git_action_loading && !create_commit_loading);
+        let commit_disabled = staged_count == 0 || (git_controls_busy && !create_commit_loading);
         let commit_readiness_label = if staged_count == 0 {
             "Stage files to commit".to_string()
         } else {
@@ -831,7 +946,7 @@ impl DiffViewer {
                             .focus_bordered(false)
                             .w_full()
                             .h(px(100.0))
-                            .disabled(self.git_action_loading),
+                            .disabled(git_controls_busy),
                     ),
             )
             .child(

@@ -17,8 +17,11 @@ Hunk is also has full codex integration so you can use Codex inside of Hunk inst
 ## What it includes
 
 - Uses a native Git backend built on `gix` with narrow `git2` fallbacks for unsupported write flows
+- Managed Git worktrees with per-worktree branch publishing
 - File tree for changed files
 - Side-by-side diff viewer with per-line styling and line numbers
+- Review compare mode for `base branch <-> workspace target` and custom branch/worktree pairs
+- AI drafts and threads scoped to the selected project checkout or worktree
 - Resizable split panes (tree + diff)
 - Light/Dark mode toggle
 - Refresh action
@@ -47,6 +50,16 @@ cargo run -p hunk-desktop
 Launch from anywhere, then use `File > Open Project...` (or `Cmd/Ctrl+Shift+O`) to choose a Git repository.
 
 `cargo run -p hunk-desktop` starts from Terminal, so macOS may still present it like a terminal-launched app.
+
+## Worktrees
+
+Hunk treats the primary checkout and each linked Git worktree as separate workspace targets.
+
+- Create and switch worktrees from the Git tab.
+- Managed worktrees live under `<repo>/.hunkdiff/worktrees/<worktree-name>`.
+- The Files and Git tabs follow the currently active workspace target.
+- The Review tab defaults to comparing the active workspace target against the repo base branch, but you can also compare custom branch/worktree pairs.
+- The AI tab can start a new thread in the primary checkout with `Cmd/Ctrl+N` or in a worktree-targeted draft with `Cmd/Ctrl+Shift+N`.
 
 ### Validate Workspace
 

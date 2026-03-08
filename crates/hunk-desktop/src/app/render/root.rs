@@ -119,6 +119,7 @@ impl DiffViewer {
         let diff_selected = self.workspace_view_mode == WorkspaceViewMode::Diff;
         let git_selected = self.workspace_view_mode == WorkspaceViewMode::GitWorkspace;
         let ai_selected = self.workspace_view_mode == WorkspaceViewMode::Ai;
+        let review_file_count = self.active_diff_file_count();
         let workspace_label = if ai_selected {
             "Codex AI Workspace"
         } else if git_selected {
@@ -142,6 +143,13 @@ impl DiffViewer {
             } else {
                 format!("{} changed files • branch not published", self.files.len())
             }
+        } else if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            format!(
+                "{} compared files • {} -> {}",
+                review_file_count,
+                self.review_compare_source_label(self.review_left_source_id.as_deref()),
+                self.review_compare_source_label(self.review_right_source_id.as_deref())
+            )
         } else {
             format!(
                 "{} changed files • active branch: {}",
@@ -343,6 +351,7 @@ impl Render for DiffViewer {
             .on_action(cx.listener(Self::switch_to_git_view_action))
             .on_action(cx.listener(Self::switch_to_ai_view_action))
             .on_action(cx.listener(Self::ai_new_thread_action))
+            .on_action(cx.listener(Self::ai_new_worktree_thread_action))
             .on_action(cx.listener(Self::open_project_action))
             .on_action(cx.listener(Self::save_current_file_action))
             .on_action(cx.listener(Self::open_settings_action))

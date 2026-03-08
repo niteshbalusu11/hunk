@@ -32,7 +32,7 @@ impl DiffViewer {
 
         self.selected_path = Some(path.clone());
         self.selected_status = self
-            .files
+            .active_diff_files()
             .iter()
             .find(|file| file.path == path)
             .map(|file| file.status);

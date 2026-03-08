@@ -9,11 +9,14 @@ use hunk_domain::state::CachedLocalBranchState;
 use hunk_domain::state::CachedRecentCommitState;
 use hunk_domain::state::CachedRecentCommitsState;
 use hunk_domain::state::CachedWorkflowState;
+use hunk_domain::state::ReviewCompareSelectionState;
 
 #[test]
 fn app_state_defaults_last_project_path_to_none() {
     let state = AppState::default();
     assert_eq!(state.last_project_path, None);
+    assert!(state.last_workspace_target_by_repo.is_empty());
+    assert!(state.review_compare_selection_by_repo.is_empty());
     assert!(state.ai_workspace_mad_max.is_empty());
     assert!(state.ai_workspace_include_hidden_models.is_empty());
     assert!(state.ai_workspace_session_overrides.is_empty());
@@ -26,6 +29,8 @@ fn app_state_parses_without_last_project_path_field() {
     let raw = "";
     let state: AppState = toml::from_str(raw).expect("state without fields should parse");
     assert_eq!(state.last_project_path, None);
+    assert!(state.last_workspace_target_by_repo.is_empty());
+    assert!(state.review_compare_selection_by_repo.is_empty());
     assert!(state.ai_workspace_mad_max.is_empty());
     assert!(state.ai_workspace_include_hidden_models.is_empty());
     assert!(state.ai_workspace_session_overrides.is_empty());
@@ -37,6 +42,21 @@ fn app_state_parses_without_last_project_path_field() {
 fn app_state_round_trips_last_project_path() {
     let state = AppState {
         last_project_path: Some(PathBuf::from("/tmp/hunk-repo")),
+        last_workspace_target_by_repo: [(
+            "/tmp/hunk-repo".to_string(),
+            "worktree:feature".to_string(),
+        )]
+        .into_iter()
+        .collect(),
+        review_compare_selection_by_repo: [(
+            "/tmp/hunk-repo".to_string(),
+            ReviewCompareSelectionState {
+                left_source_id: Some("branch:main".to_string()),
+                right_source_id: Some("worktree:feature".to_string()),
+            },
+        )]
+        .into_iter()
+        .collect(),
         ai_workspace_mad_max: [("/tmp/hunk-repo".to_string(), true)].into_iter().collect(),
         ai_workspace_include_hidden_models: [("/tmp/hunk-repo".to_string(), true)]
             .into_iter()

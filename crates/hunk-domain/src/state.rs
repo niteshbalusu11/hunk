@@ -95,8 +95,17 @@ pub struct CachedRecentCommitsState {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+pub struct ReviewCompareSelectionState {
+    pub left_source_id: Option<String>,
+    pub right_source_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppState {
     pub last_project_path: Option<PathBuf>,
+    pub last_workspace_target_by_repo: BTreeMap<String, String>,
+    pub review_compare_selection_by_repo: BTreeMap<String, ReviewCompareSelectionState>,
     pub ai_workspace_mad_max: BTreeMap<String, bool>,
     pub ai_workspace_include_hidden_models: BTreeMap<String, bool>,
     pub ai_workspace_session_overrides: BTreeMap<String, AiThreadSessionState>,

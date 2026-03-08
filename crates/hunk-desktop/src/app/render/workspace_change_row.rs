@@ -162,7 +162,7 @@ impl DiffViewer {
                                     .loading(undo_loading)
                                     .label("Undo")
                                     .tooltip(undo_tooltip)
-                                    .disabled(self.git_action_loading)
+                                    .disabled(self.git_controls_busy())
                                     .on_click(move |_, _, cx| {
                                         cx.stop_propagation();
                                         view.update(cx, |this, cx| {

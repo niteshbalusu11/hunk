@@ -1,0 +1,314 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context as _, Result, anyhow};
+use git2::{BranchType, Repository, WorktreeAddOptions};
+
+use crate::branch::is_valid_branch_name;
+use crate::git::discover_repo_root;
+
+pub const PRIMARY_WORKSPACE_TARGET_ID: &str = "primary";
+pub const HUNK_STATE_DIR_NAME: &str = ".hunkdiff";
+pub const MANAGED_WORKTREES_DIR_NAME: &str = "worktrees";
+
+const MANAGED_WORKTREE_RELATIVE_PREFIX: &str = ".hunkdiff/worktrees";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceTargetKind {
+    PrimaryCheckout,
+    LinkedWorktree,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceTargetSummary {
+    pub id: String,
+    pub kind: WorkspaceTargetKind,
+    pub root: PathBuf,
+    pub name: String,
+    pub display_name: String,
+    pub branch_name: String,
+    pub managed: bool,
+    pub is_active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateWorktreeRequest {
+    pub worktree_name: String,
+    pub branch_name: String,
+}
+
+pub fn workspace_target_id_for_worktree(name: &str) -> String {
+    format!("worktree:{name}")
+}
+
+pub fn managed_worktrees_root(primary_repo_root: &Path) -> PathBuf {
+    primary_repo_root
+        .join(HUNK_STATE_DIR_NAME)
+        .join(MANAGED_WORKTREES_DIR_NAME)
+}
+
+pub fn managed_worktree_path(primary_repo_root: &Path, worktree_name: &str) -> PathBuf {
+    managed_worktrees_root(primary_repo_root).join(worktree_name)
+}
+
+pub fn repo_relative_path_is_within_managed_worktrees(relative_path: &str) -> bool {
+    let normalized = normalize_relative_path(relative_path);
+    if normalized.is_empty() {
+        return false;
+    }
+
+    normalized == MANAGED_WORKTREE_RELATIVE_PREFIX
+        || normalized
+            .strip_prefix(MANAGED_WORKTREE_RELATIVE_PREFIX)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+pub fn path_is_within_managed_worktrees(
+    primary_repo_root: &Path,
+    absolute_path: &Path,
+) -> Result<bool> {
+    let primary_repo_root = canonicalize_existing_path(primary_repo_root)?;
+    let absolute_path = normalize_absolute_path(primary_repo_root.as_path(), absolute_path)?;
+    let Ok(relative_path) = absolute_path.strip_prefix(primary_repo_root.as_path()) else {
+        return Ok(false);
+    };
+    Ok(repo_relative_path_is_within_managed_worktrees(
+        relative_path.to_string_lossy().as_ref(),
+    ))
+}
+
+pub fn primary_repo_root(path: &Path) -> Result<PathBuf> {
+    let repo = gix::discover(path)
+        .with_context(|| format!("failed to discover Git repository from {}", path.display()))?;
+    let common_dir = canonicalize_existing_path(repo.common_dir())?;
+    let root = common_dir.parent().ok_or_else(|| {
+        anyhow!(
+            "failed to resolve primary repository root from common dir {}",
+            common_dir.display()
+        )
+    })?;
+    canonicalize_existing_path(root)
+}
+
+pub fn list_workspace_targets(path: &Path) -> Result<Vec<WorkspaceTargetSummary>> {
+    let active_root = canonicalize_existing_path(discover_repo_root(path)?.as_path())?;
+    let primary_root = primary_repo_root(path)?;
+    let repo = open_repository(primary_root.as_path())?;
+    let mut targets = Vec::new();
+
+    targets.push(primary_workspace_target_summary(
+        primary_root.as_path(),
+        active_root.as_path(),
+    )?);
+
+    for worktree_name in repo.worktrees()?.iter().flatten() {
+        let worktree = repo
+            .find_worktree(worktree_name)
+            .with_context(|| format!("failed to open worktree '{worktree_name}'"))?;
+        if worktree.validate().is_err() {
+            continue;
+        }
+        let root = canonicalize_existing_path(worktree.path())?;
+        targets.push(worktree_target_summary(
+            worktree_name,
+            root,
+            active_root.as_path(),
+            primary_root.as_path(),
+        )?);
+    }
+
+    targets.sort_by(|left, right| match (left.kind, right.kind) {
+        (WorkspaceTargetKind::PrimaryCheckout, WorkspaceTargetKind::LinkedWorktree) => {
+            std::cmp::Ordering::Less
+        }
+        (WorkspaceTargetKind::LinkedWorktree, WorkspaceTargetKind::PrimaryCheckout) => {
+            std::cmp::Ordering::Greater
+        }
+        _ => left
+            .display_name
+            .to_lowercase()
+            .cmp(&right.display_name.to_lowercase()),
+    });
+
+    Ok(targets)
+}
+
+pub fn create_managed_worktree(
+    path: &Path,
+    request: &CreateWorktreeRequest,
+) -> Result<WorkspaceTargetSummary> {
+    let worktree_name = request.worktree_name.trim();
+    let branch_name = request.branch_name.trim();
+    if !is_valid_managed_worktree_name(worktree_name) {
+        return Err(anyhow!(
+            "invalid worktree name: use letters, numbers, '.', '_' or '-'"
+        ));
+    }
+    if !is_valid_branch_name(branch_name) {
+        return Err(anyhow!("invalid branch name: {branch_name}"));
+    }
+
+    let active_repo = open_repository(path)?;
+    let primary_root = primary_repo_root(path)?;
+    let primary_repo = open_repository(primary_root.as_path())?;
+
+    if primary_repo
+        .find_branch(branch_name, BranchType::Local)
+        .is_ok()
+    {
+        return Err(anyhow!("branch '{branch_name}' already exists"));
+    }
+    if primary_repo.find_worktree(worktree_name).is_ok() {
+        return Err(anyhow!("worktree '{worktree_name}' already exists"));
+    }
+
+    let target_path = managed_worktree_path(primary_root.as_path(), worktree_name);
+    if target_path.exists() {
+        return Err(anyhow!(
+            "worktree path already exists: {}",
+            target_path.display()
+        ));
+    }
+    fs::create_dir_all(managed_worktrees_root(primary_root.as_path())).with_context(|| {
+        format!(
+            "failed to create managed worktree directory {}",
+            managed_worktrees_root(primary_root.as_path()).display()
+        )
+    })?;
+
+    let head_commit = active_repo
+        .head()
+        .context("failed to resolve HEAD for worktree creation")?
+        .peel_to_commit()
+        .context("failed to resolve HEAD commit for worktree creation")?;
+    let head_commit = primary_repo
+        .find_commit(head_commit.id())
+        .context("failed to resolve shared HEAD commit in primary repository")?;
+    let branch = primary_repo
+        .branch(branch_name, &head_commit, false)
+        .with_context(|| format!("failed to create branch '{branch_name}'"))?;
+    let mut options = WorktreeAddOptions::new();
+    options.reference(Some(branch.get()));
+    primary_repo
+        .worktree(worktree_name, target_path.as_path(), Some(&options))
+        .with_context(|| {
+            format!(
+                "failed to create worktree '{}' at {}",
+                worktree_name,
+                target_path.display()
+            )
+        })?;
+
+    let active_root = canonicalize_existing_path(discover_repo_root(path)?.as_path())?;
+    let created_root = canonicalize_existing_path(target_path.as_path())?;
+    worktree_target_summary(
+        worktree_name,
+        created_root,
+        active_root.as_path(),
+        primary_root.as_path(),
+    )
+}
+
+fn primary_workspace_target_summary(
+    primary_root: &Path,
+    active_root: &Path,
+) -> Result<WorkspaceTargetSummary> {
+    Ok(WorkspaceTargetSummary {
+        id: PRIMARY_WORKSPACE_TARGET_ID.to_string(),
+        kind: WorkspaceTargetKind::PrimaryCheckout,
+        root: primary_root.to_path_buf(),
+        name: primary_checkout_name(primary_root),
+        display_name: "Project".to_string(),
+        branch_name: checked_out_branch_name(primary_root)?,
+        managed: false,
+        is_active: primary_root == active_root,
+    })
+}
+
+fn worktree_target_summary(
+    worktree_name: &str,
+    root: PathBuf,
+    active_root: &Path,
+    primary_root: &Path,
+) -> Result<WorkspaceTargetSummary> {
+    Ok(WorkspaceTargetSummary {
+        id: workspace_target_id_for_worktree(worktree_name),
+        kind: WorkspaceTargetKind::LinkedWorktree,
+        root: root.clone(),
+        name: worktree_name.to_string(),
+        display_name: worktree_name.to_string(),
+        branch_name: checked_out_branch_name(root.as_path())?,
+        managed: root.starts_with(managed_worktrees_root(primary_root)),
+        is_active: root == active_root,
+    })
+}
+
+fn checked_out_branch_name(path: &Path) -> Result<String> {
+    let repo = open_repository(path)?;
+    Ok(match repo.head() {
+        Ok(head) => head.shorthand().unwrap_or("detached").to_string(),
+        Err(err) if err.code() == git2::ErrorCode::UnbornBranch => "unborn".to_string(),
+        Err(_) => "detached".to_string(),
+    })
+}
+
+fn open_repository(path: &Path) -> Result<Repository> {
+    Repository::open(path)
+        .with_context(|| format!("failed to open Git repository at {}", path.display()))
+}
+
+fn canonicalize_existing_path(path: &Path) -> Result<PathBuf> {
+    fs::canonicalize(path).with_context(|| format!("failed to resolve path {}", path.display()))
+}
+
+fn normalize_absolute_path(primary_repo_root: &Path, path: &Path) -> Result<PathBuf> {
+    if path.exists() {
+        return canonicalize_existing_path(path);
+    }
+
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        primary_repo_root.join(path)
+    };
+    Ok(normalize_lexical_path(absolute.as_path()))
+}
+
+fn normalize_lexical_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
+}
+
+fn primary_checkout_name(primary_root: &Path) -> String {
+    primary_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("project")
+        .to_string()
+}
+
+fn is_valid_managed_worktree_name(name: &str) -> bool {
+    let name = name.trim();
+    if name.is_empty() || name == "." || name == ".." {
+        return false;
+    }
+    name.chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+}
+
+fn normalize_relative_path(path: &str) -> String {
+    path.trim_matches('/')
+        .replace('\\', "/")
+        .trim_matches('/')
+        .to_string()
+}

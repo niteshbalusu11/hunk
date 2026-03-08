@@ -16,6 +16,7 @@ impl DiffViewer {
         let theme_button_label = format!("Theme ({theme_label})");
         let is_dark = cx.theme().mode.is_dark();
         let git_selected = self.workspace_view_mode == WorkspaceViewMode::GitWorkspace;
+        let review_selected = self.workspace_view_mode == WorkspaceViewMode::Diff;
         let active_branch = self
             .checked_out_branch_name()
             .unwrap_or(self.branch_name.as_str())
@@ -23,6 +24,12 @@ impl DiffViewer {
         let chip_colors = hunk_toolbar_chip(cx.theme(), is_dark);
         let brand_colors = hunk_toolbar_brand_chip(cx.theme(), is_dark);
         let dropdown_bg = hunk_dropdown_fill(cx.theme(), is_dark);
+        let visible_line_stats = self.active_diff_overall_line_stats();
+        let visible_file_count = if review_selected {
+            self.active_diff_file_count()
+        } else {
+            self.files.len()
+        };
 
         h_flex()
             .w_full()
@@ -229,7 +236,7 @@ impl DiffViewer {
                         ))
                     })
                     .when(!git_selected, |this| {
-                        this.child(self.render_line_stats("overall", self.overall_line_stats, cx))
+                        this.child(self.render_line_stats("overall", visible_line_stats, cx))
                             .child({
                                 let view = view.clone();
                                 Button::new("toggle-diff-whitespace")
@@ -270,7 +277,7 @@ impl DiffViewer {
                                 div()
                                     .text_sm()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(format!("{} files", self.files.len())),
+                                    .child(format!("{} files", visible_file_count)),
                             )
                     })
                     .when(self.config.show_fps_counter, |this| {

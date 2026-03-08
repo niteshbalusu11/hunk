@@ -13,6 +13,8 @@ use gix::bstr::{BStr, ByteSlice as _};
 use gix::diff::blob::intern::InternedInput;
 use gix::filter::plumbing::pipeline::convert::ToGitOutcome;
 
+use crate::worktree::repo_relative_path_is_within_managed_worktrees;
+
 pub const MAX_REPO_TREE_ENTRIES: usize = 60_000;
 
 static NESTED_REPO_ROOTS_CACHE: LazyLock<Mutex<HashMap<PathBuf, BTreeSet<String>>>> =
@@ -854,6 +856,9 @@ fn collect_candidate_files(
         if path.is_empty() {
             continue;
         }
+        if repo_relative_path_is_within_managed_worktrees(path.as_str()) {
+            continue;
+        }
         if path_is_within_nested_repo(path.as_str(), &nested_repo_roots) {
             continue;
         }
@@ -1487,7 +1492,7 @@ fn load_visible_repo_paths(repo: &gix::Repository, root: &Path) -> Result<BTreeS
     let mut paths = BTreeSet::new();
     for (path, ()) in index.entries_with_paths_by_filter_map(|_path, _| Some(())) {
         let path = normalize_bstr_path(path);
-        if !path.is_empty() {
+        if !path.is_empty() && !repo_relative_path_is_within_managed_worktrees(path.as_str()) {
             paths.insert(path);
         }
     }
@@ -1517,6 +1522,9 @@ fn collect_untracked_repo_paths(repo: &gix::Repository, root: &Path) -> Result<B
 
         let path = normalize_bstr_path(item.rela_path());
         if path.is_empty() {
+            continue;
+        }
+        if repo_relative_path_is_within_managed_worktrees(path.as_str()) {
             continue;
         }
         if path_is_within_nested_repo(path.as_str(), &nested_repo_roots) {
@@ -1560,6 +1568,9 @@ fn walk_repo_tree(
         };
         let relative_path = normalize_path(relative.to_string_lossy().as_ref());
         if relative_path.is_empty() {
+            continue;
+        }
+        if repo_relative_path_is_within_managed_worktrees(relative_path.as_str()) {
             continue;
         }
 
@@ -1650,12 +1661,16 @@ fn collect_nested_repo_roots(
         }
 
         let child_path = child.path();
+        let Ok(relative) = child_path.strip_prefix(root) else {
+            continue;
+        };
+        let relative_path = normalize_path(relative.to_string_lossy().as_ref());
+        if repo_relative_path_is_within_managed_worktrees(relative_path.as_str()) {
+            continue;
+        }
         if directory_is_repo_root(child_path.as_path()) {
-            if let Ok(relative) = child_path.strip_prefix(root) {
-                let relative_path = normalize_path(relative.to_string_lossy().as_ref());
-                if !relative_path.is_empty() {
-                    nested_roots.insert(relative_path);
-                }
+            if !relative_path.is_empty() {
+                nested_roots.insert(relative_path);
             }
             continue;
         }

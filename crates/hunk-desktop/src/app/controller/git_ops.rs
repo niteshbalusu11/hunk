@@ -1,4 +1,8 @@
 impl DiffViewer {
+    pub(super) fn git_controls_busy(&self) -> bool {
+        self.git_action_loading || self.workspace_target_switch_loading
+    }
+
     fn set_git_warning_message(
         &mut self,
         message: String,
@@ -103,8 +107,14 @@ impl DiffViewer {
 
     fn refresh_after_git_action(&mut self, action_name: &'static str, cx: &mut Context<Self>) {
         self.request_snapshot_refresh_workflow_only(true, cx);
-        if matches!(action_name, "Activate branch" | "Sync branch") {
+        if matches!(
+            action_name,
+            "Activate branch" | "Sync branch" | "Create worktree"
+        ) {
             self.request_recent_commits_refresh(true, cx);
+        }
+        if action_name == "Create worktree" {
+            self.refresh_workspace_targets_from_git_state(cx);
         }
     }
 
@@ -168,7 +178,7 @@ impl DiffViewer {
     where
         F: FnOnce(std::path::PathBuf) -> anyhow::Result<String> + Send + 'static,
     {
-        if self.git_action_loading {
+        if self.git_controls_busy() {
             return false;
         }
 
@@ -337,7 +347,7 @@ impl DiffViewer {
     }
 
     pub(super) fn can_run_active_branch_actions(&self) -> bool {
-        self.branch_syncable() && self.active_branch_is_checked_out()
+        self.branch_syncable() && self.active_branch_is_checked_out() && !self.git_controls_busy()
     }
 
     fn tracking_area_clean(&self) -> bool {
@@ -348,14 +358,14 @@ impl DiffViewer {
         self.can_run_active_branch_actions()
             && self.branch_has_upstream
             && self.tracking_area_clean()
-            && !self.git_action_loading
+            && !self.git_controls_busy()
     }
 
     pub(super) fn can_publish_current_branch(&self) -> bool {
         self.can_run_active_branch_actions()
             && !self.branch_has_upstream
             && self.tracking_area_clean()
-            && !self.git_action_loading
+            && !self.git_controls_busy()
     }
 
     pub(super) fn can_push_current_branch(&self) -> bool {
@@ -363,7 +373,7 @@ impl DiffViewer {
             && self.branch_has_upstream
             && self.branch_ahead_count > 0
             && self.tracking_area_clean()
-            && !self.git_action_loading
+            && !self.git_controls_busy()
     }
 
     fn staged_commit_paths(&self) -> Vec<String> {
@@ -431,6 +441,60 @@ impl DiffViewer {
         });
     }
 
+    pub(super) fn create_managed_worktree_from_input(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let worktree_name = self.worktree_name_input_state.read(cx).value().trim().to_string();
+        if worktree_name.is_empty() {
+            self.set_git_warning_message(
+                "Worktree name is required.".to_string(),
+                Some(window),
+                cx,
+            );
+            return;
+        }
+
+        let branch_name = self
+            .worktree_branch_input_state
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        if branch_name.is_empty() {
+            self.set_git_warning_message(
+                "Branch name is required for a new worktree.".to_string(),
+                Some(window),
+                cx,
+            );
+            return;
+        }
+
+        let request = hunk_git::worktree::CreateWorktreeRequest {
+            worktree_name: worktree_name.clone(),
+            branch_name: branch_name.clone(),
+        };
+        let started = self.run_git_action("Create worktree", cx, move |repo_root| {
+            let created =
+                hunk_git::worktree::create_managed_worktree(repo_root.as_path(), &request)?;
+            Ok(format!(
+                "Created worktree {} on branch {}",
+                created.display_name, created.branch_name
+            ))
+        });
+        if !started {
+            return;
+        }
+
+        self.worktree_name_input_state.update(cx, |state, cx| {
+            state.set_value("", window, cx);
+        });
+        self.worktree_branch_input_state.update(cx, |state, cx| {
+            state.set_value("", window, cx);
+        });
+    }
+
     pub(super) fn publish_current_branch(&mut self, cx: &mut Context<Self>) {
         if !self.can_run_active_branch_actions() {
             let message = "Activate a branch before publishing.".to_string();
@@ -453,7 +517,7 @@ impl DiffViewer {
             cx.notify();
             return;
         }
-        if self.git_action_loading {
+        if self.git_controls_busy() {
             return;
         }
 
@@ -493,7 +557,7 @@ impl DiffViewer {
             cx.notify();
             return;
         }
-        if self.git_action_loading {
+        if self.git_controls_busy() {
             return;
         }
 
@@ -526,7 +590,7 @@ impl DiffViewer {
             cx.notify();
             return;
         }
-        if self.git_action_loading {
+        if self.git_controls_busy() {
             return;
         }
 
@@ -574,7 +638,7 @@ impl DiffViewer {
         action: ReviewUrlAction,
         cx: &mut Context<Self>,
     ) {
-        if self.git_action_loading {
+        if self.git_controls_busy() {
             return;
         }
 
@@ -713,7 +777,7 @@ impl DiffViewer {
     }
 
     pub(super) fn commit_from_input(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        if self.git_action_loading {
+        if self.git_controls_busy() {
             return;
         }
 

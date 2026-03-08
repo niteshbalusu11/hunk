@@ -279,7 +279,6 @@ impl AiState {
                     return ApplyOutcome::Stale;
                 }
 
-                thread.cwd = cwd;
                 thread.title = title;
                 if let Some(created_at) = created_at {
                     thread.created_at = created_at;

@@ -125,9 +125,9 @@ impl DiffViewer {
             let selected_in_changed_files = self
                 .selected_path
                 .as_ref()
-                .is_some_and(|selected| self.files.iter().any(|file| &file.path == selected));
+                .is_some_and(|selected| self.active_diff_contains_path(selected));
             if !selected_in_changed_files {
-                self.selected_path = self.files.first().map(|file| file.path.clone());
+                self.selected_path = self.active_diff_first_path();
                 self.selected_status = self
                     .selected_path
                     .as_deref()
@@ -691,7 +691,7 @@ impl DiffViewer {
     }
 
     fn rebuild_repo_tree_for_changed_files(&mut self) {
-        self.repo_tree.nodes = build_changed_files_tree(&self.files);
+        self.repo_tree.nodes = build_changed_files_tree(self.active_diff_files());
         self.repo_tree.file_count = count_repo_tree_kind(&self.repo_tree.nodes, RepoTreeNodeKind::File);
         self.repo_tree.folder_count =
             count_repo_tree_kind(&self.repo_tree.nodes, RepoTreeNodeKind::Directory);

@@ -38,12 +38,13 @@ use hunk_domain::markdown_preview::MarkdownPreviewBlock;
 use hunk_domain::state::{
     AiCollaborationModeSelection, AiServiceTierSelection, AppState, AppStateStore,
     CachedChangedFileState, CachedLocalBranchState, CachedRecentCommitState,
-    CachedRecentCommitsState, CachedWorkflowState,
+    CachedRecentCommitsState, CachedWorkflowState, ReviewCompareSelectionState,
 };
 use hunk_git::git::{ChangedFile, FileStatus, LineStats, LocalBranch, RepoSnapshotFingerprint};
 use hunk_git::history::{
     DEFAULT_RECENT_AUTHORED_COMMIT_LIMIT, RecentCommitSummary, RecentCommitsFingerprint,
 };
+use hunk_git::worktree::WorkspaceTargetSummary;
 
 use ai_runtime::AiApprovalDecision;
 use ai_runtime::AiApprovalKind;
@@ -70,6 +71,14 @@ use refresh_policy::{
     should_refresh_line_stats_after_snapshot, should_reload_diff_after_snapshot,
     should_reload_repo_tree_after_snapshot, should_run_cold_start_reconcile,
     should_scroll_selected_after_reload,
+};
+use review_compare_picker::{
+    ReviewComparePickerDelegate, ReviewCompareSourceOption, build_review_compare_picker_delegate,
+    review_compare_picker_selected_index,
+};
+use workspace_target_picker::{
+    WorkspaceTargetPickerDelegate, build_workspace_target_picker_delegate,
+    workspace_target_picker_selected_index,
 };
 
 const FPS_SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
@@ -104,6 +113,8 @@ mod ai_paths;
 mod branch_activation;
 mod branch_picker;
 mod refresh_policy;
+mod review_compare_picker;
+mod workspace_target_picker;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RepoTreePromptAction {
@@ -433,6 +444,7 @@ actions!(
         SwitchToGitView,
         SwitchToAiView,
         AiNewThread,
+        AiNewWorktreeThread,
         AiInterruptSelectedTurn,
         OpenProject,
         SaveCurrentFile,
@@ -646,6 +658,16 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
     );
     bindings.push(KeyBinding::new("cmd-n", AiNewThread, Some("DiffViewer")));
     bindings.push(KeyBinding::new("ctrl-n", AiNewThread, Some("DiffViewer")));
+    bindings.push(KeyBinding::new(
+        "cmd-shift-n",
+        AiNewWorktreeThread,
+        Some("DiffViewer"),
+    ));
+    bindings.push(KeyBinding::new(
+        "ctrl-shift-n",
+        AiNewWorktreeThread,
+        Some("DiffViewer"),
+    ));
     bindings.extend(
         shortcuts
             .open_project
@@ -1060,6 +1082,11 @@ struct DiffViewer {
     comment_status_message: Option<String>,
     project_path: Option<PathBuf>,
     repo_root: Option<PathBuf>,
+    workspace_targets: Vec<WorkspaceTargetSummary>,
+    active_workspace_target_id: Option<String>,
+    review_compare_sources: Vec<ReviewCompareSourceOption>,
+    review_left_source_id: Option<String>,
+    review_right_source_id: Option<String>,
     branch_name: String,
     branch_has_upstream: bool,
     branch_ahead_count: usize,
@@ -1119,11 +1146,20 @@ struct DiffViewer {
     ai_worker_thread: Option<JoinHandle<()>>,
     ai_command_tx: Option<mpsc::Sender<AiWorkerCommand>>,
     ai_worker_workspace_key: Option<String>,
+    ai_draft_workspace_target_id: Option<String>,
+    ai_workspace_target_picker_state: Entity<SelectState<WorkspaceTargetPickerDelegate>>,
     ai_composer_input_state: Entity<InputState>,
     ai_composer_drafts: BTreeMap<AiComposerDraftKey, AiComposerDraft>,
     ai_composer_status_by_draft: BTreeMap<AiComposerDraftKey, String>,
     files: Vec<ChangedFile>,
     file_status_by_path: BTreeMap<String, FileStatus>,
+    workspace_target_picker_state: Entity<SelectState<WorkspaceTargetPickerDelegate>>,
+    worktree_name_input_state: Entity<InputState>,
+    worktree_name_input_has_text: bool,
+    worktree_branch_input_state: Entity<InputState>,
+    worktree_branch_input_has_text: bool,
+    review_left_picker_state: Entity<SelectState<ReviewComparePickerDelegate>>,
+    review_right_picker_state: Entity<SelectState<ReviewComparePickerDelegate>>,
     branch_picker_state: Entity<SelectState<BranchPickerDelegate>>,
     branch_input_state: Entity<InputState>,
     branch_input_has_text: bool,
@@ -1136,6 +1172,7 @@ struct DiffViewer {
     git_action_task: Task<()>,
     git_action_loading: bool,
     git_action_label: Option<String>,
+    workspace_target_switch_loading: bool,
     git_status_message: Option<String>,
     collapsed_files: BTreeSet<String>,
     selected_path: Option<String>,
@@ -1152,6 +1189,12 @@ struct DiffViewer {
     diff_show_eol_markers: bool,
     diff_left_line_number_width: f32,
     diff_right_line_number_width: f32,
+    review_files: Vec<ChangedFile>,
+    review_file_status_by_path: BTreeMap<String, FileStatus>,
+    review_file_line_stats: BTreeMap<String, LineStats>,
+    review_overall_line_stats: LineStats,
+    review_compare_loading: bool,
+    review_compare_error: Option<String>,
     overall_line_stats: LineStats,
     refresh_epoch: usize,
     auto_refresh_unmodified_streak: u32,

@@ -15,7 +15,9 @@ impl DiffViewer {
         }
         self.detach_ai_worker_thread_join("switching AI workspace");
         self.ai_worker_workspace_key = None;
-        self.reset_ai_runtime_workspace_state();
+        self.reset_ai_runtime_workspace_state(
+            self.ai_new_thread_draft_active || self.ai_pending_new_thread_selection,
+        );
 
         self.ai_sync_workspace_preferences(cx);
         self.restore_ai_visible_composer_from_current_draft(cx);
@@ -24,20 +26,19 @@ impl DiffViewer {
         }
     }
 
-    fn reset_ai_runtime_workspace_state(&mut self) {
+    fn reset_ai_runtime_workspace_state(&mut self, preserve_new_thread_draft: bool) {
         self.ai_connection_state = AiConnectionState::Disconnected;
         self.ai_bootstrap_loading = false;
         self.ai_error_message = None;
         self.ai_status_message = None;
         self.ai_state_snapshot = hunk_codex::state::AiState::default();
         self.ai_selected_thread_id = None;
-        self.ai_new_thread_draft_active = false;
+        self.ai_new_thread_draft_active = preserve_new_thread_draft;
         self.ai_pending_new_thread_selection = false;
         self.ai_thread_title_refresh_state_by_thread.clear();
         self.ai_pending_approvals.clear();
         self.ai_pending_user_inputs.clear();
         self.ai_pending_user_input_answers.clear();
-        self.ai_composer_status_by_draft.clear();
         self.ai_timeline_visible_turn_limit_by_thread.clear();
         self.ai_timeline_turn_ids_by_thread.clear();
         self.ai_timeline_row_ids_by_thread.clear();
@@ -50,6 +51,7 @@ impl DiffViewer {
         self.ai_text_selection = None;
         self.ai_scroll_timeline_to_bottom = false;
         self.ai_timeline_follow_output = true;
+        self.prune_ai_composer_statuses();
         reset_ai_timeline_list_measurements(self, 0);
     }
 }

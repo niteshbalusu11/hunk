@@ -125,6 +125,15 @@ impl DiffViewer {
     }
 
     fn refresh_comments_cache_from_store(&mut self) {
+        if !self.review_comments_enabled() {
+            self.comments_cache.clear();
+            self.comment_miss_streaks.clear();
+            self.reset_comment_row_match_cache();
+            self.clear_comment_ui_state();
+            self.comment_status_message = None;
+            return;
+        }
+
         let Some(store) = self.database_store.clone() else {
             self.comments_cache.clear();
             self.reset_comment_row_match_cache();
@@ -221,6 +230,12 @@ impl DiffViewer {
     }
 
     pub(super) fn toggle_comments_preview(&mut self, cx: &mut Context<Self>) {
+        if !self.review_comments_enabled() {
+            self.comment_status_message =
+                Some("Comments are only available for the default base-vs-active comparison.".to_string());
+            cx.notify();
+            return;
+        }
         if !self.comments_preview_open {
             self.auto_show_non_open_if_open_empty();
         }
@@ -237,6 +252,9 @@ impl DiffViewer {
     }
 
     pub(super) fn row_supports_comments(&self, row_ix: usize) -> bool {
+        if !self.review_comments_enabled() {
+            return false;
+        }
         let Some(row) = self.diff_rows.get(row_ix) else {
             return false;
         };
@@ -306,6 +324,13 @@ impl DiffViewer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.review_comments_enabled() {
+            self.comment_status_message =
+                Some("Comments are disabled for custom compare pairs.".to_string());
+            self.active_comment_editor_row = None;
+            cx.notify();
+            return;
+        }
         let Some(store) = self.database_store.clone() else {
             self.comment_status_message =
                 Some("Comments database is unavailable on this machine.".to_string());

@@ -28,9 +28,7 @@ impl DiffViewer {
         let threads = self.ai_visible_threads();
         let show_global_loading_overlay = self.ai_bootstrap_loading;
         let threads_loading = show_global_loading_overlay && threads.is_empty();
-        let active_branch = self
-            .checked_out_branch_name()
-            .map_or_else(|| "detached".to_string(), ToOwned::to_owned);
+        let active_branch = self.ai_active_workspace_branch_name();
         let pending_approvals = self.ai_visible_pending_approvals();
         let pending_approvals_for_timeline = pending_approvals.clone();
         let pending_approval_count = pending_approvals.len();
@@ -83,6 +81,12 @@ impl DiffViewer {
                 self.ai_connection_state,
                 self.ai_bootstrap_loading,
             );
+        let ai_target_editable = self.current_ai_thread_id().is_none();
+        let ai_target_label = if ai_target_editable {
+            self.ai_draft_workspace_target_label()
+        } else {
+            self.ai_active_workspace_label()
+        };
         let composer_interrupt_available = selected_thread_id
             .as_deref()
             .and_then(|thread_id| self.current_ai_in_progress_turn_id(thread_id))
@@ -215,6 +219,71 @@ impl DiffViewer {
                                 },
                             )
                             .child(
+                                h_flex()
+                                    .w_full()
+                                    .items_center()
+                                    .justify_between()
+                                    .gap_2()
+                                    .flex_wrap()
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .font_semibold()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(if ai_target_editable {
+                                                "Draft Target"
+                                            } else {
+                                                "Thread Target"
+                                            }),
+                                    )
+                                    .child(
+                                        div()
+                                            .min_w(px(280.0))
+                                            .flex_1()
+                                            .child(if ai_target_editable {
+                                                Select::new(&self.ai_workspace_target_picker_state)
+                                                    .with_size(gpui_component::Size::Medium)
+                                                    .placeholder(ai_target_label)
+                                                    .search_placeholder("Find a worktree or project")
+                                                    .rounded(px(8.0))
+                                                    .w_full()
+                                                    .disabled(self.workspace_targets.is_empty())
+                                                    .empty(
+                                                        h_flex()
+                                                            .h(px(72.0))
+                                                            .justify_center()
+                                                            .text_sm()
+                                                            .text_color(cx.theme().muted_foreground)
+                                                            .child("No workspace targets available."),
+                                                    )
+                                                    .into_any_element()
+                                            } else {
+                                                div()
+                                                    .w_full()
+                                                    .min_h(px(36.0))
+                                                    .px_2p5()
+                                                    .py_1p5()
+                                                    .rounded(px(8.0))
+                                                    .border_1()
+                                                    .border_color(cx.theme().border)
+                                                    .bg(hunk_blend(
+                                                        cx.theme().background,
+                                                        cx.theme().muted,
+                                                        is_dark,
+                                                        0.18,
+                                                        0.12,
+                                                    ))
+                                                    .child(
+                                                        div()
+                                                            .text_sm()
+                                                            .text_color(cx.theme().foreground)
+                                                            .child(ai_target_label),
+                                                    )
+                                                    .into_any_element()
+                                            }),
+                                    ),
+                            )
+                            .child(
                                 Input::new(&self.ai_composer_input_state)
                                     .appearance(false)
                                     .bordered(false)
@@ -343,7 +412,13 @@ impl DiffViewer {
                     .child(
                         v_flex()
                             .gap_0p5()
-                            .child(div().text_sm().font_semibold().child("Codex Agent Workspace")),
+                            .child(div().text_sm().font_semibold().child("Codex Agent Workspace"))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(format!("Target: {}", self.ai_active_workspace_label())),
+                            ),
                     )
                     .child(
                         v_flex()

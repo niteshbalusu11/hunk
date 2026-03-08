@@ -105,6 +105,12 @@ impl DiffViewer {
             return false;
         };
 
+        if hunk_git::worktree::repo_relative_path_is_within_managed_worktrees(
+            relative_path.to_string_lossy().as_ref(),
+        ) {
+            return true;
+        }
+
         relative_path.components().any(|component| {
             let component = component.as_os_str();
             component
@@ -420,6 +426,26 @@ mod tests {
             repo_root.join(".hunk-tmp.1.2").as_path(),
             repo_root.as_path()
         ));
+    }
+
+    #[test]
+    fn ignores_managed_worktree_paths_for_repo_watch() {
+        let repo_root = fixture_repo_root();
+        assert!(DiffViewer::should_ignore_repo_watch_path(
+            repo_root
+                .join(".hunkdiff/worktrees/feature-one/src/lib.rs")
+                .as_path(),
+            repo_root.as_path()
+        ));
+        assert_eq!(
+            DiffViewer::repo_watch_dirty_path(
+                repo_root
+                    .join(".hunkdiff/worktrees/feature-one/src/lib.rs")
+                    .as_path(),
+                repo_root.as_path()
+            ),
+            None
+        );
     }
 
     #[test]

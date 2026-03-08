@@ -67,7 +67,7 @@ impl DiffViewer {
         self.ai_pending_user_input_answers.clear();
         self.ai_in_progress_turn_started_at.clear();
         self.ai_composer_activity_elapsed_second = None;
-        self.ai_pending_new_thread_selection = false;
+        self.restore_ai_new_thread_draft_after_failure();
         self.ai_account = None;
         self.ai_requires_openai_auth = false;
         self.ai_rate_limits = None;
@@ -106,6 +106,7 @@ impl DiffViewer {
                 self.ai_status_message = Some(message);
             }
             AiWorkerEvent::Error(message) => {
+                self.restore_ai_new_thread_draft_after_failure();
                 self.ai_error_message = Some(message.clone());
                 self.ai_status_message = Some(message);
             }
@@ -122,7 +123,7 @@ impl DiffViewer {
                 self.ai_pending_user_input_answers.clear();
                 self.ai_in_progress_turn_started_at.clear();
                 self.ai_composer_activity_elapsed_second = None;
-                self.ai_pending_new_thread_selection = false;
+                self.restore_ai_new_thread_draft_after_failure();
                 self.ai_account = None;
                 self.ai_requires_openai_auth = false;
                 self.ai_rate_limits = None;
@@ -360,7 +361,7 @@ impl DiffViewer {
     }
 
     fn workspace_ai_composer_draft_key(&self) -> Option<AiComposerDraftKey> {
-        let workspace_key = self.ai_workspace_key();
+        let workspace_key = self.ai_workspace_key_for_draft();
         ai_composer_draft_key(None, workspace_key.as_deref())
     }
 
@@ -496,6 +497,13 @@ impl DiffViewer {
             AiComposerDraftKey::Thread(thread_id) => thread_ids.contains(thread_id),
             AiComposerDraftKey::Workspace(_) => true,
         });
+    }
+
+    fn restore_ai_new_thread_draft_after_failure(&mut self) {
+        if self.ai_pending_new_thread_selection {
+            self.ai_new_thread_draft_active = true;
+        }
+        self.ai_pending_new_thread_selection = false;
     }
 
     fn current_ai_composer_activity_elapsed_second(&self) -> Option<u64> {

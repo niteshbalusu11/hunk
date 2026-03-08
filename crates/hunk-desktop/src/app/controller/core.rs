@@ -124,6 +124,8 @@ impl DiffViewer {
         let Some(root) = cache.root.clone() else {
             return;
         };
+        let cached_project_root =
+            hunk_git::worktree::primary_repo_root(root.as_path()).unwrap_or_else(|_| root.clone());
         let Some(expected_root) = self
             .project_path
             .clone()
@@ -131,14 +133,15 @@ impl DiffViewer {
         else {
             return;
         };
-        if root != expected_root {
+        if cached_project_root != expected_root {
             return;
         }
 
         let previous_ai_workspace_key = self.ai_workspace_key();
         self.sync_ai_visible_composer_prompt_to_draft(cx);
-        self.project_path = Some(root.clone());
+        self.project_path = Some(cached_project_root);
         self.repo_root = Some(root.clone());
+        self.active_workspace_target_id = self.persisted_workspace_target_id();
         self.ai_handle_workspace_change(previous_ai_workspace_key, cx);
         self.branch_name = if cache.branch_name.is_empty() {
             "unknown".to_string()
@@ -183,6 +186,7 @@ impl DiffViewer {
             .as_deref()
             .and_then(|selected| self.status_for_path(selected));
         self.sync_branch_picker_state(cx);
+        self.refresh_workspace_targets_from_git_state(cx);
         self.repo_discovery_failed = false;
         self.error_message = None;
         debug!(
@@ -301,6 +305,28 @@ impl DiffViewer {
         let branch_picker_state = cx.new(|cx| {
             SelectState::new(BranchPickerDelegate::default(), None, window, cx).searchable(true)
         });
+        let workspace_target_picker_state = cx.new(|cx| {
+            SelectState::new(WorkspaceTargetPickerDelegate::default(), None, window, cx)
+                .searchable(true)
+        });
+        let ai_workspace_target_picker_state = cx.new(|cx| {
+            SelectState::new(WorkspaceTargetPickerDelegate::default(), None, window, cx)
+                .searchable(true)
+        });
+        let review_left_picker_state = cx.new(|cx| {
+            SelectState::new(ReviewComparePickerDelegate::default(), None, window, cx)
+                .searchable(true)
+        });
+        let review_right_picker_state = cx.new(|cx| {
+            SelectState::new(ReviewComparePickerDelegate::default(), None, window, cx)
+                .searchable(true)
+        });
+        let worktree_name_input_state = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("New worktree name")
+        });
+        let worktree_branch_input_state = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("Branch for new worktree")
+        });
         let branch_input_state = cx.new(|cx| {
             InputState::new(window, cx).placeholder("Create or rename branch")
         });
@@ -346,6 +372,11 @@ impl DiffViewer {
             comment_status_message: None,
             project_path: last_project_path,
             repo_root: None,
+            workspace_targets: Vec::new(),
+            active_workspace_target_id: None,
+            review_compare_sources: Vec::new(),
+            review_left_source_id: None,
+            review_right_source_id: None,
             branch_name: "unknown".to_string(),
             branch_has_upstream: false,
             branch_ahead_count: 0,
@@ -405,11 +436,20 @@ impl DiffViewer {
             ai_worker_thread: None,
             ai_command_tx: None,
             ai_worker_workspace_key: None,
+            ai_draft_workspace_target_id: None,
+            ai_workspace_target_picker_state,
             ai_composer_input_state,
             ai_composer_drafts: BTreeMap::new(),
             ai_composer_status_by_draft: BTreeMap::new(),
             files: Vec::new(),
             file_status_by_path: BTreeMap::new(),
+            workspace_target_picker_state,
+            worktree_name_input_state,
+            worktree_name_input_has_text: false,
+            worktree_branch_input_state,
+            worktree_branch_input_has_text: false,
+            review_left_picker_state,
+            review_right_picker_state,
             branch_picker_state,
             branch_input_state,
             branch_input_has_text: false,
@@ -422,6 +462,7 @@ impl DiffViewer {
             git_action_task: Task::ready(()),
             git_action_loading: false,
             git_action_label: None,
+            workspace_target_switch_loading: false,
             git_status_message: None,
             collapsed_files: BTreeSet::new(),
             selected_path: None,
@@ -438,6 +479,12 @@ impl DiffViewer {
             diff_show_eol_markers,
             diff_left_line_number_width: line_number_column_width(DIFF_LINE_NUMBER_MIN_DIGITS),
             diff_right_line_number_width: line_number_column_width(DIFF_LINE_NUMBER_MIN_DIGITS),
+            review_files: Vec::new(),
+            review_file_status_by_path: BTreeMap::new(),
+            review_file_line_stats: BTreeMap::new(),
+            review_overall_line_stats: LineStats::default(),
+            review_compare_loading: false,
+            review_compare_error: None,
             overall_line_stats: LineStats::default(),
             refresh_epoch: 0,
             auto_refresh_unmodified_streak: 0,
@@ -527,6 +574,26 @@ impl DiffViewer {
         })
         .detach();
 
+        let worktree_name_input_state = view.worktree_name_input_state.clone();
+        cx.subscribe(&worktree_name_input_state, |this, _, event, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.worktree_name_input_has_text =
+                    !this.worktree_name_input_state.read(cx).value().trim().is_empty();
+                cx.notify();
+            }
+        })
+        .detach();
+
+        let worktree_branch_input_state = view.worktree_branch_input_state.clone();
+        cx.subscribe(&worktree_branch_input_state, |this, _, event, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.worktree_branch_input_has_text =
+                    !this.worktree_branch_input_state.read(cx).value().trim().is_empty();
+                cx.notify();
+            }
+        })
+        .detach();
+
         let ai_composer_state = view.ai_composer_input_state.clone();
         cx.subscribe(&ai_composer_state, |this, _, event, cx| {
             if matches!(event, InputEvent::Change) {
@@ -554,7 +621,65 @@ impl DiffViewer {
         )
         .detach();
 
+        let workspace_target_picker_state = view.workspace_target_picker_state.clone();
+        cx.subscribe(
+            &workspace_target_picker_state,
+            |this, _, event: &SelectEvent<WorkspaceTargetPickerDelegate>, cx| {
+                let SelectEvent::Confirm(target_id) = event;
+                let Some(target_id) = target_id.clone() else {
+                    return;
+                };
+                if this.active_workspace_target_id.as_deref() == Some(target_id.as_str()) {
+                    return;
+                }
+                this.activate_workspace_target(target_id, cx);
+            },
+        )
+        .detach();
+
+        let review_left_picker_state = view.review_left_picker_state.clone();
+        cx.subscribe(
+            &review_left_picker_state,
+            |this, _, event: &SelectEvent<ReviewComparePickerDelegate>, cx| {
+                let SelectEvent::Confirm(source_id) = event;
+                let Some(source_id) = source_id.clone() else {
+                    return;
+                };
+                this.update_review_compare_selection(Some(source_id), None, cx);
+            },
+        )
+        .detach();
+
+        let review_right_picker_state = view.review_right_picker_state.clone();
+        cx.subscribe(
+            &review_right_picker_state,
+            |this, _, event: &SelectEvent<ReviewComparePickerDelegate>, cx| {
+                let SelectEvent::Confirm(source_id) = event;
+                let Some(source_id) = source_id.clone() else {
+                    return;
+                };
+                this.update_review_compare_selection(None, Some(source_id), cx);
+            },
+        )
+        .detach();
+
+        let ai_workspace_target_picker_state = view.ai_workspace_target_picker_state.clone();
+        cx.subscribe(
+            &ai_workspace_target_picker_state,
+            |this, _, event: &SelectEvent<WorkspaceTargetPickerDelegate>, cx| {
+                let SelectEvent::Confirm(target_id) = event;
+                let Some(target_id) = target_id.clone() else {
+                    return;
+                };
+                this.update_ai_draft_workspace_target(target_id, cx);
+            },
+        )
+        .detach();
+
         view.update_branch_picker_state(window, cx);
+        view.update_workspace_target_picker_state(window, cx);
+        view.update_ai_workspace_target_picker_state(window, cx);
+        view.update_review_compare_picker_states(window, cx);
         view.apply_theme_preference(window, cx);
         cx.observe_window_appearance(window, |this, window, cx| {
             this.sync_theme_with_system_if_needed(window, cx);
@@ -563,6 +688,7 @@ impl DiffViewer {
 
         view.hydrate_workflow_cache_if_available(cx);
         view.hydrate_recent_commits_cache_if_available(cx);
+        view.restore_active_workspace_target_root_from_state(cx);
         view.request_snapshot_refresh(cx);
         view.request_recent_commits_refresh(false, cx);
         view.start_auto_refresh(cx);
@@ -604,6 +730,237 @@ impl DiffViewer {
         }
     }
 
+    fn update_workspace_target_picker_state(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let delegate = build_workspace_target_picker_delegate(&self.workspace_targets);
+        let selected_index = workspace_target_picker_selected_index(
+            &self.workspace_targets,
+            self.active_workspace_target_id.as_deref(),
+        );
+        self.workspace_target_picker_state.update(cx, |state, cx| {
+            state.set_items(delegate, window, cx);
+            state.set_selected_index(selected_index, window, cx);
+        });
+        cx.notify();
+    }
+
+    fn sync_workspace_target_picker_state(&mut self, cx: &mut Context<Self>) {
+        let Some(window_handle) = cx.windows().into_iter().next() else {
+            return;
+        };
+
+        let workspace_target_picker_state = self.workspace_target_picker_state.clone();
+        let delegate = build_workspace_target_picker_delegate(&self.workspace_targets);
+        let selected_index = workspace_target_picker_selected_index(
+            &self.workspace_targets,
+            self.active_workspace_target_id.as_deref(),
+        );
+
+        if let Err(err) = cx.update_window(window_handle, move |_, window, cx| {
+            workspace_target_picker_state.update(cx, |state, cx| {
+                state.set_items(delegate, window, cx);
+                state.set_selected_index(selected_index, window, cx);
+            });
+        }) {
+            error!("failed to sync workspace target picker state: {err:#}");
+        }
+    }
+
+    fn workspace_catalog_source_root(&self) -> Option<PathBuf> {
+        self.repo_root.clone().or_else(|| self.project_path.clone())
+    }
+
+    fn persisted_workspace_target_id(&self) -> Option<String> {
+        let project_path = self.project_path.as_ref()?;
+        self.state
+            .last_workspace_target_by_repo
+            .get(project_path.to_string_lossy().as_ref())
+            .cloned()
+    }
+
+    fn persist_active_workspace_target_id(&mut self) {
+        let Some(project_path) = self.project_path.as_ref() else {
+            return;
+        };
+
+        let key = project_path.to_string_lossy().to_string();
+        match self.active_workspace_target_id.clone() {
+            Some(active_target_id) => {
+                if self
+                    .state
+                    .last_workspace_target_by_repo
+                    .get(key.as_str())
+                    == Some(&active_target_id)
+                {
+                    return;
+                }
+                self.state
+                    .last_workspace_target_by_repo
+                    .insert(key, active_target_id);
+            }
+            None => {
+                if self
+                    .state
+                    .last_workspace_target_by_repo
+                    .remove(key.as_str())
+                    .is_none()
+                {
+                    return;
+                }
+            }
+        }
+        self.persist_state();
+    }
+
+    fn refresh_workspace_targets_from_git_state(&mut self, cx: &mut Context<Self>) {
+        let Some(source_root) = self.workspace_catalog_source_root() else {
+            self.workspace_targets.clear();
+            self.active_workspace_target_id = None;
+            self.sync_workspace_target_picker_state(cx);
+            self.refresh_review_compare_sources_from_git_state(cx);
+            return;
+        };
+
+        match hunk_git::worktree::list_workspace_targets(source_root.as_path()) {
+            Ok(targets) => {
+                let current_root_target_id = self.repo_root.as_ref().and_then(|repo_root| {
+                    targets
+                        .iter()
+                        .find(|target| target.root == *repo_root)
+                        .map(|target| target.id.clone())
+                });
+                let next_active_target_id = self
+                    .active_workspace_target_id
+                    .clone()
+                    .filter(|active_target_id| {
+                        current_root_target_id.as_deref() == Some(active_target_id.as_str())
+                    })
+                    .or(current_root_target_id)
+                    .or_else(|| {
+                        self.persisted_workspace_target_id().filter(|persisted_target_id| {
+                            targets
+                                .iter()
+                                .any(|target| target.id == *persisted_target_id)
+                        })
+                    })
+                    .or_else(|| {
+                        targets
+                            .iter()
+                            .find(|target| target.is_active)
+                            .map(|target| target.id.clone())
+                    })
+                    .or_else(|| targets.first().map(|target| target.id.clone()));
+                self.workspace_targets = targets;
+                self.active_workspace_target_id = next_active_target_id;
+                self.persist_active_workspace_target_id();
+                self.sync_workspace_target_picker_state(cx);
+                self.sync_ai_workspace_target_from_catalog(cx);
+                self.refresh_review_compare_sources_from_git_state(cx);
+            }
+            Err(err) => {
+                debug!(
+                    "skipping workspace target refresh for {}: {err:#}",
+                    source_root.display()
+                );
+                self.workspace_targets.clear();
+                self.active_workspace_target_id = None;
+                self.sync_workspace_target_picker_state(cx);
+                self.sync_ai_workspace_target_from_catalog(cx);
+                self.refresh_review_compare_sources_from_git_state(cx);
+            }
+        }
+    }
+
+    fn restore_active_workspace_target_root_from_state(&mut self, cx: &mut Context<Self>) {
+        if self.repo_root.is_some() {
+            self.refresh_workspace_targets_from_git_state(cx);
+            return;
+        }
+        let Some(project_path) = self.project_path.clone() else {
+            return;
+        };
+
+        let Ok(targets) = hunk_git::worktree::list_workspace_targets(project_path.as_path()) else {
+            self.workspace_targets.clear();
+            self.active_workspace_target_id = None;
+            self.sync_workspace_target_picker_state(cx);
+            self.refresh_review_compare_sources_from_git_state(cx);
+            return;
+        };
+
+        let target_id = self
+            .persisted_workspace_target_id()
+            .filter(|persisted_target_id| {
+                targets
+                    .iter()
+                    .any(|target| target.id == *persisted_target_id)
+            })
+            .or_else(|| {
+                targets
+                    .iter()
+                    .find(|target| target.kind == hunk_git::worktree::WorkspaceTargetKind::PrimaryCheckout)
+                    .map(|target| target.id.clone())
+            })
+            .or_else(|| targets.first().map(|target| target.id.clone()));
+        let target_root = target_id.as_deref().and_then(|target_id| {
+            targets
+                .iter()
+                .find(|target| target.id == target_id)
+                .map(|target| target.root.clone())
+        });
+        let mut targets = targets;
+        for workspace_target in &mut targets {
+            workspace_target.is_active =
+                target_id.as_deref() == Some(workspace_target.id.as_str());
+        }
+
+        self.workspace_targets = targets;
+        self.active_workspace_target_id = target_id;
+        self.repo_root = target_root;
+        self.persist_active_workspace_target_id();
+        self.sync_workspace_target_picker_state(cx);
+        self.sync_ai_workspace_target_from_catalog(cx);
+        self.refresh_review_compare_sources_from_git_state(cx);
+    }
+
+    fn activate_workspace_target(&mut self, target_id: String, cx: &mut Context<Self>) {
+        let Some(target) = self
+            .workspace_targets
+            .iter()
+            .find(|target| target.id == target_id)
+            .cloned()
+        else {
+            return;
+        };
+        if self.repo_root.as_ref() == Some(&target.root) {
+            return;
+        }
+
+        let previous_ai_workspace_key = self.ai_workspace_key();
+        let follow_active_target_for_ai =
+            !self.ai_new_thread_draft_active && self.ai_selected_thread_id.is_none();
+        self.sync_ai_visible_composer_prompt_to_draft(cx);
+        self.workspace_target_switch_loading = true;
+        self.repo_root = Some(target.root);
+        self.active_workspace_target_id = Some(target.id);
+        for workspace_target in &mut self.workspace_targets {
+            workspace_target.is_active =
+                self.active_workspace_target_id.as_deref() == Some(workspace_target.id.as_str());
+        }
+        self.persist_active_workspace_target_id();
+        self.sync_workspace_target_picker_state(cx);
+        if follow_active_target_for_ai {
+            self.ai_draft_workspace_target_id = self.active_workspace_target_id.clone();
+            self.sync_ai_workspace_target_picker_state(cx);
+        }
+        self.ai_handle_workspace_change(previous_ai_workspace_key, cx);
+        self.git_status_message = Some("Switching workspace target...".to_string());
+        self.reset_recent_commits_state();
+        self.start_repo_watch(cx);
+        self.request_snapshot_refresh_internal(SnapshotRefreshRequest::user(true), cx);
+        self.request_recent_commits_refresh(true, cx);
+        cx.notify();
+    }
+
     pub(super) fn open_project_action(
         &mut self,
         _: &OpenProject,
@@ -614,7 +971,11 @@ impl DiffViewer {
     }
 
     pub(super) fn status_for_path(&self, path: &str) -> Option<FileStatus> {
-        self.file_status_by_path.get(path).copied()
+        if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            self.review_file_status_by_path.get(path).copied()
+        } else {
+            self.file_status_by_path.get(path).copied()
+        }
     }
 
     pub(super) fn request_snapshot_refresh(&mut self, cx: &mut Context<Self>) {
@@ -653,6 +1014,7 @@ impl DiffViewer {
     fn finish_snapshot_refresh_loading(&mut self) {
         self.snapshot_loading = false;
         self.snapshot_active_request = None;
+        self.workspace_target_switch_loading = false;
     }
 
     fn enqueue_line_stats_refresh(&mut self, refresh: PendingLineStatsRefresh) {
@@ -953,8 +1315,9 @@ impl DiffViewer {
         }
 
         let source_dir_result = self
-            .project_path
+            .repo_root
             .clone()
+            .or_else(|| self.project_path.clone())
             .map(Ok)
             .unwrap_or_else(|| std::env::current_dir().context("failed to resolve current directory"));
         let previous_fingerprint = if request.force {
@@ -968,9 +1331,9 @@ impl DiffViewer {
         self.snapshot_active_request = Some(request);
         self.workflow_loading = true;
         let refresh_root = self
-            .project_path
+            .repo_root
             .clone()
-            .or_else(|| self.repo_root.clone())
+            .or_else(|| self.project_path.clone())
             .unwrap_or_else(|| PathBuf::from("."));
         debug!(
             "git workspace refresh start: epoch={} force={} priority={} behavior={} cold_start={} root={}",
@@ -1349,7 +1712,10 @@ impl DiffViewer {
                     this.sync_ai_visible_composer_prompt_to_draft(cx);
                     this.project_path = Some(selected_path.clone());
                     this.repo_root = None;
+                    this.workspace_targets.clear();
+                    this.active_workspace_target_id = None;
                     this.set_last_project_path(Some(selected_path));
+                    this.restore_active_workspace_target_root_from_state(cx);
                     this.ai_handle_workspace_change(previous_ai_workspace_key, cx);
                     this.git_status_message = None;
                     this.reset_recent_commits_state();
@@ -1390,12 +1756,23 @@ impl DiffViewer {
         let previous_selected_status = self.selected_status;
         let previous_files = self.files.clone();
         let previous_working_copy_commit_id = self.working_copy_commit_id.clone();
+        let primary_root =
+            hunk_git::worktree::primary_repo_root(root.as_path()).unwrap_or_else(|_| root.clone());
 
         let previous_ai_workspace_key = self.ai_workspace_key();
         self.sync_ai_visible_composer_prompt_to_draft(cx);
-        self.project_path = Some(root.clone());
-        self.set_last_project_path(Some(root.clone()));
+        self.project_path = Some(primary_root);
+        self.set_last_project_path(self.project_path.clone());
         self.repo_root = Some(root);
+        self.refresh_workspace_targets_from_git_state(cx);
+        if self.active_workspace_target_id.is_none() {
+            self.active_workspace_target_id = self
+                .workspace_targets
+                .iter()
+                .find(|target| target.is_active)
+                .map(|target| target.id.clone());
+        }
+        self.persist_active_workspace_target_id();
         self.ai_handle_workspace_change(previous_ai_workspace_key, cx);
         self.working_copy_commit_id = Some(working_copy_commit_id);
         self.branch_name = branch_name;
@@ -1404,6 +1781,7 @@ impl DiffViewer {
         self.branch_behind_count = branch_behind_count;
         self.branches = branches;
         self.sync_branch_picker_state(cx);
+        self.refresh_review_compare_sources_from_git_state(cx);
         self.files = files;
         self.file_status_by_path = self
             .files
@@ -1519,6 +1897,16 @@ impl DiffViewer {
         let previous_ai_workspace_key = self.ai_workspace_key();
         self.sync_ai_visible_composer_prompt_to_draft(cx);
         self.repo_root = None;
+        self.workspace_targets.clear();
+        self.active_workspace_target_id = None;
+        self.ai_draft_workspace_target_id = None;
+        self.persist_active_workspace_target_id();
+        self.sync_workspace_target_picker_state(cx);
+        self.sync_ai_workspace_target_picker_state(cx);
+        self.review_compare_sources.clear();
+        self.review_left_source_id = None;
+        self.review_right_source_id = None;
+        self.sync_review_compare_picker_states(cx);
         self.ai_handle_workspace_change(previous_ai_workspace_key, cx);
         self.branch_name = "unknown".to_string();
         self.branch_has_upstream = false;
@@ -1529,6 +1917,12 @@ impl DiffViewer {
         self.git_action_label = None;
         self.files.clear();
         self.file_status_by_path.clear();
+        self.review_files.clear();
+        self.review_file_status_by_path.clear();
+        self.review_file_line_stats.clear();
+        self.review_overall_line_stats = LineStats::default();
+        self.review_compare_loading = false;
+        self.review_compare_error = None;
         self.last_commit_subject = None;
         self.staged_commit_files.clear();
         self.selected_path = None;
@@ -1602,6 +1996,11 @@ impl DiffViewer {
     }
 
     fn request_selected_diff_reload(&mut self, cx: &mut Context<Self>) {
+        if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            self.request_review_compare_refresh(cx);
+            return;
+        }
+
         let Some(repo_root) = self.repo_root.clone() else {
             self.cancel_patch_reload();
             self.comments_cache.clear();

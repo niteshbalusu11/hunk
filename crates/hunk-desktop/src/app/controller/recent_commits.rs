@@ -6,6 +6,8 @@ impl DiffViewer {
         let Some(root) = cache.root.clone() else {
             return;
         };
+        let cached_project_root =
+            hunk_git::worktree::primary_repo_root(root.as_path()).unwrap_or_else(|_| root.clone());
         let Some(expected_root) = self
             .project_path
             .clone()
@@ -13,11 +15,11 @@ impl DiffViewer {
         else {
             return;
         };
-        if root != expected_root {
+        if cached_project_root != expected_root {
             return;
         }
         let Ok(current_fingerprint) = load_recent_authored_commits_fingerprint(
-            expected_root.as_path(),
+            root.as_path(),
             DEFAULT_RECENT_AUTHORED_COMMIT_LIMIT,
         ) else {
             return;
@@ -194,8 +196,9 @@ impl DiffViewer {
         }
 
         let source_dir_result = self
-            .project_path
+            .repo_root
             .clone()
+            .or_else(|| self.project_path.clone())
             .map(Ok)
             .unwrap_or_else(|| std::env::current_dir().context("failed to resolve current directory"));
         let previous_fingerprint = if request.force {
@@ -208,9 +211,9 @@ impl DiffViewer {
         self.recent_commits_active_request = Some(request);
         let show_loading_state = self.recent_commits.is_empty();
         let refresh_root = self
-            .project_path
+            .repo_root
             .clone()
-            .or_else(|| self.repo_root.clone())
+            .or_else(|| self.project_path.clone())
             .unwrap_or_else(|| PathBuf::from("."));
         debug!(
             "recent commits refresh start: epoch={} force={} priority={} root={}",

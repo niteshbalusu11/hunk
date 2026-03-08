@@ -25,7 +25,10 @@ impl DiffViewer {
                 )
                 .into_any_element();
         }
-        if self.repo_root.is_some() && self.files.is_empty() {
+        if self.repo_root.is_some()
+            && self.workspace_view_mode != WorkspaceViewMode::Diff
+            && self.files.is_empty()
+        {
             return v_flex()
                 .size_full()
                 .items_center()
@@ -86,6 +89,9 @@ impl DiffViewer {
                 v_flex()
                     .flex_1()
                     .min_h_0()
+                    .when(self.workspace_view_mode == WorkspaceViewMode::Diff, |this| {
+                        this.child(self.render_review_compare_controls(cx))
+                    })
                     .child(
                         h_flex()
                             .w_full()
@@ -248,7 +254,11 @@ impl DiffViewer {
             return div().w_full().h(px(0.)).into_any_element();
         }
 
-        let stats = self.file_line_stats.get(path.as_str()).copied().unwrap_or_default();
+        let stats = self
+            .active_diff_file_line_stats()
+            .get(path.as_str())
+            .copied()
+            .unwrap_or_default();
         self.render_sticky_file_status_banner_row(header_row_ix, path.as_str(), status, stats, cx)
     }
 
@@ -378,7 +388,11 @@ impl DiffViewer {
             && meta.kind == DiffStreamRowKind::FileHeader
             && let (Some(path), Some(status)) = (meta.file_path.as_deref(), meta.file_status)
         {
-            let stats = self.file_line_stats.get(path).copied().unwrap_or_default();
+            let stats = self
+                .active_diff_file_line_stats()
+                .get(path)
+                .copied()
+                .unwrap_or_default();
             return self.render_file_status_banner_row(
                 ix,
                 path,
@@ -839,6 +853,13 @@ impl DiffViewer {
     }
 
     fn diff_column_labels(&self) -> (String, String) {
+        if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            return (
+                self.review_compare_source_label(self.review_left_source_id.as_deref()),
+                self.review_compare_source_label(self.review_right_source_id.as_deref()),
+            );
+        }
+
         let selected = self
             .selected_path
             .clone()
@@ -848,5 +869,132 @@ impl DiffViewer {
             FileStatus::Deleted => (selected, "/dev/null".to_string()),
             _ => ("Old".to_string(), "New".to_string()),
         }
+    }
+
+    fn render_review_compare_controls(&self, cx: &mut Context<Self>) -> AnyElement {
+        let is_dark = cx.theme().mode.is_dark();
+        let left_label = self.review_compare_source_label(self.review_left_source_id.as_deref());
+        let right_label = self.review_compare_source_label(self.review_right_source_id.as_deref());
+        let status_message = if let Some(error) = self.review_compare_error.as_ref() {
+            error.clone()
+        } else if self.review_compare_loading {
+            "Loading comparison...".to_string()
+        } else if !self.review_comments_enabled() {
+            "Custom compare mode is read-only. Comments are disabled.".to_string()
+        } else {
+            self.review_compare_source_detail(self.review_left_source_id.as_deref())
+                .zip(self.review_compare_source_detail(self.review_right_source_id.as_deref()))
+                .map(|(left, right)| format!("{left} -> {right}"))
+                .unwrap_or_else(|| "Pick two sources to compare.".to_string())
+        };
+
+        v_flex()
+            .w_full()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .border_b_1()
+            .border_color(hunk_opacity(cx.theme().border, is_dark, 0.88, 0.72))
+            .bg(hunk_blend(
+                cx.theme().title_bar,
+                cx.theme().muted,
+                is_dark,
+                0.16,
+                0.24,
+            ))
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .flex_wrap()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Compare Sources"),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(if self.review_compare_error.is_some() {
+                                cx.theme().danger
+                            } else if self.review_compare_loading {
+                                cx.theme().warning
+                            } else {
+                                cx.theme().muted_foreground
+                            })
+                            .child(status_message),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .w_full()
+                    .gap_2()
+                    .flex_wrap()
+                    .child(
+                        v_flex()
+                            .min_w(px(240.0))
+                            .flex_1()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_semibold()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("Left"),
+                            )
+                            .child(
+                                Select::new(&self.review_left_picker_state)
+                                    .with_size(gpui_component::Size::Medium)
+                                    .placeholder(left_label)
+                                    .search_placeholder("Find a branch or worktree")
+                                    .rounded(px(8.0))
+                                    .w_full()
+                                    .disabled(self.review_compare_sources.is_empty())
+                                    .empty(
+                                        h_flex()
+                                            .h(px(72.0))
+                                            .justify_center()
+                                            .text_sm()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child("No compare sources available."),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        v_flex()
+                            .min_w(px(240.0))
+                            .flex_1()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_semibold()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("Right"),
+                            )
+                            .child(
+                                Select::new(&self.review_right_picker_state)
+                                    .with_size(gpui_component::Size::Medium)
+                                    .placeholder(right_label)
+                                    .search_placeholder("Find a branch or worktree")
+                                    .rounded(px(8.0))
+                                    .w_full()
+                                    .disabled(self.review_compare_sources.is_empty())
+                                    .empty(
+                                        h_flex()
+                                            .h(px(72.0))
+                                            .justify_center()
+                                            .text_sm()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child("No compare sources available."),
+                                    ),
+                            ),
+                    ),
+            )
+            .into_any_element()
     }
 }
