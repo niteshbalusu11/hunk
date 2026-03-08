@@ -10,22 +10,23 @@ use hunk_git::history::{
 use tempfile::TempDir;
 
 #[test]
-fn recent_authored_commits_include_local_branches_and_exclude_other_authors() -> Result<()> {
+fn recent_authored_commits_only_include_the_checked_out_branch() -> Result<()> {
     let fixture = TempGitRepo::new()?;
     fixture.configure_signature("Hunk", "hunk@example.com")?;
     fixture.write_file("tracked.txt", "base\n")?;
     fixture.commit_all_at("initial", 1_700_000_000, "Hunk", "hunk@example.com")?;
     let default_branch = fixture.current_branch_name()?;
+    fixture.write_file("tracked.txt", "main one\n")?;
+    fixture.commit_all_at("main one", 1_700_000_010, "Hunk", "hunk@example.com")?;
     fixture.checkout_branch("feature")?;
     fixture.write_file("tracked.txt", "feature one\n")?;
-    fixture.commit_all_at("feature one", 1_700_000_010, "Hunk", "hunk@example.com")?;
+    fixture.commit_all_at("feature one", 1_700_000_020, "Hunk", "hunk@example.com")?;
     fixture.write_file("tracked.txt", "feature two\n")?;
-    fixture.commit_all_at("feature two", 1_700_000_020, "Hunk", "hunk@example.com")?;
+    fixture.commit_all_at("feature two", 1_700_000_030, "Hunk", "hunk@example.com")?;
     fixture.checkout_branch(default_branch.as_str())?;
-    fixture.write_file("tracked.txt", "main one\n")?;
-    fixture.commit_all_at("main one", 1_700_000_030, "Hunk", "hunk@example.com")?;
     fixture.write_file("tracked.txt", "other author\n")?;
     fixture.commit_all_at("other author", 1_700_000_040, "Other", "other@example.com")?;
+    fixture.checkout_branch("feature")?;
 
     let (_, snapshot) = load_recent_authored_commits_with_fingerprint(
         fixture.root(),
@@ -37,15 +38,12 @@ fn recent_authored_commits_include_local_branches_and_exclude_other_authors() ->
         .iter()
         .map(|commit| commit.subject.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(
-        subjects,
-        vec!["main one", "feature two", "feature one", "initial"]
-    );
+    assert_eq!(subjects, vec!["feature two", "feature one"]);
     assert_eq!(
         snapshot.author_label.as_deref(),
         Some("Hunk <hunk@example.com>")
     );
-    assert_eq!(snapshot.commits.len(), 4);
+    assert_eq!(snapshot.commits.len(), 2);
     Ok(())
 }
 
@@ -88,6 +86,31 @@ fn recent_authored_commits_filter_to_the_configured_identity() -> Result<()> {
         Some("Configured <configured@example.com>")
     );
     assert!(snapshot.commits.is_empty());
+    Ok(())
+}
+
+#[test]
+fn recent_authored_commits_if_changed_refreshes_when_head_ref_changes() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.configure_signature("Hunk", "hunk@example.com")?;
+    fixture.write_file("tracked.txt", "base\n")?;
+    fixture.commit_all_at("initial", 1_700_000_000, "Hunk", "hunk@example.com")?;
+
+    let (main_fingerprint, main_snapshot) = load_recent_authored_commits_with_fingerprint(
+        fixture.root(),
+        DEFAULT_RECENT_AUTHORED_COMMIT_LIMIT,
+    )?;
+    assert_eq!(main_snapshot.commits.len(), 1);
+
+    fixture.checkout_branch("feature")?;
+
+    let (_, refreshed_snapshot) = load_recent_authored_commits_if_changed(
+        fixture.root(),
+        DEFAULT_RECENT_AUTHORED_COMMIT_LIMIT,
+        Some(&main_fingerprint),
+    )?;
+
+    assert!(refreshed_snapshot.is_some());
     Ok(())
 }
 

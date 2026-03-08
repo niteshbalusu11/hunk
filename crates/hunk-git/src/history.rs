@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
@@ -26,13 +25,31 @@ pub struct RecentCommitsSnapshot {
 pub struct RecentCommitsFingerprint {
     root: PathBuf,
     author_key: Option<String>,
-    local_branch_tip_ids: Vec<String>,
+    head_ref_name: Option<String>,
+    head_commit_id: Option<String>,
+    base_tip_id: Option<String>,
     limit: usize,
 }
 
 impl RecentCommitsFingerprint {
     pub fn root(&self) -> &Path {
         self.root.as_path()
+    }
+
+    pub fn author_key(&self) -> Option<&str> {
+        self.author_key.as_deref()
+    }
+
+    pub fn head_ref_name(&self) -> Option<&str> {
+        self.head_ref_name.as_deref()
+    }
+
+    pub fn head_commit_id(&self) -> Option<&str> {
+        self.head_commit_id.as_deref()
+    }
+
+    pub fn base_tip_id(&self) -> Option<&str> {
+        self.base_tip_id.as_deref()
     }
 }
 
@@ -100,13 +117,26 @@ pub fn load_recent_authored_commits(path: &Path, limit: usize) -> Result<RecentC
     Ok(snapshot)
 }
 
+pub fn load_recent_authored_commits_fingerprint(
+    path: &Path,
+    limit: usize,
+) -> Result<RecentCommitsFingerprint> {
+    let (_, _, _, _, fingerprint) = recent_commits_context(path, limit)?;
+    Ok(fingerprint)
+}
+
 pub fn load_recent_authored_commits_with_fingerprint(
     path: &Path,
     limit: usize,
 ) -> Result<(RecentCommitsFingerprint, RecentCommitsSnapshot)> {
-    let (repo, author, tip_ids, fingerprint) = recent_commits_context(path, limit)?;
-    let commits =
-        load_recent_authored_commits_from_context(repo.repository(), &author, tip_ids, limit)?;
+    let (repo, author, tip_id, base_tip_id, fingerprint) = recent_commits_context(path, limit)?;
+    let commits = load_recent_authored_commits_from_context(
+        repo.repository(),
+        &author,
+        tip_id,
+        base_tip_id,
+        limit,
+    )?;
 
     Ok((
         fingerprint,
@@ -123,12 +153,17 @@ pub fn load_recent_authored_commits_if_changed(
     limit: usize,
     previous_fingerprint: Option<&RecentCommitsFingerprint>,
 ) -> Result<(RecentCommitsFingerprint, Option<RecentCommitsSnapshot>)> {
-    let (repo, author, tip_ids, fingerprint) = recent_commits_context(path, limit)?;
+    let (repo, author, tip_id, base_tip_id, fingerprint) = recent_commits_context(path, limit)?;
     if previous_fingerprint.is_some_and(|previous| previous == &fingerprint) {
         return Ok((fingerprint, None));
     }
-    let commits =
-        load_recent_authored_commits_from_context(repo.repository(), &author, tip_ids, limit)?;
+    let commits = load_recent_authored_commits_from_context(
+        repo.repository(),
+        &author,
+        tip_id,
+        base_tip_id,
+        limit,
+    )?;
     Ok((
         fingerprint,
         Some(RecentCommitsSnapshot {
@@ -145,41 +180,74 @@ fn recent_commits_context(
 ) -> Result<(
     crate::git::GitRepo,
     RecentCommitAuthorMatcher,
-    Vec<gix::ObjectId>,
+    gix::ObjectId,
+    Option<gix::ObjectId>,
     RecentCommitsFingerprint,
 )> {
     let repo = open_repo(path)?;
     let author = RecentCommitAuthorMatcher::from_repo(repo.repository())?;
-    let (tip_ids, tip_id_strings) = local_branch_tip_ids(repo.repository())?;
+    let head_ref_name = repo
+        .repository()
+        .head_name()
+        .context("failed to resolve Git HEAD name for recent commits")?
+        .map(|name| name.to_string());
+    let Some(head_commit_id) = repo.repository().head_id().ok().map(|id| id.detach()) else {
+        let fingerprint = RecentCommitsFingerprint {
+            root: repo.root().to_path_buf(),
+            author_key: author.key.clone(),
+            head_ref_name,
+            head_commit_id: None,
+            base_tip_id: None,
+            limit,
+        };
+        return Ok((
+            repo,
+            author,
+            gix::ObjectId::null(gix::hash::Kind::Sha1),
+            None,
+            fingerprint,
+        ));
+    };
+    let base_tip_id =
+        branch_base_tip_id(repo.repository(), head_ref_name.as_deref(), head_commit_id)?;
     let fingerprint = RecentCommitsFingerprint {
         root: repo.root().to_path_buf(),
         author_key: author.key.clone(),
-        local_branch_tip_ids: tip_id_strings,
+        head_ref_name,
+        head_commit_id: Some(head_commit_id.to_string()),
+        base_tip_id: base_tip_id.as_ref().map(ToString::to_string),
         limit,
     };
-    Ok((repo, author, tip_ids, fingerprint))
+    Ok((repo, author, head_commit_id, base_tip_id, fingerprint))
 }
 
 fn load_recent_authored_commits_from_context(
     repo: &gix::Repository,
     author: &RecentCommitAuthorMatcher,
-    tip_ids: Vec<gix::ObjectId>,
+    tip_id: gix::ObjectId,
+    base_tip_id: Option<gix::ObjectId>,
     limit: usize,
 ) -> Result<Vec<RecentCommitSummary>> {
-    if author.key.is_none() || tip_ids.is_empty() || limit == 0 {
+    if author.key.is_none() || tip_id.is_null() || limit == 0 {
         return Ok(Vec::new());
     }
-    collect_recent_authored_commits(repo, author, tip_ids, limit)
+    collect_recent_authored_commits(repo, author, tip_id, base_tip_id, limit)
 }
 
 fn collect_recent_authored_commits(
     repo: &gix::Repository,
     author: &RecentCommitAuthorMatcher,
-    tip_ids: Vec<gix::ObjectId>,
+    tip_id: gix::ObjectId,
+    base_tip_id: Option<gix::ObjectId>,
     limit: usize,
 ) -> Result<Vec<RecentCommitSummary>> {
-    let walk = repo
-        .rev_walk(tip_ids)
+    let walk_builder = repo.rev_walk([tip_id]);
+    let walk_builder = if let Some(base_tip_id) = base_tip_id {
+        walk_builder.with_hidden([base_tip_id])
+    } else {
+        walk_builder
+    };
+    let walk = walk_builder
         .sorting(gix::revision::walk::Sorting::ByCommitTime(
             CommitTimeOrder::NewestFirst,
         ))
@@ -212,31 +280,104 @@ fn collect_recent_authored_commits(
     Ok(commits)
 }
 
-fn local_branch_tip_ids(repo: &gix::Repository) -> Result<(Vec<gix::ObjectId>, Vec<String>)> {
-    let refs_platform = repo
-        .references()
-        .context("failed to access Git references for recent commits")?;
-    let refs = refs_platform
-        .local_branches()
-        .context("failed to iterate local Git branches for recent commits")?
-        .peeled()
-        .context("failed to enable peeled Git branch iteration for recent commits")?;
-    let mut tip_ids_by_hex = BTreeMap::<String, gix::ObjectId>::new();
+fn branch_base_tip_id(
+    repo: &gix::Repository,
+    head_ref_name: Option<&str>,
+    head_commit_id: gix::ObjectId,
+) -> Result<Option<gix::ObjectId>> {
+    let Some(head_ref_name) = head_ref_name else {
+        return Ok(None);
+    };
+    let Some(current_branch_name) = short_branch_name(head_ref_name) else {
+        return Ok(None);
+    };
 
-    for reference in refs {
-        let mut reference = reference
-            .map_err(|err| anyhow::anyhow!("failed to read Git branch reference: {err}"))?;
-        let Ok(tip_id) = reference.peel_to_id() else {
-            continue;
-        };
-        tip_ids_by_hex
-            .entry(tip_id.to_string())
-            .or_insert_with(|| tip_id.detach());
+    if let Some(base_tip_id) =
+        remote_default_branch_tip_id(repo, current_branch_name, head_ref_name, head_commit_id)?
+    {
+        return Ok(Some(base_tip_id));
+    }
+    if matches!(current_branch_name, "main" | "master") {
+        return Ok(None);
     }
 
-    let tip_ids = tip_ids_by_hex.values().cloned().collect::<Vec<_>>();
-    let tip_id_strings = tip_ids_by_hex.into_keys().collect::<Vec<_>>();
-    Ok((tip_ids, tip_id_strings))
+    for candidate in ["main", "master"] {
+        if candidate == current_branch_name {
+            continue;
+        }
+        if let Some(base_tip_id) =
+            peel_reference_to_id(repo, format!("refs/heads/{candidate}").as_str())?
+        {
+            return Ok(Some(base_tip_id));
+        }
+    }
+
+    Ok(None)
+}
+
+fn remote_default_branch_tip_id(
+    repo: &gix::Repository,
+    current_branch_name: &str,
+    head_ref_name: &str,
+    head_commit_id: gix::ObjectId,
+) -> Result<Option<gix::ObjectId>> {
+    let head_ref_name = <&gix::refs::FullNameRef>::try_from(head_ref_name).map_err(|err| {
+        anyhow::anyhow!("failed to validate current Git branch reference name: {err}")
+    })?;
+    let Some(tracking_ref_name) = repo
+        .branch_remote_tracking_ref_name(head_ref_name, gix::remote::Direction::Fetch)
+        .transpose()
+        .context("failed to resolve Git tracking branch for recent commits")?
+    else {
+        return Ok(None);
+    };
+    let tracking_ref_name = tracking_ref_name.to_string();
+    let Some(remote_name) = tracking_ref_name
+        .strip_prefix("refs/remotes/")
+        .and_then(|name| name.split('/').next())
+    else {
+        return Ok(None);
+    };
+    let default_remote_head_ref = format!("refs/remotes/{remote_name}/HEAD");
+    let Some(mut default_remote_head) = find_reference(repo, default_remote_head_ref.as_str()) else {
+        return Ok(None);
+    };
+    if default_remote_head
+        .target()
+        .try_name()
+        .map(|name| name.to_string())
+        .and_then(|name| name.strip_prefix(format!("refs/remotes/{remote_name}/").as_str()).map(str::to_owned))
+        .as_deref()
+        == Some(current_branch_name)
+    {
+        return Ok(None);
+    }
+    let Ok(base_tip_id) = default_remote_head.peel_to_id() else {
+        return Ok(None);
+    };
+    let base_tip_id = base_tip_id.detach();
+    if base_tip_id == head_commit_id {
+        return Ok(None);
+    }
+    Ok(Some(base_tip_id))
+}
+
+fn find_reference<'repo>(repo: &'repo gix::Repository, ref_name: &str) -> Option<gix::Reference<'repo>> {
+    repo.find_reference(ref_name).ok()
+}
+
+fn peel_reference_to_id(repo: &gix::Repository, ref_name: &str) -> Result<Option<gix::ObjectId>> {
+    let Some(mut reference) = find_reference(repo, ref_name) else {
+        return Ok(None);
+    };
+    let Ok(id) = reference.peel_to_id() else {
+        return Ok(None);
+    };
+    Ok(Some(id.detach()))
+}
+
+fn short_branch_name(head_ref_name: &str) -> Option<&str> {
+    head_ref_name.strip_prefix("refs/heads/")
 }
 
 fn normalize_identity_value(value: &gix::bstr::BStr) -> Option<String> {

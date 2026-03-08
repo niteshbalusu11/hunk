@@ -79,7 +79,7 @@ impl DiffViewer {
 
     fn refresh_after_git_action(&mut self, action_name: &'static str, cx: &mut Context<Self>) {
         self.request_snapshot_refresh_workflow_only(true, cx);
-        if action_name == "Sync branch" {
+        if matches!(action_name, "Activate branch" | "Sync branch") {
             self.request_recent_commits_refresh(true, cx);
         }
     }

@@ -7,12 +7,22 @@ impl DiffViewer {
         let is_dark = cx.theme().mode.is_dark();
         let colors = hunk_git_workspace(cx.theme(), is_dark);
         let recent_count = self.recent_commits.len();
+        let branch_scope_label = self
+            .checked_out_branch_name()
+            .unwrap_or(self.branch_name.as_str());
+        let branch_scope_description = if branch_scope_label.is_empty() || branch_scope_label == "unknown" {
+            "the current branch".to_string()
+        } else if branch_scope_label == "detached" {
+            "detached HEAD".to_string()
+        } else {
+            format!("branch {}", branch_scope_label)
+        };
         let subtitle = self
             .recent_commits_author_label
             .as_ref()
-            .map(|label| format!("Newest authored commits across local branches for {label}."))
+            .map(|label| format!("Newest authored commits on {branch_scope_description} for {label}."))
             .unwrap_or_else(|| {
-                "Configure Git user.name and user.email to filter your authored commits."
+                "Configure Git user.name and user.email to filter your commits on the current branch."
                     .to_string()
             });
 
@@ -29,7 +39,7 @@ impl DiffViewer {
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
                         .whitespace_normal()
-                        .child("Set Git user.name and user.email to show your recent authored commits."),
+                        .child("Set Git user.name and user.email to show your recent commits on the current branch."),
                 )
                 .into_any_element()
         } else if let Some(error) = self
@@ -61,7 +71,7 @@ impl DiffViewer {
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
                         .whitespace_normal()
-                        .child("No recent authored commits across local branches."),
+                        .child("No recent authored commits on the current branch."),
                 )
                 .into_any_element()
         } else {
@@ -116,14 +126,17 @@ impl DiffViewer {
                         HunkAccentTone::Neutral,
                         cx,
                     ))
-                    .child(self.render_git_metric_pill("Across Local Branches", HunkAccentTone::Neutral, cx))
-                    .when(self.recent_commits_loading && !self.recent_commits.is_empty(), |this| {
-                        this.child(self.render_git_metric_pill(
-                            "Refreshing…",
-                            HunkAccentTone::Accent,
-                            cx,
-                        ))
-                    }),
+                    .child(self.render_git_metric_pill(
+                        if branch_scope_label == "detached" {
+                            "Detached HEAD".to_string()
+                        } else if branch_scope_label.is_empty() || branch_scope_label == "unknown" {
+                            "Current Branch".to_string()
+                        } else {
+                            branch_scope_label.to_string()
+                        },
+                        HunkAccentTone::Neutral,
+                        cx,
+                    )),
             )
             .child(
                 div()
@@ -141,7 +154,6 @@ impl DiffViewer {
                             .size_full()
                             .track_scroll(&self.recent_commits_scroll_handle)
                             .overflow_y_scroll()
-                            .pr(px(GIT_RECENT_COMMITS_SCROLLBAR_GUTTER))
                             .on_scroll_wheel(move |_, _, cx| {
                                 view.update(cx, |this, _| {
                                     this.last_scroll_activity_at = Instant::now();
@@ -164,7 +176,7 @@ impl DiffViewer {
                             .w(px(GIT_RECENT_COMMITS_SCROLLBAR_GUTTER))
                             .child(
                                 Scrollbar::vertical(&self.recent_commits_scroll_handle)
-                                    .scrollbar_show(ScrollbarShow::Always),
+                                    .scrollbar_show(ScrollbarShow::Scrolling),
                             ),
                     ),
             )
@@ -193,8 +205,10 @@ impl DiffViewer {
         let is_dark = cx.theme().mode.is_dark();
         let colors = hunk_git_workspace(cx.theme(), is_dark);
         let short_commit_id = short_commit_id(commit.commit_id.as_str());
+        let stable_row_id = stable_recent_commit_row_id(commit.commit_id.as_str());
 
         v_flex()
+            .id(("git-recent-commit-row", stable_row_id))
             .w_full()
             .gap_1()
             .p_2()
@@ -258,6 +272,14 @@ impl DiffViewer {
             }))
             .into_any_element()
     }
+}
+
+fn stable_recent_commit_row_id(commit_id: &str) -> u64 {
+    use std::hash::{Hash as _, Hasher as _};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    commit_id.hash(&mut hasher);
+    hasher.finish()
 }
 
 fn short_commit_id(commit_id: &str) -> String {
