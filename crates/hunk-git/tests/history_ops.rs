@@ -16,16 +16,17 @@ fn recent_authored_commits_only_include_the_checked_out_branch() -> Result<()> {
     fixture.write_file("tracked.txt", "base\n")?;
     fixture.commit_all_at("initial", 1_700_000_000, "Hunk", "hunk@example.com")?;
     let default_branch = fixture.current_branch_name()?;
+    fixture.write_file("tracked.txt", "main one\n")?;
+    fixture.commit_all_at("main one", 1_700_000_010, "Hunk", "hunk@example.com")?;
     fixture.checkout_branch("feature")?;
     fixture.write_file("tracked.txt", "feature one\n")?;
-    fixture.commit_all_at("feature one", 1_700_000_010, "Hunk", "hunk@example.com")?;
+    fixture.commit_all_at("feature one", 1_700_000_020, "Hunk", "hunk@example.com")?;
     fixture.write_file("tracked.txt", "feature two\n")?;
-    fixture.commit_all_at("feature two", 1_700_000_020, "Hunk", "hunk@example.com")?;
+    fixture.commit_all_at("feature two", 1_700_000_030, "Hunk", "hunk@example.com")?;
     fixture.checkout_branch(default_branch.as_str())?;
-    fixture.write_file("tracked.txt", "main one\n")?;
-    fixture.commit_all_at("main one", 1_700_000_030, "Hunk", "hunk@example.com")?;
     fixture.write_file("tracked.txt", "other author\n")?;
     fixture.commit_all_at("other author", 1_700_000_040, "Other", "other@example.com")?;
+    fixture.checkout_branch("feature")?;
 
     let (_, snapshot) = load_recent_authored_commits_with_fingerprint(
         fixture.root(),
@@ -37,7 +38,7 @@ fn recent_authored_commits_only_include_the_checked_out_branch() -> Result<()> {
         .iter()
         .map(|commit| commit.subject.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(subjects, vec!["main one", "initial"]);
+    assert_eq!(subjects, vec!["feature two", "feature one"]);
     assert_eq!(
         snapshot.author_label.as_deref(),
         Some("Hunk <hunk@example.com>")

@@ -25,8 +25,8 @@ use hunk_git::git::{
     load_workflow_snapshot_with_fingerprint_without_refresh, open_patch_session,
 };
 use hunk_git::history::{
-    DEFAULT_RECENT_AUTHORED_COMMIT_LIMIT, load_recent_authored_commits_if_changed,
-    load_recent_authored_commits_with_fingerprint,
+    DEFAULT_RECENT_AUTHORED_COMMIT_LIMIT, load_recent_authored_commits_fingerprint,
+    load_recent_authored_commits_if_changed, load_recent_authored_commits_with_fingerprint,
 };
 use hunk_git::mutation::{
     activate_or_create_branch as checkout_or_create_branch_with_change_transfer,

@@ -86,7 +86,11 @@ pub struct CachedRecentCommitState {
 #[serde(default)]
 pub struct CachedRecentCommitsState {
     pub root: Option<PathBuf>,
+    pub author_key: Option<String>,
     pub author_label: Option<String>,
+    pub head_ref_name: Option<String>,
+    pub head_commit_id: Option<String>,
+    pub base_tip_id: Option<String>,
     pub commits: Vec<CachedRecentCommitState>,
     pub cached_unix_time: i64,
 }

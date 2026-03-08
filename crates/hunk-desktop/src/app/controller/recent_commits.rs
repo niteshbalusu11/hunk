@@ -16,6 +16,24 @@ impl DiffViewer {
         if root != expected_root {
             return;
         }
+        let Ok(current_fingerprint) = load_recent_authored_commits_fingerprint(
+            expected_root.as_path(),
+            DEFAULT_RECENT_AUTHORED_COMMIT_LIMIT,
+        ) else {
+            return;
+        };
+        if current_fingerprint.root() != root.as_path()
+            || current_fingerprint.author_key() != cache.author_key.as_deref()
+            || current_fingerprint.head_ref_name() != cache.head_ref_name.as_deref()
+            || current_fingerprint.head_commit_id() != cache.head_commit_id.as_deref()
+            || current_fingerprint.base_tip_id() != cache.base_tip_id.as_deref()
+        {
+            debug!(
+                "skipping recent commits cache hydration for {} due to scope mismatch",
+                root.display()
+            );
+            return;
+        }
 
         self.recent_commits = cache
             .commits
@@ -43,7 +61,23 @@ impl DiffViewer {
 
         let mut cache = CachedRecentCommitsState {
             root: Some(root),
+            author_key: self
+                .last_recent_commits_fingerprint
+                .as_ref()
+                .and_then(|fingerprint| fingerprint.author_key().map(str::to_string)),
             author_label: self.recent_commits_author_label.clone(),
+            head_ref_name: self
+                .last_recent_commits_fingerprint
+                .as_ref()
+                .and_then(|fingerprint| fingerprint.head_ref_name().map(str::to_string)),
+            head_commit_id: self
+                .last_recent_commits_fingerprint
+                .as_ref()
+                .and_then(|fingerprint| fingerprint.head_commit_id().map(str::to_string)),
+            base_tip_id: self
+                .last_recent_commits_fingerprint
+                .as_ref()
+                .and_then(|fingerprint| fingerprint.base_tip_id().map(str::to_string)),
             commits: self
                 .recent_commits
                 .iter()

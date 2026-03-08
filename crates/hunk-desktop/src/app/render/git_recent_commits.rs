@@ -154,7 +154,6 @@ impl DiffViewer {
                             .size_full()
                             .track_scroll(&self.recent_commits_scroll_handle)
                             .overflow_y_scroll()
-                            .pr(px(GIT_RECENT_COMMITS_SCROLLBAR_GUTTER))
                             .on_scroll_wheel(move |_, _, cx| {
                                 view.update(cx, |this, _| {
                                     this.last_scroll_activity_at = Instant::now();
@@ -177,7 +176,7 @@ impl DiffViewer {
                             .w(px(GIT_RECENT_COMMITS_SCROLLBAR_GUTTER))
                             .child(
                                 Scrollbar::vertical(&self.recent_commits_scroll_handle)
-                                    .scrollbar_show(ScrollbarShow::Always),
+                                    .scrollbar_show(ScrollbarShow::Scrolling),
                             ),
                     ),
             )
