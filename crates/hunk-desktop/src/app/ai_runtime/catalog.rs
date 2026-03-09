@@ -57,11 +57,10 @@ fn load_ai_workspace_thread_catalogs_on_port(
         codex_home.to_path_buf(),
         port,
     );
-    let mut host = HostRuntime::new(host_config);
-    host.start(HOST_START_TIMEOUT)?;
+    let host = SharedHostLease::acquire(host_config, HOST_START_TIMEOUT)?;
 
-    let result = (|| {
-        let endpoint = WebSocketEndpoint::loopback(port);
+    (|| {
+        let endpoint = WebSocketEndpoint::loopback(host.port());
         let mut session = JsonRpcSession::connect(&endpoint)?;
         session.initialize(InitializeOptions::default(), DEFAULT_REQUEST_TIMEOUT)?;
 
@@ -101,12 +100,5 @@ fn load_ai_workspace_thread_catalogs_on_port(
         }
 
         Ok(catalogs)
-    })();
-
-    let stop_result = host.stop();
-    match (result, stop_result) {
-        (Ok(catalogs), Ok(())) => Ok(catalogs),
-        (Err(error), _) => Err(error),
-        (Ok(_), Err(error)) => Err(error),
-    }
+    })()
 }

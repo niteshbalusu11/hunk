@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 #[cfg(unix)]
 use std::io;
@@ -21,6 +22,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 use std::time::Instant;
 
+use tracing::debug;
 use tracing::warn;
 
 use crate::errors::CodexIntegrationError;
@@ -35,6 +37,7 @@ const STOP_TERM_GRACE_TIMEOUT: Duration = Duration::from_millis(750);
 const STOP_TERM_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const STDERR_READER_JOIN_TIMEOUT: Duration = Duration::from_millis(750);
 static TRACKED_HOST_PROCESS_IDS: OnceLock<Mutex<BTreeSet<u32>>> = OnceLock::new();
+static SHARED_HOSTS: OnceLock<Mutex<BTreeMap<SharedHostKey, SharedHostEntry>>> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostLifecycleState {
@@ -53,6 +56,100 @@ pub struct HostConfig {
     pub port: u16,
     pub arguments: Vec<String>,
     pub environment: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct SharedHostKey {
+    executable_path: PathBuf,
+    codex_home: PathBuf,
+}
+
+impl SharedHostKey {
+    fn from_config(config: &HostConfig) -> Self {
+        Self {
+            executable_path: config.executable_path.clone(),
+            codex_home: config.codex_home.clone(),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct SharedHostEntry {
+    lease_count: usize,
+    runtime: HostRuntime,
+}
+
+#[derive(Debug)]
+pub struct SharedHostLease {
+    key: SharedHostKey,
+    fallback_port: u16,
+}
+
+impl SharedHostLease {
+    pub fn acquire(config: HostConfig, timeout: Duration) -> Result<Self> {
+        let key = SharedHostKey::from_config(&config);
+        let mut guard = shared_hosts()
+            .lock()
+            .expect("shared host registry mutex poisoned");
+
+        if let Some(entry) = guard.get_mut(&key) {
+            if entry.runtime.ensure_running(timeout).is_err() {
+                let mut replacement = HostRuntime::new(config);
+                replacement.start(timeout)?;
+                entry.runtime = replacement;
+            }
+            entry.lease_count = entry.lease_count.saturating_add(1);
+            return Ok(Self {
+                key,
+                fallback_port: entry.runtime.config().port,
+            });
+        }
+
+        let mut runtime = HostRuntime::new(config);
+        runtime.start(timeout)?;
+        let port = runtime.config().port;
+        guard.insert(
+            key.clone(),
+            SharedHostEntry {
+                lease_count: 1,
+                runtime,
+            },
+        );
+        Ok(Self {
+            key,
+            fallback_port: port,
+        })
+    }
+
+    pub fn port(&self) -> u16 {
+        shared_hosts()
+            .lock()
+            .expect("shared host registry mutex poisoned")
+            .get(&self.key)
+            .map(|entry| entry.runtime.config().port)
+            .unwrap_or(self.fallback_port)
+    }
+
+    pub fn pid(&self) -> Option<u32> {
+        let mut guard = shared_hosts()
+            .lock()
+            .expect("shared host registry mutex poisoned");
+        guard
+            .get_mut(&self.key)
+            .and_then(|entry| entry.runtime.pid())
+    }
+
+    pub fn ensure_running(&self, timeout: Duration) -> Result<()> {
+        let mut guard = shared_hosts()
+            .lock()
+            .expect("shared host registry mutex poisoned");
+        let Some(entry) = guard.get_mut(&self.key) else {
+            return Err(CodexIntegrationError::WebSocketTransport(
+                "shared codex host lease was released unexpectedly".to_string(),
+            ));
+        };
+        entry.runtime.ensure_running(timeout)
+    }
 }
 
 impl HostConfig {
@@ -353,7 +450,7 @@ impl HostRuntime {
                 if line.trim().is_empty() {
                     continue;
                 }
-                warn!("codex host stderr: {line}");
+                debug!("codex host stderr: {line}");
 
                 let mut guard = lines.lock().expect("stderr buffer mutex poisoned");
                 guard.push(line);
@@ -450,7 +547,19 @@ impl Drop for HostRuntime {
     }
 }
 
+impl Drop for SharedHostLease {
+    fn drop(&mut self) {
+        release_shared_host(&self.key);
+    }
+}
+
 pub fn cleanup_tracked_hosts_for_shutdown() {
+    for mut runtime in take_shared_host_runtimes() {
+        if let Err(error) = runtime.stop() {
+            warn!("failed to stop shared codex host during shutdown: {error}");
+        }
+    }
+
     let tracked_process_ids = take_tracked_host_processes();
     for process_id in tracked_process_ids {
         cleanup_tracked_host_process(process_id);
@@ -459,6 +568,44 @@ pub fn cleanup_tracked_hosts_for_shutdown() {
 
 fn tracked_host_processes() -> &'static Mutex<BTreeSet<u32>> {
     TRACKED_HOST_PROCESS_IDS.get_or_init(|| Mutex::new(BTreeSet::new()))
+}
+
+fn shared_hosts() -> &'static Mutex<BTreeMap<SharedHostKey, SharedHostEntry>> {
+    SHARED_HOSTS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn release_shared_host(key: &SharedHostKey) {
+    let maybe_runtime = {
+        let mut guard = shared_hosts()
+            .lock()
+            .expect("shared host registry mutex poisoned");
+        let Some(entry) = guard.get_mut(key) else {
+            return;
+        };
+
+        if entry.lease_count > 1 {
+            entry.lease_count -= 1;
+            None
+        } else {
+            guard.remove(key).map(|entry| entry.runtime)
+        }
+    };
+
+    if let Some(mut runtime) = maybe_runtime
+        && let Err(error) = runtime.stop()
+    {
+        warn!("failed to stop shared codex host after last lease dropped: {error}");
+    }
+}
+
+fn take_shared_host_runtimes() -> Vec<HostRuntime> {
+    let mut guard = shared_hosts()
+        .lock()
+        .expect("shared host registry mutex poisoned");
+    std::mem::take(&mut *guard)
+        .into_values()
+        .map(|entry| entry.runtime)
+        .collect()
 }
 
 fn register_tracked_host_process(process_id: u32) {

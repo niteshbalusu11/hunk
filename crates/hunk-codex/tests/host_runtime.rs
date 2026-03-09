@@ -14,6 +14,7 @@ use std::time::Instant;
 use hunk_codex::host::HostConfig;
 use hunk_codex::host::HostLifecycleState;
 use hunk_codex::host::HostRuntime;
+use hunk_codex::host::SharedHostLease;
 #[cfg(unix)]
 use hunk_codex::host::cleanup_tracked_hosts_for_shutdown;
 use tempfile::TempDir;
@@ -133,6 +134,43 @@ fn graceful_shutdown_leaves_no_running_process() {
 
     let connect_result = tungstenite::connect(runtime.config().websocket_url());
     assert!(connect_result.is_err());
+}
+
+#[test]
+fn shared_host_lease_reuses_one_process_across_worktrees() {
+    let _guard = host_runtime_test_guard();
+    let setup = TestSetup::new();
+    let first_config = setup.host_config();
+    let first_port = first_config.port;
+    let first_lease =
+        SharedHostLease::acquire(first_config, Duration::from_secs(5)).expect("first lease");
+
+    let mut second_config = setup.host_config();
+    second_config.working_directory = setup.temp_dir.path().join("workspace-b");
+    second_config.port = free_port();
+    fs::create_dir_all(&second_config.working_directory).expect("second workspace must exist");
+    let second_requested_port = second_config.port;
+    let second_lease =
+        SharedHostLease::acquire(second_config, Duration::from_secs(5)).expect("second lease");
+
+    let first_pid = first_lease.pid().expect("first lease pid should exist");
+    let second_pid = second_lease.pid().expect("second lease pid should exist");
+    assert_eq!(first_pid, second_pid);
+    assert_eq!(first_lease.port(), second_lease.port());
+    assert_eq!(first_lease.port(), first_port);
+    assert_ne!(first_lease.port(), second_requested_port);
+
+    let websocket_url = format!("ws://127.0.0.1:{}/", first_lease.port());
+    let (mut socket, _) =
+        tungstenite::connect(websocket_url).expect("websocket connect should succeed");
+    socket
+        .send(Message::Text("shared".into()))
+        .expect("send should succeed");
+    let response = socket.read().expect("read should succeed");
+    let text = response
+        .into_text()
+        .expect("response should be text message");
+    assert_eq!(text.to_string(), "shared");
 }
 
 #[cfg(unix)]

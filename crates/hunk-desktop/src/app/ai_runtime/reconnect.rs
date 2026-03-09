@@ -66,7 +66,6 @@ fn run_ai_worker(
         }
     }
 
-    let _ = runtime.host.stop();
     Ok(())
 }
 
@@ -190,7 +189,7 @@ impl AiWorkerRuntime {
     }
 
     fn try_reconnect_existing_host_session(&mut self) -> Result<(), CodexIntegrationError> {
-        let endpoint = WebSocketEndpoint::loopback(self.host.config().port);
+        let endpoint = WebSocketEndpoint::loopback(self.host.port());
         let mut session = JsonRpcSession::connect(&endpoint)?;
         session.initialize(InitializeOptions::default(), self.request_timeout)?;
         self.session = session;

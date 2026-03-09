@@ -53,7 +53,7 @@ use hunk_domain::state::AiServiceTierSelection;
 use hunk_codex::api::InitializeOptions;
 use hunk_codex::errors::CodexIntegrationError;
 use hunk_codex::host::HostConfig;
-use hunk_codex::host::HostRuntime;
+use hunk_codex::host::SharedHostLease;
 use hunk_codex::state::AiState;
 use hunk_codex::state::ServerRequestDecision;
 use hunk_codex::state::ThreadLifecycleStatus;
@@ -332,7 +332,7 @@ fn panic_payload_message(payload: Box<dyn Any + Send>) -> String {
 }
 
 struct AiWorkerRuntime {
-    host: HostRuntime,
+    host: SharedHostLease,
     session: JsonRpcSession,
     service: ThreadService,
     codex_home: PathBuf,
@@ -405,10 +405,9 @@ impl AiWorkerRuntime {
             config.codex_home.clone(),
             port,
         );
-        let mut host = HostRuntime::new(host_config);
-        host.start(HOST_START_TIMEOUT)?;
+        let host = SharedHostLease::acquire(host_config, HOST_START_TIMEOUT)?;
 
-        let endpoint = WebSocketEndpoint::loopback(port);
+        let endpoint = WebSocketEndpoint::loopback(host.port());
         let mut session = JsonRpcSession::connect(&endpoint)?;
         session.initialize(InitializeOptions::default(), config.request_timeout)?;
 
