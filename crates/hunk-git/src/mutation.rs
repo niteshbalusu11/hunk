@@ -171,7 +171,7 @@ pub fn working_copy_context_for_ai(
     let capped_bytes = max_patch_bytes.max(1);
     let mut patch_bytes = Vec::new();
     let mut truncated = false;
-    diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+    let print_result = diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
         if patch_bytes.len() >= capped_bytes {
             truncated = true;
             return false;
@@ -187,7 +187,12 @@ pub fn working_copy_context_for_ai(
 
         patch_bytes.extend_from_slice(content);
         true
-    })?;
+    });
+    if let Err(err) = print_result
+        && !(truncated && err.code() == git2::ErrorCode::User)
+    {
+        return Err(err.into());
+    }
 
     let mut diff_patch = String::from_utf8_lossy(patch_bytes.as_slice()).to_string();
     if truncated {

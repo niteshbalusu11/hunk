@@ -5,8 +5,9 @@ use notify::Watcher;
 use tracing::{debug, error, warn};
 
 use crate::app::ai_thread_flow::{
-    AiCodexGenerationConfig, AiCommitGenerationContext, AiCommitMessage, ai_branch_name_for_prompt,
-    ai_branch_name_for_thread, ai_commit_message_for_thread, ai_first_prompt_seed_for_thread,
+    AiCodexGenerationConfig, AiCommitGenerationContext, AiCommitMessage,
+    ai_branch_generation_seed_for_thread, ai_branch_name_for_prompt, ai_branch_name_for_thread,
+    ai_commit_message_for_thread, ai_first_prompt_seed_for_thread,
     ai_latest_agent_message_for_thread, try_ai_branch_name_for_prompt, try_ai_commit_message,
 };
 

@@ -95,9 +95,6 @@ impl DiffViewer {
             ai_first_prompt_seed_for_thread(&self.ai_state_snapshot, context.thread_id.as_str());
         let latest_agent_message =
             ai_latest_agent_message_for_thread(&self.ai_state_snapshot, context.thread_id.as_str());
-        let session_overrides = self.current_ai_turn_session_overrides();
-        let selected_model = session_overrides.model.clone();
-        let selected_effort = session_overrides.effort.clone();
         let codex_executable = Self::resolve_codex_executable_path();
         let branch_name = context.branch_name.clone();
         let repo_root = context.repo_root.clone();
@@ -114,8 +111,6 @@ impl DiffViewer {
                             AiCodexGenerationConfig {
                                 codex_executable: codex_executable.as_path(),
                                 repo_root: repo_root.as_path(),
-                                model: selected_model.as_deref(),
-                                reasoning_effort: selected_effort.as_deref(),
                             },
                             repo_root.as_path(),
                             branch_name.as_str(),
@@ -242,21 +237,19 @@ impl DiffViewer {
             ai_first_prompt_seed_for_thread(&self.ai_state_snapshot, context.thread_id.as_str());
         let latest_agent_message =
             ai_latest_agent_message_for_thread(&self.ai_state_snapshot, context.thread_id.as_str());
-        let session_overrides = self.current_ai_turn_session_overrides();
-        let selected_model = session_overrides.model.clone();
-        let selected_effort = session_overrides.effort.clone();
         let codex_executable = Self::resolve_codex_executable_path();
         let provider_mappings = self.config.review_provider_mappings.clone();
-        let requested_branch_name = if context.start_mode == AiNewThreadStartMode::Local {
-            Some(ai_branch_name_for_thread(
-                &self.ai_state_snapshot,
-                context.thread_id.as_str(),
-                context.branch_name.as_str(),
-                false,
-            ))
-        } else {
-            None
-        };
+        let fallback_review_branch_name = ai_branch_name_for_thread(
+            &self.ai_state_snapshot,
+            context.thread_id.as_str(),
+            context.branch_name.as_str(),
+            false,
+        );
+        let review_branch_generation_seed = ai_branch_generation_seed_for_thread(
+            &self.ai_state_snapshot,
+            context.thread_id.as_str(),
+            context.branch_name.as_str(),
+        );
         let repo_root = context.repo_root.clone();
         let branch_name = context.branch_name.clone();
         let start_mode = context.start_mode;
@@ -269,12 +262,18 @@ impl DiffViewer {
                 .spawn(async move {
                     let execution_started_at = Instant::now();
                     let result = (|| -> anyhow::Result<(Option<String>, String, String)> {
-                        let review_branch_name = if let Some(requested_branch_name) =
-                            requested_branch_name.as_deref()
-                        {
+                        let review_branch_name = if start_mode == AiNewThreadStartMode::Local {
+                            let requested_branch_name = try_ai_branch_name_for_prompt(
+                                codex_executable.as_path(),
+                                repo_root.as_path(),
+                                review_branch_generation_seed.as_str(),
+                                &[],
+                                false,
+                            )
+                            .unwrap_or_else(|| fallback_review_branch_name.clone());
                             activate_new_ai_review_branch(
                                 repo_root.as_path(),
-                                requested_branch_name,
+                                requested_branch_name.as_str(),
                             )?
                         } else {
                             branch_name.clone()
@@ -284,8 +283,6 @@ impl DiffViewer {
                             AiCodexGenerationConfig {
                                 codex_executable: codex_executable.as_path(),
                                 repo_root: repo_root.as_path(),
-                                model: selected_model.as_deref(),
-                                reasoning_effort: selected_effort.as_deref(),
                             },
                             repo_root.as_path(),
                             review_branch_name.as_str(),

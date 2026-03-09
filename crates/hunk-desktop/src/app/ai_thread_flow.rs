@@ -1,8 +1,8 @@
 use std::fs;
 use std::io::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use hunk_codex::state::AiState;
 use hunk_git::branch::sanitize_branch_name;
@@ -16,6 +16,8 @@ const MAX_SUMMARY_CONTEXT_LEN: usize = 8_000;
 const MAX_PATCH_CONTEXT_LEN: usize = 40_000;
 const DEFAULT_AI_GIT_TEXT_MODEL: &str = "gpt-5.3-codex";
 const DEFAULT_AI_GIT_REASONING_EFFORT: &str = "low";
+const AI_GIT_TEXT_TIMEOUT: Duration = Duration::from_secs(20);
+const AI_GIT_TEXT_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const BRANCH_STOP_WORDS: &[&str] = &[
     "a", "an", "and", "as", "at", "be", "for", "from", "in", "into", "is", "it", "of", "on", "or",
     "that", "the", "this", "to", "with",
@@ -43,8 +45,6 @@ impl AiCommitMessage {
 pub(super) struct AiCodexGenerationConfig<'a> {
     pub codex_executable: &'a Path,
     pub repo_root: &'a Path,
-    pub model: Option<&'a str>,
-    pub reasoning_effort: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -122,25 +122,45 @@ pub(super) fn ai_commit_message_for_thread(
     }
 }
 
+pub(super) fn ai_branch_generation_seed_for_thread(
+    state: &AiState,
+    thread_id: &str,
+    fallback_branch_name: &str,
+) -> String {
+    ai_first_prompt_seed_for_thread(state, thread_id)
+        .or_else(|| ai_latest_agent_message_for_thread(state, thread_id))
+        .or_else(|| {
+            state
+                .threads
+                .get(thread_id)
+                .and_then(|thread| thread.title.clone())
+        })
+        .unwrap_or_else(|| fallback_branch_name.to_string())
+}
+
 pub(super) fn try_ai_branch_name_for_prompt(
     codex_executable: &Path,
     repo_root: &Path,
     prompt: &str,
-    model: Option<&str>,
-    reasoning_effort: Option<&str>,
+    image_paths: &[PathBuf],
     worktree_mode: bool,
 ) -> Option<String> {
     let prompt = prompt.trim();
-    if prompt.is_empty() {
+    if prompt.is_empty() && image_paths.is_empty() {
         return None;
     }
+    let request_context = if prompt.is_empty() {
+        "(none)".to_string()
+    } else {
+        limit_text(prompt, MAX_PROMPT_CONTEXT_LEN)
+    };
 
     let branch_prefix = if worktree_mode {
         "ai/worktree"
     } else {
         "ai/local"
     };
-    let generation_prompt = format!(
+    let mut generation_prompt = format!(
         "Generate a concise git branch fragment for this request.\n\
 Return strict JSON with one key: branch.\n\
 Rules:\n\
@@ -149,10 +169,14 @@ Rules:\n\
 - no quotes.\n\
 - no prefix like feature/ or ai/.\n\
 - no trailing punctuation.\n\
+- use attached images as primary context for visual/UI requests.\n\
 \n\
 User request:\n{}\n",
-        limit_text(prompt, MAX_PROMPT_CONTEXT_LEN)
+        request_context
     );
+    if !image_paths.is_empty() {
+        generation_prompt.push_str(format!("\nAttached images: {}\n", image_paths.len()).as_str());
+    }
     let output_schema = serde_json::json!({
         "type": "object",
         "additionalProperties": false,
@@ -164,10 +188,9 @@ User request:\n{}\n",
     let generated = run_codex_json_generation(
         codex_executable,
         repo_root,
-        model,
-        reasoning_effort,
         generation_prompt.as_str(),
         &output_schema,
+        image_paths,
     )?;
     let branch = generated
         .get("branch")
@@ -229,10 +252,9 @@ Diff patch:\n{}\n",
     let generated = run_codex_json_generation(
         config.codex_executable,
         config.repo_root,
-        config.model,
-        config.reasoning_effort,
         prompt.as_str(),
         &output_schema,
+        &[],
     )?;
     let subject = generated
         .get("subject")
@@ -325,8 +347,8 @@ fn normalized_commit_subject_line(message: &str) -> Option<String> {
         if subject.is_empty() {
             continue;
         }
-        if subject.len() > MAX_COMMIT_SUBJECT_LEN {
-            subject.truncate(MAX_COMMIT_SUBJECT_LEN);
+        if subject.chars().count() > MAX_COMMIT_SUBJECT_LEN {
+            subject = truncate_text_chars(subject.as_str(), MAX_COMMIT_SUBJECT_LEN);
             subject = subject.trim().to_string();
         }
         if subject.is_empty() {
@@ -373,10 +395,9 @@ fn ai_first_prompt_for_thread(state: &AiState, thread_id: &str, fallback_branch_
 fn run_codex_json_generation(
     codex_executable: &Path,
     repo_root: &Path,
-    model: Option<&str>,
-    reasoning_effort: Option<&str>,
     prompt: &str,
     schema: &serde_json::Value,
+    image_paths: &[PathBuf],
 ) -> Option<serde_json::Value> {
     let unique_suffix = format!(
         "{}-{}",
@@ -403,21 +424,18 @@ fn run_codex_json_generation(
         .arg("--output-schema")
         .arg(schema_path.as_path())
         .arg("--output-last-message")
-        .arg(output_path.as_path());
-
-    let selected_model = model
-        .map(str::trim)
-        .filter(|candidate| !candidate.is_empty())
-        .unwrap_or(DEFAULT_AI_GIT_TEXT_MODEL);
-    command.arg("--model").arg(selected_model);
-
-    let effort = reasoning_effort
-        .map(str::trim)
-        .filter(|effort| !effort.is_empty())
-        .unwrap_or(DEFAULT_AI_GIT_REASONING_EFFORT);
+        .arg(output_path.as_path())
+        .arg("--model")
+        .arg(DEFAULT_AI_GIT_TEXT_MODEL);
+    for image_path in image_paths {
+        command.arg("--image").arg(image_path.as_path());
+    }
     command
         .arg("--config")
-        .arg(format!("model_reasoning_effort=\"{effort}\""))
+        .arg(format!(
+            "model_reasoning_effort=\"{}\"",
+            DEFAULT_AI_GIT_REASONING_EFFORT
+        ))
         .arg("-")
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
@@ -428,7 +446,7 @@ fn run_codex_json_generation(
         if let Some(mut stdin) = child.stdin.take() {
             stdin.write_all(prompt.as_bytes()).ok()?;
         }
-        let status = child.wait().ok()?;
+        let status = wait_for_command_completion(&mut child, AI_GIT_TEXT_TIMEOUT)?;
         if !status.success() {
             return None;
         }
@@ -453,18 +471,40 @@ fn normalize_commit_body(body: &str) -> String {
         .join("\n")
         .trim()
         .to_string();
-    if normalized.len() > MAX_COMMIT_BODY_LEN {
-        normalized.truncate(MAX_COMMIT_BODY_LEN);
+    if normalized.chars().count() > MAX_COMMIT_BODY_LEN {
+        normalized = truncate_text_chars(normalized.as_str(), MAX_COMMIT_BODY_LEN);
         normalized = normalized.trim().to_string();
     }
     normalized
 }
 
 fn limit_text(text: &str, max_len: usize) -> String {
-    if text.len() <= max_len {
+    if text.chars().count() <= max_len {
         return text.to_string();
     }
-    let mut truncated = text.chars().take(max_len).collect::<String>();
+    let mut truncated = truncate_text_chars(text, max_len);
     truncated.push_str("\n[truncated]");
     truncated
+}
+
+fn truncate_text_chars(text: &str, max_chars: usize) -> String {
+    text.chars().take(max_chars).collect()
+}
+
+pub(super) fn wait_for_command_completion(
+    child: &mut std::process::Child,
+    timeout: Duration,
+) -> Option<std::process::ExitStatus> {
+    let started_at = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().ok()? {
+            return Some(status);
+        }
+        if started_at.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(AI_GIT_TEXT_POLL_INTERVAL);
+    }
 }

@@ -739,8 +739,6 @@ impl DiffViewer {
         let fallback_branch_name =
             ai_branch_name_for_prompt(prompt_seed.as_str(), start_mode == AiNewThreadStartMode::Worktree);
         let codex_executable = Self::resolve_codex_executable_path();
-        let selected_model = session_overrides.model.clone();
-        let selected_effort = session_overrides.effort.clone();
         let epoch = self.begin_git_action("Prepare AI thread", cx);
         let started_at = Instant::now();
 
@@ -756,8 +754,7 @@ impl DiffViewer {
                         codex_executable.as_path(),
                         repo_root.as_path(),
                         prompt_seed.as_str(),
-                        selected_model.as_deref(),
-                        selected_effort.as_deref(),
+                        local_image_paths.as_slice(),
                         start_mode == AiNewThreadStartMode::Worktree,
                     )
                     .unwrap_or(fallback_branch_name);
