@@ -30,6 +30,7 @@ mod ai_tests {
     use super::normalized_thread_session_state;
     use super::normalized_user_input_answers;
     use super::preferred_ai_worktree_base_branch_name;
+    use super::requested_branch_name_for_new_thread;
     use super::resolve_bundled_codex_executable_from_exe;
     use super::resolved_ai_workspace_cwd;
     use super::seed_ai_workspace_preferences;
@@ -2255,6 +2256,41 @@ mod ai_tests {
         assert_eq!(item_status_chip(ItemStatus::Started), "started");
         assert_eq!(item_status_chip(ItemStatus::Streaming), "streaming");
         assert_eq!(item_status_chip(ItemStatus::Completed), "completed");
+    }
+
+    #[test]
+    fn requested_branch_name_for_local_thread_skips_generation() {
+        let fallback = "ai/local/fallback".to_string();
+        let requested = requested_branch_name_for_new_thread(
+            AiNewThreadStartMode::Local,
+            fallback.clone(),
+            || panic!("local thread starts should not generate branch names"),
+        );
+
+        assert_eq!(requested, fallback);
+    }
+
+    #[test]
+    fn requested_branch_name_for_worktree_uses_generated_branch_when_available() {
+        let requested = requested_branch_name_for_new_thread(
+            AiNewThreadStartMode::Worktree,
+            "ai/worktree/fallback".to_string(),
+            || Some("ai/worktree/generated".to_string()),
+        );
+
+        assert_eq!(requested, "ai/worktree/generated");
+    }
+
+    #[test]
+    fn requested_branch_name_for_worktree_falls_back_when_generation_fails() {
+        let fallback = "ai/worktree/fallback".to_string();
+        let requested = requested_branch_name_for_new_thread(
+            AiNewThreadStartMode::Worktree,
+            fallback.clone(),
+            || None,
+        );
+
+        assert_eq!(requested, fallback);
     }
 
     #[test]

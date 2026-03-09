@@ -750,14 +750,17 @@ impl DiffViewer {
                 .background_executor()
                 .spawn(async move {
                     let execution_started_at = Instant::now();
-                    let requested_branch_name = try_ai_branch_name_for_prompt(
-                        codex_executable.as_path(),
-                        repo_root.as_path(),
-                        prompt_seed.as_str(),
-                        local_image_paths.as_slice(),
-                        start_mode == AiNewThreadStartMode::Worktree,
-                    )
-                    .unwrap_or(fallback_branch_name);
+                    let requested_branch_name = requested_branch_name_for_new_thread(
+                        start_mode,
+                        fallback_branch_name,
+                        || try_ai_branch_name_for_prompt(
+                            codex_executable.as_path(),
+                            repo_root.as_path(),
+                            prompt_seed.as_str(),
+                            local_image_paths.as_slice(),
+                            true,
+                        )
+                    );
                     let prepared = prepare_ai_thread_workspace(
                         repo_root.as_path(),
                         requested_branch_name.as_str(),
@@ -1084,6 +1087,19 @@ fn prepare_ai_thread_workspace(
                     }
                 }
             }
+        }
+    }
+}
+
+fn requested_branch_name_for_new_thread(
+    start_mode: AiNewThreadStartMode,
+    fallback_branch_name: String,
+    generate_branch_name: impl FnOnce() -> Option<String>,
+) -> String {
+    match start_mode {
+        AiNewThreadStartMode::Local => fallback_branch_name,
+        AiNewThreadStartMode::Worktree => {
+            generate_branch_name().unwrap_or(fallback_branch_name)
         }
     }
 }
