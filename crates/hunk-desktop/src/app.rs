@@ -7,13 +7,13 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use gpui::{
-    Animation, AnimationExt as _, AnyElement, App, AppContext as _, ClipboardItem, Context, Corner,
-    Entity, FocusHandle, Hsla, InteractiveElement as _, IntoElement, IsZero as _, KeyBinding,
-    ListAlignment, ListOffset, ListSizingBehavior, ListState, Menu, MenuItem, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, OsAction, ParentElement as _, PathPromptOptions,
-    Point, Render, ScrollHandle, ScrollWheelEvent, SharedString, StatefulInteractiveElement as _,
-    Styled as _, SystemMenuType, Task, TitlebarOptions, Window, WindowOptions, actions, anchored,
-    deferred, div, list, prelude::FluentBuilder as _, px,
+    Animation, AnimationExt as _, AnyElement, AnyWindowHandle, App, AppContext as _, ClipboardItem,
+    Context, Corner, Entity, FocusHandle, Hsla, InteractiveElement as _, IntoElement, IsZero as _,
+    KeyBinding, ListAlignment, ListOffset, ListSizingBehavior, ListState, Menu, MenuItem,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, OsAction, ParentElement as _,
+    PathPromptOptions, Point, Render, ScrollHandle, ScrollWheelEvent, SharedString,
+    StatefulInteractiveElement as _, Styled as _, SystemMenuType, Task, TitlebarOptions, Window,
+    WindowOptions, actions, anchored, deferred, div, list, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     ActiveTheme as _, Colorize as _, GlobalState, Root, StyledExt as _, Theme, ThemeMode, h_flex,
@@ -74,7 +74,6 @@ use refresh_policy::{
 };
 use review_compare_picker::{
     ReviewComparePickerDelegate, ReviewCompareSourceOption, build_review_compare_picker_delegate,
-    review_compare_picker_selected_index,
 };
 use workspace_target_picker::{
     WorkspaceTargetPickerDelegate, build_workspace_target_picker_delegate,
@@ -1070,6 +1069,7 @@ struct DiffViewer {
     state_store: Option<AppStateStore>,
     state: AppState,
     database_store: Option<DatabaseStore>,
+    window_handle: AnyWindowHandle,
     comments_cache: Vec<CommentRecord>,
     comments_preview_open: bool,
     comments_show_non_open: bool,
@@ -1085,6 +1085,8 @@ struct DiffViewer {
     workspace_targets: Vec<WorkspaceTargetSummary>,
     active_workspace_target_id: Option<String>,
     review_compare_sources: Vec<ReviewCompareSourceOption>,
+    review_default_left_source_id: Option<String>,
+    review_default_right_source_id: Option<String>,
     review_left_source_id: Option<String>,
     review_right_source_id: Option<String>,
     branch_name: String,

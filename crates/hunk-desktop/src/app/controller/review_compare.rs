@@ -27,29 +27,22 @@ impl DiffViewer {
         .detach();
     }
 
-    fn replace_review_compare_picker_states(
-        &mut self,
+    fn sync_review_compare_picker_state(
+        picker_state: &Entity<SelectState<ReviewComparePickerDelegate>>,
+        delegate: ReviewComparePickerDelegate,
+        selected_source_id: Option<&str>,
         window: &mut Window,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) {
-        let delegate = build_review_compare_picker_delegate(&self.review_compare_sources);
-        let left_selected_index = review_compare_picker_selected_index(
-            &self.review_compare_sources,
-            self.review_left_source_id.as_deref(),
-        );
-        let right_selected_index = review_compare_picker_selected_index(
-            &self.review_compare_sources,
-            self.review_right_source_id.as_deref(),
-        );
-
-        self.review_left_picker_state = cx.new(|cx| {
-            SelectState::new(delegate.clone(), left_selected_index, window, cx).searchable(true)
+        picker_state.update(cx, |state, cx| {
+            state.set_items(delegate, window, cx);
+            if let Some(selected_source_id) = selected_source_id {
+                let selected_source_id = selected_source_id.to_string();
+                state.set_selected_value(&selected_source_id, window, cx);
+            } else {
+                state.set_selected_index(None, window, cx);
+            }
         });
-        self.review_right_picker_state = cx.new(|cx| {
-            SelectState::new(delegate, right_selected_index, window, cx).searchable(true)
-        });
-        self.subscribe_review_compare_picker_states(cx);
-        cx.notify();
     }
 
     fn update_review_compare_picker_states(
@@ -57,43 +50,53 @@ impl DiffViewer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.replace_review_compare_picker_states(window, cx);
+        let delegate = build_review_compare_picker_delegate(&self.review_compare_sources);
+
+        Self::sync_review_compare_picker_state(
+            &self.review_left_picker_state,
+            delegate.clone(),
+            self.review_left_source_id.as_deref(),
+            window,
+            cx,
+        );
+        Self::sync_review_compare_picker_state(
+            &self.review_right_picker_state,
+            delegate,
+            self.review_right_source_id.as_deref(),
+            window,
+            cx,
+        );
+        cx.notify();
     }
 
     fn sync_review_compare_picker_states(&mut self, cx: &mut Context<Self>) {
-        let Some(window_handle) = cx.windows().into_iter().next() else {
-            return;
-        };
-
+        let window_handle = self.window_handle;
+        let review_left_picker_state = self.review_left_picker_state.clone();
+        let review_right_picker_state = self.review_right_picker_state.clone();
         let delegate = build_review_compare_picker_delegate(&self.review_compare_sources);
-        let left_selected_index = review_compare_picker_selected_index(
-            &self.review_compare_sources,
-            self.review_left_source_id.as_deref(),
-        );
-        let right_selected_index = review_compare_picker_selected_index(
-            &self.review_compare_sources,
-            self.review_right_source_id.as_deref(),
-        );
+        let review_left_source_id = self.review_left_source_id.clone();
+        let review_right_source_id = self.review_right_source_id.clone();
 
-        match cx.update_window(window_handle, move |_, window, cx| {
-            let left = cx.new(|cx| {
-                SelectState::new(delegate.clone(), left_selected_index, window, cx).searchable(true)
-            });
-            let right = cx.new(|cx| {
-                SelectState::new(delegate, right_selected_index, window, cx).searchable(true)
-            });
-            (left, right)
-        }) {
-            Ok((left_picker_state, right_picker_state)) => {
-                self.review_left_picker_state = left_picker_state;
-                self.review_right_picker_state = right_picker_state;
-                self.subscribe_review_compare_picker_states(cx);
-                cx.notify();
-            }
-            Err(err) => {
+        cx.defer(move |cx| {
+            if let Err(err) = cx.update_window(window_handle, move |_, window, cx| {
+                Self::sync_review_compare_picker_state(
+                    &review_left_picker_state,
+                    delegate.clone(),
+                    review_left_source_id.as_deref(),
+                    window,
+                    cx,
+                );
+                Self::sync_review_compare_picker_state(
+                    &review_right_picker_state,
+                    delegate,
+                    review_right_source_id.as_deref(),
+                    window,
+                    cx,
+                );
+            }) {
                 error!("failed to sync review compare picker state: {err:#}");
             }
-        }
+        });
     }
 
     fn review_compare_repo_key(&self) -> Option<String> {
@@ -180,6 +183,7 @@ impl DiffViewer {
         &self,
         sources: &[ReviewCompareSourceOption],
         right_source_id: Option<&str>,
+        default_base_branch_name: Option<&str>,
     ) -> Option<String> {
         if let Some(active_branch_name) = right_source_id
             .and_then(|right_source_id| {
@@ -198,11 +202,10 @@ impl DiffViewer {
             return Some(source.id.clone());
         }
 
-        if let Some(project_path) = self.project_path.as_deref()
-            && let Ok(Some(default_branch_name)) = resolve_default_base_branch_name(project_path)
+        if let Some(default_branch_name) = default_base_branch_name
             && let Some(source) = sources.iter().find(|source| {
                 source.kind == crate::app::review_compare_picker::ReviewCompareSourceKind::Branch
-                    && source.branch_name.as_deref() == Some(default_branch_name.as_str())
+                    && source.branch_name.as_deref() == Some(default_branch_name)
                     && Some(source.id.as_str()) != right_source_id
             })
         {
@@ -233,16 +236,27 @@ impl DiffViewer {
             .map(|source| source.id.clone())
     }
 
+    fn default_review_compare_selection_ids_from_sources(
+        &self,
+        sources: &[ReviewCompareSourceOption],
+        default_base_branch_name: Option<&str>,
+    ) -> (Option<String>, Option<String>) {
+        let default_right_source_id = self.default_review_right_source_id_from_sources(sources);
+        let default_left_source_id = self.default_review_left_source_id_from_sources(
+            sources,
+            default_right_source_id.as_deref(),
+            default_base_branch_name,
+        );
+        (default_left_source_id, default_right_source_id)
+    }
+
     fn default_review_compare_selection_ids(
         &self,
     ) -> (Option<String>, Option<String>) {
-        let default_right_source_id =
-            self.default_review_right_source_id_from_sources(&self.review_compare_sources);
-        let default_left_source_id = self.default_review_left_source_id_from_sources(
-            &self.review_compare_sources,
-            default_right_source_id.as_deref(),
-        );
-        (default_left_source_id, default_right_source_id)
+        (
+            self.review_default_left_source_id.clone(),
+            self.review_default_right_source_id.clone(),
+        )
     }
 
     fn normalize_review_compare_selection_ids(
@@ -349,9 +363,15 @@ impl DiffViewer {
                     .get(repo_key.as_str())
                     .cloned()
             });
-        let default_right_source_id = self.default_review_right_source_id_from_sources(&sources);
-        let default_left_source_id =
-            self.default_review_left_source_id_from_sources(&sources, default_right_source_id.as_deref());
+        let default_base_branch_name = self
+            .project_path
+            .as_deref()
+            .and_then(|project_path| resolve_default_base_branch_name(project_path).ok().flatten());
+        let (default_left_source_id, default_right_source_id) = self
+            .default_review_compare_selection_ids_from_sources(
+                &sources,
+                default_base_branch_name.as_deref(),
+            );
         let left_source_id = self
             .review_left_source_id
             .clone()
@@ -360,16 +380,18 @@ impl DiffViewer {
                     .as_ref()
                     .and_then(|selection| selection.left_source_id.clone())
             })
-            .or(default_left_source_id);
+            .or(default_left_source_id.clone());
         let right_source_id = self
             .review_right_source_id
             .clone()
             .or_else(|| persisted_selection.and_then(|selection| selection.right_source_id))
-            .or(default_right_source_id);
+            .or(default_right_source_id.clone());
         let (left_source_id, right_source_id) =
             Self::normalize_review_compare_selection_ids(&sources, left_source_id, right_source_id);
 
         self.review_compare_sources = sources;
+        self.review_default_left_source_id = default_left_source_id;
+        self.review_default_right_source_id = default_right_source_id;
         self.review_left_source_id = left_source_id;
         self.review_right_source_id = right_source_id;
         self.persist_review_compare_selection();

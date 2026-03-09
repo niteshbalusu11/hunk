@@ -357,6 +357,7 @@ impl DiffViewer {
             state_store,
             state,
             database_store,
+            window_handle: window.window_handle(),
             comments_cache: Vec::new(),
             comments_preview_open: false,
             comments_show_non_open: false,
@@ -372,6 +373,8 @@ impl DiffViewer {
             workspace_targets: Vec::new(),
             active_workspace_target_id: None,
             review_compare_sources: Vec::new(),
+            review_default_left_source_id: None,
+            review_default_right_source_id: None,
             review_left_source_id: None,
             review_right_source_id: None,
             branch_name: "unknown".to_string(),
@@ -1729,6 +1732,8 @@ impl DiffViewer {
         self.project_path = Some(primary_root);
         self.set_last_project_path(self.project_path.clone());
         self.repo_root = Some(root);
+        self.branches = branches;
+        self.sync_branch_picker_state(cx);
         self.refresh_workspace_targets_from_git_state(cx);
         if self.active_workspace_target_id.is_none() {
             self.active_workspace_target_id = self
@@ -1744,9 +1749,6 @@ impl DiffViewer {
         self.branch_has_upstream = branch_has_upstream;
         self.branch_ahead_count = branch_ahead_count;
         self.branch_behind_count = branch_behind_count;
-        self.branches = branches;
-        self.sync_branch_picker_state(cx);
-        self.refresh_review_compare_sources_from_git_state(cx);
         self.files = files;
         self.file_status_by_path = self
             .files
@@ -1869,6 +1871,8 @@ impl DiffViewer {
         self.sync_workspace_target_picker_state(cx);
         self.sync_ai_workspace_target_picker_state(cx);
         self.review_compare_sources.clear();
+        self.review_default_left_source_id = None;
+        self.review_default_right_source_id = None;
         self.review_left_source_id = None;
         self.review_right_source_id = None;
         self.sync_review_compare_picker_states(cx);

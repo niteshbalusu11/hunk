@@ -194,18 +194,6 @@ pub(crate) fn build_review_compare_picker_delegate(
     )
 }
 
-pub(crate) fn review_compare_picker_selected_index(
-    options: &[ReviewCompareSourceOption],
-    selected_id: Option<&str>,
-) -> Option<IndexPath> {
-    selected_id.and_then(|selected_id| {
-        options
-            .iter()
-            .position(|option| option.id == selected_id)
-            .map(|row| IndexPath::default().row(row))
-    })
-}
-
 fn is_detached_workspace_target_branch(branch_name: &str) -> bool {
     matches!(branch_name, "detached" | "unborn")
 }
