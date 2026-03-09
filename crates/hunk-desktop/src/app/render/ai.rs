@@ -779,96 +779,77 @@ impl DiffViewer {
                                                                 )
                                                                 .child({
                                                                     let view = view.clone();
-                                                                    if selected_thread_start_mode
-                                                                        == Some(AiNewThreadStartMode::Local)
-                                                                    {
-                                                                        let push_label = format!(
-                                                                            "Commit and Push to {}",
-                                                                            active_branch
-                                                                        );
-                                                                        Button::new("ai-publish-local-thread")
-                                                                            .compact()
-                                                                            .outline()
-                                                                            .with_size(
-                                                                                gpui_component::Size::Small,
-                                                                            )
-                                                                            .rounded(px(8.0))
-                                                                            .loading(
-                                                                                ai_commit_and_push_loading
-                                                                                    || ai_open_pr_loading,
-                                                                            )
-                                                                            .dropdown_caret(true)
-                                                                            .label("Publish")
-                                                                            .tooltip(
-                                                                                ai_publish_blocker
-                                                                                    .clone()
-                                                                                    .unwrap_or_else(
-                                                                                        || "Commit and push this branch directly, or create a review branch and open PR/MR."
-                                                                                            .to_string(),
-                                                                                    ),
-                                                                            )
-                                                                            .disabled(
-                                                                                ai_publish_disabled,
-                                                                            )
-                                                                            .dropdown_menu(
-                                                                                move |menu, _, _| {
-                                                                                    menu.item(
-                                                                                        PopupMenuItem::new(
-                                                                                            push_label.clone(),
-                                                                                        )
+                                                                    let push_label = format!(
+                                                                        "Commit and Push to {}",
+                                                                        active_branch
+                                                                    );
+                                                                    let publish_tooltip =
+                                                                        ai_publish_blocker.clone().unwrap_or_else(|| {
+                                                                            match selected_thread_start_mode {
+                                                                                Some(AiNewThreadStartMode::Local) => {
+                                                                                    "Commit and push this branch directly, or create a review branch and open PR/MR."
+                                                                                        .to_string()
+                                                                                }
+                                                                                Some(AiNewThreadStartMode::Worktree) => {
+                                                                                    "Commit and push this worktree branch directly, or open PR/MR for the current branch."
+                                                                                        .to_string()
+                                                                                }
+                                                                                None => "Commit and push this branch directly, or open PR/MR for it."
+                                                                                    .to_string(),
+                                                                            }
+                                                                        });
+                                                                    Button::new("ai-publish-thread")
+                                                                        .compact()
+                                                                        .outline()
+                                                                        .with_size(
+                                                                            gpui_component::Size::Small,
+                                                                        )
+                                                                        .rounded(px(8.0))
+                                                                        .loading(
+                                                                            ai_commit_and_push_loading
+                                                                                || ai_open_pr_loading,
+                                                                        )
+                                                                        .dropdown_caret(true)
+                                                                        .label("Publish")
+                                                                        .tooltip(publish_tooltip)
+                                                                        .disabled(
+                                                                            ai_publish_disabled
+                                                                                || ai_open_pr_disabled,
+                                                                        )
+                                                                        .dropdown_menu(
+                                                                            move |menu, _, _| {
+                                                                                menu.item(
+                                                                                    PopupMenuItem::new(
+                                                                                        push_label.clone(),
+                                                                                    )
+                                                                                    .on_click({
+                                                                                        let view = view
+                                                                                            .clone();
+                                                                                        move |_, _, cx| {
+                                                                                            view.update(cx, |this, cx| {
+                                                                                                this.ai_commit_and_push_for_current_thread(cx);
+                                                                                            });
+                                                                                        }
+                                                                                    }),
+                                                                                )
+                                                                                .item(
+                                                                                    PopupMenuItem::separator(),
+                                                                                )
+                                                                                .item(
+                                                                                    PopupMenuItem::new("Open PR")
                                                                                         .on_click({
                                                                                             let view = view
                                                                                                 .clone();
                                                                                             move |_, _, cx| {
                                                                                                 view.update(cx, |this, cx| {
-                                                                                                    this.ai_commit_and_push_for_current_thread(cx);
+                                                                                                    this.ai_open_pr_for_current_thread(cx);
                                                                                                 });
                                                                                             }
                                                                                         }),
-                                                                                    )
-                                                                                    .item(
-                                                                                        PopupMenuItem::separator(),
-                                                                                    )
-                                                                                    .item(
-                                                                                        PopupMenuItem::new("Open PR")
-                                                                                            .on_click({
-                                                                                                let view = view
-                                                                                                    .clone();
-                                                                                                move |_, _, cx| {
-                                                                                                    view.update(cx, |this, cx| {
-                                                                                                        this.ai_open_pr_for_current_thread(cx);
-                                                                                                    });
-                                                                                                }
-                                                                                            }),
-                                                                                    )
-                                                                                },
-                                                                            )
-                                                                            .into_any_element()
-                                                                    } else {
-                                                                        Button::new("ai-open-pr")
-                                                                            .compact()
-                                                                            .outline()
-                                                                            .with_size(
-                                                                                gpui_component::Size::Small,
-                                                                            )
-                                                                            .rounded(px(8.0))
-                                                                            .loading(ai_open_pr_loading)
-                                                                            .label("Open PR")
-                                                                            .tooltip(
-                                                                                ai_open_pr_blocker
-                                                                                    .clone()
-                                                                                    .unwrap_or_else(
-                                                                                        || "Commit, push, and open PR/MR for the current AI thread.".to_string(),
-                                                                                    ),
-                                                                            )
-                                                                            .disabled(ai_open_pr_disabled)
-                                                                            .on_click(move |_, _, cx| {
-                                                                                view.update(cx, |this, cx| {
-                                                                                    this.ai_open_pr_for_current_thread(cx);
-                                                                                });
-                                                                            })
-                                                                            .into_any_element()
-                                                                    }
+                                                                                )
+                                                                            },
+                                                                        )
+                                                                        .into_any_element()
                                                                 })
                                                                 .when(self.ai_mad_max_mode, |this| {
                                                                     this.child(
