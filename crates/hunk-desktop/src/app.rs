@@ -312,11 +312,6 @@ struct GitWorkspaceState {
     file_status_by_path: BTreeMap<String, FileStatus>,
     file_line_stats: BTreeMap<String, LineStats>,
     overall_line_stats: LineStats,
-    staged_commit_files: BTreeSet<String>,
-    last_commit_subject: Option<String>,
-    recent_commits: Vec<RecentCommitSummary>,
-    recent_commits_error: Option<String>,
-    last_recent_commits_fingerprint: Option<RecentCommitsFingerprint>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
