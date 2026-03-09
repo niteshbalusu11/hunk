@@ -138,6 +138,7 @@ fn render_ai_pending_thread_start(
     is_dark: bool,
     cx: &mut Context<DiffViewer>,
 ) -> AnyElement {
+    let pending_colors = hunk_pending_message(cx.theme(), is_dark);
     let status_text = if pending.thread_id.is_some() {
         "Sending first message..."
     } else {
@@ -165,14 +166,26 @@ fn render_ai_pending_thread_start(
                 .max_w(px(680.0))
                 .w_full()
                 .min_w_0()
-                .gap_1p5()
+                .items_end()
+                .gap_1()
                 .child(
-                    h_flex()
+                    div()
+                        .text_xs()
+                        .font_semibold()
+                        .child("You"),
+                )
+                .child(
+                    div()
                         .w_full()
-                        .items_center()
-                        .justify_between()
-                        .gap_2()
-                        .child(div().text_xs().font_semibold().child("You"))
+                        .text_sm()
+                        .text_color(pending_colors.text)
+                        .whitespace_normal()
+                        .child(message_text),
+                )
+                .child(
+                    v_flex()
+                        .items_end()
+                        .gap_0p5()
                         .child(
                             h_flex()
                                 .items_center()
@@ -180,46 +193,19 @@ fn render_ai_pending_thread_start(
                                 .child(
                                     gpui_component::spinner::Spinner::new()
                                         .with_size(gpui_component::Size::Small)
-                                        .color(cx.theme().muted_foreground),
+                                        .color(pending_colors.meta),
                                 )
                                 .child(
                                     div()
                                         .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
+                                        .text_color(pending_colors.meta)
                                         .child(status_text),
                                 ),
-                        ),
-                )
-                .child(
-                    div()
-                        .w_full()
-                        .rounded(px(14.0))
-                        .border_1()
-                        .border_color(hunk_opacity(cx.theme().accent, is_dark, 0.68, 0.54))
-                        .bg(hunk_blend(
-                            cx.theme().accent,
-                            cx.theme().background,
-                            is_dark,
-                            0.46,
-                            0.18,
-                        ))
-                        .px_3()
-                        .py_2()
-                        .child(
-                            div()
-                                .text_sm()
-                                .whitespace_normal()
-                                .child(message_text),
-                        ),
-                )
-                .child(
-                    h_flex()
-                        .w_full()
-                        .justify_end()
+                        )
                         .child(
                             div()
                                 .text_xs()
-                                .text_color(cx.theme().muted_foreground)
+                                .text_color(pending_colors.meta)
                                 .child(format!(
                                     "{} | {} | {}s",
                                     pending.start_mode.label(),

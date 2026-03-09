@@ -5,6 +5,15 @@ impl DiffViewer {
         cx: &mut Context<Self>,
     ) {
         let next_workspace_key = self.ai_workspace_key();
+        self.ai_handle_workspace_change_to(previous_workspace_key, next_workspace_key, cx);
+    }
+
+    pub(super) fn ai_handle_workspace_change_to(
+        &mut self,
+        previous_workspace_key: Option<String>,
+        next_workspace_key: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         if previous_workspace_key == next_workspace_key {
             self.ai_sync_workspace_preferences(cx);
             return;

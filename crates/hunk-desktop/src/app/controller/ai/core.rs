@@ -111,6 +111,7 @@ impl DiffViewer {
         let draft_start_mode = self.ai_new_thread_start_mode;
         let draft_worktree_base_branch_name = self.ai_worktree_base_branch_name.clone();
         self.sync_ai_workspace_target_from_catalog(cx);
+        let next_workspace_key = self.ai_workspace_key_for_draft();
         let previous_draft_key = self.current_ai_composer_draft_key();
         self.sync_ai_visible_composer_prompt_to_draft(cx);
         if let Some(workspace_key) = self.workspace_ai_composer_draft_key() {
@@ -118,15 +119,7 @@ impl DiffViewer {
                 .insert(workspace_key.clone(), Default::default());
             self.ai_composer_status_by_draft.remove(&workspace_key);
         }
-        self.ai_new_thread_draft_active = true;
-        self.ai_pending_new_thread_selection = false;
-        self.ai_pending_thread_start = None;
-        self.ai_selected_thread_id = None;
-        self.ai_timeline_follow_output = true;
-        self.ai_scroll_timeline_to_bottom = false;
-        self.ai_expanded_timeline_row_ids.clear();
-        self.ai_text_selection = None;
-        self.ai_handle_workspace_change(previous_workspace_key, cx);
+        self.ai_handle_workspace_change_to(previous_workspace_key, next_workspace_key, cx);
         self.ai_new_thread_start_mode = draft_start_mode;
         self.ai_worktree_base_branch_name = draft_worktree_base_branch_name;
         self.ai_new_thread_draft_active = true;
@@ -225,10 +218,7 @@ impl DiffViewer {
             draft.prompt.clear();
             draft.local_images.clear();
         }
-        let Some(window_handle) = cx.windows().into_iter().next() else {
-            return;
-        };
-        if let Err(error) = cx.update_window(window_handle, |_, window, cx| {
+        if let Err(error) = Self::update_any_window(cx, |window, cx| {
             ai_composer_state.update(cx, |state, cx| {
                 state.set_value("", window, cx);
             });
@@ -519,16 +509,19 @@ impl DiffViewer {
         cx: &mut Context<Self>,
     ) {
         let previous_workspace_key = self.ai_workspace_key();
+        let next_workspace_key = self
+            .ai_thread_workspace_root(thread_id.as_str())
+            .map(|root| root.to_string_lossy().to_string())
+            .or_else(|| previous_workspace_key.clone());
         let previous_draft_key = self.current_ai_composer_draft_key();
         self.sync_ai_visible_composer_prompt_to_draft(cx);
+        self.ai_handle_workspace_change_to(previous_workspace_key, next_workspace_key, cx);
         self.ai_timeline_follow_output = true;
         self.ai_scroll_timeline_to_bottom = true;
         self.ai_expanded_timeline_row_ids.clear();
         self.ai_text_selection = None;
         self.ai_new_thread_draft_active = false;
         self.ai_pending_new_thread_selection = false;
-        self.ai_selected_thread_id = Some(thread_id.clone());
-        self.ai_handle_workspace_change(previous_workspace_key, cx);
         self.ai_selected_thread_id = Some(thread_id.clone());
         if previous_draft_key != self.current_ai_composer_draft_key() {
             self.restore_ai_visible_composer_from_current_draft_in_window(window, cx);

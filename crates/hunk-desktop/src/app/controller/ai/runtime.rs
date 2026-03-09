@@ -520,10 +520,7 @@ impl DiffViewer {
             self.current_ai_composer_draft_key().as_ref(),
         );
         let ai_composer_state = self.ai_composer_input_state.clone();
-        let Some(window_handle) = cx.windows().into_iter().next() else {
-            return;
-        };
-        if let Err(error) = cx.update_window(window_handle, move |_, window, cx| {
+        if let Err(error) = Self::update_any_window(cx, move |window, cx| {
             ai_composer_state.update(cx, |state, cx| {
                 state.set_value(prompt.clone(), window, cx);
             });

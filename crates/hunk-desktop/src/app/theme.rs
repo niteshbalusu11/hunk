@@ -60,6 +60,12 @@ pub(crate) struct HunkGitWorkspaceColors {
     pub muted_card: HunkSurfaceColors,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HunkPendingMessageColors {
+    pub text: Hsla,
+    pub meta: Hsla,
+}
+
 pub(crate) fn install_hunk_themes(cx: &mut App) {
     apply_soft_light_theme(cx);
     apply_soft_dark_theme(cx);
@@ -94,6 +100,19 @@ pub(crate) fn hunk_input_surface(theme: &Theme, is_dark: bool) -> HunkSurfaceCol
     HunkSurfaceColors {
         background: hunk_blend(theme.background, theme.muted, is_dark, 0.20, 0.09),
         border: hunk_opacity(theme.border, is_dark, 0.90, 0.72),
+    }
+}
+
+pub(crate) fn hunk_pending_message(theme: &Theme, is_dark: bool) -> HunkPendingMessageColors {
+    HunkPendingMessageColors {
+        text: hunk_blend(
+            theme.foreground,
+            theme.muted_foreground,
+            is_dark,
+            0.52,
+            0.74,
+        ),
+        meta: hunk_opacity(theme.muted_foreground, is_dark, 0.90, 0.94),
     }
 }
 

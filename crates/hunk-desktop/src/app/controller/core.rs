@@ -697,16 +697,13 @@ impl DiffViewer {
     }
 
     fn sync_branch_picker_state(&mut self, cx: &mut Context<Self>) {
-        let Some(window_handle) = cx.windows().into_iter().next() else {
-            return;
-        };
-
         let branch_picker_state = self.branch_picker_state.clone();
         let delegate = build_branch_picker_delegate(&self.git_workspace.branches);
         let selected_index =
             branch_picker_selected_index(&self.git_workspace.branches, self.checked_out_branch_name());
 
-        if let Err(err) = cx.update_window(window_handle, move |_, window, cx| {
+        if let Err(err) = Self::update_any_window(cx, move |window, cx| {
+            let delegate = delegate.clone();
             branch_picker_state.update(cx, |state, cx| {
                 state.set_items(delegate, window, cx);
                 state.set_selected_index(selected_index, window, cx);
@@ -717,10 +714,6 @@ impl DiffViewer {
     }
 
     fn sync_ai_worktree_base_branch_picker_state(&mut self, cx: &mut Context<Self>) {
-        let Some(window_handle) = cx.windows().into_iter().next() else {
-            return;
-        };
-
         let ai_worktree_base_branch_picker_state = self.ai_worktree_base_branch_picker_state.clone();
         let delegate = build_branch_picker_delegate(&self.branches);
         let selected_index = branch_picker_selected_index(
@@ -728,7 +721,8 @@ impl DiffViewer {
             self.ai_selected_worktree_base_branch_name(),
         );
 
-        if let Err(err) = cx.update_window(window_handle, move |_, window, cx| {
+        if let Err(err) = Self::update_any_window(cx, move |window, cx| {
+            let delegate = delegate.clone();
             ai_worktree_base_branch_picker_state.update(cx, |state, cx| {
                 state.set_items(delegate, window, cx);
                 state.set_selected_index(selected_index, window, cx);
@@ -752,10 +746,6 @@ impl DiffViewer {
     }
 
     fn sync_workspace_target_picker_state(&mut self, cx: &mut Context<Self>) {
-        let Some(window_handle) = cx.windows().into_iter().next() else {
-            return;
-        };
-
         let workspace_target_picker_state = self.workspace_target_picker_state.clone();
         let delegate = build_workspace_target_picker_delegate(&self.workspace_targets);
         let selected_index = workspace_target_picker_selected_index(
@@ -763,7 +753,8 @@ impl DiffViewer {
             self.active_workspace_target_id.as_deref(),
         );
 
-        if let Err(err) = cx.update_window(window_handle, move |_, window, cx| {
+        if let Err(err) = Self::update_any_window(cx, move |window, cx| {
+            let delegate = delegate.clone();
             workspace_target_picker_state.update(cx, |state, cx| {
                 state.set_items(delegate, window, cx);
                 state.set_selected_index(selected_index, window, cx);
