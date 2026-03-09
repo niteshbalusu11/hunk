@@ -1122,28 +1122,6 @@ impl DiffViewer {
                                                                         ),
                                                                 )
                                                             })
-                                                            .when(
-                                                                timeline_visible_turn_count > 0
-                                                                    && timeline_visible_row_ids.is_empty(),
-                                                                |this| {
-                                                                    this.child(
-                                                                        div()
-                                                                            .rounded_md()
-                                                                            .border_1()
-                                                                            .border_color(cx.theme().border)
-                                                                            .bg(hunk_opacity(cx.theme().muted, is_dark, 0.22, 0.40))
-                                                                            .p_3()
-                                                                            .child(
-                                                                                div()
-                                                                                    .text_sm()
-                                                                                    .text_color(
-                                                                                        cx.theme().muted_foreground,
-                                                                                    )
-                                                                                    .child("No timeline events for visible turns yet."),
-                                                                            ),
-                                                                    )
-                                                                },
-                                                            )
                                                             .when(timeline_hidden_turn_count > 0, |this| {
                                                                 let load_older_thread_id = thread_id.clone();
                                                                 let show_all_thread_id = thread_id.clone();
