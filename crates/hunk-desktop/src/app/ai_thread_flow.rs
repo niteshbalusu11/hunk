@@ -14,6 +14,8 @@ const MAX_COMMIT_BODY_LEN: usize = 2_000;
 const MAX_PROMPT_CONTEXT_LEN: usize = 8_000;
 const MAX_SUMMARY_CONTEXT_LEN: usize = 8_000;
 const MAX_PATCH_CONTEXT_LEN: usize = 40_000;
+const DEFAULT_AI_GIT_TEXT_MODEL: &str = "gpt-5.3-codex";
+const DEFAULT_AI_GIT_REASONING_EFFORT: &str = "low";
 const BRANCH_STOP_WORDS: &[&str] = &[
     "a", "an", "and", "as", "at", "be", "for", "from", "in", "into", "is", "it", "of", "on", "or",
     "that", "the", "this", "to", "with",
@@ -403,14 +405,16 @@ fn run_codex_json_generation(
         .arg("--output-last-message")
         .arg(output_path.as_path());
 
-    if let Some(model) = model.map(str::trim).filter(|model| !model.is_empty()) {
-        command.arg("--model").arg(model);
-    }
+    let selected_model = model
+        .map(str::trim)
+        .filter(|candidate| !candidate.is_empty())
+        .unwrap_or(DEFAULT_AI_GIT_TEXT_MODEL);
+    command.arg("--model").arg(selected_model);
 
     let effort = reasoning_effort
         .map(str::trim)
         .filter(|effort| !effort.is_empty())
-        .unwrap_or("low");
+        .unwrap_or(DEFAULT_AI_GIT_REASONING_EFFORT);
     command
         .arg("--config")
         .arg(format!("model_reasoning_effort=\"{effort}\""))
