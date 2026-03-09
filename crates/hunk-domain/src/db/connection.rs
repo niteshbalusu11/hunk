@@ -6,7 +6,6 @@ use rusqlite::Connection;
 
 use super::sql;
 
-const DB_DIR_NAME: &str = ".hunkdiff";
 const DB_FILE_NAME: &str = "hunk.db";
 const DB_SCHEMA_VERSION: i64 = 2;
 
@@ -17,10 +16,8 @@ pub struct DatabaseStore {
 
 impl DatabaseStore {
     pub fn new() -> Result<Self> {
-        let home_dir =
-            dirs::home_dir().ok_or_else(|| anyhow!("failed to resolve home directory"))?;
         Ok(Self {
-            path: home_dir.join(DB_DIR_NAME).join(DB_FILE_NAME),
+            path: crate::paths::hunk_home_dir()?.join(DB_FILE_NAME),
         })
     }
 

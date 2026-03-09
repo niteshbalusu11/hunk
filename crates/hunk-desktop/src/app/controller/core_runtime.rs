@@ -429,9 +429,9 @@ mod tests {
     }
 
     #[test]
-    fn ignores_managed_worktree_paths_for_repo_watch() {
+    fn keeps_repo_local_hunkdiff_paths_for_repo_watch() {
         let repo_root = fixture_repo_root();
-        assert!(DiffViewer::should_ignore_repo_watch_path(
+        assert!(!DiffViewer::should_ignore_repo_watch_path(
             repo_root
                 .join(".hunkdiff/worktrees/feature-one/src/lib.rs")
                 .as_path(),
@@ -444,7 +444,7 @@ mod tests {
                     .as_path(),
                 repo_root.as_path()
             ),
-            None
+            Some(".hunkdiff/worktrees/feature-one/src/lib.rs".to_string())
         );
     }
 

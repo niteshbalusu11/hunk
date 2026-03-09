@@ -56,7 +56,7 @@ Launch from anywhere, then use `File > Open Project...` (or `Cmd/Ctrl+Shift+O`) 
 Hunk treats the primary checkout and each linked Git worktree as separate workspace targets.
 
 - Create and switch worktrees from the Git tab.
-- Managed worktrees live under `<repo>/.hunkdiff/worktrees/worktree-N`.
+- Managed worktrees live under `~/.hunkdiff/worktrees/<repo-key>/worktree-N`.
 - The Files and Git tabs follow the currently active workspace target.
 - The Review tab defaults to comparing the active workspace target against the repo base branch, but you can also compare custom branch/worktree pairs.
 - The AI tab can start a new thread in the primary checkout with `Cmd/Ctrl+N` or in a worktree-targeted draft with `Cmd/Ctrl+Shift+N`.

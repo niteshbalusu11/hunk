@@ -219,7 +219,7 @@ impl DiffViewer {
                             .loading(create_worktree_loading)
                             .label("Create Worktree")
                             .tooltip(
-                                "Create a managed worktree under .hunkdiff/worktrees/worktree-N for this branch.",
+                                "Create a managed worktree under ~/.hunkdiff/worktrees/<repo>/worktree-N for this branch.",
                             )
                             .disabled(create_worktree_disabled)
                             .on_click(move |_, window, cx| {

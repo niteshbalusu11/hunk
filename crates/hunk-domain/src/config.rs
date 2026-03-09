@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-const CONFIG_DIR_NAME: &str = ".hunkdiff";
 const CONFIG_FILE_NAME: &str = "config.toml";
 const DEFAULT_AUTO_REFRESH_INTERVAL_MS: u64 = 60_000;
 
@@ -128,9 +127,7 @@ pub struct ConfigStore {
 
 impl ConfigStore {
     pub fn new() -> Result<Self> {
-        let home_dir =
-            dirs::home_dir().ok_or_else(|| anyhow!("failed to resolve home directory"))?;
-        let path = home_dir.join(CONFIG_DIR_NAME).join(CONFIG_FILE_NAME);
+        let path = crate::paths::hunk_home_dir()?.join(CONFIG_FILE_NAME);
         Ok(Self { path })
     }
 

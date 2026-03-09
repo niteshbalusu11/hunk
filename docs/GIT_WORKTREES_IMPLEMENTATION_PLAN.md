@@ -9,7 +9,7 @@ Performance is a hard requirement for this entire feature. Regressions in Git ta
 V1 decisions:
 
 - Keep core worktree logic inside `crates/hunk-git`.
-- Managed worktrees live at `<repo>/.hunkdiff/worktrees/<worktree_name>`.
+- Managed worktrees live at `~/.hunkdiff/worktrees/<repo-key>/<worktree_name>`.
 - V1 includes create, list, switch, inspect, publish/push, Review compare, and AI target binding.
 - V1 does not include delete/remove worktree UI.
 - Worktree creation is from the current active checkout only.
@@ -36,8 +36,8 @@ V1 decisions:
 
 - [ ] Create shared workspace target types across `hunk-git`, `hunk-domain`, and `hunk-desktop`.
 - [ ] Define the target model for `primary checkout`, `linked worktree`, stable target id, canonical root path, branch name, display label, and `managed/external` status.
-- [ ] Add repo-local managed-worktree path helpers for `.hunkdiff/worktrees`.
-- [ ] Make `.hunkdiff/worktrees` an explicit ignored subtree for repo tree rendering, status scans, and filesystem watch filtering.
+- [ ] Add managed-worktree path helpers under `~/.hunkdiff/worktrees/<repo-key>`.
+- [ ] Managed worktrees live outside the repo, so repo tree rendering, status scans, and filesystem watch filtering do not need repo-local managed-worktree exclusions.
 - [ ] Extend persisted app state for per-primary-repo selected target and Review compare defaults.
 - [ ] Review the target model and path rules specifically for hot-path cost so inactive worktrees do not add scan, watch, or refresh overhead to the active workspace.
 - [ ] Add targeted tests for state serialization, target id stability, canonical-path handling, and ignore-path behavior.
@@ -47,7 +47,7 @@ V1 decisions:
 
 - [ ] Add `hunk-git` APIs to list the primary checkout and all linked worktrees for a repository.
 - [ ] Introduce public worktree-facing types such as `WorkspaceTargetSummary`, `WorkspaceTargetKind`, and `CreateWorktreeRequest`.
-- [ ] Add `hunk-git` mutation APIs to create a managed worktree in `.hunkdiff/worktrees/<worktree_name>` from the current active checkout.
+- [ ] Add `hunk-git` mutation APIs to create a managed worktree in `~/.hunkdiff/worktrees/<repo-key>/<worktree_name>` from the current active checkout.
 - [ ] Validate worktree names, branch names, path collisions, and branch collisions during creation.
 - [ ] Keep the read path `gix`-first and use narrow `git2` fallback only if required for worktree creation.
 - [ ] Ensure primary checkout scans do not surface managed worktrees as ordinary nested repos.

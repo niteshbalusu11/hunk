@@ -1,8 +1,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use anyhow::{Context as _, Result};
 use git2::{IndexAddOption, Repository, RepositoryInitOptions, Signature};
+use hunk_domain::paths::HUNK_HOME_DIR_ENV_VAR;
 use hunk_git::compare::{CompareSource, load_compare_snapshot};
 use hunk_git::worktree::{
     CreateWorktreeRequest, PRIMARY_WORKSPACE_TARGET_ID, WorkspaceTargetKind,
@@ -12,16 +14,17 @@ use hunk_git::worktree::{
 use tempfile::TempDir;
 
 #[test]
-fn managed_worktree_helpers_keep_paths_under_hunkdiff_root() -> Result<()> {
+fn managed_worktree_helpers_keep_paths_under_global_hunkdiff_root() -> Result<()> {
     let fixture = TempGitRepo::new()?;
-    let managed_root = managed_worktrees_root(fixture.root());
-    let managed_path = managed_worktree_path(fixture.root(), "worktree-1");
+    let managed_root = managed_worktrees_root(fixture.root())?;
+    let managed_path = managed_worktree_path(fixture.root(), "worktree-1")?;
     fs::create_dir_all(managed_path.join("src"))?;
     fs::write(managed_path.join("src/lib.rs"), "fn main() {}\n")?;
 
+    let test_hunk_home = test_hunk_home_dir();
     assert_eq!(
-        managed_root,
-        fixture.root().join(".hunkdiff").join("worktrees")
+        managed_root.parent(),
+        Some(test_hunk_home.join("worktrees").as_path())
     );
     assert_eq!(managed_path, managed_root.join("worktree-1"));
     assert!(path_is_within_managed_worktrees(
@@ -32,7 +35,7 @@ fn managed_worktree_helpers_keep_paths_under_hunkdiff_root() -> Result<()> {
         fixture.root(),
         fixture.root().join("src/lib.rs").as_path(),
     )?);
-    assert!(repo_relative_path_is_within_managed_worktrees(
+    assert!(!repo_relative_path_is_within_managed_worktrees(
         ".hunkdiff/worktrees/worktree-1/src/lib.rs",
     ));
     assert!(!repo_relative_path_is_within_managed_worktrees(
@@ -237,6 +240,7 @@ struct TempGitRepo {
 
 impl TempGitRepo {
     fn new() -> Result<Self> {
+        let _ = test_hunk_home_dir();
         let tempdir = tempfile::tempdir()?;
         let root = tempdir.path().join("repo");
         let mut options = RepositoryInitOptions::new();
@@ -330,5 +334,25 @@ impl TempGitRepo {
         permissions.set_mode(0o755);
         fs::set_permissions(path, permissions)?;
         Ok(())
+    }
+}
+
+fn test_hunk_home_dir() -> &'static PathBuf {
+    static TEST_HUNK_HOME_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+    TEST_HUNK_HOME_DIR.get_or_init(|| {
+        let path = std::env::temp_dir()
+            .join(format!("hunk-git-tests-{}", std::process::id()))
+            .join(".hunkdiff");
+        fs::create_dir_all(path.as_path()).expect("test hunk home dir should be created");
+        set_test_hunk_home_dir(path.as_path());
+        path
+    })
+}
+
+#[allow(unused_unsafe)]
+fn set_test_hunk_home_dir(path: &Path) {
+    unsafe {
+        std::env::set_var(HUNK_HOME_DIR_ENV_VAR, path.as_os_str());
     }
 }

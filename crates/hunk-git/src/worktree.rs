@@ -3,15 +3,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, anyhow};
 use git2::{BranchType, Repository, WorktreeAddOptions};
+use hunk_domain::paths::hunk_home_dir;
 
 use crate::branch::is_valid_branch_name;
 use crate::git::discover_repo_root;
 
 pub const PRIMARY_WORKSPACE_TARGET_ID: &str = "primary";
-pub const HUNK_STATE_DIR_NAME: &str = ".hunkdiff";
 pub const MANAGED_WORKTREES_DIR_NAME: &str = "worktrees";
-
-const MANAGED_WORKTREE_RELATIVE_PREFIX: &str = ".hunkdiff/worktrees";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceTargetKind {
@@ -40,26 +38,18 @@ pub fn workspace_target_id_for_worktree(name: &str) -> String {
     format!("worktree:{name}")
 }
 
-pub fn managed_worktrees_root(primary_repo_root: &Path) -> PathBuf {
-    primary_repo_root
-        .join(HUNK_STATE_DIR_NAME)
+pub fn managed_worktrees_root(primary_repo_root: &Path) -> Result<PathBuf> {
+    Ok(hunk_home_dir()?
         .join(MANAGED_WORKTREES_DIR_NAME)
+        .join(repository_storage_key(primary_repo_root)))
 }
 
-pub fn managed_worktree_path(primary_repo_root: &Path, worktree_name: &str) -> PathBuf {
-    managed_worktrees_root(primary_repo_root).join(worktree_name)
+pub fn managed_worktree_path(primary_repo_root: &Path, worktree_name: &str) -> Result<PathBuf> {
+    Ok(managed_worktrees_root(primary_repo_root)?.join(worktree_name))
 }
 
-pub fn repo_relative_path_is_within_managed_worktrees(relative_path: &str) -> bool {
-    let normalized = normalize_relative_path(relative_path);
-    if normalized.is_empty() {
-        return false;
-    }
-
-    normalized == MANAGED_WORKTREE_RELATIVE_PREFIX
-        || normalized
-            .strip_prefix(MANAGED_WORKTREE_RELATIVE_PREFIX)
-            .is_some_and(|suffix| suffix.starts_with('/'))
+pub fn repo_relative_path_is_within_managed_worktrees(_relative_path: &str) -> bool {
+    false
 }
 
 pub fn path_is_within_managed_worktrees(
@@ -68,11 +58,9 @@ pub fn path_is_within_managed_worktrees(
 ) -> Result<bool> {
     let primary_repo_root = canonicalize_existing_path(primary_repo_root)?;
     let absolute_path = normalize_absolute_path(primary_repo_root.as_path(), absolute_path)?;
-    let Ok(relative_path) = absolute_path.strip_prefix(primary_repo_root.as_path()) else {
-        return Ok(false);
-    };
-    Ok(repo_relative_path_is_within_managed_worktrees(
-        relative_path.to_string_lossy().as_ref(),
+    Ok(path_is_within_root(
+        absolute_path.as_path(),
+        managed_worktrees_root(primary_repo_root.as_path())?.as_path(),
     ))
 }
 
@@ -155,17 +143,18 @@ pub fn create_managed_worktree(
     let worktree_name = allocate_managed_worktree_name(primary_root.as_path(), &primary_repo)?;
     let registration_name = managed_worktree_registration_name(worktree_name.as_str());
 
-    let target_path = managed_worktree_path(primary_root.as_path(), worktree_name.as_str());
+    let managed_root = managed_worktrees_root(primary_root.as_path())?;
+    let target_path = managed_worktree_path(primary_root.as_path(), worktree_name.as_str())?;
     if target_path.exists() {
         return Err(anyhow!(
             "worktree path already exists: {}",
             target_path.display()
         ));
     }
-    fs::create_dir_all(managed_worktrees_root(primary_root.as_path())).with_context(|| {
+    fs::create_dir_all(managed_root.as_path()).with_context(|| {
         format!(
             "failed to create managed worktree directory {}",
-            managed_worktrees_root(primary_root.as_path()).display()
+            managed_root.display()
         )
     })?;
     if let Some(parent) = target_path.parent() {
@@ -318,7 +307,7 @@ fn allocate_managed_worktree_name(primary_root: &Path, repo: &Repository) -> Res
             index += 1;
             continue;
         }
-        if managed_worktree_path(primary_root, candidate.as_str()).exists() {
+        if managed_worktree_path(primary_root, candidate.as_str())?.exists() {
             index += 1;
             continue;
         }
@@ -340,10 +329,10 @@ fn managed_worktree_registration_name(worktree_name: &str) -> String {
 }
 
 fn managed_worktree_name_from_root(root: &Path, primary_root: &Path) -> Option<String> {
-    let managed_root = managed_worktrees_root(primary_root);
-    let relative = root.strip_prefix(managed_root).ok()?;
-    let name = relative.to_string_lossy().replace('\\', "/");
-    (!name.is_empty()).then_some(name)
+    managed_worktree_name_from_managed_root(
+        root,
+        managed_worktrees_root(primary_root).ok()?.as_path(),
+    )
 }
 
 fn linked_workspace_target_display_name(worktree_name: &str, branch_name: &str) -> String {
@@ -358,9 +347,46 @@ fn is_detached_workspace_target_branch(branch_name: &str) -> bool {
     matches!(branch_name, "detached" | "unborn")
 }
 
-fn normalize_relative_path(path: &str) -> String {
-    path.trim_matches('/')
-        .replace('\\', "/")
-        .trim_matches('/')
-        .to_string()
+fn path_is_within_root(path: &Path, root: &Path) -> bool {
+    let root = normalize_lexical_path(root);
+    let path = normalize_lexical_path(path);
+    path == root || path.starts_with(root.as_path())
+}
+
+fn managed_worktree_name_from_managed_root(root: &Path, managed_root: &Path) -> Option<String> {
+    let relative = root.strip_prefix(managed_root).ok()?;
+    let name = relative.to_string_lossy().replace('\\', "/");
+    (!name.is_empty()).then_some(name)
+}
+
+fn repository_storage_key(primary_repo_root: &Path) -> String {
+    let repo_name = primary_repo_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(sanitize_repo_storage_name)
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "project".to_string());
+    let hash = fnv1a64_hex(primary_repo_root.to_string_lossy().as_bytes());
+    format!("{repo_name}-{hash}")
+}
+
+fn sanitize_repo_storage_name(name: &str) -> String {
+    name.chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+fn fnv1a64_hex(bytes: &[u8]) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
 }
