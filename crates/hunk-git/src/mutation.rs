@@ -18,6 +18,12 @@ pub struct CreatedCommit {
     pub committed_unix_time: Option<i64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AiWorkingCopyContext {
+    pub changed_files_summary: String,
+    pub diff_patch: String,
+}
+
 // `gix` is still the primary backend for the hot read path. We isolate local worktree/index
 // mutation here until it exposes a stable public checkout/index-editing surface we can rely on.
 pub fn activate_or_create_branch(
@@ -125,6 +131,81 @@ pub fn commit_selected_paths_with_details(
     }
 
     commit_paths_internal(repo_root, message, Some(&selected_paths))
+}
+
+pub fn working_copy_context_for_ai(
+    repo_root: &Path,
+    max_files: usize,
+    max_patch_bytes: usize,
+) -> Result<Option<AiWorkingCopyContext>> {
+    let repo = open_repo(repo_root)?;
+    ensure_no_hidden_index_changes(
+        &repo,
+        "summarizing changes with staged index changes is not supported",
+    )?;
+    let changes = collect_worktree_changes(&repo, None)?;
+    if changes.is_empty() {
+        return Ok(None);
+    }
+
+    let limited_files = max_files.max(1);
+    let mut summary_lines = changes
+        .iter()
+        .take(limited_files)
+        .map(|(path, change)| format!("{} {}", worktree_change_status_code(*change), path))
+        .collect::<Vec<_>>();
+    if changes.len() > limited_files {
+        summary_lines.push(format!("... {} more file(s)", changes.len() - limited_files));
+    }
+    let changed_files_summary = summary_lines.join("\n");
+
+    let mut diff_options = git2::DiffOptions::new();
+    diff_options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_unmodified(false)
+        .ignore_submodules(true);
+    let head_tree = current_head_tree(&repo)?;
+    let diff = repo.diff_tree_to_workdir(head_tree.as_ref(), Some(&mut diff_options))?;
+
+    let capped_bytes = max_patch_bytes.max(1);
+    let mut patch_bytes = Vec::new();
+    let mut truncated = false;
+    let print_result = diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+        if patch_bytes.len() >= capped_bytes {
+            truncated = true;
+            return false;
+        }
+
+        let content = line.content();
+        let remaining = capped_bytes.saturating_sub(patch_bytes.len());
+        if content.len() > remaining {
+            patch_bytes.extend_from_slice(&content[..remaining]);
+            truncated = true;
+            return false;
+        }
+
+        patch_bytes.extend_from_slice(content);
+        true
+    });
+    if let Err(err) = print_result
+        && !(truncated && err.code() == git2::ErrorCode::User)
+    {
+        return Err(err.into());
+    }
+
+    let mut diff_patch = String::from_utf8_lossy(patch_bytes.as_slice()).to_string();
+    if truncated {
+        if !diff_patch.ends_with('\n') {
+            diff_patch.push('\n');
+        }
+        diff_patch.push_str("[truncated]\n");
+    }
+
+    Ok(Some(AiWorkingCopyContext {
+        changed_files_summary,
+        diff_patch,
+    }))
 }
 
 pub fn restore_working_copy_paths(repo_root: &Path, paths: &[String]) -> Result<usize> {
@@ -294,6 +375,13 @@ fn stage_changes(
     }
     index.write()?;
     Ok(())
+}
+
+fn worktree_change_status_code(change: WorktreeChange) -> &'static str {
+    match change {
+        WorktreeChange::AddOrUpdate => "M",
+        WorktreeChange::Remove => "D",
+    }
 }
 
 fn ensure_no_hidden_index_changes(repo: &git2::Repository, action_message: &str) -> Result<()> {

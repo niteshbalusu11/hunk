@@ -5,7 +5,10 @@ use notify::Watcher;
 use tracing::{debug, error, warn};
 
 use crate::app::ai_thread_flow::{
-    ai_branch_name_for_prompt, ai_branch_name_for_thread, ai_commit_subject_for_thread,
+    AiCodexGenerationConfig, AiCommitGenerationContext, AiCommitMessage,
+    ai_branch_generation_seed_for_thread, ai_branch_name_for_prompt, ai_branch_name_for_thread,
+    ai_commit_message_for_thread, ai_first_prompt_seed_for_thread,
+    ai_latest_agent_message_for_thread, try_ai_branch_name_for_prompt, try_ai_commit_message,
 };
 
 use super::data::{
@@ -36,7 +39,7 @@ use hunk_git::history::{
 use hunk_git::mutation::{
     activate_or_create_branch as checkout_or_create_branch_with_change_transfer,
     commit_all_with_details as commit_staged_with_details, commit_selected_paths_with_details,
-    restore_working_copy_paths,
+    restore_working_copy_paths, working_copy_context_for_ai,
 };
 use hunk_git::network::{
     push_current_branch, sync_branch_from_remote_if_tracked, sync_current_branch,

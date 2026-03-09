@@ -736,10 +736,9 @@ impl DiffViewer {
         let start_mode = self.ai_new_thread_start_mode;
         let selected_base_branch_name = self.ai_selected_worktree_base_branch_name().map(str::to_string);
         let prompt_seed = prompt.clone().unwrap_or_default();
-        let requested_branch_name = ai_branch_name_for_prompt(
-            prompt_seed.as_str(),
-            start_mode == AiNewThreadStartMode::Worktree,
-        );
+        let fallback_branch_name =
+            ai_branch_name_for_prompt(prompt_seed.as_str(), start_mode == AiNewThreadStartMode::Worktree);
+        let codex_executable = Self::resolve_codex_executable_path();
         let epoch = self.begin_git_action("Prepare AI thread", cx);
         let started_at = Instant::now();
 
@@ -751,6 +750,14 @@ impl DiffViewer {
                 .background_executor()
                 .spawn(async move {
                     let execution_started_at = Instant::now();
+                    let requested_branch_name = try_ai_branch_name_for_prompt(
+                        codex_executable.as_path(),
+                        repo_root.as_path(),
+                        prompt_seed.as_str(),
+                        local_image_paths.as_slice(),
+                        start_mode == AiNewThreadStartMode::Worktree,
+                    )
+                    .unwrap_or(fallback_branch_name);
                     let prepared = prepare_ai_thread_workspace(
                         repo_root.as_path(),
                         requested_branch_name.as_str(),

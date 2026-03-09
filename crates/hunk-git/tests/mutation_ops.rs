@@ -6,7 +6,7 @@ use git2::{BranchType, IndexAddOption, Repository, Signature, build::CheckoutBui
 use hunk_git::git::load_workflow_snapshot;
 use hunk_git::mutation::{
     activate_or_create_branch, commit_all, commit_all_with_details, commit_selected_paths,
-    commit_selected_paths_with_details, restore_working_copy_paths,
+    commit_selected_paths_with_details, restore_working_copy_paths, working_copy_context_for_ai,
 };
 use tempfile::TempDir;
 
@@ -194,6 +194,82 @@ fn commit_details_use_the_commit_subject_for_multiline_messages() -> Result<()> 
     let created = commit_all_with_details(fixture.root(), "subject line\n\nbody line")?;
 
     assert_eq!(created.subject, "subject line");
+    Ok(())
+}
+
+#[test]
+fn working_copy_context_for_ai_returns_none_when_clean() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.configure_signature()?;
+    fixture.write_file("tracked.txt", "base\n")?;
+    fixture.commit_all_git2("initial")?;
+
+    let context = working_copy_context_for_ai(fixture.root(), 10, 10_000)?;
+
+    assert!(context.is_none());
+    Ok(())
+}
+
+#[test]
+fn working_copy_context_for_ai_returns_summary_and_patch() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.configure_signature()?;
+    fixture.write_file("tracked.txt", "base\n")?;
+    fixture.commit_all_git2("initial")?;
+    fixture.write_file("tracked.txt", "base\nupdated\n")?;
+    fixture.write_file("new.txt", "hello\n")?;
+
+    let context = working_copy_context_for_ai(fixture.root(), 10, 10_000)?
+        .expect("context should exist for dirty worktree");
+
+    assert!(context.changed_files_summary.contains("tracked.txt"));
+    assert!(context.changed_files_summary.contains("new.txt"));
+    assert!(context.diff_patch.contains("diff --git"));
+    assert!(context.diff_patch.contains("updated"));
+    Ok(())
+}
+
+#[test]
+fn working_copy_context_for_ai_rejects_hidden_index_changes() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.configure_signature()?;
+    fixture.write_file("tracked.txt", "base\n")?;
+    fixture.commit_all_git2("initial")?;
+    fixture.write_file("tracked.txt", "staged\n")?;
+    fixture.stage_path("tracked.txt")?;
+    fixture.write_file("tracked.txt", "base\n")?;
+
+    let err = working_copy_context_for_ai(fixture.root(), 10, 10_000)
+        .expect_err("hidden index changes should be rejected");
+
+    assert!(err.to_string().contains("staged index changes"));
+    Ok(())
+}
+
+#[test]
+fn working_copy_context_for_ai_truncates_large_patch_output() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.configure_signature()?;
+    fixture.write_file("tracked.txt", "base\n")?;
+    fixture.commit_all_git2("initial")?;
+    fixture.write_file("tracked.txt", &format!("base\n{}\n", "updated".repeat(100)))?;
+
+    let context = working_copy_context_for_ai(fixture.root(), 10, 80)?
+        .expect("context should exist for dirty worktree");
+
+    assert!(context.diff_patch.contains("[truncated]"));
+    Ok(())
+}
+
+#[test]
+fn working_copy_context_for_ai_supports_unborn_head_repositories() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.write_file("tracked.txt", "pending\n")?;
+
+    let context = working_copy_context_for_ai(fixture.root(), 10, 10_000)?
+        .expect("context should exist for an unborn repo");
+
+    assert!(context.changed_files_summary.contains("tracked.txt"));
     Ok(())
 }
 
