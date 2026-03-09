@@ -53,14 +53,7 @@ impl DiffViewer {
     }
 
     pub(super) fn ai_publish_blocker(&self) -> Option<String> {
-        let context = match self.ai_current_thread_git_action_context("publishing") {
-            Ok(context) => context,
-            Err(reason) => return Some(reason),
-        };
-        if context.start_mode != AiNewThreadStartMode::Local {
-            return Some("Direct push is only available for local threads.".to_string());
-        }
-        None
+        ai_publish_blocker_reason(self.ai_current_thread_git_action_context("publishing"))
     }
 
     pub(super) fn ai_open_pr_blocker(&self) -> Option<String> {
@@ -411,6 +404,12 @@ impl DiffViewer {
     }
 }
 
+fn ai_publish_blocker_reason(
+    context: Result<AiThreadGitActionContext, String>,
+) -> Option<String> {
+    context.err()
+}
+
 fn resolve_ai_commit_message_for_working_copy(
     generation_config: AiCodexGenerationConfig<'_>,
     repo_root: &std::path::Path,
@@ -463,5 +462,45 @@ fn activate_new_ai_review_branch(
                 return Err(err);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod ai_git_ops_tests {
+    use super::*;
+
+    fn test_git_action_context(start_mode: AiNewThreadStartMode) -> AiThreadGitActionContext {
+        AiThreadGitActionContext {
+            repo_root: std::path::PathBuf::from("/repo"),
+            thread_id: "thread-1".to_string(),
+            branch_name: "feature/ai-thread".to_string(),
+            start_mode,
+        }
+    }
+
+    #[test]
+    fn publish_blocker_allows_local_threads() {
+        assert_eq!(
+            ai_publish_blocker_reason(Ok(test_git_action_context(AiNewThreadStartMode::Local))),
+            None
+        );
+    }
+
+    #[test]
+    fn publish_blocker_allows_worktree_threads() {
+        assert_eq!(
+            ai_publish_blocker_reason(Ok(test_git_action_context(
+                AiNewThreadStartMode::Worktree,
+            ))),
+            None
+        );
+    }
+
+    #[test]
+    fn publish_blocker_preserves_context_errors() {
+        assert_eq!(
+            ai_publish_blocker_reason(Err("Select a thread before publishing.".to_string())),
+            Some("Select a thread before publishing.".to_string())
+        );
     }
 }
