@@ -1154,8 +1154,6 @@ struct DiffViewer {
     files: Vec<ChangedFile>,
     file_status_by_path: BTreeMap<String, FileStatus>,
     workspace_target_picker_state: Entity<SelectState<WorkspaceTargetPickerDelegate>>,
-    worktree_name_input_state: Entity<InputState>,
-    worktree_name_input_has_text: bool,
     worktree_branch_input_state: Entity<InputState>,
     worktree_branch_input_has_text: bool,
     review_left_picker_state: Entity<SelectState<ReviewComparePickerDelegate>>,

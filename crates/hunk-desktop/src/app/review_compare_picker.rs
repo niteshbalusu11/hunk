@@ -35,11 +35,22 @@ impl ReviewCompareSourceOption {
             WorkspaceTargetKind::PrimaryCheckout => {
                 format!("Project checkout • {}", target.branch_name)
             }
+            WorkspaceTargetKind::LinkedWorktree
+                if target.managed
+                    && is_detached_workspace_target_branch(target.branch_name.as_str()) =>
+            {
+                "Managed worktree • detached".to_string()
+            }
             WorkspaceTargetKind::LinkedWorktree if target.managed => {
-                format!("Managed worktree • {}", target.branch_name)
+                format!("Managed worktree • {}", target.name)
+            }
+            WorkspaceTargetKind::LinkedWorktree
+                if is_detached_workspace_target_branch(target.branch_name.as_str()) =>
+            {
+                "Linked worktree • detached".to_string()
             }
             WorkspaceTargetKind::LinkedWorktree => {
-                format!("Linked worktree • {}", target.branch_name)
+                format!("Linked worktree • {}", target.name)
             }
         };
         Self {
@@ -193,4 +204,8 @@ pub(crate) fn review_compare_picker_selected_index(
             .position(|option| option.id == selected_id)
             .map(|row| IndexPath::default().row(row))
     })
+}
+
+fn is_detached_workspace_target_branch(branch_name: &str) -> bool {
+    matches!(branch_name, "detached" | "unborn")
 }

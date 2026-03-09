@@ -15,8 +15,6 @@ impl DiffViewer {
         const GIT_WORKING_TREE_SCROLLBAR_GUTTER: f32 = 16.0;
 
         let view = cx.entity();
-        let tracked_count = self.files.iter().filter(|file| file.is_tracked()).count();
-        let untracked_count = self.files.len().saturating_sub(tracked_count);
         let staged_count = self.staged_commit_file_count();
         let is_dark = cx.theme().mode.is_dark();
         let colors = hunk_git_workspace(cx.theme(), is_dark);
@@ -26,7 +24,7 @@ impl DiffViewer {
             .h_full()
             .min_h_0()
             .gap_2()
-            .p_3()
+            .p_2()
             .rounded(px(12.0))
             .border_1()
             .border_color(colors.card.border)
@@ -52,10 +50,7 @@ impl DiffViewer {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(format!(
-                                        "{} files changed across tracked and untracked work.",
-                                        self.files.len()
-                                    )),
+                                    .child(format!("{} changed files", self.files.len())),
                             ),
                     )
                     .child(
@@ -63,20 +58,6 @@ impl DiffViewer {
                             .items_center()
                             .gap_2()
                             .flex_wrap()
-                            .child(self.render_git_metric_pill(
-                                format!("Tracked {}", tracked_count),
-                                HunkAccentTone::Neutral,
-                                cx,
-                            ))
-                            .child(self.render_git_metric_pill(
-                                format!("Untracked {}", untracked_count),
-                                if untracked_count > 0 {
-                                    HunkAccentTone::Warning
-                                } else {
-                                    HunkAccentTone::Neutral
-                                },
-                                cx,
-                            ))
                             .child(self.render_git_metric_pill(
                                 format!("Staged {}", staged_count),
                                 if staged_count > 0 {
@@ -92,6 +73,7 @@ impl DiffViewer {
                                     Button::new("git-stage-all")
                                         .outline()
                                         .compact()
+                                        .with_size(gpui_component::Size::Small)
                                         .rounded(px(8.0))
                                         .label("Stage All")
                                         .tooltip("Stage every changed file for the next commit.")
@@ -110,6 +92,7 @@ impl DiffViewer {
                                     Button::new("git-unstage-all")
                                         .outline()
                                         .compact()
+                                        .with_size(gpui_component::Size::Small)
                                         .rounded(px(8.0))
                                         .label("Unstage All")
                                         .tooltip(
@@ -134,9 +117,9 @@ impl DiffViewer {
                         .justify_center()
                         .child(
                             div()
-                                .text_sm()
+                                .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("No tracked or untracked changes."),
+                                .child("No working tree changes."),
                         )
                         .into_any_element()
                 } else {
@@ -170,7 +153,7 @@ impl DiffViewer {
                                 div()
                                     .w_full()
                                     .min_h_full()
-                                    .p_1p5()
+                                    .p_1()
                                     .child(list_container),
                             ),
                     )
@@ -188,6 +171,182 @@ impl DiffViewer {
                     )
                     .into_any_element()
             })
+            .into_any_element()
+    }
+
+    fn render_git_commit_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let view = cx.entity();
+        let is_dark = cx.theme().mode.is_dark();
+        let colors = hunk_git_workspace(cx.theme(), is_dark);
+        let create_commit_loading = self.git_action_loading_named("Create commit");
+        let push_loading = self.git_action_loading_named("Push branch");
+        let git_controls_busy = self.git_controls_busy();
+        let push_available = self.can_push_current_branch() || push_loading;
+        let push_disabled = !push_available || (git_controls_busy && !push_loading);
+        let push_tooltip = if !self.can_run_active_branch_actions() {
+            "Activate a branch before pushing."
+        } else if !self.branch_has_upstream {
+            "Publish this branch before pushing."
+        } else if self.branch_ahead_count == 0 {
+            "No local commits to push."
+        } else if !self.files.is_empty() {
+            "Commit or discard working tree changes before pushing."
+        } else {
+            "Push all local commits on this branch."
+        };
+        let staged_count = self.staged_commit_file_count();
+        let total_count = self.files.len();
+        let commit_disabled = staged_count == 0 || (git_controls_busy && !create_commit_loading);
+        let commit_readiness_label = if staged_count == 0 {
+            "Stage files".to_string()
+        } else {
+            "Ready to commit".to_string()
+        };
+        let last_commit_text = self
+            .last_commit_subject
+            .as_deref()
+            .map(str::trim_end)
+            .filter(|text| !text.is_empty())
+            .unwrap_or("No commits yet")
+            .to_string();
+
+        v_flex()
+            .w_full()
+            .gap_2()
+            .p_3()
+            .rounded(px(12.0))
+            .border_1()
+            .border_color(colors.rail.border)
+            .bg(colors.rail.background)
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        v_flex()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_semibold()
+                                    .text_color(cx.theme().foreground)
+                                    .child("Commit & Publish"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(format!("Staged {staged_count}/{total_count} files")),
+                            ),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .gap_2()
+                    .flex_wrap()
+                    .child(self.render_git_metric_pill(
+                        commit_readiness_label,
+                        if commit_disabled {
+                            HunkAccentTone::Warning
+                        } else {
+                            HunkAccentTone::Success
+                        },
+                        cx,
+                    ))
+                    .child(self.render_git_metric_pill(
+                        format!("To Push {}", self.branch_ahead_count),
+                        if self.branch_ahead_count > 0 {
+                            HunkAccentTone::Accent
+                        } else {
+                            HunkAccentTone::Neutral
+                        },
+                        cx,
+                    )),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .rounded(px(8.0))
+                    .border_1()
+                    .border_color(colors.muted_card.border)
+                    .bg(colors.muted_card.background)
+                    .px_3()
+                    .py_2()
+                    .child(
+                        Input::new(&self.commit_input_state)
+                            .appearance(false)
+                            .bordered(false)
+                            .focus_bordered(false)
+                            .w_full()
+                            .h(px(84.0))
+                            .disabled(git_controls_busy),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .gap_2()
+                    .flex_wrap()
+                    .child({
+                        let view = view.clone();
+                        Button::new("commit-staged-v3")
+                            .primary()
+                            .rounded(px(8.0))
+                            .loading(create_commit_loading)
+                            .label(if create_commit_loading { "Committing..." } else { "Commit" })
+                            .tooltip("Create a new commit from staged files using the message above.")
+                            .disabled(commit_disabled)
+                            .on_click(move |_, window, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.commit_from_input(window, cx);
+                                });
+                            })
+                    })
+                    .child({
+                        let view = view.clone();
+                        Button::new("push-branch-v3")
+                            .outline()
+                            .rounded(px(8.0))
+                            .loading(push_loading)
+                            .label(if push_loading { "Pushing..." } else { "Push" })
+                            .tooltip(push_tooltip)
+                            .disabled(push_disabled)
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.push_current_branch(cx);
+                                });
+                            })
+                    }),
+            )
+            .child(
+                v_flex()
+                    .w_full()
+                    .gap_0p5()
+                    .p_2()
+                    .rounded(px(10.0))
+                    .border_1()
+                    .border_color(colors.muted_card.border)
+                    .bg(colors.muted_card.background)
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Last Commit"),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().foreground.opacity(0.92))
+                            .whitespace_normal()
+                            .child(last_commit_text),
+                    ),
+            )
             .into_any_element()
     }
 }

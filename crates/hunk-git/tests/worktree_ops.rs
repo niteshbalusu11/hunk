@@ -15,7 +15,7 @@ use tempfile::TempDir;
 fn managed_worktree_helpers_keep_paths_under_hunkdiff_root() -> Result<()> {
     let fixture = TempGitRepo::new()?;
     let managed_root = managed_worktrees_root(fixture.root());
-    let managed_path = managed_worktree_path(fixture.root(), "feature-one");
+    let managed_path = managed_worktree_path(fixture.root(), "worktree-1");
     fs::create_dir_all(managed_path.join("src"))?;
     fs::write(managed_path.join("src/lib.rs"), "fn main() {}\n")?;
 
@@ -23,7 +23,7 @@ fn managed_worktree_helpers_keep_paths_under_hunkdiff_root() -> Result<()> {
         managed_root,
         fixture.root().join(".hunkdiff").join("worktrees")
     );
-    assert_eq!(managed_path, managed_root.join("feature-one"));
+    assert_eq!(managed_path, managed_root.join("worktree-1"));
     assert!(path_is_within_managed_worktrees(
         fixture.root(),
         managed_path.join("src/lib.rs").as_path(),
@@ -33,7 +33,7 @@ fn managed_worktree_helpers_keep_paths_under_hunkdiff_root() -> Result<()> {
         fixture.root().join("src/lib.rs").as_path(),
     )?);
     assert!(repo_relative_path_is_within_managed_worktrees(
-        ".hunkdiff/worktrees/feature-one/src/lib.rs",
+        ".hunkdiff/worktrees/worktree-1/src/lib.rs",
     ));
     assert!(!repo_relative_path_is_within_managed_worktrees(
         "src/lib.rs"
@@ -50,7 +50,6 @@ fn listing_workspace_targets_includes_primary_checkout_and_created_worktree() ->
     let created = create_managed_worktree(
         fixture.root(),
         &CreateWorktreeRequest {
-            worktree_name: "feature-one".to_string(),
             branch_name: "feature/worktree-one".to_string(),
         },
     )?;
@@ -69,7 +68,8 @@ fn listing_workspace_targets_includes_primary_checkout_and_created_worktree() ->
         .context("created worktree target should be listed")?;
     assert_eq!(created_target.kind, WorkspaceTargetKind::LinkedWorktree);
     assert_eq!(created_target.root, created.root);
-    assert_eq!(created_target.name, "feature-one");
+    assert_eq!(created_target.name, "worktree-1");
+    assert_eq!(created_target.display_name, "feature/worktree-one");
     assert_eq!(created_target.branch_name, "feature/worktree-one");
     assert!(created_target.managed);
     assert!(!created_target.is_active);
@@ -86,13 +86,36 @@ fn creating_managed_worktree_rejects_existing_branch_name() -> Result<()> {
     let err = create_managed_worktree(
         fixture.root(),
         &CreateWorktreeRequest {
-            worktree_name: "feature-two".to_string(),
             branch_name: "feature/existing".to_string(),
         },
     )
     .expect_err("existing branch should block worktree creation");
 
     assert!(err.to_string().contains("already exists"));
+    Ok(())
+}
+
+#[test]
+fn creating_managed_worktree_auto_increments_generated_names() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.write_file("tracked.txt", "base\n")?;
+    fixture.commit_all("initial")?;
+
+    let first = create_managed_worktree(
+        fixture.root(),
+        &CreateWorktreeRequest {
+            branch_name: "feature/one".to_string(),
+        },
+    )?;
+    let second = create_managed_worktree(
+        fixture.root(),
+        &CreateWorktreeRequest {
+            branch_name: "feature/two".to_string(),
+        },
+    )?;
+
+    assert_eq!(first.name, "worktree-1");
+    assert_eq!(second.name, "worktree-2");
     Ok(())
 }
 
@@ -104,7 +127,6 @@ fn compare_snapshot_supports_branch_to_worktree_diffs() -> Result<()> {
     let worktree = create_managed_worktree(
         fixture.root(),
         &CreateWorktreeRequest {
-            worktree_name: "feature-compare".to_string(),
             branch_name: "feature/compare".to_string(),
         },
     )?;
@@ -141,7 +163,6 @@ fn compare_snapshot_marks_binary_branch_to_worktree_diffs() -> Result<()> {
     let worktree = create_managed_worktree(
         fixture.root(),
         &CreateWorktreeRequest {
-            worktree_name: "feature-binary".to_string(),
             branch_name: "feature/binary".to_string(),
         },
     )?;
@@ -180,7 +201,6 @@ fn compare_snapshot_keeps_mode_only_worktree_diffs() -> Result<()> {
     let worktree = create_managed_worktree(
         fixture.root(),
         &CreateWorktreeRequest {
-            worktree_name: "feature-mode".to_string(),
             branch_name: "feature/mode".to_string(),
         },
     )?;

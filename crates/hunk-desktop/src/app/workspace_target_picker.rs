@@ -13,9 +13,9 @@ use hunk_git::worktree::{WorkspaceTargetKind, WorkspaceTargetSummary};
 pub(crate) struct WorkspaceTargetPickerItem {
     title: SharedString,
     value: String,
-    normalized_title: String,
+    normalized_search_text: String,
     detail: SharedString,
-    branch_name: SharedString,
+    branch_detail: SharedString,
     is_active: bool,
     managed: bool,
     kind: WorkspaceTargetKind,
@@ -25,16 +25,24 @@ impl WorkspaceTargetPickerItem {
     fn from_target(target: &WorkspaceTargetSummary) -> Self {
         let detail = match target.kind {
             WorkspaceTargetKind::PrimaryCheckout => "Primary checkout".to_string(),
-            WorkspaceTargetKind::LinkedWorktree if target.managed => "Managed worktree".to_string(),
-            WorkspaceTargetKind::LinkedWorktree => "Linked worktree".to_string(),
+            WorkspaceTargetKind::LinkedWorktree if target.managed => {
+                format!("Managed worktree • {}", target.name)
+            }
+            WorkspaceTargetKind::LinkedWorktree => format!("Linked worktree • {}", target.name),
+        };
+        let search_text = workspace_target_search_text(target);
+        let branch_detail = if is_detached_workspace_target_branch(target.branch_name.as_str()) {
+            "Detached HEAD".to_string()
+        } else {
+            format!("Branch {}", target.branch_name)
         };
 
         Self {
             title: SharedString::from(target.display_name.clone()),
             value: target.id.clone(),
-            normalized_title: normalize_workspace_target_key(target.display_name.as_str()),
+            normalized_search_text: normalize_workspace_target_key(search_text.as_str()),
             detail: SharedString::from(detail),
-            branch_name: SharedString::from(target.branch_name.clone()),
+            branch_detail: SharedString::from(branch_detail),
             is_active: target.is_active,
             managed: target.managed,
             kind: target.kind,
@@ -83,7 +91,7 @@ impl SelectItem for WorkspaceTargetPickerItem {
                                 div()
                                     .text_xs()
                                     .text_color(detail_color)
-                                    .child(format!("Branch {}", self.branch_name)),
+                                    .child(self.branch_detail.clone()),
                             ),
                     ),
             )
@@ -211,7 +219,7 @@ fn matched_workspace_target_items(
     let mut matched = items
         .iter()
         .filter_map(|item| {
-            workspace_target_match_score(query.as_str(), item.normalized_title.as_str())
+            workspace_target_match_score(query.as_str(), item.normalized_search_text.as_str())
                 .map(|score| (score, item.clone()))
         })
         .collect::<Vec<_>>();
@@ -240,4 +248,68 @@ fn workspace_target_match_score(query: &str, candidate: &str) -> Option<i32> {
 
 fn normalize_workspace_target_key(value: &str) -> String {
     value.trim().to_lowercase()
+}
+
+fn workspace_target_search_text(target: &WorkspaceTargetSummary) -> String {
+    match target.kind {
+        WorkspaceTargetKind::PrimaryCheckout => {
+            format!("{} {}", target.display_name, target.branch_name)
+        }
+        WorkspaceTargetKind::LinkedWorktree
+            if is_detached_workspace_target_branch(target.branch_name.as_str()) =>
+        {
+            target.name.clone()
+        }
+        WorkspaceTargetKind::LinkedWorktree => target.branch_name.clone(),
+    }
+}
+
+fn is_detached_workspace_target_branch(branch_name: &str) -> bool {
+    matches!(branch_name, "detached" | "unborn")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn managed_target(name: &str, display_name: &str, branch_name: &str) -> WorkspaceTargetSummary {
+        WorkspaceTargetSummary {
+            id: format!("worktree:{name}"),
+            kind: WorkspaceTargetKind::LinkedWorktree,
+            root: std::path::PathBuf::from(format!("/tmp/{name}")),
+            name: name.to_string(),
+            display_name: display_name.to_string(),
+            branch_name: branch_name.to_string(),
+            managed: true,
+            is_active: false,
+        }
+    }
+
+    #[test]
+    fn managed_worktree_searches_by_branch_name_when_attached() {
+        let items = vec![WorkspaceTargetPickerItem::from_target(&managed_target(
+            "worktree-3",
+            "feature/faster-picker",
+            "feature/faster-picker",
+        ))];
+
+        let by_branch = matched_workspace_target_items(&items, "feature/faster-picker");
+        let by_name = matched_workspace_target_items(&items, "worktree-3");
+
+        assert_eq!(by_branch.len(), 1);
+        assert!(by_name.is_empty());
+    }
+
+    #[test]
+    fn detached_worktree_searches_by_worktree_name() {
+        let items = vec![WorkspaceTargetPickerItem::from_target(&managed_target(
+            "worktree-4",
+            "worktree-4",
+            "detached",
+        ))];
+
+        let by_name = matched_workspace_target_items(&items, "worktree-4");
+
+        assert_eq!(by_name.len(), 1);
+    }
 }

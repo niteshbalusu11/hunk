@@ -55,7 +55,6 @@ pub(crate) struct HunkLineStatsColors {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct HunkGitWorkspaceColors {
     pub shell: HunkSurfaceColors,
-    pub hero: HunkSurfaceColors,
     pub rail: HunkSurfaceColors,
     pub card: HunkSurfaceColors,
     pub muted_card: HunkSurfaceColors,
@@ -103,10 +102,6 @@ pub(crate) fn hunk_git_workspace(theme: &Theme, is_dark: bool) -> HunkGitWorkspa
         shell: HunkSurfaceColors {
             background: hunk_blend(theme.sidebar, theme.muted, is_dark, 0.18, 0.26),
             border: hunk_opacity(theme.border, is_dark, 0.92, 0.74),
-        },
-        hero: HunkSurfaceColors {
-            background: hunk_blend(theme.background, theme.accent, is_dark, 0.14, 0.08),
-            border: hunk_opacity(theme.accent, is_dark, 0.46, 0.34),
         },
         rail: HunkSurfaceColors {
             background: hunk_blend(theme.popover, theme.muted, is_dark, 0.22, 0.12),

@@ -8,6 +8,16 @@ impl DiffViewer {
         } else {
             self.render_git_workspace_operations_panel(cx)
         };
+        let active_branch_label = self
+            .checked_out_branch_name()
+            .map_or_else(|| "detached".to_string(), ToOwned::to_owned);
+        let last_commit_text = self
+            .last_commit_subject
+            .as_deref()
+            .map(str::trim_end)
+            .filter(|text| !text.is_empty())
+            .unwrap_or("No commits yet")
+            .to_string();
 
         v_flex()
             .size_full()
@@ -22,7 +32,7 @@ impl DiffViewer {
             .child(
                 v_flex()
                     .w_full()
-                    .gap_0p5()
+                    .gap_1()
                     .child(
                         div()
                             .text_base()
@@ -31,11 +41,41 @@ impl DiffViewer {
                             .child("Git Workflow"),
                     )
                     .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
+                        v_flex()
+                            .min_w_0()
+                            .gap_1()
                             .child(
-                                "Manage branches, working tree changes, commits, publishing, and review handoff.",
+                                div()
+                                    .max_w(px(520.0))
+                                    .truncate()
+                                    .text_sm()
+                                    .font_semibold()
+                                    .text_color(cx.theme().foreground)
+                                    .child(active_branch_label),
+                            )
+                            .child(
+                                div()
+                                    .max_w(px(520.0))
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(format!("Last commit: {last_commit_text}")),
+                            )
+                            .child(
+                                h_flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .flex_wrap()
+                                    .child(self.render_git_metric_pill(
+                                        format!("Changed {}", self.files.len()),
+                                        if self.files.is_empty() {
+                                            HunkAccentTone::Neutral
+                                        } else {
+                                            HunkAccentTone::Accent
+                                        },
+                                        cx,
+                                    ))
+                                    .child(self.render_git_workspace_summary_line_stats(cx)),
                             ),
                     ),
             )
@@ -45,6 +85,44 @@ impl DiffViewer {
                     .min_h_0()
                     .min_w_0()
                     .child(panel_body),
+            )
+            .into_any_element()
+    }
+
+    fn render_git_workspace_summary_line_stats(&self, cx: &mut Context<Self>) -> AnyElement {
+        let is_dark = cx.theme().mode.is_dark();
+        let colors = hunk_line_stats(cx.theme(), is_dark);
+        let surface = hunk_tinted_button(cx.theme(), is_dark, HunkAccentTone::Neutral);
+
+        h_flex()
+            .items_center()
+            .gap_1()
+            .px_2()
+            .py_1()
+            .rounded(px(999.0))
+            .border_1()
+            .border_color(surface.border)
+            .bg(surface.background)
+            .child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Lines"),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .font_family(cx.theme().mono_font_family.clone())
+                    .text_color(colors.added)
+                    .child(format!("+{}", self.overall_line_stats.added)),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .font_family(cx.theme().mono_font_family.clone())
+                    .text_color(colors.removed)
+                    .child(format!("-{}", self.overall_line_stats.removed)),
             )
             .into_any_element()
     }

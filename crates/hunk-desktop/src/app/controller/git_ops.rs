@@ -405,6 +405,7 @@ impl DiffViewer {
         }
     }
 
+    #[allow(dead_code)]
     pub(super) fn rename_current_branch_from_input(
         &mut self,
         window: &mut Window,
@@ -446,16 +447,6 @@ impl DiffViewer {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let worktree_name = self.worktree_name_input_state.read(cx).value().trim().to_string();
-        if worktree_name.is_empty() {
-            self.set_git_warning_message(
-                "Worktree name is required.".to_string(),
-                Some(window),
-                cx,
-            );
-            return;
-        }
-
         let branch_name = self
             .worktree_branch_input_state
             .read(cx)
@@ -464,7 +455,7 @@ impl DiffViewer {
             .to_string();
         if branch_name.is_empty() {
             self.set_git_warning_message(
-                "Branch name is required for a new worktree.".to_string(),
+                "Branch name is required.".to_string(),
                 Some(window),
                 cx,
             );
@@ -472,24 +463,20 @@ impl DiffViewer {
         }
 
         let request = hunk_git::worktree::CreateWorktreeRequest {
-            worktree_name: worktree_name.clone(),
             branch_name: branch_name.clone(),
         };
         let started = self.run_git_action("Create worktree", cx, move |repo_root| {
             let created =
                 hunk_git::worktree::create_managed_worktree(repo_root.as_path(), &request)?;
             Ok(format!(
-                "Created worktree {} on branch {}",
-                created.display_name, created.branch_name
+                "Created worktree {} for branch {}",
+                created.name, created.branch_name
             ))
         });
         if !started {
             return;
         }
 
-        self.worktree_name_input_state.update(cx, |state, cx| {
-            state.set_value("", window, cx);
-        });
         self.worktree_branch_input_state.update(cx, |state, cx| {
             state.set_value("", window, cx);
         });

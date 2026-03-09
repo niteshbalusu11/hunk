@@ -1,404 +1,42 @@
-const GIT_WORKSPACE_RAIL_MAX_WIDTH: f32 = 368.0;
+const GIT_WORKSPACE_RAIL_WIDTH: f32 = 396.0;
 
 impl DiffViewer {
     fn render_git_workspace_operations_panel_v2(&self, cx: &mut Context<Self>) -> AnyElement {
-        v_flex()
+        h_flex()
             .size_full()
             .min_h_0()
             .min_w_0()
+            .items_stretch()
             .gap_3()
-            .child(self.render_git_workspace_hero(cx))
             .child(
-                h_flex()
+                div()
                     .flex_1()
-                    .w_full()
-                    .min_h_0()
+                    .h_full()
                     .min_w_0()
-                    .items_stretch()
+                    .min_h_0()
+                    .child(self.render_workspace_changes_panel(cx)),
+            )
+            .child(
+                v_flex()
+                    .flex_none()
+                    .w(px(GIT_WORKSPACE_RAIL_WIDTH))
+                    .min_w(px(GIT_WORKSPACE_RAIL_WIDTH))
+                    .h_full()
+                    .min_h_0()
                     .gap_3()
-                    .child(
-                        div()
-                            .flex_1()
-                            .h_full()
-                            .min_w_0()
-                            .min_h_0()
-                            .child(self.render_workspace_changes_panel(cx)),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(GIT_RECENT_COMMITS_PANEL_WIDTH))
-                            .min_w(px(GIT_RECENT_COMMITS_PANEL_WIDTH))
-                            .h_full()
-                            .min_h_0()
-                            .child(self.render_git_recent_commits_panel(cx)),
-                    )
-                    .child(
-                        v_flex()
-                            .flex_none()
-                            .w(px(GIT_WORKSPACE_RAIL_MAX_WIDTH))
-                            .min_w(px(GIT_WORKSPACE_RAIL_MAX_WIDTH))
-                            .h_full()
-                            .min_h_0()
-                            .gap_3()
-                            .child(self.render_git_branch_panel(cx))
-                            .child(self.render_git_commit_panel(cx)),
-                    ),
+                    .child(self.render_git_branch_panel(cx))
+                    .child(self.render_git_commit_panel(cx)),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(GIT_RECENT_COMMITS_PANEL_WIDTH))
+                    .min_w(px(GIT_RECENT_COMMITS_PANEL_WIDTH))
+                    .h_full()
+                    .min_h_0()
+                    .child(self.render_git_recent_commits_panel(cx)),
             )
             .into_any_element()
-    }
-
-    fn render_git_workspace_hero(&self, cx: &mut Context<Self>) -> AnyElement {
-        let view = cx.entity();
-        let is_dark = cx.theme().mode.is_dark();
-        let colors = hunk_git_workspace(cx.theme(), is_dark);
-        let active_branch_label = self
-            .checked_out_branch_name()
-            .map_or_else(|| "detached".to_string(), ToOwned::to_owned);
-        let tracked_count = self.files.iter().filter(|file| file.is_tracked()).count();
-        let untracked_count = self.files.len().saturating_sub(tracked_count);
-        let staged_count = self.staged_commit_file_count();
-        let overall_changed_lines = self.overall_line_stats.changed();
-        let branch_syncable = self.can_run_active_branch_actions();
-        let primary_action = self.render_git_hero_primary_action(cx);
-        let active_review_blocker = self.active_review_action_blocker();
-        let review_tooltip = active_review_blocker.clone().unwrap_or_else(|| {
-            "Open a prefilled pull/merge request page for the active branch.".to_string()
-        });
-        let review_disabled = active_review_blocker.is_some();
-        let review_is_primary = branch_syncable
-            && self.branch_has_upstream
-            && self.branch_ahead_count == 0
-            && self.branch_behind_count == 0;
-        let summary = if !branch_syncable {
-            "Detached HEAD. Activate or create a branch to publish, sync, and review."
-                .to_string()
-        } else if self.files.is_empty() {
-            "Working tree clean. Branch actions are available.".to_string()
-        } else {
-            format!(
-                "{} changed files ready for review and commit.",
-                self.files.len()
-            )
-        };
-        let last_commit_text = self
-            .last_commit_subject
-            .as_deref()
-            .map(str::trim_end)
-            .filter(|text| !text.is_empty())
-            .unwrap_or("No commits yet")
-            .to_string();
-
-        v_flex()
-            .w_full()
-            .gap_3()
-            .p_4()
-            .rounded(px(14.0))
-            .border_1()
-            .border_color(colors.hero.border)
-            .bg(colors.hero.background)
-            .child(
-                h_flex()
-                    .w_full()
-                    .items_start()
-                    .justify_between()
-                    .gap_3()
-                    .flex_wrap()
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_semibold()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("Active Branch"),
-                            )
-                            .child(
-                                div()
-                                    .text_lg()
-                                    .font_semibold()
-                                    .text_color(cx.theme().foreground)
-                                    .child(active_branch_label),
-                            )
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .whitespace_normal()
-                                    .child(summary),
-                            ),
-                    )
-                    .child(
-                        h_flex()
-                            .items_center()
-                            .gap_2()
-                            .flex_wrap()
-                            .justify_end()
-                            .child(primary_action)
-                            .when(!review_is_primary, |this| {
-                                this.child({
-                                    let view = view.clone();
-                                    Button::new("git-hero-open-review")
-                                        .outline()
-                                        .rounded(px(9.0))
-                                        .label("Open PR/MR")
-                                        .tooltip(review_tooltip)
-                                        .disabled(review_disabled)
-                                        .on_click(move |_, _, cx| {
-                                            view.update(cx, |this, cx| {
-                                                this.open_current_branch_review_url(cx);
-                                            });
-                                        })
-                                })
-                            }),
-                    ),
-            )
-            .child(
-                h_flex()
-                    .w_full()
-                    .items_center()
-                    .gap_2()
-                    .flex_wrap()
-                    .child(self.render_git_metric_pill(
-                        if self.branch_has_upstream {
-                            "Published"
-                        } else {
-                            "Unpublished"
-                        },
-                        if self.branch_has_upstream {
-                            HunkAccentTone::Success
-                        } else {
-                            HunkAccentTone::Warning
-                        },
-                        cx,
-                    ))
-                    .child(self.render_git_metric_pill(
-                        format!("Ahead {}", self.branch_ahead_count),
-                        if self.branch_ahead_count > 0 {
-                            HunkAccentTone::Accent
-                        } else {
-                            HunkAccentTone::Neutral
-                        },
-                        cx,
-                    ))
-                    .child(self.render_git_metric_pill(
-                        format!("Behind {}", self.branch_behind_count),
-                        if self.branch_behind_count > 0 {
-                            HunkAccentTone::Warning
-                        } else {
-                            HunkAccentTone::Neutral
-                        },
-                        cx,
-                    ))
-                    .child(self.render_git_metric_pill(
-                        format!("Changed {}", self.files.len()),
-                        if self.files.is_empty() {
-                            HunkAccentTone::Neutral
-                        } else {
-                            HunkAccentTone::Accent
-                        },
-                        cx,
-                    ))
-                    .child(self.render_git_metric_pill(
-                        format!("Tracked {}", tracked_count),
-                        HunkAccentTone::Neutral,
-                        cx,
-                    ))
-                    .child(self.render_git_metric_pill(
-                        format!("Untracked {}", untracked_count),
-                        if untracked_count > 0 {
-                            HunkAccentTone::Warning
-                        } else {
-                            HunkAccentTone::Neutral
-                        },
-                        cx,
-                    ))
-                    .child(self.render_git_metric_pill(
-                        format!("Staged {}", staged_count),
-                        if staged_count > 0 {
-                            HunkAccentTone::Success
-                        } else {
-                            HunkAccentTone::Neutral
-                        },
-                        cx,
-                    ))
-                    .when(overall_changed_lines > 0, |this| {
-                        this.child(self.render_line_stats("git-hero", self.overall_line_stats, cx))
-                    }),
-            )
-            .child(
-                h_flex()
-                    .w_full()
-                    .items_start()
-                    .gap_2()
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_0p5()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_semibold()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("Last Commit"),
-                            )
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(cx.theme().foreground)
-                                    .whitespace_normal()
-                                    .child(last_commit_text),
-                            ),
-                    ),
-            )
-            .into_any_element()
-    }
-
-    fn render_git_hero_primary_action(&self, cx: &mut Context<Self>) -> AnyElement {
-        let view = cx.entity();
-        let branch_syncable = self.can_run_active_branch_actions();
-        let sync_loading = self.git_action_loading_named("Sync branch");
-        let publish_loading = self.git_action_loading_named("Publish branch");
-        let push_loading = self.git_action_loading_named("Push branch");
-        let open_review_loading = self.git_action_loading_named("Open PR/MR");
-        let git_controls_busy = self.git_controls_busy();
-        let sync_disabled = !self.can_sync_current_branch();
-        let publish_disabled = !self.can_publish_current_branch();
-        let push_available = self.can_push_current_branch() || push_loading;
-        let push_disabled = !push_available || (git_controls_busy && !push_loading);
-        let sync_tooltip = if !branch_syncable {
-            "Activate a branch before syncing."
-        } else if !self.branch_has_upstream {
-            "Publish this branch before syncing."
-        } else if !self.files.is_empty() {
-            "Commit or discard working tree changes before syncing."
-        } else {
-            "Fetch and fast-forward this branch from its upstream remote."
-        };
-        let publish_tooltip = if self.branch_has_upstream {
-            "This branch already tracks upstream. Use Push below."
-        } else if !branch_syncable {
-            "Activate a branch before publishing."
-        } else if !self.files.is_empty() {
-            "Commit or discard working tree changes before publishing."
-        } else {
-            "Publish this branch to upstream and start tracking it."
-        };
-        let push_tooltip = if !branch_syncable {
-            "Activate a branch before pushing."
-        } else if !self.branch_has_upstream {
-            "Publish this branch before pushing."
-        } else if self.branch_ahead_count == 0 {
-            "No local commits to push."
-        } else if !self.files.is_empty() {
-            "Commit or discard working tree changes before pushing."
-        } else {
-            "Push all local commits on this branch."
-        };
-        let review_tooltip = self.active_review_action_blocker().unwrap_or_else(|| {
-            "Open a prefilled pull/merge request page for the active branch.".to_string()
-        });
-        let review_disabled = self.active_review_action_blocker().is_some();
-
-        if !branch_syncable {
-            return Button::new("git-hero-detached")
-                .primary()
-                .rounded(px(9.0))
-                .label("Detached")
-                .tooltip("Activate or create a branch to continue.")
-                .disabled(true)
-                .into_any_element();
-        }
-
-        if !self.branch_has_upstream {
-            return {
-                let view = view.clone();
-                Button::new("git-hero-publish")
-                    .primary()
-                    .rounded(px(9.0))
-                    .loading(publish_loading)
-                    .label(if publish_loading {
-                        "Publishing..."
-                    } else {
-                        "Publish Branch"
-                    })
-                    .tooltip(publish_tooltip)
-                    .disabled(publish_disabled)
-                    .on_click(move |_, _, cx| {
-                        view.update(cx, |this, cx| {
-                            this.publish_current_branch(cx);
-                        });
-                    })
-                    .into_any_element()
-            };
-        }
-
-        if self.branch_ahead_count > 0 {
-            return {
-                let view = view.clone();
-                Button::new("git-hero-push")
-                    .primary()
-                    .rounded(px(9.0))
-                    .loading(push_loading)
-                    .label(if push_loading {
-                        "Pushing...".to_string()
-                    } else {
-                        format!("Push {} commits", self.branch_ahead_count)
-                    })
-                    .tooltip(push_tooltip)
-                    .disabled(push_disabled)
-                    .on_click(move |_, _, cx| {
-                        view.update(cx, |this, cx| {
-                            this.push_current_branch(cx);
-                        });
-                    })
-                    .into_any_element()
-            };
-        }
-
-        if self.branch_behind_count > 0 {
-            return {
-                let view = view.clone();
-                Button::new("git-hero-sync")
-                    .primary()
-                    .rounded(px(9.0))
-                    .loading(sync_loading)
-                    .label(if sync_loading {
-                        "Syncing...".to_string()
-                    } else {
-                        format!("Sync {} commits", self.branch_behind_count)
-                    })
-                    .tooltip(sync_tooltip)
-                    .disabled(sync_disabled)
-                    .on_click(move |_, _, cx| {
-                        view.update(cx, |this, cx| {
-                            this.sync_current_branch_from_remote(cx);
-                        });
-                    })
-                    .into_any_element()
-            };
-        }
-
-        {
-            let view = view.clone();
-            Button::new("git-hero-review")
-                .primary()
-                .rounded(px(9.0))
-                .loading(open_review_loading)
-                .label("Open PR/MR")
-                .tooltip(review_tooltip)
-                .disabled(review_disabled)
-                .on_click(move |_, _, cx| {
-                    view.update(cx, |this, cx| {
-                        this.open_current_branch_review_url(cx);
-                    });
-                })
-                .into_any_element()
-        }
     }
 
     fn render_git_metric_pill(
@@ -432,19 +70,13 @@ impl DiffViewer {
         let activate_branch_loading = self.git_action_loading_named("Activate branch");
         let sync_loading = self.git_action_loading_named("Sync branch");
         let publish_loading = self.git_action_loading_named("Publish branch");
-        let rename_loading = self.git_action_loading_named("Rename branch");
         let open_review_loading = self.git_action_loading_named("Open PR/MR");
         let copy_review_loading = self.git_action_loading_named("Copy PR/MR URL");
         let git_controls_busy = self.git_controls_busy();
-        let create_worktree_disabled = git_controls_busy
-            || !self.worktree_name_input_has_text
-            || !self.worktree_branch_input_has_text;
+        let create_worktree_disabled = git_controls_busy || !self.worktree_branch_input_has_text;
         let branch_syncable = self.can_run_active_branch_actions();
         let sync_disabled = !self.can_sync_current_branch();
         let publish_disabled = !self.can_publish_current_branch();
-        let rename_disabled = git_controls_busy
-            || !self.can_run_active_branch_actions()
-            || !self.branch_input_has_text;
         let create_or_activate_disabled = git_controls_busy || !self.branch_input_has_text;
         let active_review_blocker = self.active_review_action_blocker();
         let review_url_disabled = active_review_blocker.is_some();
@@ -498,8 +130,8 @@ impl DiffViewer {
         };
         v_flex()
             .w_full()
-            .gap_2()
-            .p_3()
+            .gap_1p5()
+            .p_2p5()
             .rounded(px(12.0))
             .border_1()
             .border_color(colors.rail.border)
@@ -524,7 +156,7 @@ impl DiffViewer {
             .child(
                 v_flex()
                     .w_full()
-                    .gap_2()
+                    .gap_1p5()
                     .child(
                         div()
                             .text_xs()
@@ -534,9 +166,9 @@ impl DiffViewer {
                     )
                     .child(
                         Select::new(&self.workspace_target_picker_state)
-                            .with_size(gpui_component::Size::Medium)
+                            .with_size(gpui_component::Size::Small)
                             .placeholder(active_target_label)
-                            .search_placeholder("Find a worktree or project")
+                            .search_placeholder("Find a branch or project")
                             .rounded(px(8.0))
                             .w_full()
                             .bg(colors.muted_card.background)
@@ -544,7 +176,7 @@ impl DiffViewer {
                             .disabled(git_controls_busy || self.workspace_targets.is_empty())
                             .empty(
                                 h_flex()
-                                    .h(px(84.0))
+                                    .h(px(72.0))
                                     .justify_center()
                                     .text_sm()
                                     .text_color(cx.theme().muted_foreground)
@@ -556,33 +188,14 @@ impl DiffViewer {
                             .text_xs()
                             .font_semibold()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Create Managed Worktree"),
+                            .child("Create Worktree"),
                     )
                     .child(
                         div()
                             .w_full()
-                            .min_h(px(36.0))
-                            .px_2p5()
-                            .py_1p5()
-                            .rounded(px(8.0))
-                            .border_1()
-                            .border_color(colors.muted_card.border)
-                            .bg(colors.muted_card.background)
-                            .child(
-                                Input::new(&self.worktree_name_input_state)
-                                    .appearance(false)
-                                    .bordered(false)
-                                    .focus_bordered(false)
-                                    .w_full()
-                                    .disabled(git_controls_busy),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .w_full()
-                            .min_h(px(36.0))
-                            .px_2p5()
-                            .py_1p5()
+                            .min_h(px(32.0))
+                            .px_2()
+                            .py_1()
                             .rounded(px(8.0))
                             .border_1()
                             .border_color(colors.muted_card.border)
@@ -606,7 +219,7 @@ impl DiffViewer {
                             .loading(create_worktree_loading)
                             .label("Create Worktree")
                             .tooltip(
-                                "Create a managed worktree under .hunkdiff/worktrees and check out a new branch there.",
+                                "Create a managed worktree under .hunkdiff/worktrees/worktree-N for this branch.",
                             )
                             .disabled(create_worktree_disabled)
                             .on_click(move |_, window, cx| {
@@ -620,7 +233,7 @@ impl DiffViewer {
                 h_flex()
                     .w_full()
                     .items_center()
-                    .gap_2()
+                    .gap_1p5()
                     .flex_wrap()
                     .child(self.render_git_metric_pill(
                         if self.branch_has_upstream {
@@ -656,7 +269,7 @@ impl DiffViewer {
             )
             .child(
                 Select::new(&self.branch_picker_state)
-                    .with_size(gpui_component::Size::Medium)
+                    .with_size(gpui_component::Size::Small)
                     .placeholder(active_branch_label)
                     .search_placeholder("Find a branch")
                     .rounded(px(8.0))
@@ -666,7 +279,7 @@ impl DiffViewer {
                     .disabled(git_controls_busy)
                     .empty(
                         h_flex()
-                            .h(px(84.0))
+                            .h(px(72.0))
                             .justify_center()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
@@ -676,9 +289,9 @@ impl DiffViewer {
             .child(
                 div()
                     .w_full()
-                    .min_h(px(36.0))
-                    .px_2p5()
-                    .py_1p5()
+                    .min_h(px(32.0))
+                    .px_2()
+                    .py_1()
                     .rounded(px(8.0))
                     .border_1()
                     .border_color(colors.muted_card.border)
@@ -696,7 +309,7 @@ impl DiffViewer {
                 h_flex()
                     .w_full()
                     .items_center()
-                    .gap_2()
+                    .gap_1p5()
                     .flex_wrap()
                     .child({
                         let view = view.clone();
@@ -706,31 +319,14 @@ impl DiffViewer {
                             .with_size(gpui_component::Size::Small)
                             .rounded(px(8.0))
                             .loading(activate_branch_loading)
-                            .label("Create / Activate")
+                            .label("Create / Switch")
                             .tooltip(
-                                "Create a branch from the entered name or activate it if it already exists.",
+                                "Create a branch from the entered name or switch to it if it already exists.",
                             )
                             .disabled(create_or_activate_disabled)
                             .on_click(move |_, window, cx| {
                                 view.update(cx, |this, cx| {
                                     this.create_or_switch_branch_from_input(window, cx);
-                                });
-                            })
-                    })
-                    .child({
-                        let view = view.clone();
-                        Button::new("rename-active-branch-v3")
-                            .outline()
-                            .compact()
-                            .with_size(gpui_component::Size::Small)
-                            .rounded(px(8.0))
-                            .loading(rename_loading)
-                            .label("Rename")
-                            .tooltip("Rename the currently active branch to the entered name.")
-                            .disabled(rename_disabled)
-                            .on_click(move |_, window, cx| {
-                                view.update(cx, |this, cx| {
-                                    this.rename_current_branch_from_input(window, cx);
                                 });
                             })
                     }),
@@ -739,7 +335,7 @@ impl DiffViewer {
                 h_flex()
                     .w_full()
                     .items_center()
-                    .gap_2()
+                    .gap_1p5()
                     .flex_wrap()
                     .child({
                         let view = view.clone();
@@ -789,7 +385,7 @@ impl DiffViewer {
                 h_flex()
                     .w_full()
                     .items_center()
-                    .gap_2()
+                    .gap_1p5()
                     .flex_wrap()
                     .child({
                         let view = view.clone();
@@ -837,183 +433,4 @@ impl DiffViewer {
             .into_any_element()
     }
 
-    fn render_git_commit_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let view = cx.entity();
-        let is_dark = cx.theme().mode.is_dark();
-        let colors = hunk_git_workspace(cx.theme(), is_dark);
-        let create_commit_loading = self.git_action_loading_named("Create commit");
-        let push_loading = self.git_action_loading_named("Push branch");
-        let git_controls_busy = self.git_controls_busy();
-        let push_available = self.can_push_current_branch() || push_loading;
-        let push_disabled = !push_available || (git_controls_busy && !push_loading);
-        let push_tooltip = if !self.can_run_active_branch_actions() {
-            "Activate a branch before pushing."
-        } else if !self.branch_has_upstream {
-            "Publish this branch before pushing."
-        } else if self.branch_ahead_count == 0 {
-            "No local commits to push."
-        } else if !self.files.is_empty() {
-            "Commit or discard working tree changes before pushing."
-        } else {
-            "Push all local commits on this branch."
-        };
-        let staged_count = self.staged_commit_file_count();
-        let total_count = self.files.len();
-        let commit_disabled = staged_count == 0 || (git_controls_busy && !create_commit_loading);
-        let commit_readiness_label = if staged_count == 0 {
-            "Stage files to commit".to_string()
-        } else {
-            "Enter a message and commit".to_string()
-        };
-        let last_commit_text = self
-            .last_commit_subject
-            .as_deref()
-            .map(str::trim_end)
-            .filter(|text| !text.is_empty())
-            .unwrap_or("No commits yet")
-            .to_string();
-
-        v_flex()
-            .w_full()
-            .gap_2()
-            .p_3()
-            .rounded(px(12.0))
-            .border_1()
-            .border_color(colors.rail.border)
-            .bg(colors.rail.background)
-            .child(
-                h_flex()
-                    .w_full()
-                    .items_center()
-                    .justify_between()
-                    .gap_2()
-                    .child(
-                        v_flex()
-                            .gap_0p5()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_semibold()
-                                    .text_color(cx.theme().foreground)
-                                    .child("Commit & Publish"),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(format!("Staged {staged_count}/{total_count} changed files")),
-                            ),
-                    ),
-            )
-            .child(
-                h_flex()
-                    .w_full()
-                    .items_center()
-                    .gap_2()
-                    .flex_wrap()
-                    .child(self.render_git_metric_pill(
-                        commit_readiness_label,
-                        if commit_disabled {
-                            HunkAccentTone::Warning
-                        } else {
-                            HunkAccentTone::Success
-                        },
-                        cx,
-                    ))
-                    .child(self.render_git_metric_pill(
-                        format!("To Push {}", self.branch_ahead_count),
-                        if self.branch_ahead_count > 0 {
-                            HunkAccentTone::Accent
-                        } else {
-                            HunkAccentTone::Neutral
-                        },
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .w_full()
-                    .rounded(px(8.0))
-                    .border_1()
-                    .border_color(colors.muted_card.border)
-                    .bg(colors.muted_card.background)
-                    .px_3()
-                    .py_2()
-                    .child(
-                        Input::new(&self.commit_input_state)
-                            .appearance(false)
-                            .bordered(false)
-                            .focus_bordered(false)
-                            .w_full()
-                            .h(px(100.0))
-                            .disabled(git_controls_busy),
-                    ),
-            )
-            .child(
-                h_flex()
-                    .w_full()
-                    .items_center()
-                    .gap_2()
-                    .flex_wrap()
-                    .child({
-                        let view = view.clone();
-                        Button::new("commit-staged-v3")
-                            .primary()
-                            .rounded(px(8.0))
-                            .loading(create_commit_loading)
-                            .label(if create_commit_loading {
-                                "Creating Commit..."
-                            } else {
-                                "Create Commit"
-                            })
-                            .tooltip("Create a new commit from staged files using the message above.")
-                            .disabled(commit_disabled)
-                            .on_click(move |_, window, cx| {
-                                view.update(cx, |this, cx| {
-                                    this.commit_from_input(window, cx);
-                                });
-                            })
-                    })
-                    .child({
-                        let view = view.clone();
-                        Button::new("push-branch-v3")
-                            .outline()
-                            .rounded(px(8.0))
-                            .loading(push_loading)
-                            .label(if push_loading { "Pushing..." } else { "Push" })
-                            .tooltip(push_tooltip)
-                            .disabled(push_disabled)
-                            .on_click(move |_, _, cx| {
-                                view.update(cx, |this, cx| {
-                                    this.push_current_branch(cx);
-                                });
-                            })
-                    }),
-            )
-            .child(
-                v_flex()
-                    .w_full()
-                    .gap_0p5()
-                    .p_2()
-                    .rounded(px(10.0))
-                    .border_1()
-                    .border_color(colors.muted_card.border)
-                    .bg(colors.muted_card.background)
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_semibold()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Last Commit"),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().foreground.opacity(0.92))
-                            .whitespace_normal()
-                            .child(last_commit_text),
-                    ),
-            )
-            .into_any_element()
-    }
 }

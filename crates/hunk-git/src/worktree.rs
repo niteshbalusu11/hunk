@@ -33,7 +33,6 @@ pub struct WorkspaceTargetSummary {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateWorktreeRequest {
-    pub worktree_name: String,
     pub branch_name: String,
 }
 
@@ -137,13 +136,7 @@ pub fn create_managed_worktree(
     path: &Path,
     request: &CreateWorktreeRequest,
 ) -> Result<WorkspaceTargetSummary> {
-    let worktree_name = request.worktree_name.trim();
     let branch_name = request.branch_name.trim();
-    if !is_valid_managed_worktree_name(worktree_name) {
-        return Err(anyhow!(
-            "invalid worktree name: use letters, numbers, '.', '_' or '-'"
-        ));
-    }
     if !is_valid_branch_name(branch_name) {
         return Err(anyhow!("invalid branch name: {branch_name}"));
     }
@@ -158,11 +151,11 @@ pub fn create_managed_worktree(
     {
         return Err(anyhow!("branch '{branch_name}' already exists"));
     }
-    if primary_repo.find_worktree(worktree_name).is_ok() {
-        return Err(anyhow!("worktree '{worktree_name}' already exists"));
-    }
 
-    let target_path = managed_worktree_path(primary_root.as_path(), worktree_name);
+    let worktree_name = allocate_managed_worktree_name(primary_root.as_path(), &primary_repo)?;
+    let registration_name = managed_worktree_registration_name(worktree_name.as_str());
+
+    let target_path = managed_worktree_path(primary_root.as_path(), worktree_name.as_str());
     if target_path.exists() {
         return Err(anyhow!(
             "worktree path already exists: {}",
@@ -175,6 +168,14 @@ pub fn create_managed_worktree(
             managed_worktrees_root(primary_root.as_path()).display()
         )
     })?;
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create managed worktree parent directory {}",
+                parent.display()
+            )
+        })?;
+    }
 
     let head_commit = active_repo
         .head()
@@ -190,11 +191,15 @@ pub fn create_managed_worktree(
     let mut options = WorktreeAddOptions::new();
     options.reference(Some(branch.get()));
     primary_repo
-        .worktree(worktree_name, target_path.as_path(), Some(&options))
+        .worktree(
+            registration_name.as_str(),
+            target_path.as_path(),
+            Some(&options),
+        )
         .with_context(|| {
             format!(
                 "failed to create worktree '{}' at {}",
-                worktree_name,
+                worktree_name.as_str(),
                 target_path.display()
             )
         })?;
@@ -202,7 +207,7 @@ pub fn create_managed_worktree(
     let active_root = canonicalize_existing_path(discover_repo_root(path)?.as_path())?;
     let created_root = canonicalize_existing_path(target_path.as_path())?;
     worktree_target_summary(
-        worktree_name,
+        worktree_name.as_str(),
         created_root,
         active_root.as_path(),
         primary_root.as_path(),
@@ -226,19 +231,26 @@ fn primary_workspace_target_summary(
 }
 
 fn worktree_target_summary(
-    worktree_name: &str,
+    worktree_registration_name: &str,
     root: PathBuf,
     active_root: &Path,
     primary_root: &Path,
 ) -> Result<WorkspaceTargetSummary> {
+    let managed_name = managed_worktree_name_from_root(root.as_path(), primary_root);
+    let managed = managed_name.is_some();
+    let worktree_name = managed_name.unwrap_or_else(|| worktree_registration_name.to_string());
+    let branch_name = checked_out_branch_name(root.as_path())?;
     Ok(WorkspaceTargetSummary {
-        id: workspace_target_id_for_worktree(worktree_name),
+        id: workspace_target_id_for_worktree(worktree_name.as_str()),
         kind: WorkspaceTargetKind::LinkedWorktree,
         root: root.clone(),
-        name: worktree_name.to_string(),
-        display_name: worktree_name.to_string(),
-        branch_name: checked_out_branch_name(root.as_path())?,
-        managed: root.starts_with(managed_worktrees_root(primary_root)),
+        name: worktree_name.clone(),
+        display_name: linked_workspace_target_display_name(
+            worktree_name.as_str(),
+            branch_name.as_str(),
+        ),
+        branch_name,
+        managed,
         is_active: root == active_root,
     })
 }
@@ -297,13 +309,53 @@ fn primary_checkout_name(primary_root: &Path) -> String {
         .to_string()
 }
 
-fn is_valid_managed_worktree_name(name: &str) -> bool {
-    let name = name.trim();
-    if name.is_empty() || name == "." || name == ".." {
-        return false;
+fn allocate_managed_worktree_name(primary_root: &Path, repo: &Repository) -> Result<String> {
+    let mut index = 1usize;
+    loop {
+        let candidate = format!("worktree-{index}");
+        let registration_name = managed_worktree_registration_name(candidate.as_str());
+        if repo.find_worktree(registration_name.as_str()).is_ok() {
+            index += 1;
+            continue;
+        }
+        if managed_worktree_path(primary_root, candidate.as_str()).exists() {
+            index += 1;
+            continue;
+        }
+        return Ok(candidate);
     }
-    name.chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+}
+
+fn managed_worktree_registration_name(worktree_name: &str) -> String {
+    let mut encoded = String::with_capacity(worktree_name.len());
+    for byte in worktree_name.bytes() {
+        let ch = byte as char;
+        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
+            encoded.push(ch);
+        } else {
+            encoded.push_str(format!("_x{byte:02X}_").as_str());
+        }
+    }
+    encoded
+}
+
+fn managed_worktree_name_from_root(root: &Path, primary_root: &Path) -> Option<String> {
+    let managed_root = managed_worktrees_root(primary_root);
+    let relative = root.strip_prefix(managed_root).ok()?;
+    let name = relative.to_string_lossy().replace('\\', "/");
+    (!name.is_empty()).then_some(name)
+}
+
+fn linked_workspace_target_display_name(worktree_name: &str, branch_name: &str) -> String {
+    if is_detached_workspace_target_branch(branch_name) {
+        worktree_name.to_string()
+    } else {
+        branch_name.to_string()
+    }
+}
+
+fn is_detached_workspace_target_branch(branch_name: &str) -> bool {
+    matches!(branch_name, "detached" | "unborn")
 }
 
 fn normalize_relative_path(path: &str) -> String {

@@ -321,14 +321,11 @@ impl DiffViewer {
             SelectState::new(ReviewComparePickerDelegate::default(), None, window, cx)
                 .searchable(true)
         });
-        let worktree_name_input_state = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("New worktree name")
-        });
         let worktree_branch_input_state = cx.new(|cx| {
             InputState::new(window, cx).placeholder("Branch for new worktree")
         });
         let branch_input_state = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Create or rename branch")
+            InputState::new(window, cx).placeholder("Create or activate branch")
         });
         let commit_input_state = cx
             .new(|cx| InputState::new(window, cx).multi_line(true).rows(4).placeholder("Commit message"));
@@ -444,8 +441,6 @@ impl DiffViewer {
             files: Vec::new(),
             file_status_by_path: BTreeMap::new(),
             workspace_target_picker_state,
-            worktree_name_input_state,
-            worktree_name_input_has_text: false,
             worktree_branch_input_state,
             worktree_branch_input_has_text: false,
             review_left_picker_state,
@@ -574,21 +569,15 @@ impl DiffViewer {
         })
         .detach();
 
-        let worktree_name_input_state = view.worktree_name_input_state.clone();
-        cx.subscribe(&worktree_name_input_state, |this, _, event, cx| {
-            if matches!(event, InputEvent::Change) {
-                this.worktree_name_input_has_text =
-                    !this.worktree_name_input_state.read(cx).value().trim().is_empty();
-                cx.notify();
-            }
-        })
-        .detach();
-
         let worktree_branch_input_state = view.worktree_branch_input_state.clone();
         cx.subscribe(&worktree_branch_input_state, |this, _, event, cx| {
             if matches!(event, InputEvent::Change) {
-                this.worktree_branch_input_has_text =
-                    !this.worktree_branch_input_state.read(cx).value().trim().is_empty();
+                this.worktree_branch_input_has_text = !this
+                    .worktree_branch_input_state
+                    .read(cx)
+                    .value()
+                    .trim()
+                    .is_empty();
                 cx.notify();
             }
         })
