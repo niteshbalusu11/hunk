@@ -162,7 +162,7 @@ impl DiffViewer {
                     )
                     .child(
                         Select::new(&self.workspace_target_picker_state)
-                            .with_size(gpui_component::Size::Small)
+                            .with_size(gpui_component::Size::Medium)
                             .placeholder(active_target_label)
                             .search_placeholder("Find a branch or project")
                             .rounded(px(8.0))
@@ -220,7 +220,7 @@ impl DiffViewer {
             )
             .child(
                 Select::new(&self.branch_picker_state)
-                    .with_size(gpui_component::Size::Small)
+                    .with_size(gpui_component::Size::Medium)
                     .placeholder(active_branch_label)
                     .search_placeholder("Find a branch")
                     .rounded(px(8.0))
@@ -238,23 +238,14 @@ impl DiffViewer {
                     ),
             )
             .child(
-                div()
+                Input::new(&self.branch_input_state)
+                    .with_size(gpui_component::Size::Medium)
+                    .appearance(true)
                     .w_full()
-                    .min_h(px(32.0))
-                    .px_2()
-                    .py_1()
                     .rounded(px(8.0))
-                    .border_1()
-                    .border_color(colors.muted_card.border)
                     .bg(colors.muted_card.background)
-                    .child(
-                        Input::new(&self.branch_input_state)
-                            .appearance(false)
-                            .bordered(false)
-                            .focus_bordered(false)
-                            .w_full()
-                            .disabled(git_controls_busy),
-                    ),
+                    .border_color(colors.muted_card.border)
+                    .disabled(git_controls_busy),
             )
             .child(
                 h_flex()

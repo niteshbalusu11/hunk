@@ -271,23 +271,16 @@ impl DiffViewer {
                     )),
             )
             .child(
-                div()
+                Input::new(&self.commit_input_state)
+                    .appearance(true)
                     .w_full()
+                    .with_size(gpui_component::Size::Medium)
+                    .px_2()
+                    .h(px(84.0))
                     .rounded(px(8.0))
-                    .border_1()
-                    .border_color(colors.muted_card.border)
                     .bg(colors.muted_card.background)
-                    .px_3()
-                    .py_2()
-                    .child(
-                        Input::new(&self.commit_input_state)
-                            .appearance(false)
-                            .bordered(false)
-                            .focus_bordered(false)
-                            .w_full()
-                            .h(px(84.0))
-                            .disabled(git_controls_busy),
-                    ),
+                    .border_color(colors.muted_card.border)
+                    .disabled(git_controls_busy),
             )
             .child(
                 h_flex()
