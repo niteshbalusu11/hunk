@@ -27,16 +27,25 @@ fn run_ai_worker(
                         )?;
                         if command_can_retry_after_reconnect(&retry_command) {
                             if let Err(error) = runtime.handle_command(retry_command, event_tx) {
-                                let _ = event_tx.send(AiWorkerEvent::Error(error.to_string()));
+                                runtime.send_event(
+                                    event_tx,
+                                    AiWorkerEventPayload::Error(error.to_string()),
+                                );
                             }
                         } else {
-                            let _ = event_tx.send(AiWorkerEvent::Status(format!(
-                                "AI connection restored after {}. Refreshed state without replaying the last action.",
-                                command_context_message(&retry_command)
-                            )));
+                            runtime.send_event(
+                                event_tx,
+                                AiWorkerEventPayload::Status(format!(
+                                    "AI connection restored after {}. Refreshed state without replaying the last action.",
+                                    command_context_message(&retry_command)
+                                )),
+                            );
                         }
                     } else {
-                        let _ = event_tx.send(AiWorkerEvent::Error(error.to_string()));
+                        runtime.send_event(
+                            event_tx,
+                            AiWorkerEventPayload::Error(error.to_string()),
+                        );
                     }
                 }
             }
@@ -68,36 +77,49 @@ impl AiWorkerRuntime {
         connected_message: &str,
         emit_bootstrap_completed: bool,
     ) -> Result<(), CodexIntegrationError> {
-        let _ = event_tx.send(AiWorkerEvent::Status(connected_message.to_string()));
+        self.send_event(
+            event_tx,
+            AiWorkerEventPayload::Status(connected_message.to_string()),
+        );
         self.emit_snapshot(event_tx);
         self.refresh_thread_list()?;
         self.emit_snapshot(event_tx);
         if let Err(error) = self.refresh_account_state() {
-            let _ = event_tx.send(AiWorkerEvent::Status(format!(
-                "Unable to read account state: {error}"
-            )));
+            self.send_event(
+                event_tx,
+                AiWorkerEventPayload::Status(format!("Unable to read account state: {error}")),
+            );
         }
         self.emit_snapshot(event_tx);
         if let Err(error) = self.refresh_account_rate_limits() {
-            let _ = event_tx.send(AiWorkerEvent::Status(format!(
-                "Unable to read account rate limits: {error}"
-            )));
+            self.send_event(
+                event_tx,
+                AiWorkerEventPayload::Status(format!(
+                    "Unable to read account rate limits: {error}"
+                )),
+            );
         }
         self.emit_snapshot(event_tx);
         if let Err(error) = self.refresh_session_metadata() {
-            let _ = event_tx.send(AiWorkerEvent::Status(format!(
-                "Unable to read model/session metadata: {error}"
-            )));
+            self.send_event(
+                event_tx,
+                AiWorkerEventPayload::Status(format!(
+                    "Unable to read model/session metadata: {error}"
+                )),
+            );
         }
         self.emit_snapshot(event_tx);
         if let Err(error) = self.hydrate_initial_timeline() {
-            let _ = event_tx.send(AiWorkerEvent::Status(format!(
-                "Unable to hydrate initial thread timeline: {error}"
-            )));
+            self.send_event(
+                event_tx,
+                AiWorkerEventPayload::Status(format!(
+                    "Unable to hydrate initial thread timeline: {error}"
+                )),
+            );
         }
         self.emit_snapshot(event_tx);
         if emit_bootstrap_completed {
-            let _ = event_tx.send(AiWorkerEvent::BootstrapCompleted);
+            self.send_event(event_tx, AiWorkerEventPayload::BootstrapCompleted);
             self.emit_snapshot(event_tx);
         }
         Ok(())
@@ -114,9 +136,12 @@ impl AiWorkerRuntime {
         let mut last_error = None;
 
         for attempt in 1..=WORKER_RECONNECT_MAX_ATTEMPTS {
-            let _ = event_tx.send(AiWorkerEvent::Reconnecting(format!(
-                "AI connection lost while {context}. Reconnecting ({attempt}/{WORKER_RECONNECT_MAX_ATTEMPTS})..."
-            )));
+            self.send_event(
+                event_tx,
+                AiWorkerEventPayload::Reconnecting(format!(
+                    "AI connection lost while {context}. Reconnecting ({attempt}/{WORKER_RECONNECT_MAX_ATTEMPTS})..."
+                )),
+            );
 
             match self.try_restore_transport(config, preferred_active_thread_id.as_deref()) {
                 Ok(()) => match self.sync_after_connect(event_tx, "AI connection restored.", false)
@@ -198,7 +223,7 @@ impl AiWorkerRuntime {
         };
         self.service
             .state_mut()
-            .set_active_thread_for_cwd(self.cwd_key.clone(), thread_id.to_string());
+            .set_active_thread_for_cwd(self.workspace_key.clone(), thread_id.to_string());
     }
 }
 

@@ -158,6 +158,9 @@ impl DiffViewer {
                 name: branch.name,
                 is_current: branch.is_current,
                 tip_unix_time: branch.tip_unix_time,
+                attached_workspace_target_id: branch.attached_workspace_target_id,
+                attached_workspace_target_root: branch.attached_workspace_target_root,
+                attached_workspace_target_label: branch.attached_workspace_target_label,
             })
             .collect();
         self.files = cache
@@ -185,7 +188,9 @@ impl DiffViewer {
             .selected_path
             .as_deref()
             .and_then(|selected| self.status_for_path(selected));
+        self.sync_ai_worktree_base_branch_from_repo();
         self.sync_branch_picker_state(cx);
+        self.sync_ai_worktree_base_branch_picker_state(cx);
         self.refresh_workspace_targets_from_git_state(cx);
         self.repo_discovery_failed = false;
         self.error_message = None;
@@ -216,6 +221,9 @@ impl DiffViewer {
                     name: branch.name.clone(),
                     is_current: branch.is_current,
                     tip_unix_time: branch.tip_unix_time,
+                    attached_workspace_target_id: branch.attached_workspace_target_id.clone(),
+                    attached_workspace_target_root: branch.attached_workspace_target_root.clone(),
+                    attached_workspace_target_label: branch.attached_workspace_target_label.clone(),
                 })
                 .collect(),
             files: self
@@ -305,6 +313,9 @@ impl DiffViewer {
         let branch_picker_state = cx.new(|cx| {
             SelectState::new(BranchPickerDelegate::default(), None, window, cx).searchable(true)
         });
+        let ai_worktree_base_branch_picker_state = cx.new(|cx| {
+            SelectState::new(BranchPickerDelegate::default(), None, window, cx).searchable(true)
+        });
         let workspace_target_picker_state = cx.new(|cx| {
             SelectState::new(WorkspaceTargetPickerDelegate::default(), None, window, cx)
                 .searchable(true)
@@ -387,6 +398,7 @@ impl DiffViewer {
             ai_selected_thread_id: None,
             ai_new_thread_draft_active: false,
             ai_new_thread_start_mode: AiNewThreadStartMode::Local,
+            ai_worktree_base_branch_name: None,
             ai_pending_new_thread_selection: false,
             ai_scroll_timeline_to_bottom: false,
             ai_timeline_follow_output: true,
@@ -427,10 +439,13 @@ impl DiffViewer {
             ai_event_epoch: 0,
             ai_event_task: Task::ready(()),
             ai_attachment_picker_task: Task::ready(()),
+            ai_workspace_states: BTreeMap::new(),
+            ai_hidden_runtimes: BTreeMap::new(),
             ai_worker_thread: None,
             ai_command_tx: None,
             ai_worker_workspace_key: None,
             ai_draft_workspace_target_id: None,
+            ai_worktree_base_branch_picker_state,
             ai_composer_input_state,
             ai_composer_drafts: BTreeMap::new(),
             ai_composer_status_by_draft: BTreeMap::new(),
@@ -590,6 +605,19 @@ impl DiffViewer {
         )
         .detach();
 
+        let ai_worktree_base_branch_picker_state = view.ai_worktree_base_branch_picker_state.clone();
+        cx.subscribe(
+            &ai_worktree_base_branch_picker_state,
+            |this, _, event: &SelectEvent<BranchPickerDelegate>, cx| {
+                let SelectEvent::Confirm(branch_name) = event;
+                let Some(branch_name) = branch_name.clone() else {
+                    return;
+                };
+                this.ai_select_worktree_base_branch(branch_name, cx);
+            },
+        )
+        .detach();
+
         let workspace_target_picker_state = view.workspace_target_picker_state.clone();
         cx.subscribe(
             &workspace_target_picker_state,
@@ -609,6 +637,7 @@ impl DiffViewer {
         view.subscribe_review_compare_picker_states(cx);
 
         view.update_branch_picker_state(window, cx);
+        view.update_ai_worktree_base_branch_picker_state(window, cx);
         view.update_workspace_target_picker_state(window, cx);
         view.update_review_compare_picker_states(window, cx);
         view.apply_theme_preference(window, cx);
@@ -641,6 +670,24 @@ impl DiffViewer {
         cx.notify();
     }
 
+    fn update_ai_worktree_base_branch_picker_state(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let delegate = build_branch_picker_delegate(&self.branches);
+        let selected_index = branch_picker_selected_index(
+            &self.branches,
+            self.ai_selected_worktree_base_branch_name(),
+        );
+        self.ai_worktree_base_branch_picker_state
+            .update(cx, |state, cx| {
+                state.set_items(delegate, window, cx);
+                state.set_selected_index(selected_index, window, cx);
+            });
+        cx.notify();
+    }
+
     fn sync_branch_picker_state(&mut self, cx: &mut Context<Self>) {
         let Some(window_handle) = cx.windows().into_iter().next() else {
             return;
@@ -658,6 +705,28 @@ impl DiffViewer {
             });
         }) {
             error!("failed to sync branch picker state: {err:#}");
+        }
+    }
+
+    fn sync_ai_worktree_base_branch_picker_state(&mut self, cx: &mut Context<Self>) {
+        let Some(window_handle) = cx.windows().into_iter().next() else {
+            return;
+        };
+
+        let ai_worktree_base_branch_picker_state = self.ai_worktree_base_branch_picker_state.clone();
+        let delegate = build_branch_picker_delegate(&self.branches);
+        let selected_index = branch_picker_selected_index(
+            &self.branches,
+            self.ai_selected_worktree_base_branch_name(),
+        );
+
+        if let Err(err) = cx.update_window(window_handle, move |_, window, cx| {
+            ai_worktree_base_branch_picker_state.update(cx, |state, cx| {
+                state.set_items(delegate, window, cx);
+                state.set_selected_index(selected_index, window, cx);
+            });
+        }) {
+            error!("failed to sync AI worktree base branch picker state: {err:#}");
         }
     }
 
@@ -1695,7 +1764,9 @@ impl DiffViewer {
         self.set_last_project_path(self.project_path.clone());
         self.repo_root = Some(root);
         self.branches = branches;
+        self.sync_ai_worktree_base_branch_from_repo();
         self.sync_branch_picker_state(cx);
+        self.sync_ai_worktree_base_branch_picker_state(cx);
         self.refresh_workspace_targets_from_git_state(cx);
         if self.active_workspace_target_id.is_none() {
             self.active_workspace_target_id = self
@@ -1899,7 +1970,9 @@ impl DiffViewer {
             self.persist_state();
         }
         self.clear_recent_commits_cache();
+        self.ai_worktree_base_branch_name = None;
         self.sync_branch_picker_state(cx);
+        self.sync_ai_worktree_base_branch_picker_state(cx);
         cx.notify();
     }
 

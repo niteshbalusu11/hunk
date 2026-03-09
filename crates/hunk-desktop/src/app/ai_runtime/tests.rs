@@ -21,7 +21,8 @@ mod ai_tests {
 
     use super::AiApprovalDecision;
     use super::AiWorkerCommand;
-    use super::AiWorkerEvent;
+    use super::AiWorkerEventPayload;
+    use super::AiWorkerStartConfig;
     use super::AiTurnSessionOverrides;
     use super::apply_login_completed_state;
     use super::apply_thread_start_policy;
@@ -46,6 +47,16 @@ mod ai_tests {
         apply_thread_start_policy(false, &mut params);
         assert_eq!(params.approval_policy, Some(AskForApproval::OnRequest));
         assert_eq!(params.sandbox, Some(SandboxMode::WorkspaceWrite));
+    }
+
+    #[test]
+    fn worker_start_config_uses_cwd_as_workspace_key() {
+        let config = AiWorkerStartConfig::new(
+            std::path::PathBuf::from("/repo/worktrees/task-a"),
+            std::path::PathBuf::from("/bin/codex"),
+            std::path::PathBuf::from("/tmp/codex-home"),
+        );
+        assert_eq!(config.workspace_key, "/repo/worktrees/task-a");
     }
 
     #[test]
@@ -452,11 +463,12 @@ mod ai_tests {
     fn dispatch_ai_worker_result_reports_panics_as_fatal_events() {
         let (event_tx, event_rx) = mpsc::channel();
 
-        dispatch_ai_worker_result(Err(Box::new("panic payload")), &event_tx);
+        dispatch_ai_worker_result(Err(Box::new("panic payload")), "/repo-a", &event_tx);
 
         let event = event_rx.recv().expect("panic event should be emitted");
-        match event {
-            AiWorkerEvent::Fatal(message) => {
+        assert_eq!(event.workspace_key, "/repo-a");
+        match event.payload {
+            AiWorkerEventPayload::Fatal(message) => {
                 assert_eq!(message, "AI worker panicked: panic payload");
             }
             other => panic!("expected fatal event, got {other:?}"),

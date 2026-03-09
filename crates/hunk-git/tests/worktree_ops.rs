@@ -9,6 +9,7 @@ use git2::{
 };
 use hunk_domain::paths::{HUNK_HOME_DIR_ENV_VAR, hunk_home_dir};
 use hunk_git::compare::{CompareSource, load_compare_snapshot};
+use hunk_git::git::load_workflow_snapshot;
 use hunk_git::worktree::{
     CreateWorktreeRequest, PRIMARY_WORKSPACE_TARGET_ID, WorkspaceTargetKind,
     create_managed_worktree, list_workspace_targets, managed_worktree_path, managed_worktrees_root,
@@ -80,6 +81,73 @@ fn listing_workspace_targets_includes_primary_checkout_and_created_worktree() ->
     assert_eq!(created_target.branch_name, "feature/worktree-one");
     assert!(created_target.managed);
     assert!(!created_target.is_active);
+    Ok(())
+}
+
+#[test]
+fn workflow_snapshot_marks_branches_with_their_checked_out_workspace_target() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.write_file("tracked.txt", "base\n")?;
+    fixture.commit_all("initial")?;
+
+    let created = create_managed_worktree(
+        fixture.root(),
+        &CreateWorktreeRequest {
+            branch_name: "feature/worktree-one".to_string(),
+            base_branch_name: None,
+        },
+    )?;
+
+    let primary_snapshot = load_workflow_snapshot(fixture.root())?;
+    let main_branch = primary_snapshot
+        .branches
+        .iter()
+        .find(|branch| branch.name == "main")
+        .context("main branch should exist in primary snapshot")?;
+    assert_eq!(
+        main_branch.attached_workspace_target_id.as_deref(),
+        Some(PRIMARY_WORKSPACE_TARGET_ID)
+    );
+    assert_eq!(
+        main_branch.attached_workspace_target_root.as_deref(),
+        Some(fixture.root())
+    );
+    assert_eq!(
+        main_branch.attached_workspace_target_label.as_deref(),
+        Some("Primary Checkout")
+    );
+
+    let feature_branch = primary_snapshot
+        .branches
+        .iter()
+        .find(|branch| branch.name == "feature/worktree-one")
+        .context("worktree branch should exist in primary snapshot")?;
+    assert_eq!(
+        feature_branch.attached_workspace_target_id.as_deref(),
+        Some(created.id.as_str())
+    );
+    assert_eq!(
+        feature_branch.attached_workspace_target_root.as_deref(),
+        Some(created.root.as_path())
+    );
+    assert_eq!(
+        feature_branch.attached_workspace_target_label.as_deref(),
+        Some(created.name.as_str())
+    );
+
+    let worktree_snapshot = load_workflow_snapshot(created.root.as_path())?;
+    let current_feature_branch = worktree_snapshot
+        .branches
+        .iter()
+        .find(|branch| branch.name == "feature/worktree-one")
+        .context("worktree branch should exist in worktree snapshot")?;
+    assert!(current_feature_branch.is_current);
+    assert_eq!(
+        current_feature_branch
+            .attached_workspace_target_id
+            .as_deref(),
+        Some(created.id.as_str())
+    );
     Ok(())
 }
 

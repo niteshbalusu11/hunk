@@ -9,7 +9,7 @@ impl AiWorkerRuntime {
         {
             self.service
                 .state_mut()
-                .set_active_thread_for_cwd(self.cwd_key.clone(), first_thread.id.clone());
+                .set_active_thread_for_cwd(self.workspace_key.clone(), first_thread.id.clone());
         }
         Ok(())
     }
@@ -24,7 +24,7 @@ impl AiWorkerRuntime {
                     .threads
                     .get(*thread_id)
                     .is_some_and(|thread| {
-                        thread.cwd == self.cwd_key
+                        thread.cwd == self.workspace_key
                             && thread.status != ThreadLifecycleStatus::Archived
                     })
             })
@@ -35,7 +35,7 @@ impl AiWorkerRuntime {
                     .threads
                     .values()
                     .filter(|thread| {
-                        thread.cwd == self.cwd_key
+                        thread.cwd == self.workspace_key
                             && thread.status != ThreadLifecycleStatus::Archived
                     })
                     .max_by(|left, right| {
@@ -238,7 +238,7 @@ impl AiWorkerRuntime {
                     refresh_account = true;
                     refresh_rate_limits = true;
                     changed = true;
-                    let _ = event_tx.send(AiWorkerEvent::Status(message));
+                    self.send_event(event_tx, AiWorkerEventPayload::Status(message));
                 }
                 _ => {}
             }
@@ -539,24 +539,27 @@ impl AiWorkerRuntime {
     fn emit_snapshot(&self, event_tx: &Sender<AiWorkerEvent>) {
         let pending_approvals = ordered_pending_approvals(&self.pending_approvals);
         let pending_user_inputs = ordered_pending_user_inputs(&self.pending_user_inputs);
-        let _ = event_tx.send(AiWorkerEvent::Snapshot(Box::new(AiSnapshot {
-            state: self.service.state().clone(),
-            active_thread_id: self
-                .service
-                .active_thread_for_workspace()
-                .map(ToOwned::to_owned),
-            pending_approvals,
-            pending_user_inputs,
-            account: self.account.clone(),
-            requires_openai_auth: self.requires_openai_auth,
-            pending_chatgpt_login_id: self.pending_chatgpt_login_id.clone(),
-            pending_chatgpt_auth_url: self.pending_chatgpt_auth_url.clone(),
-            rate_limits: self.rate_limits.clone(),
-            models: self.models.clone(),
-            experimental_features: self.experimental_features.clone(),
-            collaboration_modes: self.collaboration_modes.clone(),
-            include_hidden_models: self.include_hidden_models,
-            mad_max_mode: self.mad_max_mode,
-        })));
+        self.send_event(
+            event_tx,
+            AiWorkerEventPayload::Snapshot(Box::new(AiSnapshot {
+                state: self.service.state().clone(),
+                active_thread_id: self
+                    .service
+                    .active_thread_for_workspace()
+                    .map(ToOwned::to_owned),
+                pending_approvals,
+                pending_user_inputs,
+                account: self.account.clone(),
+                requires_openai_auth: self.requires_openai_auth,
+                pending_chatgpt_login_id: self.pending_chatgpt_login_id.clone(),
+                pending_chatgpt_auth_url: self.pending_chatgpt_auth_url.clone(),
+                rate_limits: self.rate_limits.clone(),
+                models: self.models.clone(),
+                experimental_features: self.experimental_features.clone(),
+                collaboration_modes: self.collaboration_modes.clone(),
+                include_hidden_models: self.include_hidden_models,
+                mad_max_mode: self.mad_max_mode,
+            })),
+        );
     }
 }

@@ -30,6 +30,10 @@ impl DiffViewer {
             return;
         };
         let worker_workspace_key = cwd.to_string_lossy().to_string();
+        if self.promote_hidden_ai_runtime(worker_workspace_key.as_str()) {
+            cx.notify();
+            return;
+        }
 
         let Some(codex_home) = resolve_codex_home_path() else {
             self.ai_connection_state = AiConnectionState::Failed;
@@ -59,12 +63,13 @@ impl DiffViewer {
         self.ai_bootstrap_loading = true;
         self.ai_error_message = None;
         self.ai_status_message = Some("Starting Codex App Server...".to_string());
+        let listener_workspace_key = worker_workspace_key.clone();
         self.ai_command_tx = Some(command_tx);
         self.ai_worker_thread = Some(worker);
         self.ai_worker_workspace_key = Some(worker_workspace_key);
 
         let epoch = self.next_ai_event_epoch();
-        self.start_ai_event_listener(event_rx, epoch, cx);
+        self.start_ai_event_listener(event_rx, listener_workspace_key, epoch, cx);
         cx.notify();
     }
 
@@ -149,6 +154,8 @@ impl DiffViewer {
         cx: &mut Context<Self>,
     ) {
         self.ai_new_thread_start_mode = start_mode;
+        self.sync_ai_worktree_base_branch_from_repo();
+        self.sync_ai_worktree_base_branch_picker_state(cx);
         self.sync_ai_workspace_target_from_catalog(cx);
         self.ai_create_thread_action(window, cx);
     }
@@ -952,6 +959,64 @@ impl DiffViewer {
         self.repo_root.clone().or_else(|| self.project_path.clone())
     }
 
+    fn resolve_ai_default_worktree_base_branch_name(&self) -> Option<String> {
+        let repo_root = self
+            .project_path
+            .as_deref()
+            .or(self.repo_root.as_deref())?;
+        let resolved_default_base_branch = resolve_default_base_branch_name(repo_root)
+            .ok()
+            .flatten();
+        preferred_ai_worktree_base_branch_name(
+            &self.branches,
+            resolved_default_base_branch.as_deref(),
+            self.checked_out_branch_name()
+                .or(Some(self.branch_name.as_str())),
+        )
+    }
+
+    fn sync_ai_worktree_base_branch_from_repo(&mut self) {
+        if self.ai_new_thread_start_mode != AiNewThreadStartMode::Worktree {
+            self.ai_worktree_base_branch_name = None;
+            return;
+        }
+
+        let resolved_default_base_branch = self.resolve_ai_default_worktree_base_branch_name();
+        self.ai_worktree_base_branch_name = preferred_ai_worktree_base_branch_name(
+            &self.branches,
+            self.ai_worktree_base_branch_name
+                .as_deref()
+                .or(resolved_default_base_branch.as_deref()),
+            self.checked_out_branch_name()
+                .or(Some(self.branch_name.as_str())),
+        );
+    }
+
+    fn ai_select_worktree_base_branch(
+        &mut self,
+        branch_name: String,
+        cx: &mut Context<Self>,
+    ) {
+        if self.ai_new_thread_start_mode != AiNewThreadStartMode::Worktree {
+            return;
+        }
+        let branch_name = branch_name.trim().to_string();
+        if branch_name.is_empty() {
+            return;
+        }
+        self.ai_worktree_base_branch_name = Some(branch_name);
+        self.sync_ai_worktree_base_branch_picker_state(cx);
+        cx.notify();
+    }
+
+    pub(crate) fn ai_selected_worktree_base_branch_name(&self) -> Option<&str> {
+        if self.ai_new_thread_start_mode != AiNewThreadStartMode::Worktree {
+            return None;
+        }
+
+        self.ai_worktree_base_branch_name.as_deref()
+    }
+
     fn ai_workspace_key_for_draft(&self) -> Option<String> {
         self.ai_draft_workspace_root()
             .map(|path| path.to_string_lossy().to_string())
@@ -1155,12 +1220,402 @@ impl DiffViewer {
         }
     }
 
+    fn default_ai_workspace_state_for_workspace_key(
+        &self,
+        workspace_key: Option<&str>,
+    ) -> AiWorkspaceState {
+        let mut next = AiWorkspaceState {
+            include_hidden_models: workspace_include_hidden_models(&self.state, workspace_key),
+            mad_max_mode: workspace_mad_max_mode(&self.state, workspace_key),
+            ..AiWorkspaceState::default()
+        };
+        let persisted = workspace_key
+            .and_then(|workspace| self.state.ai_workspace_session_overrides.get(workspace).cloned())
+            .unwrap_or_default();
+        next.selected_model = persisted.model;
+        next.selected_effort = persisted.effort;
+        next.selected_collaboration_mode = persisted.collaboration_mode;
+        next.selected_service_tier = persisted.service_tier.unwrap_or_default();
+        next
+    }
+
+    fn capture_current_ai_workspace_state(&self) -> AiWorkspaceState {
+        AiWorkspaceState {
+            connection_state: self.ai_connection_state,
+            bootstrap_loading: self.ai_bootstrap_loading,
+            status_message: self.ai_status_message.clone(),
+            error_message: self.ai_error_message.clone(),
+            state_snapshot: self.ai_state_snapshot.clone(),
+            selected_thread_id: self.ai_selected_thread_id.clone(),
+            new_thread_draft_active: self.ai_new_thread_draft_active,
+            new_thread_start_mode: self.ai_new_thread_start_mode,
+            worktree_base_branch_name: self.ai_worktree_base_branch_name.clone(),
+            pending_new_thread_selection: self.ai_pending_new_thread_selection,
+            timeline_follow_output: self.ai_timeline_follow_output,
+            thread_title_refresh_state_by_thread: self.ai_thread_title_refresh_state_by_thread.clone(),
+            timeline_visible_turn_limit_by_thread: self.ai_timeline_visible_turn_limit_by_thread.clone(),
+            in_progress_turn_started_at: self.ai_in_progress_turn_started_at.clone(),
+            expanded_timeline_row_ids: self.ai_expanded_timeline_row_ids.clone(),
+            pending_approvals: self.ai_pending_approvals.clone(),
+            pending_user_inputs: self.ai_pending_user_inputs.clone(),
+            pending_user_input_answers: self.ai_pending_user_input_answers.clone(),
+            account: self.ai_account.clone(),
+            requires_openai_auth: self.ai_requires_openai_auth,
+            pending_chatgpt_login_id: self.ai_pending_chatgpt_login_id.clone(),
+            pending_chatgpt_auth_url: self.ai_pending_chatgpt_auth_url.clone(),
+            rate_limits: self.ai_rate_limits.clone(),
+            models: self.ai_models.clone(),
+            experimental_features: self.ai_experimental_features.clone(),
+            collaboration_modes: self.ai_collaboration_modes.clone(),
+            include_hidden_models: self.ai_include_hidden_models,
+            selected_model: self.ai_selected_model.clone(),
+            selected_effort: self.ai_selected_effort.clone(),
+            selected_collaboration_mode: self.ai_selected_collaboration_mode,
+            selected_service_tier: self.ai_selected_service_tier,
+            mad_max_mode: self.ai_mad_max_mode,
+        }
+    }
+
+    fn apply_ai_workspace_state(&mut self, state: AiWorkspaceState) {
+        self.ai_connection_state = state.connection_state;
+        self.ai_bootstrap_loading = state.bootstrap_loading;
+        self.ai_status_message = state.status_message;
+        self.ai_error_message = state.error_message;
+        self.ai_state_snapshot = state.state_snapshot;
+        self.ai_selected_thread_id = state.selected_thread_id;
+        self.ai_new_thread_draft_active = state.new_thread_draft_active;
+        self.ai_new_thread_start_mode = state.new_thread_start_mode;
+        self.ai_worktree_base_branch_name = state.worktree_base_branch_name;
+        self.ai_pending_new_thread_selection = state.pending_new_thread_selection;
+        self.ai_scroll_timeline_to_bottom = false;
+        self.ai_timeline_follow_output = state.timeline_follow_output;
+        self.ai_thread_inline_toast = None;
+        self.ai_thread_title_refresh_state_by_thread = state.thread_title_refresh_state_by_thread;
+        self.ai_timeline_visible_turn_limit_by_thread = state.timeline_visible_turn_limit_by_thread;
+        self.ai_in_progress_turn_started_at = state.in_progress_turn_started_at;
+        self.ai_expanded_timeline_row_ids = state.expanded_timeline_row_ids;
+        self.ai_pending_approvals = state.pending_approvals;
+        self.ai_pending_user_inputs = state.pending_user_inputs;
+        self.ai_pending_user_input_answers = state.pending_user_input_answers;
+        self.ai_account = state.account;
+        self.ai_requires_openai_auth = state.requires_openai_auth;
+        self.ai_pending_chatgpt_login_id = state.pending_chatgpt_login_id;
+        self.ai_pending_chatgpt_auth_url = state.pending_chatgpt_auth_url;
+        self.ai_rate_limits = state.rate_limits;
+        self.ai_models = state.models;
+        self.ai_experimental_features = state.experimental_features;
+        self.ai_collaboration_modes = state.collaboration_modes;
+        self.ai_include_hidden_models = state.include_hidden_models;
+        self.ai_selected_model = state.selected_model;
+        self.ai_selected_effort = state.selected_effort;
+        self.ai_selected_collaboration_mode = state.selected_collaboration_mode;
+        self.ai_selected_service_tier = state.selected_service_tier;
+        self.ai_mad_max_mode = state.mad_max_mode;
+        self.ai_text_selection = None;
+        self.rebuild_ai_timeline_indexes();
+        self.sync_ai_in_progress_turn_started_at();
+        self.ai_composer_activity_elapsed_second = self.current_ai_composer_activity_elapsed_second();
+        self.ai_thread_title_refresh_state_by_thread
+            .retain(|thread_id, _| self.ai_state_snapshot.threads.contains_key(thread_id));
+        self.ai_timeline_visible_turn_limit_by_thread
+            .retain(|thread_id, _| self.ai_state_snapshot.threads.contains_key(thread_id));
+        self.sync_ai_pending_user_input_answers();
+        self.ai_expanded_timeline_row_ids
+            .retain(|row_id| self.ai_timeline_rows_by_id.contains_key(row_id));
+        if self.ai_selected_thread_id.as_ref().is_some_and(|selected| {
+            self.ai_state_snapshot
+                .threads
+                .get(selected)
+                .is_none_or(|thread| thread.status == ThreadLifecycleStatus::Archived)
+        }) {
+            self.ai_selected_thread_id = None;
+        }
+        if !self.ai_new_thread_draft_active
+            && !self.ai_pending_new_thread_selection
+            && self.ai_selected_thread_id.is_none()
+        {
+            self.ai_selected_thread_id = self.current_ai_thread_id();
+        }
+        if !self.ai_new_thread_draft_active
+            && !self.ai_pending_new_thread_selection
+            && self.ai_selected_thread_id.is_none()
+            && let Some(first_thread) = self.ai_visible_threads().first()
+        {
+            self.ai_selected_thread_id = Some(first_thread.id.clone());
+        }
+        self.prune_ai_composer_drafts();
+        self.prune_ai_composer_statuses();
+        reset_ai_timeline_list_measurements(self, 0);
+    }
+
+    fn store_current_ai_workspace_state(&mut self, workspace_key: Option<&str>) {
+        let Some(workspace_key) = workspace_key else {
+            return;
+        };
+        self.ai_workspace_states.insert(
+            workspace_key.to_string(),
+            self.capture_current_ai_workspace_state(),
+        );
+    }
+
+    fn restore_ai_workspace_state_for_key(&mut self, workspace_key: Option<&str>) {
+        let state = workspace_key
+            .and_then(|key| self.ai_workspace_states.get(key).cloned())
+            .unwrap_or_else(|| self.default_ai_workspace_state_for_workspace_key(workspace_key));
+        self.apply_ai_workspace_state(state);
+    }
+
+    fn park_visible_ai_runtime(&mut self) {
+        let Some(workspace_key) = self.ai_worker_workspace_key.clone() else {
+            return;
+        };
+        let Some(command_tx) = self.ai_command_tx.take() else {
+            self.ai_worker_workspace_key = None;
+            return;
+        };
+        let Some(worker_thread) = self.ai_worker_thread.take() else {
+            self.ai_worker_workspace_key = None;
+            return;
+        };
+        let event_task = std::mem::replace(&mut self.ai_event_task, Task::ready(()));
+        self.ai_hidden_runtimes.insert(
+            workspace_key,
+            AiHiddenRuntimeHandle {
+                command_tx,
+                worker_thread,
+                event_task,
+                generation: self.ai_event_epoch,
+            },
+        );
+        self.ai_worker_workspace_key = None;
+    }
+
+    fn promote_hidden_ai_runtime(&mut self, workspace_key: &str) -> bool {
+        let Some(handle) = self.ai_hidden_runtimes.remove(workspace_key) else {
+            return false;
+        };
+        if handle.worker_thread.is_finished() {
+            if let Err(error) = handle.worker_thread.join() {
+                error!(
+                    "failed to join completed hidden AI worker thread while promoting {workspace_key}: {error:?}"
+                );
+            }
+            return false;
+        }
+        self.ai_command_tx = Some(handle.command_tx);
+        self.ai_worker_thread = Some(handle.worker_thread);
+        self.ai_event_task = handle.event_task;
+        self.ai_event_epoch = handle.generation;
+        self.ai_worker_workspace_key = Some(workspace_key.to_string());
+        true
+    }
+
+    fn ai_runtime_listener_generation(&self, workspace_key: &str) -> Option<usize> {
+        if self.ai_worker_workspace_key.as_deref() == Some(workspace_key) {
+            return Some(self.ai_event_epoch);
+        }
+        self.ai_hidden_runtimes
+            .get(workspace_key)
+            .map(|handle| handle.generation)
+    }
+
+    fn ai_runtime_listener_is_current(&self, workspace_key: &str, generation: usize) -> bool {
+        self.ai_runtime_listener_generation(workspace_key) == Some(generation)
+    }
+
+    fn update_background_ai_workspace_state<F>(&mut self, workspace_key: &str, update: F)
+    where
+        F: FnOnce(&mut AiWorkspaceState),
+    {
+        let default_state = self.default_ai_workspace_state_for_workspace_key(Some(workspace_key));
+        let state = self
+            .ai_workspace_states
+            .entry(workspace_key.to_string())
+            .or_insert(default_state);
+        update(state);
+    }
+
+    fn apply_ai_snapshot_to_workspace_state(state: &mut AiWorkspaceState, snapshot: AiSnapshot) {
+        let AiSnapshot {
+            state: next_snapshot,
+            active_thread_id,
+            pending_approvals,
+            pending_user_inputs,
+            account,
+            requires_openai_auth,
+            pending_chatgpt_login_id,
+            pending_chatgpt_auth_url,
+            rate_limits,
+            models,
+            experimental_features,
+            collaboration_modes,
+            include_hidden_models,
+            mad_max_mode,
+        } = snapshot;
+
+        state.state_snapshot = next_snapshot;
+        state.pending_approvals = pending_approvals;
+        state.pending_user_inputs = pending_user_inputs;
+        state.account = account;
+        state.requires_openai_auth = requires_openai_auth;
+        state.pending_chatgpt_login_id = pending_chatgpt_login_id;
+        state.pending_chatgpt_auth_url = pending_chatgpt_auth_url;
+        state.rate_limits = rate_limits;
+        state.models = models;
+        state.experimental_features = experimental_features;
+        state.collaboration_modes = collaboration_modes;
+        state.include_hidden_models = include_hidden_models;
+        state.mad_max_mode = mad_max_mode;
+        state.connection_state = AiConnectionState::Ready;
+        state.error_message = None;
+
+        if state.pending_new_thread_selection
+            && let Some(active_thread_id) = active_thread_id.as_deref()
+            && state
+                .state_snapshot
+                .threads
+                .get(active_thread_id)
+                .is_some_and(|thread| thread.status != ThreadLifecycleStatus::Archived)
+        {
+            state.new_thread_draft_active = false;
+            state.pending_new_thread_selection = false;
+            state.selected_thread_id = Some(active_thread_id.to_string());
+        }
+
+        if state.selected_thread_id.as_ref().is_some_and(|selected| {
+            state
+                .state_snapshot
+                .threads
+                .get(selected)
+                .is_none_or(|thread| thread.status == ThreadLifecycleStatus::Archived)
+        }) {
+            state.selected_thread_id = None;
+        }
+
+        if !state.new_thread_draft_active
+            && !state.pending_new_thread_selection
+            && state.selected_thread_id.is_none()
+        {
+            state.selected_thread_id = active_thread_id;
+        }
+
+        if !state.new_thread_draft_active
+            && !state.pending_new_thread_selection
+            && state.selected_thread_id.is_none()
+            && let Some(first_thread) = sorted_threads(&state.state_snapshot).first()
+        {
+            state.selected_thread_id = Some(first_thread.id.clone());
+        }
+
+        state
+            .thread_title_refresh_state_by_thread
+            .retain(|thread_id, _| state.state_snapshot.threads.contains_key(thread_id));
+        state
+            .timeline_visible_turn_limit_by_thread
+            .retain(|thread_id, _| state.state_snapshot.threads.contains_key(thread_id));
+    }
+
+    fn restore_ai_workspace_state_after_failure_for_state(state: &mut AiWorkspaceState) {
+        if state.pending_new_thread_selection {
+            state.new_thread_draft_active = true;
+        }
+        state.pending_new_thread_selection = false;
+    }
+
+    fn handle_background_ai_worker_event(
+        &mut self,
+        workspace_key: &str,
+        event: AiWorkerEventPayload,
+    ) {
+        self.update_background_ai_workspace_state(workspace_key, |state| match event {
+            AiWorkerEventPayload::Snapshot(snapshot) => {
+                Self::apply_ai_snapshot_to_workspace_state(state, *snapshot);
+            }
+            AiWorkerEventPayload::BootstrapCompleted => {
+                state.bootstrap_loading = false;
+            }
+            AiWorkerEventPayload::Reconnecting(message) => {
+                state.connection_state = AiConnectionState::Reconnecting;
+                state.bootstrap_loading = false;
+                state.error_message = None;
+                state.status_message = Some(message);
+            }
+            AiWorkerEventPayload::Status(message) => {
+                state.status_message = Some(message);
+            }
+            AiWorkerEventPayload::Error(message) => {
+                Self::restore_ai_workspace_state_after_failure_for_state(state);
+                state.error_message = Some(message.clone());
+                state.status_message = Some(message);
+            }
+            AiWorkerEventPayload::Fatal(message) => {
+                state.connection_state = AiConnectionState::Failed;
+                state.bootstrap_loading = false;
+                state.status_message = Some("Codex integration failed".to_string());
+                state.error_message = Some(message);
+                state.account = None;
+                state.requires_openai_auth = false;
+                state.pending_chatgpt_login_id = None;
+                state.pending_chatgpt_auth_url = None;
+                state.rate_limits = None;
+                state.models.clear();
+                state.experimental_features.clear();
+                state.collaboration_modes.clear();
+                state.pending_approvals.clear();
+                state.pending_user_inputs.clear();
+                state.pending_user_input_answers.clear();
+                Self::restore_ai_workspace_state_after_failure_for_state(state);
+            }
+        });
+    }
+
+    fn handle_background_ai_worker_disconnect(&mut self, workspace_key: &str) {
+        if let Some(hidden) = self.ai_hidden_runtimes.remove(workspace_key) {
+            let AiHiddenRuntimeHandle { worker_thread, .. } = hidden;
+            let workspace_key = workspace_key.to_string();
+            std::thread::spawn(move || {
+                if let Err(error) = worker_thread.join() {
+                    error!(
+                        "failed to join hidden AI worker thread during disconnect for {workspace_key}: {error:?}"
+                    );
+                }
+            });
+        }
+        self.update_background_ai_workspace_state(workspace_key, |state| {
+            state.connection_state = AiConnectionState::Failed;
+            state.bootstrap_loading = false;
+            if state.error_message.is_none() {
+                let message = "Codex worker disconnected.".to_string();
+                state.error_message = Some(message.clone());
+                state.status_message = Some("Codex integration failed".to_string());
+            }
+            state.account = None;
+            state.requires_openai_auth = false;
+            state.pending_chatgpt_login_id = None;
+            state.pending_chatgpt_auth_url = None;
+            state.rate_limits = None;
+            state.models.clear();
+            state.experimental_features.clear();
+            state.collaboration_modes.clear();
+            state.pending_approvals.clear();
+            state.pending_user_inputs.clear();
+            state.pending_user_input_answers.clear();
+            Self::restore_ai_workspace_state_after_failure_for_state(state);
+        });
+    }
+
     pub(super) fn shutdown_ai_worker_blocking(&mut self) {
         if let Some(command_tx) = self.ai_command_tx.take() {
             let _ = command_tx.send(AiWorkerCommand::Shutdown);
         }
         self.ai_worker_workspace_key = None;
         self.join_ai_worker_thread("dropping DiffViewer");
+        for (_, hidden) in std::mem::take(&mut self.ai_hidden_runtimes) {
+            let _ = hidden.command_tx.send(AiWorkerCommand::Shutdown);
+            if let Err(error) = hidden.worker_thread.join() {
+                error!("failed to join hidden AI worker thread during shutdown: {error:?}");
+            }
+        }
     }
 
     fn join_ai_worker_thread_if_finished(&mut self, reason: &str) {
@@ -1185,24 +1640,9 @@ impl DiffViewer {
         }
     }
 
-    fn detach_ai_worker_thread_join(&mut self, reason: &'static str) {
-        let Some(worker) = self.ai_worker_thread.take() else {
-            return;
-        };
-
-        std::thread::spawn(move || {
-            if let Err(error) = worker.join() {
-                error!("failed to join AI worker thread during {reason}: {error:?}");
-            }
-        });
-    }
-
     fn send_ai_worker_command(&mut self, command: AiWorkerCommand, cx: &mut Context<Self>) -> bool {
-        if self.ai_command_tx.is_none() {
-            self.ensure_ai_runtime_started(cx);
-        }
-
-        self.send_ai_worker_command_if_running(command, cx)
+        let workspace_key = self.ai_workspace_key();
+        self.send_ai_worker_command_for_workspace(workspace_key.as_deref(), command, true, cx)
     }
 
     fn send_ai_worker_command_if_running(
@@ -1210,21 +1650,70 @@ impl DiffViewer {
         command: AiWorkerCommand,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(command_tx) = self.ai_command_tx.as_ref() else {
+        let workspace_key = self.ai_workspace_key();
+        self.send_ai_worker_command_for_workspace(workspace_key.as_deref(), command, false, cx)
+    }
+
+    fn send_ai_worker_command_for_workspace(
+        &mut self,
+        workspace_key: Option<&str>,
+        command: AiWorkerCommand,
+        ensure_running: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let current_workspace_key = self.ai_workspace_key();
+        let Some(workspace_key) = workspace_key.or(current_workspace_key.as_deref()) else {
             return false;
         };
 
-        if command_tx.send(command).is_ok() {
-            return true;
+        if self.ai_worker_workspace_key.as_deref() == Some(workspace_key) {
+            if ensure_running && self.ai_command_tx.is_none() {
+                self.ensure_ai_runtime_started(cx);
+            }
+
+            let Some(command_tx) = self.ai_command_tx.as_ref() else {
+                return false;
+            };
+            if command_tx.send(command).is_ok() {
+                return true;
+            }
+
+            self.ai_connection_state = AiConnectionState::Failed;
+            self.ai_bootstrap_loading = false;
+            self.ai_error_message = Some("AI worker channel disconnected.".to_string());
+            self.ai_command_tx = None;
+            self.ai_worker_workspace_key = None;
+            self.join_ai_worker_thread("worker channel disconnect");
+            cx.notify();
+            return false;
         }
 
-        self.ai_connection_state = AiConnectionState::Failed;
-        self.ai_bootstrap_loading = false;
-        self.ai_error_message = Some("AI worker channel disconnected.".to_string());
-        self.ai_command_tx = None;
-        self.ai_worker_workspace_key = None;
-        self.join_ai_worker_thread("worker channel disconnect");
-        cx.notify();
+        if let Some(command_tx) = self
+            .ai_hidden_runtimes
+            .get(workspace_key)
+            .map(|runtime| runtime.command_tx.clone())
+        {
+            if command_tx.send(command).is_ok() {
+                return true;
+            }
+
+            self.handle_background_ai_worker_disconnect(workspace_key);
+            cx.notify();
+            return false;
+        }
+
+        if ensure_running && current_workspace_key.as_deref() == Some(workspace_key) {
+            self.ensure_ai_runtime_started(cx);
+            if self.ai_worker_workspace_key.as_deref() == Some(workspace_key) {
+                return self.send_ai_worker_command_for_workspace(
+                    Some(workspace_key),
+                    command,
+                    false,
+                    cx,
+                );
+            }
+        }
+
         false
     }
 

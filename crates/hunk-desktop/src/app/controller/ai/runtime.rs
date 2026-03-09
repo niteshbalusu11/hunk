@@ -9,7 +9,8 @@ impl DiffViewer {
     fn start_ai_event_listener(
         &mut self,
         event_rx: std::sync::mpsc::Receiver<AiWorkerEvent>,
-        epoch: usize,
+        workspace_key: String,
+        generation: usize,
         cx: &mut Context<Self>,
     ) {
         let event_rx = event_rx;
@@ -20,8 +21,17 @@ impl DiffViewer {
 
                 if buffered_events.is_empty() && !event_stream_disconnected {
                     if let Some(this) = this.upgrade() {
+                        let mut listener_is_current = true;
                         this.update(cx, |this, cx| {
-                            if this.ai_event_epoch != epoch {
+                            if !this
+                                .ai_runtime_listener_is_current(workspace_key.as_str(), generation)
+                            {
+                                listener_is_current = false;
+                                return;
+                            }
+                            if this.ai_worker_workspace_key.as_deref()
+                                != Some(workspace_key.as_str())
+                            {
                                 return;
                             }
                             let activity_elapsed_second_changed =
@@ -31,6 +41,9 @@ impl DiffViewer {
                                 cx.notify();
                             }
                         });
+                        if !listener_is_current {
+                            return;
+                        }
                     } else {
                         return;
                     }
@@ -41,18 +54,52 @@ impl DiffViewer {
                 }
 
                 if let Some(this) = this.upgrade() {
+                    let mut listener_is_current = true;
+                    let mut should_stop = false;
                     this.update(cx, |this, cx| {
-                        if this.ai_event_epoch != epoch {
+                        if !this
+                            .ai_runtime_listener_is_current(workspace_key.as_str(), generation)
+                        {
+                            listener_is_current = false;
                             return;
                         }
+                        let is_visible_runtime = this.ai_runtime_is_visible(workspace_key.as_str());
+
+                        if is_visible_runtime {
+                            for event in buffered_events {
+                                if event.workspace_key.as_str() != workspace_key.as_str() {
+                                    continue;
+                                }
+                                this.apply_ai_worker_event(event.payload, cx);
+                            }
+                            if event_stream_disconnected {
+                                this.handle_ai_worker_event_stream_disconnect(cx);
+                                should_stop = true;
+                            }
+                            cx.notify();
+                            return;
+                        }
+
+                        let mut terminate_hidden_runtime = false;
                         for event in buffered_events {
-                            this.apply_ai_worker_event(event, cx);
+                            if event.workspace_key.as_str() != workspace_key.as_str() {
+                                continue;
+                            }
+                            terminate_hidden_runtime |=
+                                matches!(&event.payload, AiWorkerEventPayload::Fatal(_));
+                            this.handle_background_ai_worker_event(
+                                workspace_key.as_str(),
+                                event.payload,
+                            );
                         }
-                        if event_stream_disconnected {
-                            this.handle_ai_worker_event_stream_disconnect(cx);
+                        if terminate_hidden_runtime || event_stream_disconnected {
+                            this.handle_background_ai_worker_disconnect(workspace_key.as_str());
+                            should_stop = true;
                         }
-                        cx.notify();
                     });
+                    if !listener_is_current || should_stop {
+                        return;
+                    }
                 } else {
                     return;
                 }
@@ -62,6 +109,10 @@ impl DiffViewer {
                 }
             }
         });
+    }
+
+    fn ai_runtime_is_visible(&self, workspace_key: &str) -> bool {
+        self.ai_worker_workspace_key.as_deref() == Some(workspace_key)
     }
 
     fn handle_ai_worker_event_stream_disconnect(&mut self, cx: &mut Context<Self>) {
@@ -93,31 +144,31 @@ impl DiffViewer {
         }
     }
 
-    fn apply_ai_worker_event(&mut self, event: AiWorkerEvent, cx: &mut Context<Self>) {
+    fn apply_ai_worker_event(&mut self, event: AiWorkerEventPayload, cx: &mut Context<Self>) {
         match event {
-            AiWorkerEvent::Snapshot(snapshot) => {
+            AiWorkerEventPayload::Snapshot(snapshot) => {
                 self.apply_ai_snapshot(*snapshot, cx);
                 self.ai_connection_state = AiConnectionState::Ready;
                 self.ai_error_message = None;
             }
-            AiWorkerEvent::BootstrapCompleted => {
+            AiWorkerEventPayload::BootstrapCompleted => {
                 self.ai_bootstrap_loading = false;
             }
-            AiWorkerEvent::Reconnecting(message) => {
+            AiWorkerEventPayload::Reconnecting(message) => {
                 self.ai_connection_state = AiConnectionState::Reconnecting;
                 self.ai_bootstrap_loading = false;
                 self.ai_error_message = None;
                 self.ai_status_message = Some(message);
             }
-            AiWorkerEvent::Status(message) => {
+            AiWorkerEventPayload::Status(message) => {
                 self.ai_status_message = Some(message);
             }
-            AiWorkerEvent::Error(message) => {
+            AiWorkerEventPayload::Error(message) => {
                 self.restore_ai_new_thread_draft_after_failure();
                 self.ai_error_message = Some(message.clone());
                 self.ai_status_message = Some(message);
             }
-            AiWorkerEvent::Fatal(message) => {
+            AiWorkerEventPayload::Fatal(message) => {
                 self.ai_connection_state = AiConnectionState::Failed;
                 self.ai_error_message = Some(message.clone());
                 self.ai_status_message = Some("Codex integration failed".to_string());
@@ -641,6 +692,7 @@ impl DiffViewer {
         };
 
         let start_mode = self.ai_new_thread_start_mode;
+        let selected_base_branch_name = self.ai_selected_worktree_base_branch_name().map(str::to_string);
         let prompt_seed = prompt.clone().unwrap_or_default();
         let requested_branch_name = ai_branch_name_for_prompt(
             prompt_seed.as_str(),
@@ -661,6 +713,7 @@ impl DiffViewer {
                         repo_root.as_path(),
                         requested_branch_name.as_str(),
                         start_mode,
+                        selected_base_branch_name,
                     );
                     (execution_started_at.elapsed(), prepared)
                 })
@@ -856,6 +909,7 @@ fn prepare_ai_thread_workspace(
     repo_root: &std::path::Path,
     requested_branch_name: &str,
     start_mode: AiNewThreadStartMode,
+    selected_base_branch_name: Option<String>,
 ) -> anyhow::Result<AiPreparedThreadWorkspace> {
     match start_mode {
         AiNewThreadStartMode::Local => {
@@ -867,13 +921,23 @@ fn prepare_ai_thread_workspace(
             })
         }
         AiNewThreadStartMode::Worktree => {
-            let Some(base_branch_name) = resolve_default_base_branch_name(repo_root)? else {
-                return Err(anyhow::anyhow!(
-                    "unable to resolve a default base branch (main/master/remote default)"
-                ));
+            let base_branch_name = match selected_base_branch_name {
+                Some(base_branch_name) => base_branch_name,
+                None => resolve_default_base_branch_name(repo_root)?.ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "unable to resolve a default base branch (main/master/remote default)"
+                    )
+                })?,
             };
-            hunk_git::network::sync_branch_from_remote(repo_root, base_branch_name.as_str())
-                .with_context(|| format!("failed to sync base branch '{}'", base_branch_name))?;
+            let base_branch_synced =
+                sync_branch_from_remote_if_tracked(repo_root, base_branch_name.as_str())
+                    .with_context(|| format!("failed to sync base branch '{}'", base_branch_name))?;
+
+            let status_base_label = if base_branch_synced {
+                format!("synced {}", base_branch_name)
+            } else {
+                format!("base {}", base_branch_name)
+            };
 
             let mut attempt = 0usize;
             loop {
@@ -893,8 +957,8 @@ fn prepare_ai_thread_workspace(
                             branch_name: candidate_branch_name,
                             workspace_target_id: Some(created.id),
                             status_message: format!(
-                                "Prepared worktree {} from synced {}",
-                                created.name, base_branch_name
+                                "Prepared worktree {} from {}",
+                                created.name, status_base_label
                             ),
                         });
                     }

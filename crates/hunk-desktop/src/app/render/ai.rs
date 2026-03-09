@@ -40,6 +40,13 @@ impl DiffViewer {
         let selected_thread_start_mode = selected_thread_id
             .as_deref()
             .and_then(|thread_id| self.ai_thread_start_mode(thread_id));
+        let show_worktree_base_branch_picker =
+            self.ai_new_thread_draft_active
+                && self.ai_new_thread_start_mode == AiNewThreadStartMode::Worktree;
+        let selected_worktree_base_branch = self
+            .ai_selected_worktree_base_branch_name()
+            .unwrap_or("Choose base branch")
+            .to_string();
         let previous_timeline_row_count = self.ai_timeline_list_row_count;
         let (
             timeline_total_turn_count,
@@ -354,7 +361,48 @@ impl DiffViewer {
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
                                     .child(format!("Target: {}", self.ai_active_workspace_label())),
-                            ),
+                            )
+                            .when(show_worktree_base_branch_picker, |this| {
+                                this.child(
+                                    h_flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .font_semibold()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child("Base Branch"),
+                                        )
+                                        .child(
+                                            Select::new(&self.ai_worktree_base_branch_picker_state)
+                                                .with_size(gpui_component::Size::Small)
+                                                .placeholder(selected_worktree_base_branch.clone())
+                                                .search_placeholder("Choose a base branch")
+                                                .rounded(px(8.0))
+                                                .w(px(220.0))
+                                                .bg(hunk_opacity(
+                                                    cx.theme().background,
+                                                    is_dark,
+                                                    0.82,
+                                                    0.98,
+                                                ))
+                                                .border_color(cx.theme().border)
+                                                .disabled(
+                                                    self.git_controls_busy()
+                                                        || self.branches.is_empty(),
+                                                )
+                                                .empty(
+                                                    h_flex()
+                                                        .h(px(72.0))
+                                                        .justify_center()
+                                                        .text_sm()
+                                                        .text_color(cx.theme().muted_foreground)
+                                                        .child("No branches available."),
+                                                ),
+                                        ),
+                                )
+                            }),
                     )
                     .child(
                         v_flex()

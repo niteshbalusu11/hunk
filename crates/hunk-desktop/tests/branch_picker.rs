@@ -2,7 +2,7 @@
 #[path = "../src/app/branch_picker.rs"]
 mod branch_picker;
 
-use branch_picker::{branch_match_score, matched_branch_names};
+use branch_picker::{branch_detail_labels, branch_match_score, matched_branch_names};
 use hunk_git::git::LocalBranch;
 
 fn branch(name: &str, is_current: bool, tip_unix_time: Option<i64>) -> LocalBranch {
@@ -10,6 +10,9 @@ fn branch(name: &str, is_current: bool, tip_unix_time: Option<i64>) -> LocalBran
         name: name.to_string(),
         is_current,
         tip_unix_time,
+        attached_workspace_target_id: None,
+        attached_workspace_target_root: None,
+        attached_workspace_target_label: None,
     }
 }
 
@@ -63,4 +66,27 @@ fn exact_then_prefix_then_segment_matches_are_sorted_first() {
             "feature/auth".to_string(),
         ]
     );
+}
+
+#[test]
+fn occupied_branch_detail_mentions_worktree_label() {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock should be after unix epoch")
+        .as_secs() as i64;
+    let branches = vec![
+        branch("main", true, Some(now - 5 * 60)),
+        LocalBranch {
+            name: "feature/auth".to_string(),
+            is_current: false,
+            tip_unix_time: Some(now - 3 * 60),
+            attached_workspace_target_id: Some("worktree:worktree-2".to_string()),
+            attached_workspace_target_root: None,
+            attached_workspace_target_label: Some("worktree-2".to_string()),
+        },
+    ];
+
+    let details = branch_detail_labels(&branches);
+    assert_eq!(details[0], "5m ago");
+    assert_eq!(details[1], "Checked out in worktree-2 • 3m ago");
 }

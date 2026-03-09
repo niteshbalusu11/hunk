@@ -24,6 +24,94 @@ V1 decisions:
 - Keep AI workspace semantics aligned with the current cwd-based runtime by binding drafts and threads to exact target paths.
 - Preserve Hunk's current performance bar in the Git and Review tabs; performance regressions are release blockers for this feature.
 
+## Repo-Agnostic Invariants
+
+- Worktree behavior must be identical for any imported Git repository. No logic should depend on Hunk's own repository layout, Cargo, or any project-specific build system.
+- One Hunk-managed AI worktree should represent one isolated task by default.
+- A branch can only be checked out in one worktree at a time, so the UI must treat branch occupancy as first-class state instead of treating checkout failures as normal UX.
+- Base branches such as `main` and `master` are source branches for new task worktrees, not long-lived AI task branches themselves.
+- Parallel AI work must be keyed by workspace cwd, not by whichever workspace is currently visible in the UI.
+
+## Current Gap Versus T3Code
+
+- Hunk already matches the core `t3code` model of `new task -> new branch + new worktree + thread bound to that cwd`.
+- The main gaps are:
+  - branch lists do not say which worktree already owns a branch
+  - selecting an occupied branch still attempts checkout instead of activating the owning worktree
+  - new worktree flows always base from the synced default branch instead of letting the user pick the base branch
+  - AI runtime state is still singleton-based, so only one workspace runtime stays live at a time
+
+## Execution Plan
+
+### Track A: Branch Occupancy and Worktree-Aware Branch Activation
+
+- Extend `hunk-git::git::LocalBranch` with attached worktree metadata:
+  - `attached_workspace_target_id`
+  - `attached_workspace_target_root`
+  - `attached_workspace_target_label`
+- Build a branch-to-worktree occupancy map from `list_workspace_targets(...)` during workflow snapshot loading.
+- Persist that metadata in `hunk-domain::state::CachedLocalBranchState`.
+- Update the branch picker so occupied branches show where they are already checked out.
+- Change branch selection behavior:
+  - if the branch is already checked out in another workspace target, activate that target
+  - otherwise keep the current dirty-tree guarded checkout/create flow
+- Files:
+  - `crates/hunk-git/src/git.rs`
+  - `crates/hunk-domain/src/state.rs`
+  - `crates/hunk-desktop/src/app/controller/core.rs`
+  - `crates/hunk-desktop/src/app/controller/workspace_mode.rs`
+  - `crates/hunk-desktop/src/app/branch_picker.rs`
+- Tests:
+  - `crates/hunk-git/tests/worktree_ops.rs`
+  - `crates/hunk-desktop/tests/branch_picker.rs`
+  - `crates/hunk-domain/tests/app_state.rs`
+
+### Track B: Base Branch Selection for New Worktree Threads
+
+- Keep the current default of using the synced default branch when the user does not choose another base.
+- Add explicit base-branch selection before creating a new worktree-backed AI thread.
+- Interpret branch selection in `new worktree thread` mode as `choose base branch`, not `check this branch out in the current workspace`.
+- Never create a managed AI worktree directly on `main` or `master`; always create a task branch from the chosen base.
+- Files:
+  - `crates/hunk-desktop/src/app/controller/ai/runtime.rs`
+  - `crates/hunk-desktop/src/app/controller/ai/helpers.rs`
+  - `crates/hunk-desktop/src/app/render/ai.rs`
+  - `crates/hunk-desktop/src/app/render/ai_helpers/*`
+
+### Track C: Truly Parallel AI Workspaces
+
+- Replace the single global AI runtime in `DiffViewer` with a runtime manager keyed by workspace cwd.
+- Move transport handles, connection state, approvals, pending inputs, per-thread selection, and timeline caches into per-workspace runtime state.
+- Stop using workspace switches to tear down AI transport. Switching workspaces should change visibility, not destroy background work in another worktree.
+- Tag worker events and snapshots with `workspace_key` so one UI process can route multiple live runtime streams safely.
+- Keep thread validity rules in `hunk-codex` cwd-scoped, which already matches the desired model.
+- Implemented:
+  - persist per-workspace AI UI/runtime state in `DiffViewer`
+  - park active worker transports on workspace switch instead of shutting them down
+  - restore and promote parked workers when returning to the same workspace
+  - keep hidden worker event listeners alive so background work continues while another worktree is visible
+  - tag worker transport config and worker events with explicit `workspace_key`
+  - route worker commands through a workspace-keyed manager helper instead of assuming one visible runtime
+- Future refinements:
+  - collapse `visible runtime + hidden runtimes` into a dedicated runtime-manager type to reduce controller bookkeeping
+  - add higher-level tests for workspace switching and concurrent in-flight turns
+  - decide whether hidden-workspace approvals and follow-up inputs should surface globally or only when that workspace becomes visible
+- Files:
+  - `crates/hunk-desktop/src/app.rs`
+  - `crates/hunk-desktop/src/app/controller/ai/core.rs`
+  - `crates/hunk-desktop/src/app/controller/ai/runtime.rs`
+  - `crates/hunk-desktop/src/app/controller/ai/workspace_runtime.rs`
+  - `crates/hunk-desktop/src/app/ai_runtime/core.rs`
+  - `crates/hunk-desktop/src/app/ai_runtime/sync.rs`
+  - `crates/hunk-codex/src/state.rs`
+  - `crates/hunk-codex/src/threads/notifications.rs`
+
+### Recommended Order
+
+- Land Track A first because it fixes the branch/worktree conflict the user hits today and aligns Hunk with the best `t3code` behavior.
+- Land Track B second so new worktree threads are based from the right branch intentionally.
+- Land Track C third because it is the largest refactor and depends on clear workspace identity semantics from Tracks A and B.
+
 ## Performance Requirements
 
 - Git tab and Review tab performance are critical and must not regress as part of worktree support.

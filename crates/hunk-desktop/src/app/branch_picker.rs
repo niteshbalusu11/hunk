@@ -24,7 +24,7 @@ impl BranchPickerItem {
             name: SharedString::from(branch.name.clone()),
             value: branch.name.clone(),
             normalized_name: normalize_branch_key(branch.name.as_str()),
-            detail: SharedString::from(relative_time_label(branch.tip_unix_time)),
+            detail: SharedString::from(branch_detail_label(branch)),
             tip_unix_time: branch.tip_unix_time,
             is_current: branch.is_current,
         }
@@ -166,6 +166,12 @@ pub(crate) fn matched_branch_names(branches: &[LocalBranch], query: &str) -> Vec
     .collect()
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) fn branch_detail_labels(branches: &[LocalBranch]) -> Vec<String> {
+    branches.iter().map(branch_detail_label).collect()
+}
+
 pub(crate) fn branch_match_score(query: &str, candidate: &str) -> Option<i32> {
     let query = normalize_branch_key(query);
     if query.is_empty() {
@@ -245,6 +251,19 @@ fn matched_branch_items(items: &[BranchPickerItem], query: &str) -> Vec<BranchPi
     });
 
     ranked.into_iter().map(|(_, _, _, _, item)| item).collect()
+}
+
+fn branch_detail_label(branch: &LocalBranch) -> String {
+    let relative_time = relative_time_label(branch.tip_unix_time);
+    match (
+        branch.is_current,
+        branch.attached_workspace_target_label.as_deref(),
+    ) {
+        (false, Some(workspace_target_label)) => {
+            format!("Checked out in {workspace_target_label} • {relative_time}")
+        }
+        _ => relative_time,
+    }
 }
 
 fn normalize_branch_key(value: &str) -> String {

@@ -82,6 +82,9 @@ fn app_state_round_trips_last_project_path() {
                 name: "main".to_string(),
                 is_current: true,
                 tip_unix_time: Some(1_711_111_111),
+                attached_workspace_target_id: Some("primary".to_string()),
+                attached_workspace_target_root: Some(PathBuf::from("/tmp/hunk-repo")),
+                attached_workspace_target_label: Some("Primary Checkout".to_string()),
             }],
             files: vec![CachedChangedFileState {
                 path: "src/main.rs".to_string(),

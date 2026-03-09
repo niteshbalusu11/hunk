@@ -165,14 +165,29 @@ pub struct AiSnapshot {
     pub mad_max_mode: bool,
 }
 
-#[derive(Debug)]
-pub enum AiWorkerEvent {
+#[derive(Debug, Clone)]
+pub enum AiWorkerEventPayload {
     Snapshot(Box<AiSnapshot>),
     BootstrapCompleted,
     Reconnecting(String),
     Status(String),
     Error(String),
     Fatal(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct AiWorkerEvent {
+    pub workspace_key: String,
+    pub payload: AiWorkerEventPayload,
+}
+
+impl AiWorkerEvent {
+    fn new(workspace_key: String, payload: AiWorkerEventPayload) -> Self {
+        Self {
+            workspace_key,
+            payload,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -232,6 +247,7 @@ pub enum AiWorkerCommand {
 #[derive(Debug, Clone)]
 pub struct AiWorkerStartConfig {
     pub cwd: PathBuf,
+    pub workspace_key: String,
     pub codex_executable: PathBuf,
     pub codex_home: PathBuf,
     pub request_timeout: Duration,
@@ -241,8 +257,10 @@ pub struct AiWorkerStartConfig {
 
 impl AiWorkerStartConfig {
     pub fn new(cwd: PathBuf, codex_executable: PathBuf, codex_home: PathBuf) -> Self {
+        let workspace_key = cwd.to_string_lossy().to_string();
         Self {
             cwd,
+            workspace_key,
             codex_executable,
             codex_home,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
@@ -258,29 +276,47 @@ pub fn spawn_ai_worker(
     event_tx: Sender<AiWorkerEvent>,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
+        let workspace_key = config.workspace_key.clone();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             run_ai_worker(config, command_rx, &event_tx)
         }));
-        dispatch_ai_worker_result(result, &event_tx);
+        dispatch_ai_worker_result(result, workspace_key.as_str(), &event_tx);
     })
 }
 
 fn dispatch_ai_worker_result(
     result: std::thread::Result<Result<(), CodexIntegrationError>>,
+    workspace_key: &str,
     event_tx: &Sender<AiWorkerEvent>,
 ) {
     match result {
         Ok(Ok(())) => {}
         Ok(Err(error)) => {
-            let _ = event_tx.send(AiWorkerEvent::Fatal(error.to_string()));
+            send_ai_worker_event(
+                event_tx,
+                workspace_key,
+                AiWorkerEventPayload::Fatal(error.to_string()),
+            );
         }
         Err(payload) => {
-            let _ = event_tx.send(AiWorkerEvent::Fatal(format!(
-                "AI worker panicked: {}",
-                panic_payload_message(payload)
-            )));
+            send_ai_worker_event(
+                event_tx,
+                workspace_key,
+                AiWorkerEventPayload::Fatal(format!(
+                    "AI worker panicked: {}",
+                    panic_payload_message(payload)
+                )),
+            );
         }
     }
+}
+
+fn send_ai_worker_event(
+    event_tx: &Sender<AiWorkerEvent>,
+    workspace_key: &str,
+    payload: AiWorkerEventPayload,
+) {
+    let _ = event_tx.send(AiWorkerEvent::new(workspace_key.to_string(), payload));
 }
 
 fn panic_payload_message(payload: Box<dyn Any + Send>) -> String {
@@ -298,7 +334,7 @@ struct AiWorkerRuntime {
     session: JsonRpcSession,
     service: ThreadService,
     codex_home: PathBuf,
-    cwd_key: String,
+    workspace_key: String,
     request_timeout: Duration,
     mad_max_mode: bool,
     account: Option<Account>,
@@ -361,7 +397,6 @@ impl AiWorkerRuntime {
         config: &AiWorkerStartConfig,
         port: u16,
     ) -> Result<Self, CodexIntegrationError> {
-        let cwd_key = config.cwd.to_string_lossy().to_string();
         let host_config = HostConfig::codex_app_server(
             config.codex_executable.clone(),
             config.cwd.clone(),
@@ -380,7 +415,7 @@ impl AiWorkerRuntime {
             session,
             service: ThreadService::new(config.cwd.clone()),
             codex_home: config.codex_home.clone(),
-            cwd_key,
+            workspace_key: config.workspace_key.clone(),
             request_timeout: config.request_timeout,
             mad_max_mode: config.mad_max_mode,
             account: None,
@@ -399,6 +434,10 @@ impl AiWorkerRuntime {
             next_approval_sequence: 1,
             next_user_input_sequence: 1,
         })
+    }
+
+    fn send_event(&self, event_tx: &Sender<AiWorkerEvent>, payload: AiWorkerEventPayload) {
+        send_ai_worker_event(event_tx, self.workspace_key.as_str(), payload);
     }
 
     fn handle_command(
@@ -448,7 +487,10 @@ impl AiWorkerRuntime {
                         .start_thread(&mut self.session, params, self.request_timeout)?;
                 self.service
                     .state_mut()
-                    .set_active_thread_for_cwd(self.cwd_key.clone(), response.thread.id.clone());
+                    .set_active_thread_for_cwd(
+                        self.workspace_key.clone(),
+                        response.thread.id.clone(),
+                    );
                 if prompt.as_ref().is_some_and(|value| !value.trim().is_empty())
                     || !local_image_paths.is_empty()
                 {
@@ -480,7 +522,7 @@ impl AiWorkerRuntime {
                         .threads
                         .values()
                         .filter(|thread| {
-                            thread.cwd == self.cwd_key
+                            thread.cwd == self.workspace_key
                                 && thread.status != ThreadLifecycleStatus::Archived
                                 && thread.id != thread_id
                         })
@@ -493,12 +535,15 @@ impl AiWorkerRuntime {
                     if let Some(next_thread_id) = replacement_thread_id {
                         self.service
                             .state_mut()
-                            .set_active_thread_for_cwd(self.cwd_key.clone(), next_thread_id);
+                            .set_active_thread_for_cwd(
+                                self.workspace_key.clone(),
+                                next_thread_id,
+                            );
                     } else {
                         self.service
                             .state_mut()
                             .active_thread_by_cwd
-                            .remove(self.cwd_key.as_str());
+                            .remove(self.workspace_key.as_str());
                     }
                 }
                 self.emit_snapshot_after_sync(event_tx)?;
@@ -565,27 +610,39 @@ impl AiWorkerRuntime {
                         self.pending_chatgpt_auth_url = Some(auth_url.clone());
                         match open_url_in_system_browser(auth_url.as_str()) {
                             Ok(()) => {
-                                let _ = event_tx.send(AiWorkerEvent::Status(
-                                    "Opened browser for ChatGPT login.".to_string(),
-                                ));
+                                self.send_event(
+                                    event_tx,
+                                    AiWorkerEventPayload::Status(
+                                        "Opened browser for ChatGPT login.".to_string(),
+                                    ),
+                                );
                             }
                             Err(_) => {
-                                let _ = event_tx.send(AiWorkerEvent::Status(format!(
-                                    "Open this URL to continue ChatGPT login: {auth_url}"
-                                )));
+                                self.send_event(
+                                    event_tx,
+                                    AiWorkerEventPayload::Status(format!(
+                                        "Open this URL to continue ChatGPT login: {auth_url}"
+                                    )),
+                                );
                             }
                         }
                     }
                     LoginAccountResponse::ApiKey { .. } => {
-                        let _ = event_tx.send(AiWorkerEvent::Status(
-                            "Server returned API-key login mode; expected ChatGPT login."
-                                .to_string(),
-                        ));
+                        self.send_event(
+                            event_tx,
+                            AiWorkerEventPayload::Status(
+                                "Server returned API-key login mode; expected ChatGPT login."
+                                    .to_string(),
+                            ),
+                        );
                     }
                     LoginAccountResponse::ChatgptAuthTokens { .. } => {
-                        let _ = event_tx.send(AiWorkerEvent::Status(
-                            "Server returned external auth token mode.".to_string(),
-                        ));
+                        self.send_event(
+                            event_tx,
+                            AiWorkerEventPayload::Status(
+                                "Server returned external auth token mode.".to_string(),
+                            ),
+                        );
                     }
                 }
                 self.emit_snapshot_after_sync(event_tx)?;
@@ -607,11 +664,14 @@ impl AiWorkerRuntime {
                             "No active ChatGPT login attempt to cancel.".to_string()
                         }
                     };
-                    let _ = event_tx.send(AiWorkerEvent::Status(message));
+                    self.send_event(event_tx, AiWorkerEventPayload::Status(message));
                 } else {
-                    let _ = event_tx.send(AiWorkerEvent::Status(
-                        "No active ChatGPT login attempt.".to_string(),
-                    ));
+                    self.send_event(
+                        event_tx,
+                        AiWorkerEventPayload::Status(
+                            "No active ChatGPT login attempt.".to_string(),
+                        ),
+                    );
                 }
                 self.emit_snapshot_after_sync(event_tx)?;
             }
@@ -646,7 +706,7 @@ impl AiWorkerRuntime {
 
         self.service
             .state_mut()
-            .set_active_thread_for_cwd(self.cwd_key.clone(), thread_id.clone());
+            .set_active_thread_for_cwd(self.workspace_key.clone(), thread_id.clone());
 
         let mut input = local_image_paths
             .into_iter()

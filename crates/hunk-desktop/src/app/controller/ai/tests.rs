@@ -24,6 +24,7 @@ mod ai_tests {
     use super::is_command_name_without_path;
     use super::normalized_thread_session_state;
     use super::normalized_user_input_answers;
+    use super::preferred_ai_worktree_base_branch_name;
     use super::resolve_bundled_codex_executable_from_exe;
     use super::resolved_ai_workspace_cwd;
     #[cfg(target_os = "windows")]
@@ -53,10 +54,13 @@ mod ai_tests {
     use crate::app::AiTextSelectionSurfaceSpec;
     use crate::app::AiTimelineRow;
     use crate::app::AiTimelineRowSource;
+    use crate::app::AiWorkspaceState;
+    use crate::app::DiffViewer;
     use crate::app::ai_runtime::AiPendingUserInputQuestion;
     use crate::app::ai_runtime::AiPendingUserInputQuestionOption;
     use crate::app::ai_runtime::AiPendingUserInputRequest;
     use crate::app::ai_runtime::AiConnectionState;
+    use crate::app::ai_runtime::AiSnapshot;
     use hunk_codex::state::AiState;
     use hunk_codex::state::ItemDisplayMetadata;
     use hunk_codex::state::ItemStatus;
@@ -66,6 +70,7 @@ mod ai_tests {
     use hunk_domain::state::AiServiceTierSelection;
     use hunk_domain::state::AiThreadSessionState;
     use hunk_domain::state::AppState;
+    use hunk_git::git::LocalBranch;
     use hunk_git::worktree::WorkspaceTargetKind;
     use hunk_git::worktree::WorkspaceTargetSummary;
     use std::collections::{BTreeMap, BTreeSet};
@@ -155,6 +160,17 @@ mod ai_tests {
         }
     }
 
+    fn local_branch(name: &str, is_current: bool) -> LocalBranch {
+        LocalBranch {
+            name: name.to_string(),
+            is_current,
+            tip_unix_time: None,
+            attached_workspace_target_id: None,
+            attached_workspace_target_root: None,
+            attached_workspace_target_label: None,
+        }
+    }
+
     #[test]
     fn sorted_threads_orders_by_created_at_descending() {
         let mut state = AiState::default();
@@ -219,6 +235,68 @@ mod ai_tests {
         let sorted = sorted_threads(&state);
         assert_eq!(sorted[0].id, "thread-z");
         assert_eq!(sorted[1].id, "thread-a");
+    }
+
+    #[test]
+    fn apply_ai_snapshot_to_workspace_state_selects_active_thread_for_pending_draft() {
+        let mut workspace_state = AiWorkspaceState {
+            new_thread_draft_active: true,
+            pending_new_thread_selection: true,
+            ..AiWorkspaceState::default()
+        };
+        let mut snapshot_state = AiState::default();
+        snapshot_state.threads.insert(
+            "thread-1".to_string(),
+            ThreadSummary {
+                id: "thread-1".to_string(),
+                cwd: "/repo/worktrees/task-1".to_string(),
+                title: Some("Task 1".to_string()),
+                status: ThreadLifecycleStatus::Active,
+                created_at: 20,
+                updated_at: 20,
+                last_sequence: 3,
+            },
+        );
+
+        DiffViewer::apply_ai_snapshot_to_workspace_state(
+            &mut workspace_state,
+            AiSnapshot {
+                state: snapshot_state,
+                active_thread_id: Some("thread-1".to_string()),
+                pending_approvals: Vec::new(),
+                pending_user_inputs: Vec::new(),
+                account: None,
+                requires_openai_auth: false,
+                pending_chatgpt_login_id: None,
+                pending_chatgpt_auth_url: None,
+                rate_limits: None,
+                models: Vec::new(),
+                experimental_features: Vec::new(),
+                collaboration_modes: Vec::new(),
+                include_hidden_models: true,
+                mad_max_mode: false,
+            },
+        );
+
+        assert_eq!(workspace_state.connection_state, AiConnectionState::Ready);
+        assert_eq!(workspace_state.selected_thread_id.as_deref(), Some("thread-1"));
+        assert!(!workspace_state.new_thread_draft_active);
+        assert!(!workspace_state.pending_new_thread_selection);
+        assert!(workspace_state.error_message.is_none());
+    }
+
+    #[test]
+    fn restore_ai_workspace_state_after_failure_reopens_pending_new_thread_draft() {
+        let mut workspace_state = AiWorkspaceState {
+            new_thread_draft_active: false,
+            pending_new_thread_selection: true,
+            ..AiWorkspaceState::default()
+        };
+
+        DiffViewer::restore_ai_workspace_state_after_failure_for_state(&mut workspace_state);
+
+        assert!(workspace_state.new_thread_draft_active);
+        assert!(!workspace_state.pending_new_thread_selection);
     }
 
     #[test]
@@ -330,6 +408,57 @@ mod ai_tests {
                 std::path::Path::new("/repo-worktree"),
             ),
             Some(AiNewThreadStartMode::Worktree),
+        );
+    }
+
+    #[test]
+    fn preferred_ai_worktree_base_branch_name_prefers_explicit_default_branch() {
+        let branches = vec![
+            local_branch("feature/current", true),
+            local_branch("main", false),
+            local_branch("release", false),
+        ];
+
+        assert_eq!(
+            preferred_ai_worktree_base_branch_name(
+                branches.as_slice(),
+                Some("release"),
+                Some("feature/current"),
+            ),
+            Some("release".to_string())
+        );
+    }
+
+    #[test]
+    fn preferred_ai_worktree_base_branch_name_falls_back_to_main_then_current_then_first() {
+        let branches = vec![
+            local_branch("feature/current", true),
+            local_branch("main", false),
+            local_branch("release", false),
+        ];
+        assert_eq!(
+            preferred_ai_worktree_base_branch_name(
+                branches.as_slice(),
+                Some("missing"),
+                Some("feature/current"),
+            ),
+            Some("main".to_string())
+        );
+
+        let branches = vec![local_branch("feature/current", true), local_branch("release", false)];
+        assert_eq!(
+            preferred_ai_worktree_base_branch_name(
+                branches.as_slice(),
+                Some("missing"),
+                Some("feature/current"),
+            ),
+            Some("feature/current".to_string())
+        );
+
+        let branches = vec![local_branch("release", false), local_branch("topic", false)];
+        assert_eq!(
+            preferred_ai_worktree_base_branch_name(branches.as_slice(), None, Some("missing")),
+            Some("release".to_string())
         );
     }
 
@@ -1701,9 +1830,10 @@ mod ai_tests {
     fn drain_ai_worker_events_preserves_final_fatal_before_disconnect() {
         let (event_tx, event_rx) = mpsc::channel();
         event_tx
-            .send(crate::app::ai_runtime::AiWorkerEvent::Fatal(
-                "boom".to_string(),
-            ))
+            .send(crate::app::ai_runtime::AiWorkerEvent {
+                workspace_key: "/repo-a".to_string(),
+                payload: crate::app::ai_runtime::AiWorkerEventPayload::Fatal("boom".to_string()),
+            })
             .expect("fatal event should send");
         drop(event_tx);
 
@@ -1712,8 +1842,8 @@ mod ai_tests {
         assert_eq!(events.len(), 1);
         assert!(matches!(
             events.first(),
-            Some(crate::app::ai_runtime::AiWorkerEvent::Fatal(message))
-                if message == "boom"
+            Some(crate::app::ai_runtime::AiWorkerEvent { workspace_key, payload: crate::app::ai_runtime::AiWorkerEventPayload::Fatal(message) })
+                if workspace_key == "/repo-a" && message == "boom"
         ));
     }
 

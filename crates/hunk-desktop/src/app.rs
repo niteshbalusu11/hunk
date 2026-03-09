@@ -56,6 +56,7 @@ use ai_runtime::AiSnapshot;
 use ai_runtime::AiTurnSessionOverrides;
 use ai_runtime::AiWorkerCommand;
 use ai_runtime::AiWorkerEvent;
+use ai_runtime::AiWorkerEventPayload;
 use ai_runtime::AiWorkerStartConfig;
 use ai_runtime::spawn_ai_worker;
 use branch_picker::{
@@ -214,6 +215,88 @@ impl AiNewThreadStartMode {
 struct AiComposerDraft {
     prompt: String,
     local_images: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+struct AiWorkspaceState {
+    connection_state: AiConnectionState,
+    bootstrap_loading: bool,
+    status_message: Option<String>,
+    error_message: Option<String>,
+    state_snapshot: hunk_codex::state::AiState,
+    selected_thread_id: Option<String>,
+    new_thread_draft_active: bool,
+    new_thread_start_mode: AiNewThreadStartMode,
+    worktree_base_branch_name: Option<String>,
+    pending_new_thread_selection: bool,
+    timeline_follow_output: bool,
+    thread_title_refresh_state_by_thread: BTreeMap<String, AiThreadTitleRefreshState>,
+    timeline_visible_turn_limit_by_thread: BTreeMap<String, usize>,
+    in_progress_turn_started_at: BTreeMap<String, Instant>,
+    expanded_timeline_row_ids: BTreeSet<String>,
+    pending_approvals: Vec<AiPendingApproval>,
+    pending_user_inputs: Vec<AiPendingUserInputRequest>,
+    pending_user_input_answers: BTreeMap<String, BTreeMap<String, Vec<String>>>,
+    account: Option<codex_app_server_protocol::Account>,
+    requires_openai_auth: bool,
+    pending_chatgpt_login_id: Option<String>,
+    pending_chatgpt_auth_url: Option<String>,
+    rate_limits: Option<codex_app_server_protocol::RateLimitSnapshot>,
+    models: Vec<codex_app_server_protocol::Model>,
+    experimental_features: Vec<codex_app_server_protocol::ExperimentalFeature>,
+    collaboration_modes: Vec<codex_app_server_protocol::CollaborationModeMask>,
+    include_hidden_models: bool,
+    selected_model: Option<String>,
+    selected_effort: Option<String>,
+    selected_collaboration_mode: AiCollaborationModeSelection,
+    selected_service_tier: AiServiceTierSelection,
+    mad_max_mode: bool,
+}
+
+impl Default for AiWorkspaceState {
+    fn default() -> Self {
+        Self {
+            connection_state: AiConnectionState::Disconnected,
+            bootstrap_loading: false,
+            status_message: None,
+            error_message: None,
+            state_snapshot: hunk_codex::state::AiState::default(),
+            selected_thread_id: None,
+            new_thread_draft_active: false,
+            new_thread_start_mode: AiNewThreadStartMode::Local,
+            worktree_base_branch_name: None,
+            pending_new_thread_selection: false,
+            timeline_follow_output: true,
+            thread_title_refresh_state_by_thread: BTreeMap::new(),
+            timeline_visible_turn_limit_by_thread: BTreeMap::new(),
+            in_progress_turn_started_at: BTreeMap::new(),
+            expanded_timeline_row_ids: BTreeSet::new(),
+            pending_approvals: Vec::new(),
+            pending_user_inputs: Vec::new(),
+            pending_user_input_answers: BTreeMap::new(),
+            account: None,
+            requires_openai_auth: false,
+            pending_chatgpt_login_id: None,
+            pending_chatgpt_auth_url: None,
+            rate_limits: None,
+            models: Vec::new(),
+            experimental_features: Vec::new(),
+            collaboration_modes: Vec::new(),
+            include_hidden_models: true,
+            selected_model: None,
+            selected_effort: None,
+            selected_collaboration_mode: AiCollaborationModeSelection::Default,
+            selected_service_tier: AiServiceTierSelection::Standard,
+            mad_max_mode: false,
+        }
+    }
+}
+
+struct AiHiddenRuntimeHandle {
+    command_tx: mpsc::Sender<AiWorkerCommand>,
+    worker_thread: JoinHandle<()>,
+    event_task: Task<()>,
+    generation: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1122,6 +1205,7 @@ struct DiffViewer {
     ai_selected_thread_id: Option<String>,
     ai_new_thread_draft_active: bool,
     ai_new_thread_start_mode: AiNewThreadStartMode,
+    ai_worktree_base_branch_name: Option<String>,
     ai_pending_new_thread_selection: bool,
     ai_scroll_timeline_to_bottom: bool,
     ai_timeline_follow_output: bool,
@@ -1162,10 +1246,13 @@ struct DiffViewer {
     ai_event_epoch: usize,
     ai_event_task: Task<()>,
     ai_attachment_picker_task: Task<()>,
+    ai_workspace_states: BTreeMap<String, AiWorkspaceState>,
+    ai_hidden_runtimes: BTreeMap<String, AiHiddenRuntimeHandle>,
     ai_worker_thread: Option<JoinHandle<()>>,
     ai_command_tx: Option<mpsc::Sender<AiWorkerCommand>>,
     ai_worker_workspace_key: Option<String>,
     ai_draft_workspace_target_id: Option<String>,
+    ai_worktree_base_branch_picker_state: Entity<SelectState<BranchPickerDelegate>>,
     ai_composer_input_state: Entity<InputState>,
     ai_composer_drafts: BTreeMap<AiComposerDraftKey, AiComposerDraft>,
     ai_composer_status_by_draft: BTreeMap<AiComposerDraftKey, String>,

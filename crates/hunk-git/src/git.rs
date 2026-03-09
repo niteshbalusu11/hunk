@@ -13,7 +13,9 @@ use gix::bstr::{BStr, ByteSlice as _};
 use gix::diff::blob::intern::InternedInput;
 use gix::filter::plumbing::pipeline::convert::ToGitOutcome;
 
-use crate::worktree::repo_relative_path_is_within_managed_worktrees;
+use crate::worktree::{
+    WorkspaceTargetKind, list_workspace_targets, repo_relative_path_is_within_managed_worktrees,
+};
 
 pub const MAX_REPO_TREE_ENTRIES: usize = 60_000;
 
@@ -66,6 +68,9 @@ pub struct LocalBranch {
     pub name: String,
     pub is_current: bool,
     pub tip_unix_time: Option<i64>,
+    pub attached_workspace_target_id: Option<String>,
+    pub attached_workspace_target_root: Option<PathBuf>,
+    pub attached_workspace_target_label: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -217,6 +222,13 @@ struct SnapshotSeed {
     branches: Vec<LocalBranch>,
     entries: BTreeMap<String, WorkspaceDiffEntry>,
     last_commit_subject: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct BranchWorkspaceOccupancy {
+    target_id: String,
+    target_root: PathBuf,
+    target_label: String,
 }
 
 #[derive(Debug, Clone)]
@@ -534,7 +546,13 @@ fn load_snapshot_seed(
     let branch_name = branch_name_from_head_ref(head_ref_name.as_deref());
     let (branch_has_upstream, branch_ahead_count, branch_behind_count) =
         current_branch_tracking(repo.repository(), head_ref_name.as_deref())?;
-    let branches = list_local_branches(repo.repository(), head_ref_name.as_deref())?;
+    let branch_workspace_occupancy =
+        list_branch_workspace_occupancy(repo.root()).unwrap_or_default();
+    let branches = list_local_branches(
+        repo.repository(),
+        head_ref_name.as_deref(),
+        &branch_workspace_occupancy,
+    )?;
     let entries = match mode {
         SnapshotLoadMode::ReadOnlyLight => {
             collect_workspace_diff_entries_light(repo.repository(), repo.root(), None)?
@@ -987,9 +1005,37 @@ fn count_unique_commits(
     Ok(count)
 }
 
+fn list_branch_workspace_occupancy(
+    path: &Path,
+) -> Result<HashMap<String, BranchWorkspaceOccupancy>> {
+    let mut occupancy = HashMap::new();
+    for target in list_workspace_targets(path)? {
+        if matches!(target.branch_name.as_str(), "detached" | "unborn") {
+            continue;
+        }
+        occupancy.insert(
+            target.branch_name.clone(),
+            BranchWorkspaceOccupancy {
+                target_id: target.id,
+                target_root: target.root,
+                target_label: workspace_target_branch_label(target.kind, target.name.as_str()),
+            },
+        );
+    }
+    Ok(occupancy)
+}
+
+fn workspace_target_branch_label(kind: WorkspaceTargetKind, name: &str) -> String {
+    match kind {
+        WorkspaceTargetKind::PrimaryCheckout => "Primary Checkout".to_string(),
+        WorkspaceTargetKind::LinkedWorktree => name.to_string(),
+    }
+}
+
 fn list_local_branches(
     repo: &gix::Repository,
     current_head_ref_name: Option<&str>,
+    workspace_occupancy_by_branch: &HashMap<String, BranchWorkspaceOccupancy>,
 ) -> Result<Vec<LocalBranch>> {
     let mut branches = Vec::new();
     let refs_platform = repo
@@ -1010,10 +1056,14 @@ fn list_local_branches(
             Ok(commit) => commit.time().ok().map(|time| time.seconds),
             Err(_) => None,
         };
+        let occupancy = workspace_occupancy_by_branch.get(name);
         branches.push(LocalBranch {
             name: name.to_string(),
             is_current: Some(full_name.as_str()) == current_head_ref_name,
             tip_unix_time,
+            attached_workspace_target_id: occupancy.map(|target| target.target_id.clone()),
+            attached_workspace_target_root: occupancy.map(|target| target.target_root.clone()),
+            attached_workspace_target_label: occupancy.map(|target| target.target_label.clone()),
         });
     }
 

@@ -4,7 +4,10 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use git2::{BranchType, IndexAddOption, Repository, Signature, build::CheckoutBuilder};
 use hunk_git::git::load_workflow_snapshot;
-use hunk_git::network::{push_current_branch, sync_branch_from_remote, sync_current_branch};
+use hunk_git::network::{
+    push_current_branch, sync_branch_from_remote, sync_branch_from_remote_if_tracked,
+    sync_current_branch,
+};
 use tempfile::TempDir;
 
 #[test]
@@ -180,6 +183,25 @@ fn sync_non_checked_out_branch_fast_forwards_from_upstream() -> Result<()> {
     assert_eq!(
         fs::read_to_string(fixture.root().join("local-only.txt"))?,
         "dirty\n"
+    );
+    Ok(())
+}
+
+#[test]
+fn sync_branch_from_remote_if_tracked_skips_local_only_base_branch() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.configure_signature()?;
+    fixture.write_file("tracked.txt", "base\n")?;
+    fixture.commit_all("initial")?;
+    fixture.checkout_branch("feature/local-only")?;
+
+    assert!(!sync_branch_from_remote_if_tracked(
+        fixture.root(),
+        "feature/local-only",
+    )?);
+    assert_eq!(
+        fixture.repository()?.head()?.shorthand(),
+        Some("feature/local-only")
     );
     Ok(())
 }

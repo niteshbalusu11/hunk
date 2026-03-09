@@ -36,7 +36,9 @@ use hunk_git::mutation::{
     commit_all_with_details as commit_staged_with_details, commit_selected_paths_with_details,
     restore_working_copy_paths,
 };
-use hunk_git::network::{push_current_branch, sync_current_branch};
+use hunk_git::network::{
+    push_current_branch, sync_branch_from_remote_if_tracked, sync_current_branch,
+};
 
 include!("core.rs");
 include!("core_runtime.rs");

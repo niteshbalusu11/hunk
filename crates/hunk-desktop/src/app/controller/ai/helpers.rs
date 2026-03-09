@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 
 use codex_app_server_protocol::CollaborationModeMask;
 use codex_protocol::config_types::ModeKind;
+use hunk_git::git::LocalBranch;
 
 fn sorted_threads(state: &hunk_codex::state::AiState) -> Vec<ThreadSummary> {
     let mut threads = state.threads.values().cloned().collect::<Vec<_>>();
@@ -77,6 +78,30 @@ fn ai_thread_start_mode_for_workspace(
             AiNewThreadStartMode::Worktree
         }
     })
+}
+
+fn preferred_ai_worktree_base_branch_name(
+    branches: &[LocalBranch],
+    preferred_branch_name: Option<&str>,
+    current_branch_name: Option<&str>,
+) -> Option<String> {
+    let branch_exists = |candidate: &str| branches.iter().any(|branch| branch.name == candidate);
+
+    preferred_branch_name
+        .filter(|candidate| branch_exists(candidate))
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            ["main", "master"]
+                .into_iter()
+                .find(|candidate| branch_exists(candidate))
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            current_branch_name
+                .filter(|candidate| branch_exists(candidate))
+                .map(ToOwned::to_owned)
+        })
+        .or_else(|| branches.first().map(|branch| branch.name.clone()))
 }
 
 fn ai_collaboration_mode_matches_kind(mask: &CollaborationModeMask, kind: ModeKind) -> bool {

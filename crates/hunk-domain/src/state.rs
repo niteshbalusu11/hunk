@@ -58,6 +58,9 @@ pub struct CachedLocalBranchState {
     pub name: String,
     pub is_current: bool,
     pub tip_unix_time: Option<i64>,
+    pub attached_workspace_target_id: Option<String>,
+    pub attached_workspace_target_root: Option<PathBuf>,
+    pub attached_workspace_target_label: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
