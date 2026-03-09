@@ -155,7 +155,10 @@ pub fn working_copy_context_for_ai(
         .map(|(path, change)| format!("{} {}", worktree_change_status_code(*change), path))
         .collect::<Vec<_>>();
     if changes.len() > limited_files {
-        summary_lines.push(format!("... {} more file(s)", changes.len() - limited_files));
+        summary_lines.push(format!(
+            "... {} more file(s)",
+            changes.len() - limited_files
+        ));
     }
     let changed_files_summary = summary_lines.join("\n");
 

@@ -38,6 +38,44 @@ fn should_retry_stale_turn_after_steer_error(error: &CodexIntegrationError) -> b
         || normalized_message.contains("in progress turn")
 }
 
+fn is_transient_rollout_load_error(error: &CodexIntegrationError) -> bool {
+    let CodexIntegrationError::JsonRpcServerError { code, message } = error else {
+        return false;
+    };
+    if *code != -32603 {
+        return false;
+    }
+
+    let normalized_message = message.to_ascii_lowercase();
+    normalized_message.contains("failed to load rollout")
+        && normalized_message.contains("is empty")
+}
+
+fn retry_transient_rollout_load<T, F>(
+    max_retries: usize,
+    retry_delay: std::time::Duration,
+    mut operation: F,
+) -> Result<T, CodexIntegrationError>
+where
+    F: FnMut() -> Result<T, CodexIntegrationError>,
+{
+    let mut attempts = 0usize;
+    loop {
+        match operation() {
+            Ok(value) => return Ok(value),
+            Err(error)
+                if is_transient_rollout_load_error(&error) && attempts < max_retries =>
+            {
+                attempts = attempts.saturating_add(1);
+                if !retry_delay.is_zero() {
+                    std::thread::sleep(retry_delay);
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
 fn map_command_approval_decision(decision: AiApprovalDecision) -> CommandExecutionApprovalDecision {
     match decision {
         AiApprovalDecision::Accept => CommandExecutionApprovalDecision::Accept,

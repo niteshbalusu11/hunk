@@ -87,7 +87,10 @@ pub(super) fn ai_first_prompt_seed_for_thread(state: &AiState, thread_id: &str) 
         .filter(|prompt| !prompt.is_empty())
 }
 
-pub(super) fn ai_latest_agent_message_for_thread(state: &AiState, thread_id: &str) -> Option<String> {
+pub(super) fn ai_latest_agent_message_for_thread(
+    state: &AiState,
+    thread_id: &str,
+) -> Option<String> {
     state
         .items
         .values()
@@ -232,7 +235,10 @@ Changed files:\n{}\n\
 \n\
 Diff patch:\n{}\n",
         context.branch_name,
-        limit_text(context.prompt_seed.unwrap_or_default(), MAX_PROMPT_CONTEXT_LEN),
+        limit_text(
+            context.prompt_seed.unwrap_or_default(),
+            MAX_PROMPT_CONTEXT_LEN
+        ),
         limit_text(
             context.latest_agent_message.unwrap_or_default(),
             MAX_SUMMARY_CONTEXT_LEN
@@ -381,7 +387,11 @@ fn ai_fallback_commit_subject(branch_name: &str) -> String {
     }
 }
 
-fn ai_first_prompt_for_thread(state: &AiState, thread_id: &str, fallback_branch_name: &str) -> String {
+fn ai_first_prompt_for_thread(
+    state: &AiState,
+    thread_id: &str,
+    fallback_branch_name: &str,
+) -> String {
     ai_first_prompt_seed_for_thread(state, thread_id)
         .or_else(|| {
             state

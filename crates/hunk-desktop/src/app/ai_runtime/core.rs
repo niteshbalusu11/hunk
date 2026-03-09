@@ -76,6 +76,8 @@ const NOTIFICATION_DRAIN_TIMEOUT: Duration = Duration::from_millis(2);
 const MAX_NOTIFICATIONS_PER_POLL: usize = 256;
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const HOST_BOOTSTRAP_MAX_ATTEMPTS: usize = 12;
+const TRANSIENT_ROLLOUT_LOAD_MAX_RETRIES: usize = 3;
+const TRANSIENT_ROLLOUT_LOAD_RETRY_DELAY: Duration = Duration::from_millis(75);
 const LOOPBACK_PORT_RANGE_START: u16 = 49_152;
 const LOOPBACK_PORT_RANGE_SIZE: u16 = 16_384;
 static NEXT_LOOPBACK_PORT_OFFSET: AtomicU16 = AtomicU16::new(0);
@@ -774,21 +776,38 @@ impl AiWorkerRuntime {
         thread_id: String,
     ) -> Result<(), CodexIntegrationError> {
         let read_thread_id = thread_id.clone();
-        self.service.resume_thread(
-            &mut self.session,
-            ThreadResumeParams {
-                thread_id,
-                persist_extended_history: true,
-                ..ThreadResumeParams::default()
+        match retry_transient_rollout_load(
+            TRANSIENT_ROLLOUT_LOAD_MAX_RETRIES,
+            TRANSIENT_ROLLOUT_LOAD_RETRY_DELAY,
+            || {
+                self.service.resume_thread(
+                    &mut self.session,
+                    ThreadResumeParams {
+                        thread_id: thread_id.clone(),
+                        persist_extended_history: true,
+                        ..ThreadResumeParams::default()
+                    },
+                    self.request_timeout,
+                )?;
+                self.service.read_thread(
+                    &mut self.session,
+                    read_thread_id.clone(),
+                    true,
+                    self.request_timeout,
+                )?;
+                Ok(())
             },
-            self.request_timeout,
-        )?;
-        self.service.read_thread(
-            &mut self.session,
-            read_thread_id.clone(),
-            true,
-            self.request_timeout,
-        )?;
+        ) {
+            Ok(()) => {}
+            Err(error) if is_transient_rollout_load_error(&error) => {
+                tracing::debug!(
+                    thread_id = read_thread_id.as_str(),
+                    error = %error,
+                    "ignoring transient rollout load error while hydrating thread snapshot"
+                );
+            }
+            Err(error) => return Err(error),
+        }
         self.hydrate_thread_from_rollout_fallback_if_needed(read_thread_id.as_str());
         Ok(())
     }
@@ -797,8 +816,25 @@ impl AiWorkerRuntime {
         &mut self,
         thread_id: String,
     ) -> Result<(), CodexIntegrationError> {
-        self.service
-            .read_thread(&mut self.session, thread_id, false, self.request_timeout)?;
+        match retry_transient_rollout_load(
+            TRANSIENT_ROLLOUT_LOAD_MAX_RETRIES,
+            TRANSIENT_ROLLOUT_LOAD_RETRY_DELAY,
+            || {
+                self.service
+                    .read_thread(&mut self.session, thread_id.clone(), false, self.request_timeout)?;
+                Ok(())
+            },
+        ) {
+            Ok(()) => {}
+            Err(error) if is_transient_rollout_load_error(&error) => {
+                tracing::debug!(
+                    thread_id = thread_id.as_str(),
+                    error = %error,
+                    "ignoring transient rollout load error while refreshing thread metadata"
+                );
+            }
+            Err(error) => return Err(error),
+        }
         Ok(())
     }
 

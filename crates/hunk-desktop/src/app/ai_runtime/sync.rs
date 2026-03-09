@@ -45,28 +45,12 @@ impl AiWorkerRuntime {
                             .then_with(|| left.id.cmp(&right.id))
                     })
                     .map(|thread| thread.id.clone())
-            });
+        });
         let Some(thread_id) = thread_id else {
             return Ok(());
         };
 
-        self.service.resume_thread(
-            &mut self.session,
-            ThreadResumeParams {
-                thread_id: thread_id.clone(),
-                persist_extended_history: true,
-                ..ThreadResumeParams::default()
-            },
-            self.request_timeout,
-        )?;
-        self.service.read_thread(
-            &mut self.session,
-            thread_id.clone(),
-            true,
-            self.request_timeout,
-        )?;
-        self.hydrate_thread_from_rollout_fallback_if_needed(thread_id.as_str());
-        Ok(())
+        self.load_thread_snapshot(thread_id)
     }
 
     fn refresh_session_metadata(&mut self) -> Result<(), CodexIntegrationError> {

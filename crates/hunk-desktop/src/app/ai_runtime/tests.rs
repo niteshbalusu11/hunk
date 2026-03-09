@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod ai_tests {
+    use std::cell::Cell;
     use std::collections::HashMap;
     use std::sync::mpsc;
+    use std::time::Duration;
 
     use codex_app_server_protocol::AccountLoginCompletedNotification;
     use codex_app_server_protocol::AskForApproval;
@@ -31,11 +33,13 @@ mod ai_tests {
     use super::command_can_retry_after_reconnect;
     use super::dispatch_ai_worker_result;
     use super::reconnect_backoff;
+    use super::is_transient_rollout_load_error;
     use super::map_command_approval_decision;
     use super::map_file_change_approval_decision;
     use super::panic_payload_message;
     use super::preferred_rate_limit_snapshot;
     use super::request_id_key;
+    use super::retry_transient_rollout_load;
     use super::selected_ai_service_tier;
     use super::should_attempt_runtime_reconnect;
     use super::should_retry_stale_turn_after_steer_error;
@@ -265,6 +269,72 @@ mod ai_tests {
         assert!(!should_retry_stale_turn_after_steer_error(
             &CodexIntegrationError::WebSocketTransport("closed".to_string())
         ));
+    }
+
+    #[test]
+    fn transient_rollout_error_helper_matches_empty_rollout_server_errors_only() {
+        assert!(is_transient_rollout_load_error(
+            &CodexIntegrationError::JsonRpcServerError {
+                code: -32603,
+                message: "failed to load rollout '/tmp/rollout.jsonl' for thread thread-1: rollout at /tmp/rollout.jsonl is empty".to_string(),
+            }
+        ));
+        assert!(!is_transient_rollout_load_error(
+            &CodexIntegrationError::JsonRpcServerError {
+                code: -32603,
+                message: "failed to load rollout '/tmp/rollout.jsonl': permission denied"
+                    .to_string(),
+            }
+        ));
+        assert!(!is_transient_rollout_load_error(
+            &CodexIntegrationError::JsonRpcServerError {
+                code: -32602,
+                message: "failed to load rollout '/tmp/rollout.jsonl' for thread thread-1: rollout at /tmp/rollout.jsonl is empty".to_string(),
+            }
+        ));
+    }
+
+    #[test]
+    fn transient_rollout_retry_retries_until_success() {
+        let attempts = Cell::new(0usize);
+        let result = retry_transient_rollout_load(2, Duration::ZERO, || {
+            attempts.set(attempts.get().saturating_add(1));
+            if attempts.get() < 3 {
+                return Err(CodexIntegrationError::JsonRpcServerError {
+                    code: -32603,
+                    message:
+                        "failed to load rollout '/tmp/rollout.jsonl' for thread thread-1: rollout at /tmp/rollout.jsonl is empty"
+                            .to_string(),
+                });
+            }
+            Ok("loaded")
+        })
+        .expect("retry helper should succeed after transient rollout load errors");
+
+        assert_eq!(result, "loaded");
+        assert_eq!(attempts.get(), 3);
+    }
+
+    #[test]
+    fn transient_rollout_retry_does_not_retry_non_rollout_errors() {
+        let attempts = Cell::new(0usize);
+        let error = retry_transient_rollout_load(3, Duration::ZERO, || {
+            attempts.set(attempts.get().saturating_add(1));
+            Result::<(), CodexIntegrationError>::Err(CodexIntegrationError::JsonRpcServerError {
+                code: -32602,
+                message: "invalid params".to_string(),
+            })
+        })
+        .expect_err("non-rollout errors should not be retried");
+
+        assert_eq!(attempts.get(), 1);
+        match error {
+            CodexIntegrationError::JsonRpcServerError { code, message } => {
+                assert_eq!(code, -32602);
+                assert_eq!(message, "invalid params");
+            }
+            other => panic!("expected json-rpc error, got {other:?}"),
+        }
     }
 
     #[test]
