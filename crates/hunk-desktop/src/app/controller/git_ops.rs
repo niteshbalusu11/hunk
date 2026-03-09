@@ -107,14 +107,8 @@ impl DiffViewer {
 
     fn refresh_after_git_action(&mut self, action_name: &'static str, cx: &mut Context<Self>) {
         self.request_snapshot_refresh_workflow_only(true, cx);
-        if matches!(
-            action_name,
-            "Activate branch" | "Sync branch" | "Create worktree"
-        ) {
+        if matches!(action_name, "Activate branch" | "Sync branch") {
             self.request_recent_commits_refresh(true, cx);
-        }
-        if action_name == "Create worktree" {
-            self.refresh_workspace_targets_from_git_state(cx);
         }
     }
 
@@ -439,47 +433,6 @@ impl DiffViewer {
         self.run_git_action("Rename branch", cx, move |repo_root| {
             rename_branch(&repo_root, &current_branch, &sanitized)?;
             Ok(format!("Renamed branch {} to {}", current_branch, sanitized))
-        });
-    }
-
-    pub(super) fn create_managed_worktree_from_input(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let branch_name = self
-            .worktree_branch_input_state
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
-        if branch_name.is_empty() {
-            self.set_git_warning_message(
-                "Branch name is required.".to_string(),
-                Some(window),
-                cx,
-            );
-            return;
-        }
-
-        let request = hunk_git::worktree::CreateWorktreeRequest {
-            branch_name: branch_name.clone(),
-            base_branch_name: None,
-        };
-        let started = self.run_git_action("Create worktree", cx, move |repo_root| {
-            let created =
-                hunk_git::worktree::create_managed_worktree(repo_root.as_path(), &request)?;
-            Ok(format!(
-                "Created worktree {} for branch {}",
-                created.name, created.branch_name
-            ))
-        });
-        if !started {
-            return;
-        }
-
-        self.worktree_branch_input_state.update(cx, |state, cx| {
-            state.set_value("", window, cx);
         });
     }
 

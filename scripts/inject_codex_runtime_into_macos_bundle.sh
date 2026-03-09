@@ -2,9 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_PATH="${1:-$ROOT_DIR/target/release/bundle/osx/Hunk.app}"
+TARGET_DIR="$("$ROOT_DIR/scripts/resolve_cargo_target_dir.sh" "$ROOT_DIR")"
+APP_PATH="${1:-$TARGET_DIR/release/bundle/osx/Hunk.app}"
 SOURCE_DIR="$ROOT_DIR/assets/codex-runtime"
-TARGET_DIR="$APP_PATH/Contents/Resources/codex-runtime"
+RUNTIME_DEST_DIR="$APP_PATH/Contents/Resources/codex-runtime"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "error: runtime injection script is macOS-only" >&2
@@ -20,18 +21,18 @@ if [[ ! -d "$SOURCE_DIR" ]]; then
   exit 1
 fi
 
-rm -rf "$TARGET_DIR"
-mkdir -p "$(dirname "$TARGET_DIR")"
-cp -R "$SOURCE_DIR" "$TARGET_DIR"
+rm -rf "$RUNTIME_DEST_DIR"
+mkdir -p "$(dirname "$RUNTIME_DEST_DIR")"
+cp -R "$SOURCE_DIR" "$RUNTIME_DEST_DIR"
 
 # Ensure unix runtime binaries preserve executable bit inside app resources.
-if [[ -f "$TARGET_DIR/macos/codex" ]]; then
-  chmod +x "$TARGET_DIR/macos/codex"
+if [[ -f "$RUNTIME_DEST_DIR/macos/codex" ]]; then
+  chmod +x "$RUNTIME_DEST_DIR/macos/codex"
 fi
-if [[ -f "$TARGET_DIR/linux/codex" ]]; then
-  chmod +x "$TARGET_DIR/linux/codex"
+if [[ -f "$RUNTIME_DEST_DIR/linux/codex" ]]; then
+  chmod +x "$RUNTIME_DEST_DIR/linux/codex"
 fi
 
 echo "Injected Codex runtime assets into bundle:"
 echo "  source: $SOURCE_DIR"
-echo "  target: $TARGET_DIR"
+echo "  target: $RUNTIME_DEST_DIR"

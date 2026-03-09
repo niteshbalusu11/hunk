@@ -66,14 +66,12 @@ impl DiffViewer {
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
         let colors = hunk_git_workspace(cx.theme(), is_dark);
-        let create_worktree_loading = self.git_action_loading_named("Create worktree");
         let activate_branch_loading = self.git_action_loading_named("Activate branch");
         let sync_loading = self.git_action_loading_named("Sync branch");
         let publish_loading = self.git_action_loading_named("Publish branch");
         let open_review_loading = self.git_action_loading_named("Open PR/MR");
         let copy_review_loading = self.git_action_loading_named("Copy PR/MR URL");
         let git_controls_busy = self.git_controls_busy();
-        let create_worktree_disabled = git_controls_busy || !self.worktree_branch_input_has_text;
         let branch_syncable = self.can_run_active_branch_actions();
         let sync_disabled = !self.can_sync_current_branch();
         let publish_disabled = !self.can_publish_current_branch();
@@ -182,52 +180,7 @@ impl DiffViewer {
                                     .text_color(cx.theme().muted_foreground)
                                     .child("No workspace targets available."),
                             ),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_semibold()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Create Worktree"),
-                    )
-                    .child(
-                        div()
-                            .w_full()
-                            .min_h(px(32.0))
-                            .px_2()
-                            .py_1()
-                            .rounded(px(8.0))
-                            .border_1()
-                            .border_color(colors.muted_card.border)
-                            .bg(colors.muted_card.background)
-                            .child(
-                                Input::new(&self.worktree_branch_input_state)
-                                    .appearance(false)
-                                    .bordered(false)
-                                    .focus_bordered(false)
-                                    .w_full()
-                                    .disabled(git_controls_busy),
-                            ),
-                    )
-                    .child({
-                        let view = view.clone();
-                        Button::new("git-create-managed-worktree")
-                            .primary()
-                            .compact()
-                            .with_size(gpui_component::Size::Small)
-                            .rounded(px(8.0))
-                            .loading(create_worktree_loading)
-                            .label("Create Worktree")
-                            .tooltip(
-                                "Create a managed worktree under ~/.hunkdiff/worktrees/<repo>/worktree-N for this branch.",
-                            )
-                            .disabled(create_worktree_disabled)
-                            .on_click(move |_, window, cx| {
-                                view.update(cx, |this, cx| {
-                                    this.create_managed_worktree_from_input(window, cx);
-                                });
-                            })
-                    }),
+                    ),
             )
             .child(
                 h_flex()

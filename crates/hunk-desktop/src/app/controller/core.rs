@@ -317,9 +317,6 @@ impl DiffViewer {
             SelectState::new(ReviewComparePickerDelegate::default(), None, window, cx)
                 .searchable(true)
         });
-        let worktree_branch_input_state = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Branch for new worktree")
-        });
         let branch_input_state = cx.new(|cx| {
             InputState::new(window, cx).placeholder("Create or activate branch")
         });
@@ -440,8 +437,6 @@ impl DiffViewer {
             files: Vec::new(),
             file_status_by_path: BTreeMap::new(),
             workspace_target_picker_state,
-            worktree_branch_input_state,
-            worktree_branch_input_has_text: false,
             review_left_picker_state,
             review_right_picker_state,
             branch_picker_state,
@@ -563,20 +558,6 @@ impl DiffViewer {
             if matches!(event, InputEvent::Change) {
                 this.branch_input_has_text =
                     !this.branch_input_state.read(cx).value().trim().is_empty();
-                cx.notify();
-            }
-        })
-        .detach();
-
-        let worktree_branch_input_state = view.worktree_branch_input_state.clone();
-        cx.subscribe(&worktree_branch_input_state, |this, _, event, cx| {
-            if matches!(event, InputEvent::Change) {
-                this.worktree_branch_input_has_text = !this
-                    .worktree_branch_input_state
-                    .read(cx)
-                    .value()
-                    .trim()
-                    .is_empty();
                 cx.notify();
             }
         })

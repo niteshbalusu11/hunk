@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TARGET_TRIPLE="${HUNK_WINDOWS_TARGET:-x86_64-pc-windows-msvc}"
 PROFILE="release"
 STAGE_RUNTIME=1
+TARGET_DIR="$("$ROOT_DIR/scripts/resolve_cargo_target_dir.sh" "$ROOT_DIR")"
 
 usage() {
   cat <<'EOF'
@@ -88,7 +89,7 @@ echo "Building hunk-desktop for Windows target '$TARGET_TRIPLE' ($PROFILE profil
   cargo "${build_args[@]}"
 )
 
-BINARY_PATH="$ROOT_DIR/target/$TARGET_TRIPLE/$PROFILE/hunk-desktop.exe"
+BINARY_PATH="$TARGET_DIR/$TARGET_TRIPLE/$PROFILE/hunk-desktop.exe"
 if [[ ! -f "$BINARY_PATH" ]]; then
   echo "error: expected Windows binary was not produced at $BINARY_PATH" >&2
   exit 1
@@ -97,7 +98,7 @@ echo "Built binary: $BINARY_PATH"
 
 if [[ "$STAGE_RUNTIME" == "1" ]]; then
   SOURCE_RUNTIME="$ROOT_DIR/assets/codex-runtime/windows/codex.exe"
-  DEST_RUNTIME="$ROOT_DIR/target/$TARGET_TRIPLE/$PROFILE/codex-runtime/windows/codex.exe"
+  DEST_RUNTIME="$TARGET_DIR/$TARGET_TRIPLE/$PROFILE/codex-runtime/windows/codex.exe"
 
   if [[ ! -f "$SOURCE_RUNTIME" ]]; then
     echo "warn: windows runtime asset not found at $SOURCE_RUNTIME; skipping runtime staging" >&2

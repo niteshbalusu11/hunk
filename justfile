@@ -1,3 +1,7 @@
+set export
+
+CARGO_TARGET_DIR := `./scripts/resolve_cargo_target_dir.sh`
+
 start:
     cargo run -p hunk-desktop
 
@@ -23,7 +27,7 @@ bundle:
 prod:
     osascript -e 'tell application "Hunk" to quit' || true
     just bundle
-    open target/release/bundle/osx/Hunk.app
+    open "{{CARGO_TARGET_DIR}}/release/bundle/osx/Hunk.app"
 
 validate-codex-runtime:
     ./scripts/validate_codex_runtime_bundle.sh
