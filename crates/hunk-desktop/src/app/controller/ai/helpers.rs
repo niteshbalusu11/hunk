@@ -181,6 +181,28 @@ fn reasoning_effort_key(effort: &codex_protocol::openai_models::ReasoningEffort)
         .unwrap_or_else(|| format!("{effort:?}").to_lowercase())
 }
 
+fn normalized_ai_session_selection(
+    models: &[codex_app_server_protocol::Model],
+    selected_model: Option<String>,
+    selected_effort: Option<String>,
+) -> (Option<String>, Option<String>) {
+    let selected_model =
+        selected_model.filter(|model_id| models.iter().any(|model| model.id == *model_id));
+    let selected_effort = selected_model.as_ref().and_then(|model_id| {
+        selected_effort.filter(|effort| {
+            models
+                .iter()
+                .find(|model| model.id == *model_id)
+                .is_some_and(|model| {
+                    model.supported_reasoning_efforts.iter().any(|option| {
+                        reasoning_effort_key(&option.reasoning_effort) == *effort
+                    })
+                })
+        })
+    });
+    (selected_model, selected_effort)
+}
+
 fn should_scroll_timeline_to_bottom_on_selection_change(
     previous_thread_id: Option<&str>,
     next_thread_id: Option<&str>,
