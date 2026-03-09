@@ -298,32 +298,48 @@ fn ai_tool_detail_section(
     if scroll_x {
         text = text.whitespace_nowrap();
     }
-    text = text.child(ai_render_selectable_styled_text(
-        this,
-        view,
-        row_id,
-        surface_id,
-        selection_surfaces,
-        StyledText::new(content),
-        is_dark,
-        cx,
-    ));
+    text = text.child(
+        div()
+            .w_full()
+            .min_w_0()
+            .child(ai_render_selectable_styled_text(
+                this,
+                view,
+                row_id,
+                surface_id,
+                selection_surfaces,
+                StyledText::new(content),
+                is_dark,
+                cx,
+            )),
+    );
 
-    let container = container.child(text);
-    let container = match (max_height, scroll_x) {
-        (Some(max_height), true) => container
+    let content = match (max_height, scroll_x) {
+        (Some(max_height), true) => div()
+            .w_full()
+            .min_w_0()
             .max_h(max_height)
             .overflow_scrollbar()
             .occlude()
+            .child(text)
             .into_any_element(),
-        (Some(max_height), false) => container
+        (Some(max_height), false) => div()
+            .w_full()
+            .min_w_0()
             .max_h(max_height)
             .overflow_y_scrollbar()
             .occlude()
+            .child(text)
             .into_any_element(),
-        (None, true) => container.overflow_x_scrollbar().into_any_element(),
-        (None, false) => container.into_any_element(),
+        (None, true) => div()
+            .w_full()
+            .min_w_0()
+            .overflow_x_scrollbar()
+            .child(text)
+            .into_any_element(),
+        (None, false) => text.into_any_element(),
     };
+    let container = container.child(content);
 
     v_flex()
         .w_full()
