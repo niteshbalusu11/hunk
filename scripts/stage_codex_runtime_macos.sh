@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_PATH="${1:-$ROOT_DIR/assets/codex-runtime/macos/codex}"
+TARGET_DIR="$("$ROOT_DIR/scripts/resolve_cargo_target_dir.sh" "$ROOT_DIR")"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "error: this staging script is for macOS only" >&2
@@ -20,7 +21,7 @@ if [[ ! -x "$SOURCE_PATH" ]]; then
 fi
 
 for profile in debug release; do
-  destination="$ROOT_DIR/target/$profile/codex-runtime/macos/codex"
+  destination="$TARGET_DIR/$profile/codex-runtime/macos/codex"
   mkdir -p "$(dirname "$destination")"
   cp "$SOURCE_PATH" "$destination"
   chmod +x "$destination"
