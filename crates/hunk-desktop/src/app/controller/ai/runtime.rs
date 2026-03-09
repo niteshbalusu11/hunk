@@ -854,12 +854,16 @@ impl DiffViewer {
             .as_ref()
             .and_then(|workspace| self.state.ai_workspace_session_overrides.get(workspace).cloned())
             .unwrap_or_default();
+        let (selected_model, selected_effort) = normalized_ai_session_selection(
+            self.ai_models.as_slice(),
+            persisted.model,
+            persisted.effort,
+        );
 
-        self.ai_selected_model = persisted.model.or_else(|| self.default_ai_model_id());
+        self.ai_selected_model = selected_model;
         self.ai_selected_collaboration_mode = persisted.collaboration_mode;
-        self.ai_selected_effort = persisted.effort;
+        self.ai_selected_effort = selected_effort;
         self.ai_selected_service_tier = persisted.service_tier.unwrap_or_default();
-        self.normalize_ai_selected_effort();
     }
 
     fn persist_current_ai_workspace_session(&mut self) {
@@ -904,32 +908,13 @@ impl DiffViewer {
     }
 
     fn normalize_ai_selected_effort(&mut self) {
-        let Some(model_id) = self.ai_selected_model.as_ref() else {
-            self.ai_selected_effort = None;
-            return;
-        };
-        let Some(model) = self.ai_model_by_id(model_id.as_str()) else {
-            self.ai_selected_effort = None;
-            return;
-        };
-
-        if let Some(effort) = self.ai_selected_effort.as_ref()
-            && model
-                .supported_reasoning_efforts
-                .iter()
-                .any(|option| reasoning_effort_key(&option.reasoning_effort) == *effort)
-        {
-            return;
-        }
-        self.ai_selected_effort = Some(reasoning_effort_key(&model.default_reasoning_effort));
-    }
-
-    fn default_ai_model_id(&self) -> Option<String> {
-        self.ai_models
-            .iter()
-            .find(|model| model.is_default)
-            .or_else(|| self.ai_models.first())
-            .map(|model| model.id.clone())
+        let (selected_model, selected_effort) = normalized_ai_session_selection(
+            self.ai_models.as_slice(),
+            self.ai_selected_model.clone(),
+            self.ai_selected_effort.clone(),
+        );
+        self.ai_selected_model = selected_model;
+        self.ai_selected_effort = selected_effort;
     }
 
     fn ai_model_by_id(&self, model_id: &str) -> Option<&codex_app_server_protocol::Model> {

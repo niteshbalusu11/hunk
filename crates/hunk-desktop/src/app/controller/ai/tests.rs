@@ -37,6 +37,7 @@ mod ai_tests {
     use super::resolve_windows_command_path_from_env;
     use super::should_follow_timeline_output;
     use super::next_thread_metadata_refresh_attempt;
+    use super::normalized_ai_session_selection;
     use super::should_reset_ai_timeline_measurements;
     use super::should_scroll_timeline_to_bottom_on_new_activity;
     use super::sorted_threads;
@@ -79,6 +80,9 @@ mod ai_tests {
     use hunk_git::git::LocalBranch;
     use hunk_git::worktree::WorkspaceTargetKind;
     use hunk_git::worktree::WorkspaceTargetSummary;
+    use codex_app_server_protocol::Model;
+    use codex_app_server_protocol::ReasoningEffortOption;
+    use codex_protocol::openai_models::ReasoningEffort;
     use std::collections::{BTreeMap, BTreeSet};
     use std::env;
     #[cfg(target_os = "windows")]
@@ -174,6 +178,37 @@ mod ai_tests {
             attached_workspace_target_id: None,
             attached_workspace_target_root: None,
             attached_workspace_target_label: None,
+        }
+    }
+
+    fn ai_model(
+        id: &str,
+        display_name: &str,
+        is_default: bool,
+        supported_reasoning_efforts: &[ReasoningEffort],
+        default_reasoning_effort: ReasoningEffort,
+    ) -> Model {
+        Model {
+            id: id.to_string(),
+            model: id.to_string(),
+            upgrade: None,
+            upgrade_info: None,
+            availability_nux: None,
+            display_name: display_name.to_string(),
+            description: String::new(),
+            hidden: false,
+            supported_reasoning_efforts: supported_reasoning_efforts
+                .iter()
+                .cloned()
+                .map(|reasoning_effort| ReasoningEffortOption {
+                    reasoning_effort,
+                    description: String::new(),
+                })
+                .collect(),
+            default_reasoning_effort,
+            input_modalities: Vec::new(),
+            supports_personality: false,
+            is_default,
         }
     }
 
@@ -2254,6 +2289,42 @@ mod ai_tests {
             service_tier: None,
         };
         assert_eq!(normalized_thread_session_state(session), None);
+    }
+
+    #[test]
+    fn normalized_ai_session_selection_preserves_server_default_when_unset() {
+        let models = vec![ai_model(
+            "gpt-5.3-codex",
+            "5.3 Codex",
+            true,
+            &[ReasoningEffort::Low, ReasoningEffort::Medium],
+            ReasoningEffort::Medium,
+        )];
+
+        assert_eq!(
+            normalized_ai_session_selection(models.as_slice(), None, None),
+            (None, None),
+        );
+    }
+
+    #[test]
+    fn normalized_ai_session_selection_preserves_model_default_effort_when_unset() {
+        let models = vec![ai_model(
+            "gpt-5.3-codex",
+            "5.3 Codex",
+            true,
+            &[ReasoningEffort::Low, ReasoningEffort::Medium],
+            ReasoningEffort::Medium,
+        )];
+
+        assert_eq!(
+            normalized_ai_session_selection(
+                models.as_slice(),
+                Some("gpt-5.3-codex".to_string()),
+                None,
+            ),
+            (Some("gpt-5.3-codex".to_string()), None),
+        );
     }
 
     #[test]
