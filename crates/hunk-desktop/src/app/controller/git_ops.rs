@@ -96,6 +96,7 @@ impl DiffViewer {
         let epoch = self.next_git_action_epoch();
         self.git_action_loading = true;
         self.git_action_label = Some(action_label.into());
+        self.ai_git_progress = None;
         cx.notify();
         epoch
     }
@@ -103,6 +104,7 @@ impl DiffViewer {
     fn finish_git_action(&mut self) {
         self.git_action_loading = false;
         self.git_action_label = None;
+        self.ai_git_progress = None;
     }
 
     fn refresh_after_git_action(&mut self, action_name: &'static str, cx: &mut Context<Self>) {

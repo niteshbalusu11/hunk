@@ -46,6 +46,10 @@ use hunk_git::history::{
 };
 use hunk_git::worktree::WorkspaceTargetSummary;
 
+use ai_git_progress::{
+    AiGitProgressAction, AiGitProgressState, AiGitProgressStep, ai_commit_and_push_progress_steps,
+    ai_open_pr_progress_steps,
+};
 use ai_runtime::AiApprovalDecision;
 use ai_runtime::AiApprovalKind;
 use ai_runtime::AiConnectionState;
@@ -540,6 +544,7 @@ impl AiTextSelection {
     }
 }
 
+mod ai_git_progress;
 mod ai_rollout_fallback;
 mod ai_runtime;
 mod controller;
@@ -1242,6 +1247,7 @@ struct DiffViewer {
     ai_thread_inline_toast: Option<String>,
     ai_thread_inline_toast_epoch: usize,
     ai_thread_inline_toast_task: Task<()>,
+    ai_git_progress: Option<AiGitProgressState>,
     ai_thread_title_refresh_state_by_thread: BTreeMap<String, AiThreadTitleRefreshState>,
     ai_timeline_list_state: ListState,
     ai_timeline_list_row_count: usize,
