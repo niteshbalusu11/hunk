@@ -7,6 +7,21 @@ use crate::git::open_repo_at_root;
 
 const RESERVED_BRANCH_NAMES: &[&str] = &["detached", "unknown"];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenameBranchIfSafeOutcome {
+    Renamed,
+    Skipped(RenameBranchSkipReason),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenameBranchSkipReason {
+    UnchangedBranchName,
+    InvalidTargetName,
+    CurrentBranchChanged,
+    CurrentBranchPublished,
+    TargetAlreadyExists,
+}
+
 pub fn sanitize_branch_name(input: &str) -> String {
     let lowered = input.trim().to_lowercase();
 
@@ -175,13 +190,108 @@ pub fn rename_branch(repo_root: &Path, old_branch_name: &str, new_branch_name: &
     let mut branch = repo
         .find_branch(old_branch_name, git2::BranchType::Local)
         .with_context(|| format!("branch '{old_branch_name}' does not exist"))?;
+    let had_upstream = branch_has_upstream(&branch)
+        .with_context(|| format!("failed to inspect upstream for branch '{old_branch_name}'"))?;
     let mut renamed = branch
         .rename(new_branch_name, false)
         .with_context(|| format!("failed to rename branch '{old_branch_name}'"))?;
-    renamed
-        .set_upstream(None)
-        .with_context(|| format!("failed to clear upstream for branch '{new_branch_name}'"))?;
+    if had_upstream
+        && let Err(err) = renamed.set_upstream(None)
+        && err.code() != git2::ErrorCode::NotFound
+        && err.class() != git2::ErrorClass::Config
+    {
+        return Err(err)
+            .with_context(|| format!("failed to clear upstream for branch '{new_branch_name}'"));
+    }
     Ok(())
+}
+
+pub fn rename_branch_if_current_unpublished(
+    repo_root: &Path,
+    expected_current_branch_name: &str,
+    new_branch_name: &str,
+) -> Result<RenameBranchIfSafeOutcome> {
+    let expected_current_branch_name = expected_current_branch_name.trim();
+    if expected_current_branch_name.is_empty() {
+        return Err(anyhow!("expected current branch name cannot be empty"));
+    }
+
+    let new_branch_name = new_branch_name.trim();
+    if new_branch_name.is_empty() {
+        return Ok(RenameBranchIfSafeOutcome::Skipped(
+            RenameBranchSkipReason::InvalidTargetName,
+        ));
+    }
+    if expected_current_branch_name == new_branch_name {
+        return Ok(RenameBranchIfSafeOutcome::Skipped(
+            RenameBranchSkipReason::UnchangedBranchName,
+        ));
+    }
+    if !is_valid_branch_name(new_branch_name) {
+        return Ok(RenameBranchIfSafeOutcome::Skipped(
+            RenameBranchSkipReason::InvalidTargetName,
+        ));
+    }
+
+    let repo = git2::Repository::open(repo_root)
+        .with_context(|| format!("failed to open Git repository at {}", repo_root.display()))?;
+
+    let Some(current_branch_name) = checked_out_branch_name(&repo)? else {
+        return Ok(RenameBranchIfSafeOutcome::Skipped(
+            RenameBranchSkipReason::CurrentBranchChanged,
+        ));
+    };
+    if current_branch_name != expected_current_branch_name {
+        return Ok(RenameBranchIfSafeOutcome::Skipped(
+            RenameBranchSkipReason::CurrentBranchChanged,
+        ));
+    }
+
+    match repo.find_branch(new_branch_name, git2::BranchType::Local) {
+        Ok(_) => {
+            return Ok(RenameBranchIfSafeOutcome::Skipped(
+                RenameBranchSkipReason::TargetAlreadyExists,
+            ));
+        }
+        Err(err) if err.code() == git2::ErrorCode::NotFound => {}
+        Err(err) => {
+            return Err(err).with_context(|| {
+                format!("failed to check whether branch '{new_branch_name}' already exists")
+            });
+        }
+    }
+
+    let mut branch = repo
+        .find_branch(expected_current_branch_name, git2::BranchType::Local)
+        .with_context(|| format!("branch '{expected_current_branch_name}' does not exist"))?;
+    let branch_is_published = branch_has_upstream(&branch).with_context(|| {
+        format!("failed to inspect upstream for branch '{expected_current_branch_name}'")
+    })? || branch_has_known_remote_counterpart(
+        &repo,
+        expected_current_branch_name,
+    )
+    .with_context(|| {
+        format!(
+            "failed to inspect remote tracking state for branch '{expected_current_branch_name}'"
+        )
+    })?;
+    if branch_is_published {
+        return Ok(RenameBranchIfSafeOutcome::Skipped(
+            RenameBranchSkipReason::CurrentBranchPublished,
+        ));
+    }
+
+    let mut renamed = branch
+        .rename(new_branch_name, false)
+        .with_context(|| format!("failed to rename branch '{expected_current_branch_name}'"))?;
+    if let Err(err) = renamed.set_upstream(None)
+        && err.code() != git2::ErrorCode::NotFound
+        && err.class() != git2::ErrorClass::Config
+    {
+        return Err(err)
+            .with_context(|| format!("failed to clear upstream for branch '{new_branch_name}'"));
+    }
+    Ok(RenameBranchIfSafeOutcome::Renamed)
 }
 
 pub fn review_url_for_branch(repo_root: &Path, branch_name: &str) -> Result<Option<String>> {
@@ -219,6 +329,60 @@ fn is_reserved_branch_name(name: &str) -> bool {
     RESERVED_BRANCH_NAMES
         .iter()
         .any(|reserved| name.eq_ignore_ascii_case(reserved))
+}
+
+fn checked_out_branch_name(repo: &git2::Repository) -> Result<Option<String>> {
+    match repo.head() {
+        Ok(head) => {
+            if !head.is_branch() {
+                return Ok(None);
+            }
+            Ok(head
+                .shorthand()
+                .map(str::to_string)
+                .filter(|name| !name.is_empty()))
+        }
+        Err(err) if err.code() == git2::ErrorCode::UnbornBranch => Ok(None),
+        Err(err) => Err(err).context("failed to resolve current branch"),
+    }
+}
+
+fn branch_has_upstream(branch: &git2::Branch<'_>) -> Result<bool> {
+    match branch.upstream() {
+        Ok(_) => Ok(true),
+        Err(err)
+            if err.code() == git2::ErrorCode::NotFound
+                || err.class() == git2::ErrorClass::Config =>
+        {
+            Ok(false)
+        }
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn branch_has_known_remote_counterpart(repo: &git2::Repository, branch_name: &str) -> Result<bool> {
+    let remote_branches = repo
+        .branches(Some(git2::BranchType::Remote))
+        .context("failed to enumerate remote branches")?;
+    for remote_branch in remote_branches {
+        let (remote_branch, _) =
+            remote_branch.context("failed to inspect remote branch reference")?;
+        let Some(remote_branch_name) = remote_branch
+            .name()
+            .context("failed to inspect remote branch name")?
+        else {
+            continue;
+        };
+        let Some((_, remote_branch_suffix)) = remote_branch_name.split_once('/') else {
+            continue;
+        };
+        if remote_branch_suffix != branch_name {
+            continue;
+        }
+        return Ok(true);
+    }
+
+    Ok(false)
 }
 
 fn resolve_review_remote<'repo>(

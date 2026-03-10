@@ -731,29 +731,21 @@ impl DiffViewer {
         let prompt_seed = prompt.clone().unwrap_or_default();
         let fallback_branch_name =
             ai_branch_name_for_prompt(prompt_seed.as_str(), start_mode == AiNewThreadStartMode::Worktree);
-        let codex_executable = Self::resolve_codex_executable_path();
         let epoch = self.begin_git_action("Prepare AI thread", cx);
         let started_at = Instant::now();
 
         self.git_action_task = cx.spawn(async move |this, cx| {
             let prompt_for_start = prompt.clone();
             let image_paths_for_start = local_image_paths.clone();
+            let image_paths_for_rename = local_image_paths.clone();
+            let prompt_seed_for_rename = prompt_seed.clone();
             let session_overrides_for_start = session_overrides.clone();
             let (execution_elapsed, result) = cx
                 .background_executor()
                 .spawn(async move {
                     let execution_started_at = Instant::now();
-                    let requested_branch_name = requested_branch_name_for_new_thread(
-                        start_mode,
-                        fallback_branch_name,
-                        || try_ai_branch_name_for_prompt(
-                            codex_executable.as_path(),
-                            repo_root.as_path(),
-                            prompt_seed.as_str(),
-                            local_image_paths.as_slice(),
-                            true,
-                        )
-                    );
+                    let requested_branch_name =
+                        requested_branch_name_for_new_thread(fallback_branch_name);
                     let prepared = prepare_ai_thread_workspace(
                         repo_root.as_path(),
                         requested_branch_name.as_str(),
@@ -797,10 +789,10 @@ impl DiffViewer {
                                 this.request_recent_commits_refresh(true, cx);
                             }
                             let pending_workspace_key = this.ai_workspace_key_for_draft();
-                            if let Some(workspace_key) = pending_workspace_key
+                            if let Some(workspace_key) = pending_workspace_key.as_ref()
                                 && let Some(pending) = this.ai_pending_thread_start.as_mut()
                             {
-                                pending.workspace_key = workspace_key;
+                                pending.workspace_key = workspace_key.clone();
                             }
 
                             if this.send_ai_worker_command(
@@ -811,6 +803,16 @@ impl DiffViewer {
                                 },
                                 cx,
                             ) {
+                                if let Some(workspace_key) = pending_workspace_key.clone() {
+                                    this.schedule_ai_worktree_branch_rename(
+                                        start_mode,
+                                        workspace_key,
+                                        prepared.branch_name.clone(),
+                                        prompt_seed_for_rename.clone(),
+                                        image_paths_for_rename.clone(),
+                                        cx,
+                                    );
+                                }
                                 this.clear_current_ai_composer_status();
                                 this.ai_pending_new_thread_selection = true;
                             } else {
@@ -845,6 +847,164 @@ impl DiffViewer {
             }
         });
         true
+    }
+
+    fn schedule_ai_worktree_branch_rename(
+        &mut self,
+        start_mode: AiNewThreadStartMode,
+        workspace_key: String,
+        current_branch_name: String,
+        prompt_seed: String,
+        local_image_paths: Vec<PathBuf>,
+        cx: &mut Context<Self>,
+    ) {
+        let codex_executable = Self::resolve_codex_executable_path();
+        if let Err(error) = Self::validate_codex_executable_path(codex_executable.as_path()) {
+            debug!(
+                "skipping AI worktree branch rename generation for {}: {}",
+                workspace_key, error
+            );
+            return;
+        }
+
+        let workspace_root = PathBuf::from(workspace_key.as_str());
+        cx.spawn(async move |this, cx| {
+            let workspace_root_for_generation = workspace_root.clone();
+            let current_branch_for_generation = current_branch_name.clone();
+            let generated_branch_name = cx
+                .background_executor()
+                .spawn(async move {
+                    background_branch_name_for_new_thread(
+                        start_mode,
+                        current_branch_for_generation.as_str(),
+                        || {
+                            try_ai_branch_name_for_prompt(
+                                codex_executable.as_path(),
+                                workspace_root_for_generation.as_path(),
+                                prompt_seed.as_str(),
+                                local_image_paths.as_slice(),
+                                true,
+                            )
+                        },
+                    )
+                })
+                .await;
+
+            let Some(generated_branch_name) = generated_branch_name else {
+                return;
+            };
+
+            const RENAME_RETRY_INTERVAL: Duration = Duration::from_millis(250);
+            const RENAME_RETRY_LIMIT: usize = 120;
+
+            let mut retry_count = 0usize;
+            let epoch = loop {
+                let Some(view) = this.upgrade() else {
+                    return;
+                };
+
+                let mut rename_epoch = None;
+                view.update(cx, |this, cx| {
+                    if this.git_controls_busy() {
+                        return;
+                    }
+
+                    rename_epoch = Some(this.begin_git_action("Rename AI worktree branch", cx));
+                });
+
+                if let Some(epoch) = rename_epoch {
+                    break epoch;
+                }
+
+                retry_count = retry_count.saturating_add(1);
+                if retry_count >= RENAME_RETRY_LIMIT {
+                    debug!(
+                        "skipping AI worktree branch rename for {} because the workspace stayed busy",
+                        workspace_key
+                    );
+                    return;
+                }
+
+                cx.background_executor()
+                    .timer(RENAME_RETRY_INTERVAL)
+                    .await;
+            };
+
+            let rename_workspace_root = workspace_root.clone();
+            let rename_current_branch_name = current_branch_name.clone();
+            let rename_generated_branch_name = generated_branch_name.clone();
+            let rename_started_at = Instant::now();
+            let rename_result = cx
+                .background_executor()
+                .spawn(async move {
+                    rename_branch_if_current_unpublished(
+                        rename_workspace_root.as_path(),
+                        rename_current_branch_name.as_str(),
+                        rename_generated_branch_name.as_str(),
+                    )
+                })
+                .await;
+
+            let Some(view) = this.upgrade() else {
+                return;
+            };
+
+            let workspace_key = workspace_key.clone();
+            let current_branch_name = current_branch_name.clone();
+            let generated_branch_name = generated_branch_name.clone();
+            let renamed_workspace_root = workspace_root.clone();
+            view.update(cx, |this, cx| {
+                if epoch != this.git_action_epoch {
+                    return;
+                }
+
+                this.finish_git_action();
+                match rename_result {
+                    Ok(RenameBranchIfSafeOutcome::Renamed) => {
+                        debug!(
+                            "git action complete: epoch={} action=Rename AI worktree branch exec_elapsed_ms={} workspace={} from={} to={}",
+                            epoch,
+                            rename_started_at.elapsed().as_millis(),
+                            workspace_key,
+                            current_branch_name,
+                            generated_branch_name
+                        );
+                        this.refresh_workspace_targets_from_git_state(cx);
+                        let selected_git_workspace_root = this.selected_git_workspace_root();
+                        if selected_git_workspace_root.as_ref() == this.repo_root.as_ref() {
+                            this.request_snapshot_refresh_workflow_only(true, cx);
+                        } else if selected_git_workspace_root.as_ref()
+                            == Some(&renamed_workspace_root)
+                        {
+                            this.request_git_workspace_refresh(false, cx);
+                        }
+                        cx.notify();
+                    }
+                    Ok(RenameBranchIfSafeOutcome::Skipped(reason)) => {
+                        debug!(
+                            "git action complete: epoch={} action=Rename AI worktree branch exec_elapsed_ms={} workspace={} from={} to={} skipped={:?}",
+                            epoch,
+                            rename_started_at.elapsed().as_millis(),
+                            workspace_key,
+                            current_branch_name,
+                            generated_branch_name,
+                            reason
+                        );
+                    }
+                    Err(err) => {
+                        debug!(
+                            "git action failed: epoch={} action=Rename AI worktree branch exec_elapsed_ms={} workspace={} from={} to={} err={err:#}",
+                            epoch,
+                            rename_started_at.elapsed().as_millis(),
+                            workspace_key,
+                            current_branch_name,
+                            generated_branch_name
+                        );
+                    }
+                }
+            });
+        })
+        .detach();
     }
 
     fn sync_ai_session_selection_from_state(&mut self) {
@@ -1084,17 +1244,26 @@ fn prepare_ai_thread_workspace(
     }
 }
 
-fn requested_branch_name_for_new_thread(
+fn requested_branch_name_for_new_thread(fallback_branch_name: String) -> String {
+    fallback_branch_name
+}
+
+fn background_branch_name_for_new_thread(
     start_mode: AiNewThreadStartMode,
-    fallback_branch_name: String,
+    current_branch_name: &str,
     generate_branch_name: impl FnOnce() -> Option<String>,
-) -> String {
-    match start_mode {
-        AiNewThreadStartMode::Local => fallback_branch_name,
-        AiNewThreadStartMode::Worktree => {
-            generate_branch_name().unwrap_or(fallback_branch_name)
-        }
+) -> Option<String> {
+    if start_mode != AiNewThreadStartMode::Worktree {
+        return None;
     }
+
+    let generated_branch_name = generate_branch_name()?;
+    let generated_branch_name = generated_branch_name.trim();
+    if generated_branch_name.is_empty() || generated_branch_name == current_branch_name {
+        return None;
+    }
+
+    Some(generated_branch_name.to_string())
 }
 
 fn drain_ai_worker_events(
