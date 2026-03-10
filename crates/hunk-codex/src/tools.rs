@@ -113,7 +113,7 @@ impl DynamicToolRegistry {
         };
 
         let mut listed = Vec::new();
-        for entry in entries.filter_map(Result::ok).take(max_entries) {
+        for entry in entries.filter_map(Result::ok) {
             let file_name = entry.file_name().to_string_lossy().to_string();
             if !args.include_hidden.unwrap_or(false) && file_name.starts_with('.') {
                 continue;
@@ -134,6 +134,9 @@ impl DynamicToolRegistry {
                 "entryType": entry_type,
                 "sizeBytes": size_bytes,
             }));
+            if listed.len() >= max_entries {
+                break;
+            }
         }
 
         success_json(serde_json::json!({

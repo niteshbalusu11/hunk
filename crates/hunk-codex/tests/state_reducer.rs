@@ -10,6 +10,7 @@ use hunk_codex::state::ServerRequestDecision;
 use hunk_codex::state::StreamEvent;
 use hunk_codex::state::ThreadLifecycleStatus;
 use hunk_codex::state::TurnStatus;
+use hunk_codex::state::turn_storage_key;
 
 #[test]
 fn ordered_stream_application_updates_all_entities() {
@@ -250,6 +251,37 @@ fn thread_started_does_not_retarget_existing_thread_cwd() {
     assert_eq!(thread.cwd, "/repo/main");
     assert_eq!(thread.title.as_deref(), Some("Retried"));
     assert_eq!(thread.updated_at, 11);
+}
+
+#[test]
+fn thread_started_backfills_placeholder_thread_cwd() {
+    let mut state = AiState::default();
+
+    state.apply_stream_event(event(
+        1,
+        Some("turn-start:r1"),
+        ReducerEvent::TurnStarted {
+            thread_id: "t1".to_string(),
+            turn_id: "r1".to_string(),
+        },
+    ));
+    state.apply_stream_event(event(
+        2,
+        Some("thread-start:t1"),
+        ReducerEvent::ThreadStarted {
+            thread_id: "t1".to_string(),
+            cwd: "/repo".to_string(),
+            title: Some("Recovered".to_string()),
+            created_at: Some(10),
+            updated_at: Some(20),
+        },
+    ));
+
+    let thread = state.threads.get("t1").expect("thread must exist");
+    assert_eq!(thread.cwd, "/repo");
+    assert_eq!(thread.title.as_deref(), Some("Recovered"));
+    assert_eq!(thread.created_at, 10);
+    assert_eq!(thread.updated_at, 20);
 }
 
 #[test]
@@ -547,6 +579,95 @@ fn stale_item_display_metadata_update_is_ignored() {
         .expect("display metadata should be present");
     assert_eq!(metadata.summary.as_deref(), Some("Latest"));
     assert_eq!(metadata.details_json.as_deref(), Some("{\"a\":1}"));
+}
+
+#[test]
+fn stale_turn_diff_update_is_ignored() {
+    let mut state = AiState::default();
+
+    state.apply_stream_events(vec![
+        event(
+            1,
+            Some("thread-start:t1"),
+            ReducerEvent::ThreadStarted {
+                thread_id: "t1".to_string(),
+                cwd: "/repo".to_string(),
+                title: None,
+                created_at: None,
+                updated_at: None,
+            },
+        ),
+        event(
+            5,
+            Some("turn-diff:new"),
+            ReducerEvent::TurnDiffUpdated {
+                thread_id: "t1".to_string(),
+                turn_id: "r1".to_string(),
+                diff: "latest diff".to_string(),
+            },
+        ),
+        event(
+            4,
+            Some("turn-diff:stale"),
+            ReducerEvent::TurnDiffUpdated {
+                thread_id: "t1".to_string(),
+                turn_id: "r1".to_string(),
+                diff: "stale diff".to_string(),
+            },
+        ),
+    ]);
+
+    assert_eq!(
+        state
+            .turn_diffs
+            .get(turn_storage_key("t1", "r1").as_str())
+            .map(String::as_str),
+        Some("latest diff")
+    );
+}
+
+#[test]
+fn later_unknown_server_request_resolution_does_not_allow_older_decision_regression() {
+    let mut state = AiState::default();
+
+    state.apply_stream_events(vec![
+        event(
+            10,
+            Some("server-request:accept"),
+            ReducerEvent::ServerRequestResolved {
+                request_id: "s1".to_string(),
+                item_id: Some("i1".to_string()),
+                decision: ServerRequestDecision::Accept,
+            },
+        ),
+        event(
+            20,
+            Some("server-request:unknown"),
+            ReducerEvent::ServerRequestResolved {
+                request_id: "s1".to_string(),
+                item_id: Some("i1".to_string()),
+                decision: ServerRequestDecision::Unknown,
+            },
+        ),
+    ]);
+
+    let stale = state.apply_stream_event(event(
+        15,
+        Some("server-request:decline"),
+        ReducerEvent::ServerRequestResolved {
+            request_id: "s1".to_string(),
+            item_id: Some("i1".to_string()),
+            decision: ServerRequestDecision::Decline,
+        },
+    ));
+
+    assert_eq!(stale, ApplyOutcome::Stale);
+    let request = state
+        .server_requests
+        .get("s1")
+        .expect("server request must exist");
+    assert_eq!(request.decision, ServerRequestDecision::Accept);
+    assert_eq!(request.sequence, 20);
 }
 
 #[test]

@@ -130,6 +130,39 @@ fn read_file_honors_max_bytes_and_sets_truncated_flag() {
 }
 
 #[test]
+fn list_directory_applies_max_entries_after_hidden_filtering() {
+    let temp = tempdir().expect("temp dir should be created");
+    fs::write(temp.path().join(".hidden-a"), "a").expect("hidden file should be written");
+    fs::write(temp.path().join(".hidden-b"), "b").expect("hidden file should be written");
+    fs::write(temp.path().join("visible-a.txt"), "a").expect("visible file should be written");
+    fs::write(temp.path().join("visible-b.txt"), "b").expect("visible file should be written");
+
+    let registry = DynamicToolRegistry::new();
+    let response = registry.execute(
+        temp.path(),
+        &dynamic_tool_params(
+            "hunk.list_directory",
+            serde_json::json!({
+                "maxEntries": 2
+            }),
+        ),
+    );
+
+    assert!(response.success);
+    let payload: serde_json::Value =
+        serde_json::from_str(&response_text(&response)).expect("response should be json");
+    let entry_names = payload["entries"]
+        .as_array()
+        .expect("entries should be an array")
+        .iter()
+        .filter_map(|entry| entry["name"].as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(entry_names.len(), 2);
+    assert!(entry_names.iter().all(|name| !name.starts_with('.')));
+}
+
+#[test]
 fn workspace_summary_serializes_workspace_counts() {
     let temp = tempdir().expect("temp dir should be created");
     fs::write(temp.path().join("a.txt"), "a").expect("test file should be written");

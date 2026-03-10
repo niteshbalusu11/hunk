@@ -8,13 +8,18 @@ impl ThreadService {
         let params = ThreadArchiveParams {
             thread_id: thread_id.clone(),
         };
-        let response: ThreadArchiveResponse =
-            session.request_typed(api::method::THREAD_ARCHIVE, Some(&params), timeout)?;
-        if self.is_known_thread(&thread_id) {
-            self.apply_event(ReducerEvent::ThreadArchived { thread_id });
-        }
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_and_reconcile(
+            session,
+            api::method::THREAD_ARCHIVE,
+            Some(&params),
+            timeout,
+            move |service, _: &mut ThreadArchiveResponse| {
+                if service.is_known_thread(&thread_id) {
+                    service.apply_event(ReducerEvent::ThreadArchived { thread_id });
+                }
+                Ok(())
+            },
+        )
     }
 
     pub fn mark_thread_archived_if_known(&mut self, thread_id: String) {
@@ -30,15 +35,20 @@ impl ThreadService {
         timeout: Duration,
     ) -> Result<ThreadUnarchiveResponse> {
         let params = ThreadUnarchiveParams { thread_id };
-        let response: ThreadUnarchiveResponse =
-            session.request_typed(api::method::THREAD_UNARCHIVE, Some(&params), timeout)?;
-        self.ensure_thread_in_workspace(&response.thread)?;
-        self.ingest_thread_snapshot(&response.thread);
-        self.apply_event(ReducerEvent::ThreadUnarchived {
-            thread_id: response.thread.id.clone(),
-        });
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_and_reconcile(
+            session,
+            api::method::THREAD_UNARCHIVE,
+            Some(&params),
+            timeout,
+            |service, response: &mut ThreadUnarchiveResponse| {
+                service.ensure_thread_in_workspace(&response.thread)?;
+                service.ingest_thread_snapshot(&response.thread);
+                service.apply_event(ReducerEvent::ThreadUnarchived {
+                    thread_id: response.thread.id.clone(),
+                });
+                Ok(())
+            },
+        )
     }
 
     pub fn compact_thread(
@@ -48,10 +58,12 @@ impl ThreadService {
         timeout: Duration,
     ) -> Result<ThreadCompactStartResponse> {
         let params = ThreadCompactStartParams { thread_id };
-        let response: ThreadCompactStartResponse =
-            session.request_typed(api::method::THREAD_COMPACT_START, Some(&params), timeout)?;
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_with_notifications(
+            session,
+            api::method::THREAD_COMPACT_START,
+            Some(&params),
+            timeout,
+        )
     }
 
     pub fn rollback_thread(
@@ -65,13 +77,18 @@ impl ThreadService {
             thread_id,
             num_turns,
         };
-        let response: ThreadRollbackResponse =
-            session.request_typed(api::method::THREAD_ROLLBACK, Some(&params), timeout)?;
-        self.ensure_thread_in_workspace(&response.thread)?;
-        self.replace_thread_turns_from_snapshot(&response.thread);
-        self.ingest_thread_snapshot(&response.thread);
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_and_reconcile(
+            session,
+            api::method::THREAD_ROLLBACK,
+            Some(&params),
+            timeout,
+            |service, response: &mut ThreadRollbackResponse| {
+                service.ensure_thread_in_workspace(&response.thread)?;
+                service.replace_thread_turns_from_snapshot(&response.thread);
+                service.ingest_thread_snapshot(&response.thread);
+                Ok(())
+            },
+        )
     }
 
     pub fn unsubscribe_thread(
@@ -83,20 +100,25 @@ impl ThreadService {
         let params = ThreadUnsubscribeParams {
             thread_id: thread_id.clone(),
         };
-        let response: ThreadUnsubscribeResponse =
-            session.request_typed(api::method::THREAD_UNSUBSCRIBE, Some(&params), timeout)?;
-        if matches!(
-            response.status,
-            ThreadUnsubscribeStatus::Unsubscribed | ThreadUnsubscribeStatus::NotLoaded
-        ) && self.is_known_thread(&thread_id)
-        {
-            self.apply_event(ReducerEvent::ThreadStatusChanged {
-                thread_id,
-                status: ThreadLifecycleStatus::NotLoaded,
-            });
-        }
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_and_reconcile(
+            session,
+            api::method::THREAD_UNSUBSCRIBE,
+            Some(&params),
+            timeout,
+            move |service, response: &mut ThreadUnsubscribeResponse| {
+                if matches!(
+                    response.status,
+                    ThreadUnsubscribeStatus::Unsubscribed | ThreadUnsubscribeStatus::NotLoaded
+                ) && service.is_known_thread(&thread_id)
+                {
+                    service.apply_event(ReducerEvent::ThreadStatusChanged {
+                        thread_id,
+                        status: ThreadLifecycleStatus::NotLoaded,
+                    });
+                }
+                Ok(())
+            },
+        )
     }
 
     pub fn apply_server_notification(&mut self, notification: ServerNotification) {
@@ -136,7 +158,7 @@ impl ThreadService {
                 if self.is_known_thread(&notification.thread_id) {
                     self.apply_event(ReducerEvent::ThreadStatusChanged {
                         thread_id: notification.thread_id.clone(),
-                        status: ThreadLifecycleStatus::NotLoaded,
+                        status: ThreadLifecycleStatus::Closed,
                     });
                     self.complete_in_progress_turns(notification.thread_id.as_str());
                 }

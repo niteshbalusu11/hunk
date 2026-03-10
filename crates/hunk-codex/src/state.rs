@@ -179,6 +179,7 @@ pub struct AiState {
     pub server_requests: BTreeMap<String, ServerRequestSummary>,
     pub active_thread_by_cwd: BTreeMap<String, String>,
     seen_dedupe_keys: BTreeSet<String>,
+    turn_diff_sequences: BTreeMap<String, u64>,
 }
 
 const KEY_SEPARATOR: char = '\u{1f}';
@@ -262,23 +263,15 @@ impl AiState {
                 created_at,
                 updated_at,
             } => {
-                let thread =
-                    self.threads
-                        .entry(thread_id.clone())
-                        .or_insert_with(|| ThreadSummary {
-                            id: thread_id,
-                            cwd: cwd.clone(),
-                            title: title.clone(),
-                            status: ThreadLifecycleStatus::Idle,
-                            created_at: 0,
-                            updated_at: 0,
-                            last_sequence: 0,
-                        });
+                let thread = self.ensure_thread_summary(thread_id.as_str());
 
                 if sequence < thread.last_sequence {
                     return ApplyOutcome::Stale;
                 }
 
+                if thread.cwd.is_empty() {
+                    thread.cwd = cwd;
+                }
                 thread.title = title;
                 if let Some(created_at) = created_at {
                     thread.created_at = created_at;
@@ -304,14 +297,11 @@ impl AiState {
                 self.apply_thread_status(sequence, thread_id, ThreadLifecycleStatus::Idle)
             }
             ReducerEvent::TurnStarted { thread_id, turn_id } => {
-                self.ensure_thread_exists(&thread_id);
-                let turn_key = turn_storage_key(thread_id.as_str(), turn_id.as_str());
-                let turn = self.turns.entry(turn_key).or_insert_with(|| TurnSummary {
-                    id: turn_id,
-                    thread_id,
-                    status: TurnStatus::InProgress,
-                    last_sequence: 0,
-                });
+                let turn = self.ensure_turn_summary(
+                    thread_id.as_str(),
+                    turn_id.as_str(),
+                    TurnStatus::InProgress,
+                );
 
                 if sequence < turn.last_sequence {
                     return ApplyOutcome::Stale;
@@ -324,13 +314,11 @@ impl AiState {
                 ApplyOutcome::Applied
             }
             ReducerEvent::TurnCompleted { thread_id, turn_id } => {
-                let turn_key = turn_storage_key(thread_id.as_str(), turn_id.as_str());
-                let turn = self.turns.entry(turn_key).or_insert_with(|| TurnSummary {
-                    id: turn_id,
-                    thread_id,
-                    status: TurnStatus::Completed,
-                    last_sequence: 0,
-                });
+                let turn = self.ensure_turn_summary(
+                    thread_id.as_str(),
+                    turn_id.as_str(),
+                    TurnStatus::Completed,
+                );
 
                 if sequence < turn.last_sequence {
                     return ApplyOutcome::Stale;
@@ -348,19 +336,13 @@ impl AiState {
                 item_id,
                 kind,
             } => {
-                self.ensure_turn_exists(thread_id.as_str(), turn_id.as_str());
-                let item_key =
-                    item_storage_key(thread_id.as_str(), turn_id.as_str(), item_id.as_str());
-                let item = self.items.entry(item_key).or_insert_with(|| ItemSummary {
-                    id: item_id,
-                    thread_id: thread_id.clone(),
-                    turn_id: turn_id.clone(),
-                    kind: kind.clone(),
-                    status: ItemStatus::Started,
-                    content: String::new(),
-                    display_metadata: None,
-                    last_sequence: 0,
-                });
+                let item = self.ensure_item_summary(
+                    thread_id.as_str(),
+                    turn_id.as_str(),
+                    item_id.as_str(),
+                    kind.as_str(),
+                    ItemStatus::Started,
+                );
 
                 if sequence < item.last_sequence {
                     return ApplyOutcome::Stale;
@@ -379,19 +361,13 @@ impl AiState {
                 item_id,
                 delta,
             } => {
-                self.ensure_turn_exists(thread_id.as_str(), turn_id.as_str());
-                let item_key =
-                    item_storage_key(thread_id.as_str(), turn_id.as_str(), item_id.as_str());
-                let item = self.items.entry(item_key).or_insert_with(|| ItemSummary {
-                    id: item_id,
-                    thread_id: thread_id.clone(),
-                    turn_id: turn_id.clone(),
-                    kind: "unknown".to_string(),
-                    status: ItemStatus::Streaming,
-                    content: String::new(),
-                    display_metadata: None,
-                    last_sequence: 0,
-                });
+                let item = self.ensure_item_summary(
+                    thread_id.as_str(),
+                    turn_id.as_str(),
+                    item_id.as_str(),
+                    "unknown",
+                    ItemStatus::Streaming,
+                );
 
                 if sequence < item.last_sequence {
                     return ApplyOutcome::Stale;
@@ -409,19 +385,13 @@ impl AiState {
                 turn_id,
                 item_id,
             } => {
-                self.ensure_turn_exists(thread_id.as_str(), turn_id.as_str());
-                let item_key =
-                    item_storage_key(thread_id.as_str(), turn_id.as_str(), item_id.as_str());
-                let item = self.items.entry(item_key).or_insert_with(|| ItemSummary {
-                    id: item_id,
-                    thread_id: thread_id.clone(),
-                    turn_id: turn_id.clone(),
-                    kind: "unknown".to_string(),
-                    status: ItemStatus::Completed,
-                    content: String::new(),
-                    display_metadata: None,
-                    last_sequence: 0,
-                });
+                let item = self.ensure_item_summary(
+                    thread_id.as_str(),
+                    turn_id.as_str(),
+                    item_id.as_str(),
+                    "unknown",
+                    ItemStatus::Completed,
+                );
 
                 if sequence < item.last_sequence {
                     return ApplyOutcome::Stale;
@@ -439,19 +409,13 @@ impl AiState {
                 item_id,
                 metadata,
             } => {
-                self.ensure_turn_exists(thread_id.as_str(), turn_id.as_str());
-                let item_key =
-                    item_storage_key(thread_id.as_str(), turn_id.as_str(), item_id.as_str());
-                let item = self.items.entry(item_key).or_insert_with(|| ItemSummary {
-                    id: item_id,
-                    thread_id: thread_id.clone(),
-                    turn_id: turn_id.clone(),
-                    kind: "unknown".to_string(),
-                    status: ItemStatus::Started,
-                    content: String::new(),
-                    display_metadata: None,
-                    last_sequence: 0,
-                });
+                let item = self.ensure_item_summary(
+                    thread_id.as_str(),
+                    turn_id.as_str(),
+                    item_id.as_str(),
+                    "unknown",
+                    ItemStatus::Started,
+                );
 
                 if sequence < item.last_sequence {
                     return ApplyOutcome::Stale;
@@ -469,7 +433,19 @@ impl AiState {
                 diff,
             } => {
                 let turn_key = turn_storage_key(thread_id.as_str(), turn_id.as_str());
+                if self
+                    .turn_diff_sequences
+                    .get(turn_key.as_str())
+                    .is_some_and(|last_sequence| sequence < *last_sequence)
+                {
+                    return ApplyOutcome::Stale;
+                }
+
                 self.turn_diffs.insert(turn_key, diff);
+                self.turn_diff_sequences.insert(
+                    turn_storage_key(thread_id.as_str(), turn_id.as_str()),
+                    sequence,
+                );
                 ApplyOutcome::Applied
             }
             ReducerEvent::ServerRequestResolved {
@@ -495,6 +471,7 @@ impl AiState {
                 if matches!(decision, ServerRequestDecision::Unknown)
                     && !matches!(request.decision, ServerRequestDecision::Unknown)
                 {
+                    request.sequence = sequence;
                     return ApplyOutcome::Applied;
                 }
                 request.decision = decision;
@@ -514,18 +491,7 @@ impl AiState {
         thread_id: String,
         status: ThreadLifecycleStatus,
     ) -> ApplyOutcome {
-        let thread = self
-            .threads
-            .entry(thread_id.clone())
-            .or_insert_with(|| ThreadSummary {
-                id: thread_id.clone(),
-                cwd: String::new(),
-                title: None,
-                status,
-                created_at: 0,
-                updated_at: 0,
-                last_sequence: 0,
-            });
+        let thread = self.ensure_thread_summary(thread_id.as_str());
 
         if sequence < thread.last_sequence {
             return ApplyOutcome::Stale;
@@ -550,18 +516,7 @@ impl AiState {
         title: Option<String>,
         updated_at: Option<i64>,
     ) -> ApplyOutcome {
-        let thread = self
-            .threads
-            .entry(thread_id.clone())
-            .or_insert_with(|| ThreadSummary {
-                id: thread_id,
-                cwd: String::new(),
-                title: None,
-                status: ThreadLifecycleStatus::Idle,
-                created_at: 0,
-                updated_at: 0,
-                last_sequence: 0,
-            });
+        let thread = self.ensure_thread_summary(thread_id.as_str());
 
         if sequence < thread.last_sequence {
             return ApplyOutcome::Stale;
@@ -575,29 +530,78 @@ impl AiState {
         ApplyOutcome::Applied
     }
 
-    fn ensure_thread_exists(&mut self, thread_id: &str) {
+    fn ensure_thread_summary(&mut self, thread_id: &str) -> &mut ThreadSummary {
         self.threads
             .entry(thread_id.to_string())
-            .or_insert_with(|| ThreadSummary {
-                id: thread_id.to_string(),
-                cwd: String::new(),
-                title: None,
-                status: ThreadLifecycleStatus::Idle,
-                created_at: 0,
-                updated_at: 0,
-                last_sequence: 0,
-            });
+            .or_insert_with(|| Self::new_thread_summary(thread_id))
     }
 
-    fn ensure_turn_exists(&mut self, thread_id: &str, turn_id: &str) {
-        self.ensure_thread_exists(thread_id);
+    fn ensure_turn_summary(
+        &mut self,
+        thread_id: &str,
+        turn_id: &str,
+        status: TurnStatus,
+    ) -> &mut TurnSummary {
+        self.ensure_thread_summary(thread_id);
         let turn_key = turn_storage_key(thread_id, turn_id);
-        self.turns.entry(turn_key).or_insert_with(|| TurnSummary {
+        self.turns
+            .entry(turn_key)
+            .or_insert_with(|| Self::new_turn_summary(thread_id, turn_id, status))
+    }
+
+    fn ensure_item_summary(
+        &mut self,
+        thread_id: &str,
+        turn_id: &str,
+        item_id: &str,
+        kind: &str,
+        status: ItemStatus,
+    ) -> &mut ItemSummary {
+        self.ensure_turn_summary(thread_id, turn_id, TurnStatus::InProgress);
+        let item_key = item_storage_key(thread_id, turn_id, item_id);
+        self.items
+            .entry(item_key)
+            .or_insert_with(|| Self::new_item_summary(thread_id, turn_id, item_id, kind, status))
+    }
+
+    fn new_thread_summary(thread_id: &str) -> ThreadSummary {
+        ThreadSummary {
+            id: thread_id.to_string(),
+            cwd: String::new(),
+            title: None,
+            status: ThreadLifecycleStatus::Idle,
+            created_at: 0,
+            updated_at: 0,
+            last_sequence: 0,
+        }
+    }
+
+    fn new_turn_summary(thread_id: &str, turn_id: &str, status: TurnStatus) -> TurnSummary {
+        TurnSummary {
             id: turn_id.to_string(),
             thread_id: thread_id.to_string(),
-            status: TurnStatus::InProgress,
+            status,
             last_sequence: 0,
-        });
+        }
+    }
+
+    fn new_item_summary(
+        thread_id: &str,
+        turn_id: &str,
+        item_id: &str,
+        kind: &str,
+        status: ItemStatus,
+    ) -> ItemSummary {
+        ItemSummary {
+            id: item_id.to_string(),
+            thread_id: thread_id.to_string(),
+            turn_id: turn_id.to_string(),
+            kind: kind.to_string(),
+            status,
+            content: String::new(),
+            display_metadata: None,
+            last_sequence: 0,
+        }
     }
 
     fn mark_thread_active(&mut self, thread_id: &str, sequence: u64) {

@@ -658,7 +658,7 @@ fn idle_status_notification_completes_in_progress_turns() {
 }
 
 #[test]
-fn thread_closed_notification_marks_not_loaded_and_completes_in_progress_turns() {
+fn thread_closed_notification_marks_closed_and_completes_in_progress_turns() {
     let mut service = ThreadService::new(WORKSPACE_CWD.into());
     let _ = service.state_mut().apply_stream_event(StreamEvent {
         sequence: 1,
@@ -679,6 +679,14 @@ fn thread_closed_notification_marks_not_loaded_and_completes_in_progress_turns()
             turn_id: "turn-known".to_string(),
         },
     });
+    let _ = service.state_mut().apply_stream_event(StreamEvent {
+        sequence: 2,
+        dedupe_key: None,
+        payload: ReducerEvent::ActiveThreadSelected {
+            cwd: WORKSPACE_CWD.to_string(),
+            thread_id: "thread-known".to_string(),
+        },
+    });
 
     service.apply_server_notification(ServerNotification::ThreadClosed(ThreadClosedNotification {
         thread_id: "thread-known".to_string(),
@@ -691,8 +699,9 @@ fn thread_closed_notification_marks_not_loaded_and_completes_in_progress_turns()
             .get("thread-known")
             .expect("thread should exist")
             .status,
-        ThreadLifecycleStatus::NotLoaded
+        ThreadLifecycleStatus::Closed
     );
+    assert_eq!(service.active_thread_for_workspace(), None);
     assert_eq!(
         get_turn(service.state(), "thread-known", "turn-known").status,
         hunk_codex::state::TurnStatus::Completed

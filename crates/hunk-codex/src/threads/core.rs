@@ -68,6 +68,8 @@ use codex_app_server_protocol::TurnSteerResponse;
 use codex_app_server_protocol::UserInput;
 use codex_app_server_protocol::{CollaborationModeListParams, CollaborationModeListResponse};
 use codex_app_server_protocol::{ExperimentalFeatureListParams, ExperimentalFeatureListResponse};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use crate::api;
 use crate::errors::CodexIntegrationError;
@@ -150,6 +152,39 @@ impl ThreadService {
             .persist_active_thread_for_cwd(store, self.cwd_key(), thread_id)
     }
 
+    fn request_with_notifications<P, R>(
+        &mut self,
+        session: &mut JsonRpcSession,
+        method: &str,
+        params: Option<&P>,
+        timeout: Duration,
+    ) -> Result<R>
+    where
+        P: Serialize,
+        R: DeserializeOwned,
+    {
+        self.request_and_reconcile(session, method, params, timeout, |_, _| Ok(()))
+    }
+
+    fn request_and_reconcile<P, R, F>(
+        &mut self,
+        session: &mut JsonRpcSession,
+        method: &str,
+        params: Option<&P>,
+        timeout: Duration,
+        reconcile: F,
+    ) -> Result<R>
+    where
+        P: Serialize,
+        R: DeserializeOwned,
+        F: FnOnce(&mut Self, &mut R) -> Result<()>,
+    {
+        let mut response: R = session.request_typed(method, params, timeout)?;
+        reconcile(self, &mut response)?;
+        self.apply_queued_notifications(session);
+        Ok(response)
+    }
+
     pub fn list_threads(
         &mut self,
         session: &mut JsonRpcSession,
@@ -168,16 +203,21 @@ impl ThreadService {
             search_term: None,
         };
 
-        let mut response: ThreadListResponse =
-            session.request_typed(api::method::THREAD_LIST, Some(&params), timeout)?;
-        response
-            .data
-            .retain(|thread| self.thread_matches_workspace(thread));
-        for thread in &response.data {
-            self.ingest_thread_snapshot(thread);
-        }
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_and_reconcile(
+            session,
+            api::method::THREAD_LIST,
+            Some(&params),
+            timeout,
+            |service, response: &mut ThreadListResponse| {
+                response
+                    .data
+                    .retain(|thread| service.thread_matches_workspace(thread));
+                for thread in &response.data {
+                    service.ingest_thread_snapshot(thread);
+                }
+                Ok(())
+            },
+        )
     }
 
     pub fn list_loaded_threads(
@@ -188,10 +228,12 @@ impl ThreadService {
         timeout: Duration,
     ) -> Result<ThreadLoadedListResponse> {
         let params = ThreadLoadedListParams { cursor, limit };
-        let response: ThreadLoadedListResponse =
-            session.request_typed(api::method::THREAD_LOADED_LIST, Some(&params), timeout)?;
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_with_notifications(
+            session,
+            api::method::THREAD_LOADED_LIST,
+            Some(&params),
+            timeout,
+        )
     }
 
     pub fn list_skills(
@@ -205,10 +247,7 @@ impl ThreadService {
             force_reload,
             per_cwd_extra_user_roots: None,
         };
-        let response: SkillsListResponse =
-            session.request_typed(api::method::SKILLS_LIST, Some(&params), timeout)?;
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_with_notifications(session, api::method::SKILLS_LIST, Some(&params), timeout)
     }
 
     pub fn write_skills_config(
@@ -219,10 +258,12 @@ impl ThreadService {
         timeout: Duration,
     ) -> Result<SkillsConfigWriteResponse> {
         let params = SkillsConfigWriteParams { path, enabled };
-        let response: SkillsConfigWriteResponse =
-            session.request_typed(api::method::SKILLS_CONFIG_WRITE, Some(&params), timeout)?;
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_with_notifications(
+            session,
+            api::method::SKILLS_CONFIG_WRITE,
+            Some(&params),
+            timeout,
+        )
     }
 
     pub fn list_apps(
@@ -239,10 +280,7 @@ impl ThreadService {
             thread_id: self.active_thread_for_workspace().map(ToOwned::to_owned),
             force_refetch,
         };
-        let response: AppsListResponse =
-            session.request_typed(api::method::APP_LIST, Some(&params), timeout)?;
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_with_notifications(session, api::method::APP_LIST, Some(&params), timeout)
     }
 
     pub fn list_models(
@@ -258,10 +296,7 @@ impl ThreadService {
             limit,
             include_hidden,
         };
-        let response: ModelListResponse =
-            session.request_typed(api::method::MODEL_LIST, Some(&params), timeout)?;
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_with_notifications(session, api::method::MODEL_LIST, Some(&params), timeout)
     }
 
     pub fn list_experimental_features(
@@ -272,13 +307,12 @@ impl ThreadService {
         timeout: Duration,
     ) -> Result<ExperimentalFeatureListResponse> {
         let params = ExperimentalFeatureListParams { cursor, limit };
-        let response: ExperimentalFeatureListResponse = session.request_typed(
+        self.request_with_notifications(
+            session,
             api::method::EXPERIMENTAL_FEATURE_LIST,
             Some(&params),
             timeout,
-        )?;
-        self.apply_queued_notifications(session);
-        Ok(response)
+        )
     }
 
     pub fn list_collaboration_modes(
@@ -286,13 +320,12 @@ impl ThreadService {
         session: &mut JsonRpcSession,
         timeout: Duration,
     ) -> Result<CollaborationModeListResponse> {
-        let response: CollaborationModeListResponse = session.request_typed(
+        self.request_with_notifications(
+            session,
             api::method::COLLABORATION_MODE_LIST,
             Some(&CollaborationModeListParams::default()),
             timeout,
-        )?;
-        self.apply_queued_notifications(session);
-        Ok(response)
+        )
     }
 
     pub fn read_account(
@@ -302,10 +335,7 @@ impl ThreadService {
         timeout: Duration,
     ) -> Result<GetAccountResponse> {
         let params = GetAccountParams { refresh_token };
-        let response: GetAccountResponse =
-            session.request_typed(api::method::ACCOUNT_READ, Some(&params), timeout)?;
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_with_notifications(session, api::method::ACCOUNT_READ, Some(&params), timeout)
     }
 
     pub fn login_account(
@@ -314,10 +344,12 @@ impl ThreadService {
         params: LoginAccountParams,
         timeout: Duration,
     ) -> Result<LoginAccountResponse> {
-        let response: LoginAccountResponse =
-            session.request_typed(api::method::ACCOUNT_LOGIN_START, Some(&params), timeout)?;
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_with_notifications(
+            session,
+            api::method::ACCOUNT_LOGIN_START,
+            Some(&params),
+            timeout,
+        )
     }
 
     pub fn cancel_account_login(
@@ -327,10 +359,12 @@ impl ThreadService {
         timeout: Duration,
     ) -> Result<CancelLoginAccountResponse> {
         let params = CancelLoginAccountParams { login_id };
-        let response: CancelLoginAccountResponse =
-            session.request_typed(api::method::ACCOUNT_LOGIN_CANCEL, Some(&params), timeout)?;
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_with_notifications(
+            session,
+            api::method::ACCOUNT_LOGIN_CANCEL,
+            Some(&params),
+            timeout,
+        )
     }
 
     pub fn logout_account(
@@ -338,10 +372,12 @@ impl ThreadService {
         session: &mut JsonRpcSession,
         timeout: Duration,
     ) -> Result<LogoutAccountResponse> {
-        let response: LogoutAccountResponse =
-            session.request_typed(api::method::ACCOUNT_LOGOUT, Option::<&()>::None, timeout)?;
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_with_notifications(
+            session,
+            api::method::ACCOUNT_LOGOUT,
+            Option::<&()>::None,
+            timeout,
+        )
     }
 
     pub fn read_account_rate_limits(
@@ -349,13 +385,12 @@ impl ThreadService {
         session: &mut JsonRpcSession,
         timeout: Duration,
     ) -> Result<GetAccountRateLimitsResponse> {
-        let response: GetAccountRateLimitsResponse = session.request_typed(
+        self.request_with_notifications(
+            session,
             api::method::ACCOUNT_RATE_LIMITS_READ,
             Option::<&()>::None,
             timeout,
-        )?;
-        self.apply_queued_notifications(session);
-        Ok(response)
+        )
     }
 
     pub fn start_thread(
@@ -365,13 +400,18 @@ impl ThreadService {
         timeout: Duration,
     ) -> Result<ThreadStartResponse> {
         params.cwd = Some(self.cwd_key());
-        let response: ThreadStartResponse =
-            session.request_typed(api::method::THREAD_START, Some(&params), timeout)?;
-        self.ensure_thread_in_workspace(&response.thread)?;
-        self.ingest_thread_snapshot(&response.thread);
-        self.select_active_thread(response.thread.id.clone());
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_and_reconcile(
+            session,
+            api::method::THREAD_START,
+            Some(&params),
+            timeout,
+            |service, response: &mut ThreadStartResponse| {
+                service.ensure_thread_in_workspace(&response.thread)?;
+                service.ingest_thread_snapshot(&response.thread);
+                service.select_active_thread(response.thread.id.clone());
+                Ok(())
+            },
+        )
     }
 
     pub fn resume_thread(
@@ -383,14 +423,19 @@ impl ThreadService {
         if params.cwd.is_none() {
             params.cwd = Some(self.cwd_key());
         }
-        let response: ThreadResumeResponse =
-            session.request_typed(api::method::THREAD_RESUME, Some(&params), timeout)?;
-        self.ensure_thread_in_workspace(&response.thread)?;
-        self.replace_thread_turns_from_snapshot(&response.thread);
-        self.ingest_thread_snapshot(&response.thread);
-        self.select_active_thread(response.thread.id.clone());
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_and_reconcile(
+            session,
+            api::method::THREAD_RESUME,
+            Some(&params),
+            timeout,
+            |service, response: &mut ThreadResumeResponse| {
+                service.ensure_thread_in_workspace(&response.thread)?;
+                service.replace_thread_turns_from_snapshot(&response.thread);
+                service.ingest_thread_snapshot(&response.thread);
+                service.select_active_thread(response.thread.id.clone());
+                Ok(())
+            },
+        )
     }
 
     pub fn fork_thread(
@@ -402,14 +447,19 @@ impl ThreadService {
         if params.cwd.is_none() {
             params.cwd = Some(self.cwd_key());
         }
-        let response: ThreadForkResponse =
-            session.request_typed(api::method::THREAD_FORK, Some(&params), timeout)?;
-        self.ensure_thread_in_workspace(&response.thread)?;
-        self.replace_thread_turns_from_snapshot(&response.thread);
-        self.ingest_thread_snapshot(&response.thread);
-        self.select_active_thread(response.thread.id.clone());
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_and_reconcile(
+            session,
+            api::method::THREAD_FORK,
+            Some(&params),
+            timeout,
+            |service, response: &mut ThreadForkResponse| {
+                service.ensure_thread_in_workspace(&response.thread)?;
+                service.replace_thread_turns_from_snapshot(&response.thread);
+                service.ingest_thread_snapshot(&response.thread);
+                service.select_active_thread(response.thread.id.clone());
+                Ok(())
+            },
+        )
     }
 
     pub fn read_thread(
@@ -423,15 +473,20 @@ impl ThreadService {
             thread_id,
             include_turns,
         };
-        let response: ThreadReadResponse =
-            session.request_typed(api::method::THREAD_READ, Some(&params), timeout)?;
-        self.ensure_thread_in_workspace(&response.thread)?;
-        if include_turns {
-            self.replace_thread_turns_from_snapshot(&response.thread);
-        }
-        self.ingest_thread_snapshot(&response.thread);
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_and_reconcile(
+            session,
+            api::method::THREAD_READ,
+            Some(&params),
+            timeout,
+            |service, response: &mut ThreadReadResponse| {
+                service.ensure_thread_in_workspace(&response.thread)?;
+                if include_turns {
+                    service.replace_thread_turns_from_snapshot(&response.thread);
+                }
+                service.ingest_thread_snapshot(&response.thread);
+                Ok(())
+            },
+        )
     }
 
     pub fn start_turn(
@@ -441,11 +496,17 @@ impl ThreadService {
         timeout: Duration,
     ) -> Result<TurnStartResponse> {
         self.ensure_thread_id_in_workspace(&params.thread_id)?;
-        let response: TurnStartResponse =
-            session.request_typed(api::method::TURN_START, Some(&params), timeout)?;
-        self.apply_turn_snapshot(&params.thread_id, &response.turn);
-        self.apply_queued_notifications(session);
-        Ok(response)
+        let thread_id = params.thread_id.clone();
+        self.request_and_reconcile(
+            session,
+            api::method::TURN_START,
+            Some(&params),
+            timeout,
+            move |service, response: &mut TurnStartResponse| {
+                service.apply_turn_snapshot(&thread_id, &response.turn);
+                Ok(())
+            },
+        )
     }
 
     pub fn steer_turn(
@@ -455,10 +516,7 @@ impl ThreadService {
         timeout: Duration,
     ) -> Result<TurnSteerResponse> {
         self.ensure_thread_id_in_workspace(&params.thread_id)?;
-        let response: TurnSteerResponse =
-            session.request_typed(api::method::TURN_STEER, Some(&params), timeout)?;
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_with_notifications(session, api::method::TURN_STEER, Some(&params), timeout)
     }
 
     pub fn interrupt_turn(
@@ -468,14 +526,18 @@ impl ThreadService {
         timeout: Duration,
     ) -> Result<TurnInterruptResponse> {
         self.ensure_thread_id_in_workspace(&params.thread_id)?;
-        let response: TurnInterruptResponse =
-            session.request_typed(api::method::TURN_INTERRUPT, Some(&params), timeout)?;
-        self.apply_event(ReducerEvent::TurnCompleted {
-            thread_id: params.thread_id,
-            turn_id: params.turn_id,
-        });
-        self.apply_queued_notifications(session);
-        Ok(response)
+        let thread_id = params.thread_id.clone();
+        let turn_id = params.turn_id.clone();
+        self.request_and_reconcile(
+            session,
+            api::method::TURN_INTERRUPT,
+            Some(&params),
+            timeout,
+            move |service, _: &mut TurnInterruptResponse| {
+                service.apply_event(ReducerEvent::TurnCompleted { thread_id, turn_id });
+                Ok(())
+            },
+        )
     }
 
     pub fn start_review(
@@ -485,13 +547,18 @@ impl ThreadService {
         timeout: Duration,
     ) -> Result<ReviewStartResponse> {
         self.ensure_thread_id_in_workspace(&params.thread_id)?;
-        let response: ReviewStartResponse =
-            session.request_typed(api::method::REVIEW_START, Some(&params), timeout)?;
-        self.ensure_local_thread(response.review_thread_id.clone());
-        self.select_active_thread(response.review_thread_id.clone());
-        self.apply_turn_snapshot(&response.review_thread_id, &response.turn);
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_and_reconcile(
+            session,
+            api::method::REVIEW_START,
+            Some(&params),
+            timeout,
+            |service, response: &mut ReviewStartResponse| {
+                service.ensure_local_thread(response.review_thread_id.clone());
+                service.select_active_thread(response.review_thread_id.clone());
+                service.apply_turn_snapshot(&response.review_thread_id, &response.turn);
+                Ok(())
+            },
+        )
     }
 
     pub fn command_exec(
@@ -503,9 +570,6 @@ impl ThreadService {
         if params.cwd.is_none() {
             params.cwd = Some(self.cwd.clone());
         }
-        let response: CommandExecResponse =
-            session.request_typed(api::method::COMMAND_EXEC, Some(&params), timeout)?;
-        self.apply_queued_notifications(session);
-        Ok(response)
+        self.request_with_notifications(session, api::method::COMMAND_EXEC, Some(&params), timeout)
     }
 }

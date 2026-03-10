@@ -62,13 +62,19 @@ pub struct HostConfig {
 struct SharedHostKey {
     executable_path: PathBuf,
     codex_home: PathBuf,
+    arguments: Vec<String>,
+    environment: Vec<(String, String)>,
 }
 
 impl SharedHostKey {
     fn from_config(config: &HostConfig) -> Self {
+        let mut environment = config.environment.clone();
+        environment.sort();
         Self {
             executable_path: config.executable_path.clone(),
             codex_home: config.codex_home.clone(),
+            arguments: config.arguments.clone(),
+            environment,
         }
     }
 }

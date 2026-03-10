@@ -175,6 +175,32 @@ fn shared_host_lease_reuses_one_process_across_worktrees() {
 
 #[cfg(unix)]
 #[test]
+fn shared_host_lease_does_not_reuse_when_environment_changes() {
+    let _guard = host_runtime_test_guard();
+    let setup = TestSetup::new();
+    let first_config = setup.host_config();
+    let first_lease =
+        SharedHostLease::acquire(first_config, Duration::from_secs(5)).expect("first lease");
+
+    let mut second_config = setup.host_config();
+    second_config.port = free_port();
+    let second_port = second_config.port;
+    set_helper_port_env(&mut second_config, second_port);
+    second_config.environment.push((
+        "HUNK_CODEX_TEST_VARIANT".to_string(),
+        "alternate".to_string(),
+    ));
+    let second_lease =
+        SharedHostLease::acquire(second_config, Duration::from_secs(5)).expect("second lease");
+
+    let first_pid = first_lease.pid().expect("first lease pid should exist");
+    let second_pid = second_lease.pid().expect("second lease pid should exist");
+    assert_ne!(first_pid, second_pid);
+    assert_ne!(first_lease.port(), second_lease.port());
+}
+
+#[cfg(unix)]
+#[test]
 fn stop_returns_when_helper_leaves_descendant_holding_stderr() {
     let _guard = host_runtime_test_guard();
     let setup = TestSetup::new_with_mode(Some(HELPER_MODE_ORPHAN_STDERR));
@@ -388,6 +414,18 @@ fn free_port() -> u16 {
         .local_addr()
         .expect("probe local addr must exist")
         .port()
+}
+
+fn set_helper_port_env(config: &mut HostConfig, port: u16) {
+    let value = port.to_string();
+    let Some((_, existing_value)) = config
+        .environment
+        .iter_mut()
+        .find(|(key, _)| key == HELPER_PORT_ENV)
+    else {
+        panic!("helper port env should exist");
+    };
+    *existing_value = value;
 }
 
 fn host_runtime_test_guard() -> std::sync::MutexGuard<'static, ()> {
