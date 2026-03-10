@@ -809,7 +809,6 @@ impl DiffViewer {
             .or_else(|| self.ai_models.first())
     }
 }
-}
 
 fn prepare_ai_thread_workspace(
     repo_root: &std::path::Path,

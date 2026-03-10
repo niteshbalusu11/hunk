@@ -1,4 +1,59 @@
     #[test]
+    fn sorted_threads_ignores_activity_updates_when_created_at_differs() {
+        let mut state = AiState::default();
+        state.threads.insert(
+            "thread-early".to_string(),
+            ThreadSummary {
+                id: "thread-early".to_string(),
+                cwd: "/repo".to_string(),
+                title: None,
+                status: ThreadLifecycleStatus::Active,
+                created_at: 5,
+                updated_at: 1000,
+                last_sequence: 999,
+            },
+        );
+        state.threads.insert(
+            "thread-late".to_string(),
+            ThreadSummary {
+                id: "thread-late".to_string(),
+                cwd: "/repo".to_string(),
+                title: None,
+                status: ThreadLifecycleStatus::Idle,
+                created_at: 10,
+                updated_at: 1,
+                last_sequence: 1,
+            },
+        );
+
+        let sorted = sorted_threads(&state);
+        assert_eq!(sorted[0].id, "thread-late");
+        assert_eq!(sorted[1].id, "thread-early");
+    }
+
+    #[test]
+    fn ai_branch_name_for_thread_falls_back_to_thread_title() {
+        let mut state = AiState::default();
+        state.threads.insert(
+            "thread-1".to_string(),
+            ThreadSummary {
+                id: "thread-1".to_string(),
+                cwd: "/repo".to_string(),
+                title: Some("Improve PR dropdown behavior".to_string()),
+                status: ThreadLifecycleStatus::Active,
+                created_at: 1,
+                updated_at: 1,
+                last_sequence: 1,
+            },
+        );
+
+        assert_eq!(
+            ai_branch_name_for_thread(&state, "thread-1", "main", false),
+            "ai/local/improve-pr-dropdown-behavior"
+        );
+    }
+
+    #[test]
     fn active_thread_change_does_not_override_valid_local_selection() {
         let mut state = AiState::default();
         state.threads.insert(
