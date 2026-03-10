@@ -396,7 +396,6 @@ impl DiffViewer {
             workspace_view_mode: WorkspaceViewMode::GitWorkspace,
             ai_connection_state: AiConnectionState::Disconnected,
             ai_bootstrap_loading: false,
-            ai_view_activation_started_at: None,
             ai_status_message: None,
             ai_error_message: None,
             ai_state_snapshot: hunk_codex::state::AiState::default(),

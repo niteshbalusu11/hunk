@@ -10,7 +10,6 @@ pub fn load_ai_workspace_thread_catalogs(
     codex_executable: PathBuf,
     codex_home: PathBuf,
 ) -> Result<Vec<AiWorkspaceThreadCatalog>, CodexIntegrationError> {
-    let started_at = Instant::now();
     if workspace_roots.is_empty() {
         return Ok(Vec::new());
     }
@@ -18,7 +17,7 @@ pub fn load_ai_workspace_thread_catalogs(
     std::fs::create_dir_all(&codex_home).map_err(CodexIntegrationError::HostProcessIo)?;
 
     let mut last_retryable_error = None;
-    for attempt in 0..HOST_BOOTSTRAP_MAX_ATTEMPTS {
+    for _attempt in 0..HOST_BOOTSTRAP_MAX_ATTEMPTS {
         let port = allocate_loopback_port();
         match load_ai_workspace_thread_catalogs_on_port(
             workspace_roots.as_slice(),
@@ -26,68 +25,20 @@ pub fn load_ai_workspace_thread_catalogs(
             codex_home.as_path(),
             port,
         ) {
-            Ok(catalogs) => {
-                let workspace_count = catalogs.len();
-                let thread_count = catalogs
-                    .iter()
-                    .map(|catalog| {
-                        catalog
-                            .state_snapshot
-                            .threads
-                            .values()
-                            .filter(|thread| thread.status != ThreadLifecycleStatus::Archived)
-                            .count()
-                    })
-                    .sum::<usize>();
-                tracing::info!(
-                    requested_workspace_count = workspace_roots.len(),
-                    workspace_count,
-                    thread_count,
-                    attempt = attempt + 1,
-                    port,
-                    elapsed_ms = started_at.elapsed().as_millis() as u64,
-                    "ai instrumentation: repo-wide thread catalog load completed"
-                );
-                return Ok(catalogs);
-            }
+            Ok(catalogs) => return Ok(catalogs),
             Err(error) if should_retry_bootstrap_with_new_port(&error) => {
-                tracing::warn!(
-                    requested_workspace_count = workspace_roots.len(),
-                    attempt = attempt + 1,
-                    port,
-                    elapsed_ms = started_at.elapsed().as_millis() as u64,
-                    error = %error,
-                    "ai instrumentation: repo-wide thread catalog load retrying on a new port"
-                );
                 last_retryable_error = Some(error);
             }
-            Err(error) => {
-                tracing::warn!(
-                    requested_workspace_count = workspace_roots.len(),
-                    attempt = attempt + 1,
-                    port,
-                    elapsed_ms = started_at.elapsed().as_millis() as u64,
-                    error = %error,
-                    "ai instrumentation: repo-wide thread catalog load failed"
-                );
-                return Err(error);
-            }
+            Err(error) => return Err(error),
         }
     }
 
-    let error = last_retryable_error.unwrap_or(CodexIntegrationError::HostStartupTimedOut {
+    Err(last_retryable_error.unwrap_or(CodexIntegrationError::HostStartupTimedOut {
         port: 0,
         timeout_ms: HOST_START_TIMEOUT
             .as_millis()
             .min(u128::from(u64::MAX)) as u64,
-    });
-    tracing::warn!(
-        requested_workspace_count = workspace_roots.len(),
-        elapsed_ms = started_at.elapsed().as_millis() as u64,
-        error = %error,
-        "ai instrumentation: repo-wide thread catalog load exhausted all attempts"
-    );
-    Err(error)
+    }))
 }
 
 pub(crate) fn archive_ai_thread_for_workspace(
@@ -194,7 +145,6 @@ fn load_ai_workspace_thread_catalogs_on_port(
     codex_home: &std::path::Path,
     port: u16,
 ) -> Result<Vec<AiWorkspaceThreadCatalog>, CodexIntegrationError> {
-    let started_at = Instant::now();
     let host_working_directory = workspace_roots
         .first()
         .cloned()
@@ -205,39 +155,18 @@ fn load_ai_workspace_thread_catalogs_on_port(
         codex_home.to_path_buf(),
         port,
     );
-    let host_started_at = Instant::now();
     let host = SharedHostLease::acquire(host_config, HOST_START_TIMEOUT)?;
-    let host_acquire_elapsed_ms = host_started_at.elapsed().as_millis() as u64;
-    let host_pid = host.pid();
-    let host_port = host.port();
 
     (|| {
         let endpoint = WebSocketEndpoint::loopback(host.port());
-        let connect_started_at = Instant::now();
         let mut session = JsonRpcSession::connect(&endpoint)?;
-        let websocket_connect_elapsed_ms = connect_started_at.elapsed().as_millis() as u64;
-        let initialize_started_at = Instant::now();
         session.initialize(InitializeOptions::default(), DEFAULT_REQUEST_TIMEOUT)?;
-        let websocket_initialize_elapsed_ms =
-            initialize_started_at.elapsed().as_millis() as u64;
-        tracing::info!(
-            requested_workspace_count = workspace_roots.len(),
-            requested_port = port,
-            host_port,
-            host_pid = ?host_pid,
-            host_acquire_elapsed_ms,
-            websocket_connect_elapsed_ms,
-            websocket_initialize_elapsed_ms,
-            elapsed_ms = started_at.elapsed().as_millis() as u64,
-            "ai instrumentation: repo-wide thread catalog transport ready"
-        );
         let mut catalogs = Vec::with_capacity(workspace_roots.len());
         for workspace_root in workspace_roots {
             if !workspace_root_exists_for_catalog(workspace_root.as_path()) {
                 continue;
             }
             let mut service = ThreadService::new(workspace_root.clone());
-            let workspace_started_at = Instant::now();
             let response = match service.list_threads(
                 &mut session,
                 None,
@@ -245,15 +174,7 @@ fn load_ai_workspace_thread_catalogs_on_port(
                 DEFAULT_REQUEST_TIMEOUT,
             ) {
                 Ok(response) => response,
-                Err(error) => {
-                    tracing::warn!(
-                        workspace_root = %workspace_root.display(),
-                        elapsed_ms = workspace_started_at.elapsed().as_millis() as u64,
-                        error = %error,
-                        "ai instrumentation: skipping workspace during thread catalog refresh"
-                    );
-                    continue;
-                }
+                Err(_) => continue,
             };
             let workspace_key = workspace_root.to_string_lossy().to_string();
 
@@ -270,13 +191,6 @@ fn load_ai_workspace_thread_catalogs_on_port(
                 state_snapshot: service.state().clone(),
                 active_thread_id: service.active_thread_for_workspace().map(ToOwned::to_owned),
             });
-            tracing::debug!(
-                workspace_root = %workspace_root.display(),
-                thread_count = response.data.len(),
-                active_thread_id = ?service.active_thread_for_workspace(),
-                elapsed_ms = workspace_started_at.elapsed().as_millis() as u64,
-                "ai instrumentation: workspace thread catalog refreshed"
-            );
         }
 
         Ok(catalogs)

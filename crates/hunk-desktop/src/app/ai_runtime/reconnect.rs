@@ -1,23 +1,15 @@
 const WORKER_RECONNECT_MAX_ATTEMPTS: usize = 4;
 const WORKER_RECONNECT_INITIAL_BACKOFF: Duration = Duration::from_millis(250);
+const INITIAL_RATE_LIMIT_REFRESH_DELAY: Duration = Duration::from_millis(500);
 
 fn run_ai_worker(
     config: AiWorkerStartConfig,
     command_rx: Receiver<AiWorkerCommand>,
     event_tx: &Sender<AiWorkerEvent>,
 ) -> Result<(), CodexIntegrationError> {
-    let worker_started_at = Instant::now();
     let mut runtime = AiWorkerRuntime::bootstrap(config.clone())?;
-    runtime.sync_after_connect(
-        event_tx,
-        "Codex App Server connected over WebSocket",
-        true,
-    )?;
-    tracing::info!(
-        workspace_key = runtime.workspace_key.as_str(),
-        elapsed_ms = worker_started_at.elapsed().as_millis() as u64,
-        "ai instrumentation: worker entered steady-state command loop"
-    );
+    runtime.sync_after_connect(event_tx, "Codex App Server connected over WebSocket", true)?;
+    let mut rate_limit_refresh_deadline = Some(Instant::now() + INITIAL_RATE_LIMIT_REFRESH_DELAY);
 
     loop {
         match command_rx.recv_timeout(COMMAND_POLL_INTERVAL) {
@@ -31,6 +23,8 @@ fn run_ai_worker(
                             command_context_message(&retry_command),
                             event_tx,
                         )?;
+                        rate_limit_refresh_deadline =
+                            Some(Instant::now() + INITIAL_RATE_LIMIT_REFRESH_DELAY);
                         if command_can_retry_after_reconnect(&retry_command) {
                             if let Err(error) = runtime.handle_command(retry_command, event_tx) {
                                 runtime.send_event(
@@ -56,6 +50,20 @@ fn run_ai_worker(
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
+                if rate_limit_refresh_deadline
+                    .is_some_and(|deadline| Instant::now() >= deadline)
+                {
+                    if let Err(error) = runtime.refresh_account_rate_limits() {
+                        runtime.send_event(
+                            event_tx,
+                            AiWorkerEventPayload::Status(format!(
+                                "Unable to read account rate limits: {error}"
+                            )),
+                        );
+                    }
+                    runtime.emit_snapshot(event_tx);
+                    rate_limit_refresh_deadline = None;
+                }
                 if let Err(error) = runtime.poll_notifications(event_tx) {
                     if should_attempt_runtime_reconnect(&error) {
                         runtime.reconnect_after_transport_failure(
@@ -63,6 +71,8 @@ fn run_ai_worker(
                             "streaming AI updates",
                             event_tx,
                         )?;
+                        rate_limit_refresh_deadline =
+                            Some(Instant::now() + INITIAL_RATE_LIMIT_REFRESH_DELAY);
                     } else {
                         return Err(error);
                     }
@@ -82,7 +92,6 @@ impl AiWorkerRuntime {
         connected_message: &str,
         emit_bootstrap_completed: bool,
     ) -> Result<(), CodexIntegrationError> {
-        let started_at = Instant::now();
         self.send_event(
             event_tx,
             AiWorkerEventPayload::Status(connected_message.to_string()),
@@ -119,23 +128,6 @@ impl AiWorkerRuntime {
             self.send_event(event_tx, AiWorkerEventPayload::BootstrapCompleted);
             self.emit_snapshot(event_tx);
         }
-        if let Err(error) = self.refresh_account_rate_limits() {
-            self.send_event(
-                event_tx,
-                AiWorkerEventPayload::Status(format!(
-                    "Unable to read account rate limits: {error}"
-                )),
-            );
-        }
-        self.emit_snapshot(event_tx);
-        tracing::info!(
-            workspace_key = self.workspace_key.as_str(),
-            connected_message,
-            emitted_bootstrap_completed = emit_bootstrap_completed,
-            active_thread_id = ?self.service.active_thread_for_workspace(),
-            elapsed_ms = started_at.elapsed().as_millis() as u64,
-            "ai instrumentation: sync_after_connect completed"
-        );
         Ok(())
     }
 
