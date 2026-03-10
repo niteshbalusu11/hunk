@@ -6,6 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use hunk_domain::db::{CommentLineSide, CommentStatus, DatabaseStore, NewComment};
 use rusqlite::Connection;
 
+const MIGRATION_0001_INIT: &str = include_str!("../src/db/migrations/0001_init.sql");
+
 struct TempDb {
     path: PathBuf,
     store: DatabaseStore,
@@ -214,6 +216,66 @@ fn touch_and_delete_comment_work() {
 }
 
 #[test]
+fn batch_comment_updates_apply_to_each_requested_id() {
+    let fixture = TempDb::new("comments-batch-updates");
+    let first = fixture
+        .store
+        .create_comment(&new_comment("/repo", "main", "src/one.rs", "first"))
+        .expect("create first comment");
+    let second = fixture
+        .store
+        .create_comment(&new_comment("/repo", "main", "src/two.rs", "second"))
+        .expect("create second comment");
+    let third = fixture
+        .store
+        .create_comment(&new_comment("/repo", "main", "src/three.rs", "third"))
+        .expect("create third comment");
+
+    let touched = fixture
+        .store
+        .touch_many_comment_seen(&[first.id.clone(), second.id.clone()], 2222)
+        .expect("touch many comments");
+    assert_eq!(touched, 2);
+
+    let marked = fixture
+        .store
+        .mark_many_comment_status(
+            &[first.id.clone(), second.id.clone()],
+            CommentStatus::Stale,
+            Some("anchor_not_found"),
+            3333,
+        )
+        .expect("mark many comments stale");
+    assert_eq!(marked, 2);
+
+    let deleted = fixture
+        .store
+        .delete_many_comments(std::slice::from_ref(&third.id))
+        .expect("delete many comments");
+    assert_eq!(deleted, 1);
+
+    let comments = fixture
+        .store
+        .list_comments("/repo", "main", true)
+        .expect("list comments after batch updates");
+    assert_eq!(comments.len(), 2);
+    assert!(
+        comments
+            .iter()
+            .all(|comment| comment.status == CommentStatus::Stale)
+    );
+    assert!(
+        comments
+            .iter()
+            .all(|comment| comment.last_seen_at_unix_ms == Some(2222))
+    );
+    assert!(comments.iter().all(|comment| {
+        comment.stale_reason.as_deref() == Some("anchor_not_found")
+            && comment.updated_at_unix_ms == 3333
+    }));
+}
+
+#[test]
 fn create_comment_ids_are_unique_within_process() {
     let fixture = TempDb::new("comments-id-unique");
     let mut ids = HashSet::new();
@@ -233,4 +295,154 @@ fn create_comment_ids_are_unique_within_process() {
             "duplicate comment id should never be generated"
         );
     }
+}
+
+#[test]
+fn create_comment_rejects_row_stable_id_larger_than_i64_max() {
+    let fixture = TempDb::new("comments-row-stable-id-overflow");
+    let mut comment = new_comment("/repo", "main", "src/lib.rs", "overflow");
+    comment.row_stable_id = Some(i64::MAX as u64 + 1);
+
+    let err = fixture
+        .store
+        .create_comment(&comment)
+        .expect_err("oversized row_stable_id should be rejected");
+
+    assert!(err.to_string().contains("cannot convert row_stable_id"));
+}
+
+#[test]
+fn sqlite_schema_rejects_negative_row_stable_id() {
+    let fixture = TempDb::new("comments-row-stable-id-negative");
+    fixture
+        .store
+        .list_comments("/repo", "main", true)
+        .expect("listing comments should initialize db");
+
+    let conn = Connection::open(&fixture.path).expect("open sqlite db");
+    let err = conn
+        .execute(
+            "INSERT INTO comments (
+                id,
+                repo_root,
+                branch_name,
+                created_head_commit,
+                status,
+                file_path,
+                line_side,
+                old_line,
+                new_line,
+                row_stable_id,
+                hunk_header,
+                line_text,
+                context_before,
+                context_after,
+                anchor_hash,
+                comment_text,
+                stale_reason,
+                created_at_unix_ms,
+                updated_at_unix_ms,
+                last_seen_at_unix_ms,
+                resolved_at_unix_ms
+            ) VALUES (
+                'comment-negative-row-stable-id',
+                '/repo',
+                'main',
+                'abc123',
+                'open',
+                'src/lib.rs',
+                'right',
+                10,
+                11,
+                -1,
+                '@@ -10,3 +11,4 @@',
+                'let value = 1;',
+                ' let other = 0;',
+                '+let value = 1;',
+                'anchor-hash-negative',
+                'negative row stable id',
+                NULL,
+                1,
+                1,
+                1,
+                NULL
+            )",
+            [],
+        )
+        .expect_err("negative row_stable_id should violate the schema constraint");
+
+    assert!(err.to_string().contains("row_stable_id"));
+}
+
+#[test]
+fn upgrading_a_version_1_database_runs_ordered_migrations() {
+    let fixture = TempDb::new("comments-version-1-upgrade");
+
+    let conn = Connection::open(&fixture.path).expect("open sqlite db");
+    conn.execute_batch(MIGRATION_0001_INIT)
+        .expect("apply version 1 schema");
+    conn.pragma_update(None, "user_version", 1_i64)
+        .expect("set sqlite user_version to 1");
+    conn.execute(
+        "INSERT INTO comments (
+            id,
+            repo_root,
+            branch_name,
+            created_head_commit,
+            status,
+            file_path,
+            line_side,
+            old_line,
+            new_line,
+            row_stable_id,
+            hunk_header,
+            line_text,
+            context_before,
+            context_after,
+            anchor_hash,
+            comment_text,
+            stale_reason,
+            created_at_unix_ms,
+            updated_at_unix_ms,
+            last_seen_at_unix_ms,
+            resolved_at_unix_ms
+        ) VALUES (
+            'comment-version-1',
+            '/repo',
+            'main',
+            'abc123',
+            'open',
+            'src/lib.rs',
+            'right',
+            10,
+            11,
+            42,
+            '@@ -10,3 +11,4 @@',
+            'let value = 1;',
+            ' let other = 0;',
+            '+let value = 1;',
+            'anchor-hash-version-1',
+            'legacy comment',
+            NULL,
+            1,
+            1,
+            1,
+            NULL
+        )",
+        [],
+    )
+    .expect("insert legacy version 1 comment");
+    drop(conn);
+
+    let comments = fixture
+        .store
+        .list_comments("/repo", "main", true)
+        .expect("upgrade version 1 database");
+    assert!(comments.is_empty());
+
+    let conn = Connection::open(&fixture.path).expect("reopen upgraded sqlite db");
+    let user_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read upgraded sqlite user_version");
+    assert_eq!(user_version, 2);
 }

@@ -8,6 +8,24 @@ use super::sql;
 
 const DB_FILE_NAME: &str = "hunk.db";
 const DB_SCHEMA_VERSION: i64 = 2;
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "0001_init.sql",
+        sql: include_str!("migrations/0001_init.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "0002_branch_scope_reset.sql",
+        sql: include_str!("migrations/0002_branch_scope_reset.sql"),
+    },
+];
+
+struct Migration {
+    version: i64,
+    name: &'static str,
+    sql: &'static str,
+}
 
 #[derive(Debug, Clone)]
 pub struct DatabaseStore {
@@ -64,11 +82,20 @@ fn run_migrations(conn: &Connection) -> Result<()> {
         ));
     }
 
-    if user_version < 2 {
-        conn.execute_batch(include_str!("migrations/0002_branch_scope_reset.sql"))
-            .context("failed to run migration 0002_branch_scope_reset.sql")?;
-        conn.pragma_update(None, "user_version", DB_SCHEMA_VERSION)
-            .context("failed to update sqlite user_version to schema version 2")?;
+    for migration in MIGRATIONS {
+        if user_version >= migration.version {
+            continue;
+        }
+
+        conn.execute_batch(migration.sql)
+            .with_context(|| format!("failed to run migration {}", migration.name))?;
+        conn.pragma_update(None, "user_version", migration.version)
+            .with_context(|| {
+                format!(
+                    "failed to update sqlite user_version to schema version {}",
+                    migration.version
+                )
+            })?;
     }
 
     Ok(())
