@@ -10,8 +10,8 @@ use refresh_policy::{
     SnapshotRefreshRequest, diff_state_changed, line_stats_paths_from_dirty_paths,
     missing_line_stat_paths, post_git_action_refresh_plan, repo_watch_refresh_request,
     should_refresh_line_stats_after_snapshot, should_reload_diff_after_snapshot,
-    should_reload_repo_tree_after_snapshot, should_run_cold_start_reconcile,
-    should_scroll_selected_after_reload,
+    should_reload_repo_tree_after_snapshot, should_request_startup_git_workspace_refresh,
+    should_run_cold_start_reconcile, should_scroll_selected_after_reload,
 };
 
 #[test]
@@ -238,4 +238,10 @@ fn git_workspace_refresh_requests_replace_old_root_when_target_changes() {
 
     assert_eq!(merged.root, PathBuf::from("/tmp/repo-worktree"));
     assert!(!merged.refresh_recent_commits);
+}
+
+#[test]
+fn startup_git_workspace_refresh_only_runs_for_non_primary_targets() {
+    assert!(!should_request_startup_git_workspace_refresh(true));
+    assert!(should_request_startup_git_workspace_refresh(false));
 }

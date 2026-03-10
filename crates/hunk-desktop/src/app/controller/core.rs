@@ -958,7 +958,19 @@ impl DiffViewer {
         if self.workspace_view_mode == WorkspaceViewMode::Ai {
             self.refresh_ai_repo_thread_catalog(cx);
         }
-        self.request_git_workspace_refresh(true, cx);
+        let selected_target_is_primary = self
+            .workspace_targets
+            .iter()
+            .find(|target| target.is_active)
+            .is_some_and(|target| {
+                matches!(
+                    target.kind,
+                    hunk_git::worktree::WorkspaceTargetKind::PrimaryCheckout
+                )
+            });
+        if should_request_startup_git_workspace_refresh(selected_target_is_primary) {
+            self.request_git_workspace_refresh(true, cx);
+        }
     }
 
     fn activate_workspace_target(&mut self, target_id: String, cx: &mut Context<Self>) {

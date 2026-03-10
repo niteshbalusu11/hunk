@@ -19,7 +19,7 @@ use crate::worktree::{
 
 pub const MAX_REPO_TREE_ENTRIES: usize = 60_000;
 
-static NESTED_REPO_ROOTS_CACHE: LazyLock<Mutex<HashMap<PathBuf, BTreeSet<String>>>> =
+static NESTED_REPO_ROOTS_CACHE: LazyLock<Mutex<HashMap<PathBuf, NestedRepoPathCache>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -178,6 +178,12 @@ struct WorkspaceDiffEntry {
     content_signature: u64,
 }
 
+#[derive(Debug, Clone, Default)]
+struct NestedRepoPathCache {
+    nested_roots: BTreeSet<String>,
+    checked_paths: BTreeSet<String>,
+}
+
 #[derive(Debug, Clone)]
 struct FileState {
     kind: gix::objs::tree::EntryKind,
@@ -241,6 +247,53 @@ struct ResolvedWorkspaceFile {
     content_signature: u64,
     old_state: Option<FileState>,
     new_state: Option<FileState>,
+}
+
+struct NestedRepoFilter<'a> {
+    root: &'a Path,
+    cache: NestedRepoPathCache,
+}
+
+impl<'a> NestedRepoFilter<'a> {
+    fn load(root: &'a Path) -> Self {
+        let cache = nested_repo_roots_cache_guard()
+            .get(root)
+            .cloned()
+            .unwrap_or_default();
+        Self { root, cache }
+    }
+
+    fn contains_path(&mut self, path: &str) -> bool {
+        if path.is_empty() || path_is_within_nested_repo(path, &self.cache.nested_roots) {
+            return !path.is_empty();
+        }
+
+        let mut current = String::new();
+        for component in path.split('/') {
+            if component.is_empty() {
+                continue;
+            }
+            if !current.is_empty() {
+                current.push('/');
+            }
+            current.push_str(component);
+
+            if self.cache.checked_paths.contains(current.as_str()) {
+                continue;
+            }
+            if directory_is_repo_root(self.root.join(current.as_str()).as_path()) {
+                self.cache.nested_roots.insert(current);
+                return true;
+            }
+            self.cache.checked_paths.insert(current.clone());
+        }
+
+        false
+    }
+
+    fn persist(self) {
+        nested_repo_roots_cache_guard().insert(self.root.to_path_buf(), self.cache);
+    }
 }
 
 impl GitRepo {
@@ -858,7 +911,7 @@ fn collect_candidate_files(
     root: &Path,
     requested_paths: Option<&BTreeSet<String>>,
 ) -> Result<BTreeMap<String, CandidateFile>> {
-    let nested_repo_roots = cached_nested_repo_roots_from_fs(root)?;
+    let mut nested_repo_filter = NestedRepoFilter::load(root);
     let mut files = BTreeMap::<String, CandidateFile>::new();
     let iter = repo
         .status(gix::progress::Discard)?
@@ -877,7 +930,7 @@ fn collect_candidate_files(
         if repo_relative_path_is_within_managed_worktrees(path.as_str()) {
             continue;
         }
-        if path_is_within_nested_repo(path.as_str(), &nested_repo_roots) {
+        if nested_repo_filter.contains_path(path.as_str()) {
             continue;
         }
         if requested_paths.is_some_and(|paths| !paths.contains(path.as_str())) {
@@ -904,6 +957,7 @@ fn collect_candidate_files(
     }
 
     resolve_candidate_rename_sources(&mut files);
+    nested_repo_filter.persist();
     Ok(files)
 }
 
@@ -1551,7 +1605,7 @@ fn load_visible_repo_paths(repo: &gix::Repository, root: &Path) -> Result<BTreeS
 }
 
 fn collect_untracked_repo_paths(repo: &gix::Repository, root: &Path) -> Result<BTreeSet<String>> {
-    let nested_repo_roots = cached_nested_repo_roots_from_fs(root)?;
+    let mut nested_repo_filter = NestedRepoFilter::load(root);
     let mut paths = BTreeSet::new();
     let iter = repo
         .status(gix::progress::Discard)?
@@ -1577,12 +1631,13 @@ fn collect_untracked_repo_paths(repo: &gix::Repository, root: &Path) -> Result<B
         if repo_relative_path_is_within_managed_worktrees(path.as_str()) {
             continue;
         }
-        if path_is_within_nested_repo(path.as_str(), &nested_repo_roots) {
+        if nested_repo_filter.contains_path(path.as_str()) {
             continue;
         }
         paths.insert(path);
     }
 
+    nested_repo_filter.persist();
     Ok(paths)
 }
 
@@ -1672,63 +1727,6 @@ fn path_is_visible_or_ancestor(path: &str, visible_paths: &BTreeSet<String>) -> 
     visible_paths
         .iter()
         .any(|visible| visible.starts_with(&prefix))
-}
-
-fn cached_nested_repo_roots_from_fs(root: &Path) -> Result<BTreeSet<String>> {
-    let cache_key = root.to_path_buf();
-    if let Some(cached) = nested_repo_roots_cache_guard().get(&cache_key).cloned() {
-        return Ok(cached);
-    }
-
-    let roots = nested_repo_roots_from_fs(root)?;
-    nested_repo_roots_cache_guard().insert(cache_key, roots.clone());
-    Ok(roots)
-}
-
-fn nested_repo_roots_from_fs(root: &Path) -> Result<BTreeSet<String>> {
-    let mut nested_roots = BTreeSet::new();
-    collect_nested_repo_roots(root, root, &mut nested_roots)?;
-    Ok(nested_roots)
-}
-
-fn collect_nested_repo_roots(
-    root: &Path,
-    current: &Path,
-    nested_roots: &mut BTreeSet<String>,
-) -> Result<()> {
-    for child in read_dir_sorted(current)? {
-        let Ok(file_type) = child.file_type() else {
-            continue;
-        };
-        if !file_type.is_dir() {
-            continue;
-        }
-
-        let name = child.file_name();
-        let name = name.to_string_lossy();
-        if name == ".git" {
-            continue;
-        }
-
-        let child_path = child.path();
-        let Ok(relative) = child_path.strip_prefix(root) else {
-            continue;
-        };
-        let relative_path = normalize_path(relative.to_string_lossy().as_ref());
-        if repo_relative_path_is_within_managed_worktrees(relative_path.as_str()) {
-            continue;
-        }
-        if directory_is_repo_root(child_path.as_path()) {
-            if !relative_path.is_empty() {
-                nested_roots.insert(relative_path);
-            }
-            continue;
-        }
-
-        collect_nested_repo_roots(root, child_path.as_path(), nested_roots)?;
-    }
-
-    Ok(())
 }
 
 fn directory_is_repo_root(path: &Path) -> bool {
@@ -1962,7 +1960,7 @@ fn canonicalize_existing_path(path: &Path) -> Result<PathBuf> {
 }
 
 fn nested_repo_roots_cache_guard()
--> std::sync::MutexGuard<'static, HashMap<PathBuf, BTreeSet<String>>> {
+-> std::sync::MutexGuard<'static, HashMap<PathBuf, NestedRepoPathCache>> {
     match NESTED_REPO_ROOTS_CACHE.lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),

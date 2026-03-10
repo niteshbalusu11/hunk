@@ -312,6 +312,61 @@ fn load_repo_tree_marks_ignored_entries_and_counts_visible_nodes() -> Result<()>
 }
 
 #[test]
+fn workflow_snapshot_excludes_non_ignored_nested_repo_contents() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.write_file("src/main.rs", "fn main() {}\n")?;
+    fixture.commit_all("initial")?;
+
+    let nested_root = fixture.root().join("vendor/nested");
+    fs::create_dir_all(nested_root.join("src"))?;
+    let nested_repo = Repository::init(nested_root.as_path())?;
+    drop(nested_repo);
+    fs::write(nested_root.join("src/lib.rs"), "nested\n")?;
+
+    let full = load_workflow_snapshot(fixture.root())?;
+    let light = load_workflow_snapshot_without_refresh(fixture.root())?;
+    let entries = load_repo_tree(fixture.root())?;
+
+    assert!(full.files.is_empty());
+    assert_eq!(light.files, full.files);
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.path != "vendor/nested" && !entry.path.starts_with("vendor/nested/"))
+    );
+
+    Ok(())
+}
+
+#[test]
+fn workflow_snapshot_skips_nested_repo_contents_inside_ignored_directories() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.write_file(".gitignore", "target-shared/\n")?;
+    fixture.commit_all("initial")?;
+
+    let nested_root = fixture.root().join("target-shared/cache/repo");
+    fs::create_dir_all(nested_root.join("src"))?;
+    let nested_repo = Repository::init(nested_root.as_path())?;
+    drop(nested_repo);
+    fs::write(nested_root.join("src/lib.rs"), "nested\n")?;
+
+    let workflow = load_workflow_snapshot_without_refresh(fixture.root())?;
+    let entries = load_repo_tree(fixture.root())?;
+
+    assert!(workflow.files.is_empty());
+    assert!(entries.iter().any(|entry| {
+        entry.path == "target-shared" && entry.kind == RepoTreeEntryKind::Directory && entry.ignored
+    }));
+    assert!(
+        entries
+            .iter()
+            .all(|entry| !entry.path.starts_with("target-shared/cache"))
+    );
+
+    Ok(())
+}
+
+#[test]
 fn file_line_stats_for_paths_only_returns_requested_changed_files() -> Result<()> {
     let fixture = TempGitRepo::new()?;
     fixture.write_file("src/lib.rs", "one\ntwo\n")?;
