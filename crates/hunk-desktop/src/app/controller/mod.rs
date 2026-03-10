@@ -49,6 +49,7 @@ use hunk_git::network::{
 
 include!("core.rs");
 include!("core_runtime.rs");
+include!("git_ops_review.rs");
 include!("git_ops.rs");
 include!("recent_commits.rs");
 include!("review_compare.rs");
@@ -56,6 +57,7 @@ include!("workspace_mode.rs");
 include!("ai.rs");
 include!("ai_git_ops.rs");
 include!("file_tree.rs");
+include!("file_tree_fs.rs");
 include!("editor.rs");
 include!("comments.rs");
 include!("comments_match.rs");

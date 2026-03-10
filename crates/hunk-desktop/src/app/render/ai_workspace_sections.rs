@@ -1,0 +1,906 @@
+struct AiWorkspaceHeaderState {
+    active_branch: String,
+    show_worktree_base_branch_picker: bool,
+    selected_worktree_base_branch: String,
+    pending_approval_count: usize,
+    pending_user_input_count: usize,
+    connection_label: &'static str,
+    connection_color: Hsla,
+}
+
+struct AiThreadSidebarState {
+    threads: Vec<hunk_codex::state::ThreadSummary>,
+    threads_loading: bool,
+    selected_thread_id: Option<String>,
+    new_thread_menu_action_context: FocusHandle,
+}
+
+struct AiTimelinePanelState {
+    active_branch: String,
+    selected_thread_id: Option<String>,
+    selected_thread_start_mode: Option<AiNewThreadStartMode>,
+    pending_approvals: Vec<AiPendingApproval>,
+    pending_user_inputs: Vec<AiPendingUserInputRequest>,
+    pending_thread_start: Option<AiPendingThreadStart>,
+    timeline_total_turn_count: usize,
+    timeline_visible_turn_count: usize,
+    timeline_hidden_turn_count: usize,
+    timeline_visible_row_ids: Vec<String>,
+    timeline_loading: bool,
+    show_select_thread_empty_state: bool,
+    show_no_turns_empty_state: bool,
+    ai_timeline_list_state: ListState,
+    ai_timeline_follow_output: bool,
+    ai_publish_blocker: Option<String>,
+    ai_publish_disabled: bool,
+    ai_commit_and_push_loading: bool,
+    ai_open_pr_disabled: bool,
+    ai_open_pr_loading: bool,
+    ai_managed_worktree_target: Option<WorkspaceTargetSummary>,
+    ai_delete_worktree_blocker: Option<String>,
+    ai_delete_worktree_loading: bool,
+    ai_error_message: Option<String>,
+}
+
+struct AiWorkspaceContentSections<'a> {
+    header: &'a AiWorkspaceHeaderState,
+    sidebar: &'a AiThreadSidebarState,
+    timeline: &'a AiTimelinePanelState,
+    composer_panel: AnyElement,
+}
+
+impl DiffViewer {
+    fn render_ai_workspace_content(
+        &self,
+        view: Entity<Self>,
+        sections: AiWorkspaceContentSections<'_>,
+        is_dark: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        v_flex()
+            .size_full()
+            .w_full()
+            .min_h_0()
+            .key_context("AiWorkspace")
+            .on_action(cx.listener(Self::ai_interrupt_selected_turn_action))
+            .child(self.render_ai_workspace_header(view.clone(), sections.header, is_dark, cx))
+            .child(
+                div()
+                    .flex_1()
+                    .w_full()
+                    .min_h_0()
+                    .child(
+                        h_resizable("hunk-ai-workspace")
+                            .child(resizable_panel().size(px(300.0)).size_range(px(240.0)..px(440.0)).child(
+                                self.render_ai_thread_sidebar_panel(view.clone(), sections.sidebar, is_dark, cx),
+                            ))
+                            .child(
+                                resizable_panel().child(
+                                    v_flex()
+                                        .size_full()
+                                        .min_h_0()
+                                        .child(self.render_ai_timeline_panel(
+                                            view.clone(),
+                                            sections.timeline,
+                                            is_dark,
+                                            cx,
+                                        ))
+                                        .child(sections.composer_panel),
+                                ),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_ai_workspace_header(
+        &self,
+        view: Entity<Self>,
+        state: &AiWorkspaceHeaderState,
+        is_dark: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        h_flex()
+            .w_full()
+            .min_h(px(48.0))
+            .items_center()
+            .justify_between()
+            .py_2()
+            .px_3()
+            .gap_3()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .bg(hunk_opacity(cx.theme().muted, is_dark, 0.32, 0.62))
+            .child(
+                v_flex()
+                    .gap_0p5()
+                    .child(div().text_sm().font_semibold().child("Codex Agent Workspace"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("Target: {}", self.ai_active_workspace_label())),
+                    )
+                    .when(state.show_worktree_base_branch_picker, |this| {
+                        this.child(
+                            h_flex()
+                                .items_center()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_semibold()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("Base Branch"),
+                                )
+                                .child(
+                                    Select::new(&self.ai_worktree_base_branch_picker_state)
+                                        .with_size(gpui_component::Size::Small)
+                                        .placeholder(state.selected_worktree_base_branch.clone())
+                                        .search_placeholder("Choose a base branch")
+                                        .rounded(px(8.0))
+                                        .w(px(220.0))
+                                        .bg(hunk_opacity(cx.theme().background, is_dark, 0.82, 0.98))
+                                        .border_color(cx.theme().border)
+                                        .disabled(self.git_controls_busy() || self.branches.is_empty())
+                                        .empty(
+                                            h_flex()
+                                                .h(px(72.0))
+                                                .justify_center()
+                                                .text_sm()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child("No branches available."),
+                                        ),
+                                ),
+                        )
+                    }),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .items_end()
+                    .gap_1()
+                    .child(
+                        h_flex()
+                            .min_w_0()
+                            .items_center()
+                            .gap_3()
+                            .flex_wrap()
+                            .justify_end()
+                            .child(render_ai_account_actions_for_view(self, view.clone(), cx))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(format!("Active branch: {}", state.active_branch)),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(if state.pending_approval_count > 0 {
+                                        cx.theme().warning
+                                    } else {
+                                        cx.theme().muted_foreground
+                                    })
+                                    .child(format!("Approvals: {}", state.pending_approval_count)),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(if state.pending_user_input_count > 0 {
+                                        cx.theme().warning
+                                    } else {
+                                        cx.theme().muted_foreground
+                                    })
+                                    .child(format!("Inputs: {}", state.pending_user_input_count)),
+                            )
+                            .child({
+                                let view = view.clone();
+                                let enable_mad_max = !self.ai_mad_max_mode;
+                                Button::new("ai-toggle-mad-max")
+                                    .compact()
+                                    .outline()
+                                    .with_size(gpui_component::Size::Small)
+                                    .label(if self.ai_mad_max_mode {
+                                        "Mad Max On"
+                                    } else {
+                                        "Mad Max Off"
+                                    })
+                                    .on_click(move |_, _, cx| {
+                                        view.update(cx, |this, cx| {
+                                            this.ai_set_mad_max_mode(enable_mad_max, cx);
+                                        });
+                                    })
+                            })
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_semibold()
+                                    .text_color(state.connection_color)
+                                    .child(state.connection_label),
+                            ),
+                    )
+                    .child(render_ai_account_panel_for_view(self, view.clone(), cx)),
+            )
+            .into_any_element()
+    }
+
+    fn render_ai_thread_sidebar_panel(
+        &self,
+        view: Entity<Self>,
+        state: &AiThreadSidebarState,
+        is_dark: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        v_flex()
+            .size_full()
+            .min_h_0()
+            .bg(cx.theme().sidebar)
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .px_3()
+                    .pt_3()
+                    .pb_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Threads"),
+                    )
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_1()
+                            .child({
+                                let view = view.clone();
+                                Button::new("ai-thread-refresh")
+                                    .ghost()
+                                    .compact()
+                                    .rounded(px(999.0))
+                                    .with_size(gpui_component::Size::Small)
+                                    .label("Refresh")
+                                    .text_color(hunk_opacity(
+                                        cx.theme().muted_foreground,
+                                        is_dark,
+                                        0.88,
+                                        0.96,
+                                    ))
+                                    .on_click(move |_, _, cx| {
+                                        view.update(cx, |this, cx| {
+                                            this.ai_refresh_threads(cx);
+                                        });
+                                    })
+                            })
+                            .child({
+                                let action_context = state.new_thread_menu_action_context.clone();
+                                Button::new("ai-thread-new")
+                                    .compact()
+                                    .primary()
+                                    .rounded(px(999.0))
+                                    .with_size(gpui_component::Size::Small)
+                                    .dropdown_caret(true)
+                                    .label("New")
+                                    .min_w(px(52.0))
+                                    .dropdown_menu(move |menu, _, _| {
+                                        menu.action_context(action_context.clone())
+                                            .item(
+                                                PopupMenuItem::new("Local thread")
+                                                    .action(Box::new(AiNewThread)),
+                                            )
+                                            .item(
+                                                PopupMenuItem::new("Worktree thread")
+                                                    .action(Box::new(AiNewWorktreeThread)),
+                                            )
+                                    })
+                            }),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .child(
+                        div()
+                            .id("ai-thread-list-scroll-area")
+                            .size_full()
+                            .track_scroll(&self.ai_thread_list_scroll_handle)
+                            .overflow_y_scroll()
+                            .child(
+                                v_flex()
+                                    .w_full()
+                                    .gap_0p5()
+                                    .px_2()
+                                    .pb_3()
+                                    .when(state.threads_loading, |this| {
+                                        this.child(render_ai_thread_list_loading_skeleton(is_dark, cx))
+                                    })
+                                    .when(state.threads.is_empty() && !state.threads_loading, |this| {
+                                        this.child(
+                                            v_flex()
+                                                .w_full()
+                                                .items_center()
+                                                .pt_8()
+                                                .px_3()
+                                                .child(
+                                                    div()
+                                                        .text_xs()
+                                                        .text_color(hunk_opacity(
+                                                            cx.theme().muted_foreground,
+                                                            is_dark,
+                                                            0.86,
+                                                            0.96,
+                                                        ))
+                                                        .child("No threads in this repo yet."),
+                                                ),
+                                        )
+                                    })
+                                    .children(state.threads.iter().cloned().map(|thread| {
+                                        let workspace_label =
+                                            self.ai_thread_workspace_label(thread.id.as_str());
+                                        render_ai_thread_sidebar_row(
+                                            thread,
+                                            workspace_label,
+                                            state.selected_thread_id.as_deref(),
+                                            view.clone(),
+                                            is_dark,
+                                            cx,
+                                        )
+                                    })),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_ai_timeline_panel(
+        &self,
+        view: Entity<Self>,
+        state: &AiTimelinePanelState,
+        is_dark: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .flex_1()
+            .min_h_0()
+            .relative()
+            .child(
+                div()
+                    .id("ai-timeline-scroll-area")
+                    .size_full()
+                    .child(
+                        v_flex()
+                            .size_full()
+                            .w_full()
+                            .min_h_0()
+                            .gap_2()
+                            .p_3()
+                            .bg(cx.theme().background)
+                            .child(self.render_ai_timeline_toolbar(view.clone(), state, is_dark, cx))
+                            .when_some(state.ai_error_message.clone(), |this, error| {
+                                this.child(
+                                    div()
+                                        .rounded_md()
+                                        .border_1()
+                                        .border_color(cx.theme().danger)
+                                        .bg(hunk_opacity(cx.theme().danger, is_dark, 0.16, 0.10))
+                                        .p_2()
+                                        .text_xs()
+                                        .text_color(cx.theme().danger)
+                                        .whitespace_normal()
+                                        .child(error),
+                                )
+                            })
+                            .when(
+                                !state.pending_approvals.is_empty()
+                                    || !state.pending_user_inputs.is_empty(),
+                                |this| {
+                                    this.child(
+                                        self.render_ai_timeline_pending_panels(
+                                            view.clone(),
+                                            state,
+                                            is_dark,
+                                            cx,
+                                        ),
+                                    )
+                                },
+                            )
+                            .when(state.timeline_loading, |this| {
+                                this.child(render_ai_timeline_loading_skeleton(is_dark, cx))
+                            })
+                            .when_some(
+                                state.pending_thread_start.clone().filter(|_| !state.timeline_loading),
+                                |this, pending| {
+                                    this.child(render_ai_pending_thread_start(&pending, is_dark, cx))
+                                },
+                            )
+                            .when(state.show_select_thread_empty_state, |this| {
+                                this.child(
+                                    div()
+                                        .rounded_md()
+                                        .border_1()
+                                        .border_color(cx.theme().border)
+                                        .bg(hunk_opacity(cx.theme().muted, is_dark, 0.22, 0.40))
+                                        .p_3()
+                                        .child(
+                                            div()
+                                                .text_sm()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child("Select a thread or start a new one to begin."),
+                                        ),
+                                )
+                            })
+                            .when_some(
+                                state.selected_thread_id.clone().filter(|_| !state.timeline_loading),
+                                |this, thread_id| {
+                                    this.child(
+                                        self.render_ai_timeline_rows(
+                                            view.clone(),
+                                            state,
+                                            thread_id,
+                                            is_dark,
+                                            cx,
+                                        ),
+                                    )
+                                },
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_ai_timeline_toolbar(
+        &self,
+        view: Entity<Self>,
+        state: &AiTimelinePanelState,
+        is_dark: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        h_flex()
+            .w_full()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .items_center()
+                    .gap_1()
+                    .child(div().text_sm().font_semibold().child("Timeline:"))
+                    .when_some(state.selected_thread_id.clone(), |this, thread_id| {
+                        let thread_id_hover_color = cx.theme().foreground;
+                        let copy_thread_id = thread_id.clone();
+                        let view = view.clone();
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .font_family(cx.theme().mono_font_family.clone())
+                                .hover(move |style| {
+                                    style.text_color(thread_id_hover_color).cursor_pointer()
+                                })
+                                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                                    view.update(cx, |this, cx| {
+                                        this.ai_copy_thread_id_action(
+                                            copy_thread_id.clone(),
+                                            window,
+                                            cx,
+                                        );
+                                    });
+                                })
+                                .child(thread_id),
+                        )
+                    })
+                    .when_some(state.selected_thread_start_mode, |this, start_mode| {
+                        this.child(ai_render_thread_start_mode_chip(start_mode, is_dark, cx))
+                    }),
+            )
+            .child(
+                h_flex()
+                    .flex_none()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("Branch: {}", state.active_branch)),
+                    )
+                    .child({
+                        let view = view.clone();
+                        let push_label = format!("Commit and Push to {}", state.active_branch);
+                        let publish_tooltip = state.ai_publish_blocker.clone().unwrap_or_else(|| {
+                            match state.selected_thread_start_mode {
+                                Some(AiNewThreadStartMode::Local) => {
+                                    "Commit and push this branch directly, or create a review branch and open PR/MR.".to_string()
+                                }
+                                Some(AiNewThreadStartMode::Worktree) => {
+                                    "Commit and push this worktree branch directly, or open PR/MR for the current branch.".to_string()
+                                }
+                                None => "Commit and push this branch directly, or open PR/MR for it.".to_string(),
+                            }
+                        });
+                        Button::new("ai-publish-thread")
+                            .compact()
+                            .outline()
+                            .with_size(gpui_component::Size::Small)
+                            .rounded(px(8.0))
+                            .loading(state.ai_commit_and_push_loading || state.ai_open_pr_loading)
+                            .dropdown_caret(true)
+                            .label("Publish")
+                            .tooltip(publish_tooltip)
+                            .disabled(state.ai_publish_disabled || state.ai_open_pr_disabled)
+                            .dropdown_menu(move |menu, _, _| {
+                                menu.item(
+                                    PopupMenuItem::new(push_label.clone()).on_click({
+                                        let view = view.clone();
+                                        move |_, _, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.ai_commit_and_push_for_current_thread(cx);
+                                            });
+                                        }
+                                    }),
+                                )
+                                .item(PopupMenuItem::separator())
+                                .item(
+                                    PopupMenuItem::new("Open PR").on_click({
+                                        let view = view.clone();
+                                        move |_, _, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.ai_open_pr_for_current_thread(cx);
+                                            });
+                                        }
+                                    }),
+                                )
+                            })
+                            .into_any_element()
+                    })
+                    .when_some(state.ai_managed_worktree_target.clone(), |this, target| {
+                        let view = view.clone();
+                        let tooltip = state.ai_delete_worktree_blocker.clone().unwrap_or_else(|| {
+                            format!("Delete managed worktree '{}' after the thread is done.", target.name)
+                        });
+                        this.child(
+                            Button::new("ai-delete-worktree")
+                                .compact()
+                                .danger()
+                                .with_size(gpui_component::Size::Small)
+                                .rounded(px(8.0))
+                                .icon(Icon::new(IconName::Delete).size(px(14.0)))
+                                .label("Delete Worktree")
+                                .tooltip(tooltip)
+                                .loading(state.ai_delete_worktree_loading)
+                                .disabled(state.ai_delete_worktree_blocker.is_some())
+                                .on_click(move |_, window, cx| {
+                                    view.update(cx, |this, cx| {
+                                        this.ai_confirm_delete_current_worktree_action(window, cx);
+                                    });
+                                }),
+                        )
+                    })
+                    .when(self.ai_mad_max_mode, |this| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().danger)
+                                .child("Mad Max auto-approvals enabled"),
+                        )
+                    }),
+            )
+            .into_any_element()
+    }
+
+    fn render_ai_timeline_pending_panels(
+        &self,
+        view: Entity<Self>,
+        state: &AiTimelinePanelState,
+        is_dark: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        v_flex()
+            .w_full()
+            .gap_1()
+            .when(!state.pending_approvals.is_empty(), |this| {
+                this.child(
+                    v_flex()
+                        .w_full()
+                        .gap_1()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(cx.theme().warning)
+                        .bg(hunk_opacity(cx.theme().warning, is_dark, 0.14, 0.08))
+                        .p_2()
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_semibold()
+                                .text_color(cx.theme().warning)
+                                .child("Pending approvals"),
+                        )
+                        .children(state.pending_approvals.iter().map(|approval| {
+                            let approve_request_id = approval.request_id.clone();
+                            let decline_request_id = approval.request_id.clone();
+                            let view = view.clone();
+                            v_flex()
+                                .w_full()
+                                .gap_1()
+                                .rounded(px(8.0))
+                                .border_1()
+                                .border_color(cx.theme().border)
+                                .bg(cx.theme().background)
+                                .p_2()
+                                .child(
+                                    h_flex()
+                                        .w_full()
+                                        .items_center()
+                                        .justify_between()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .font_semibold()
+                                                .child(ai_approval_kind_label(approval.kind)),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .font_family(cx.theme().mono_font_family.clone())
+                                                .child(approval.request_id.clone()),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .whitespace_normal()
+                                        .child(ai_approval_description(approval)),
+                                )
+                                .when_some(approval.reason.clone(), |this, reason| {
+                                    this.child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .whitespace_normal()
+                                            .child(reason),
+                                    )
+                                })
+                                .child(
+                                    h_flex()
+                                        .w_full()
+                                        .items_center()
+                                        .gap_1()
+                                        .child({
+                                            let view = view.clone();
+                                            Button::new(format!(
+                                                "ai-approval-accept-{}",
+                                                approval.request_id
+                                            ))
+                                            .compact()
+                                            .primary()
+                                            .with_size(gpui_component::Size::Small)
+                                            .label("Accept")
+                                            .on_click(move |_, _, cx| {
+                                                view.update(cx, |this, cx| {
+                                                    this.ai_resolve_pending_approval_action(
+                                                        approve_request_id.clone(),
+                                                        AiApprovalDecision::Accept,
+                                                        cx,
+                                                    );
+                                                });
+                                            })
+                                        })
+                                        .child({
+                                            let view = view.clone();
+                                            Button::new(format!(
+                                                "ai-approval-decline-{}",
+                                                approval.request_id
+                                            ))
+                                            .compact()
+                                            .outline()
+                                            .with_size(gpui_component::Size::Small)
+                                            .label("Decline")
+                                            .on_click(move |_, _, cx| {
+                                                view.update(cx, |this, cx| {
+                                                    this.ai_resolve_pending_approval_action(
+                                                        decline_request_id.clone(),
+                                                        AiApprovalDecision::Decline,
+                                                        cx,
+                                                    );
+                                                });
+                                            })
+                                        }),
+                                )
+                        })),
+                )
+            })
+            .when(!state.pending_user_inputs.is_empty(), |this| {
+                this.child(render_ai_pending_user_inputs_panel(
+                    state.pending_user_inputs.as_slice(),
+                    &self.ai_pending_user_input_answers,
+                    view.clone(),
+                    is_dark,
+                    cx,
+                ))
+            })
+            .into_any_element()
+    }
+
+    fn render_ai_timeline_rows(
+        &self,
+        view: Entity<Self>,
+        state: &AiTimelinePanelState,
+        thread_id: String,
+        is_dark: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let timeline_row_ids_for_list = state.timeline_visible_row_ids.clone();
+        let timeline_list_state = state.ai_timeline_list_state.clone();
+        let view_for_list = view.clone();
+        let timeline_list = list(timeline_list_state.clone(), {
+            cx.processor(move |this, ix: usize, _window, cx| {
+                let Some(row_id) = timeline_row_ids_for_list.get(ix) else {
+                    return div().w_full().h(px(0.0)).into_any_element();
+                };
+                render_ai_chat_timeline_row_for_view(
+                    this,
+                    row_id.as_str(),
+                    view_for_list.clone(),
+                    is_dark,
+                    cx,
+                )
+            })
+        })
+        .size_full()
+        .with_sizing_behavior(ListSizingBehavior::Auto);
+
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .gap_2()
+            .when(state.show_no_turns_empty_state, |this| {
+                this.child(
+                    div()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .bg(hunk_opacity(cx.theme().muted, is_dark, 0.22, 0.40))
+                        .p_3()
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("No turns yet. Send a prompt to start."),
+                        ),
+                )
+            })
+            .when(state.timeline_hidden_turn_count > 0, |this| {
+                let load_older_thread_id = thread_id.clone();
+                let show_all_thread_id = thread_id.clone();
+                let view = view.clone();
+                this.child(
+                    h_flex()
+                        .w_full()
+                        .items_center()
+                        .justify_between()
+                        .gap_2()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(hunk_opacity(cx.theme().border, is_dark, 0.90, 0.74))
+                        .bg(hunk_blend(
+                            cx.theme().background,
+                            cx.theme().muted,
+                            is_dark,
+                            0.16,
+                            0.24,
+                        ))
+                        .p_2()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(format!(
+                                    "Showing latest {} of {} turns.",
+                                    state.timeline_visible_turn_count, state.timeline_total_turn_count
+                                )),
+                        )
+                        .child(
+                            h_flex()
+                                .items_center()
+                                .gap_1()
+                                .child({
+                                    let view = view.clone();
+                                    Button::new("ai-timeline-load-older-turns")
+                                        .compact()
+                                        .outline()
+                                        .with_size(gpui_component::Size::Small)
+                                        .label("Load older")
+                                        .on_click(move |_, _, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.ai_load_older_turns_action(
+                                                    load_older_thread_id.clone(),
+                                                    cx,
+                                                );
+                                            });
+                                        })
+                                })
+                                .child({
+                                    let view = view.clone();
+                                    Button::new("ai-timeline-show-all-turns")
+                                        .compact()
+                                        .outline()
+                                        .with_size(gpui_component::Size::Small)
+                                        .label("Show all")
+                                        .on_click(move |_, _, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.ai_show_full_timeline_action(
+                                                    show_all_thread_id.clone(),
+                                                    cx,
+                                                );
+                                            });
+                                        })
+                                }),
+                        ),
+                )
+            })
+            .when(!state.timeline_visible_row_ids.is_empty(), |this| {
+                let view = view.clone();
+                let ai_timeline_follow_output = state.ai_timeline_follow_output;
+                let timeline_list_state = timeline_list_state.clone();
+                this.child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .relative()
+                        .child(div().size_full().child(timeline_list))
+                        .child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .right_0()
+                                .bottom_0()
+                                .w(px(16.0))
+                                .child(
+                                    Scrollbar::vertical(&timeline_list_state)
+                                        .scrollbar_show(ScrollbarShow::Always),
+                                ),
+                        )
+                        .when(!ai_timeline_follow_output, |this| {
+                            let view = view.clone();
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .right(px(16.0))
+                                    .bottom(px(8.0))
+                                    .left_0()
+                                    .flex()
+                                    .justify_center()
+                                    .child(
+                                        Button::new("ai-timeline-scroll-to-bottom")
+                                            .compact()
+                                            .primary()
+                                            .with_size(gpui_component::Size::Small)
+                                            .icon(Icon::new(IconName::ChevronDown).size(px(14.0)))
+                                            .tooltip("Scroll to the bottom")
+                                            .on_click(move |_, _, cx| {
+                                                view.update(cx, |this, cx| {
+                                                    this.ai_scroll_timeline_to_bottom_action(cx);
+                                                });
+                                            }),
+                                    ),
+                            )
+                        }),
+                )
+            })
+            .into_any_element()
+    }
+}

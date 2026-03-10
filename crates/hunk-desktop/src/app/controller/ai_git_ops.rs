@@ -261,11 +261,11 @@ impl DiffViewer {
             )),
             cx,
         );
-        let started_at = Instant::now();
         let workspace_key = context.workspace_key.clone();
         let worktree_root = context.worktree_root.clone();
         let worktree_name = context.worktree_name.clone();
         let thread_id = context.thread_id.clone();
+        let thread_id_for_delete = thread_id.clone();
         let worktree_progress_detail = format!(
             "Removing {} at {}",
             worktree_name,
@@ -273,11 +273,11 @@ impl DiffViewer {
         );
         self.git_status_message =
             Some(format!("Archiving thread and deleting worktree {}...", worktree_name));
-        self.git_action_task = cx.spawn(async move |this, cx| {
-            let (progress_tx, mut progress_rx) = mpsc::unbounded::<AiGitProgressEvent>();
-            let background_thread_id = thread_id.clone();
-            let git_task = cx.background_executor().spawn(async move {
-                let execution_started_at = Instant::now();
+        self.spawn_ai_git_action_with_progress(
+            epoch,
+            cx,
+            move |progress_tx| {
+                let background_thread_id = thread_id.clone();
                 let mut archived_thread = false;
                 let result = (|| -> anyhow::Result<()> {
                     crate::app::ai_runtime::archive_ai_thread_for_workspace(
@@ -300,76 +300,62 @@ impl DiffViewer {
                     Ok(())
                 })();
 
-                (execution_started_at.elapsed(), archived_thread, result)
-            });
+                (archived_thread, result)
+            },
+            move |this, (archived_thread, result), execution_elapsed, total_elapsed, cx| {
+                if epoch != this.git_action_epoch {
+                    return;
+                }
 
-            while let Some(update) = progress_rx.next().await {
-                let Some(this) = this.upgrade() else {
-                    break;
-                };
-                this.update(cx, move |this, cx| {
-                    this.apply_ai_git_progress(epoch, update, cx);
-                });
-            }
-            let (execution_elapsed, archived_thread, result) = git_task.await;
-
-            if let Some(this) = this.upgrade() {
-                this.update(cx, |this, cx| {
-                    if epoch != this.git_action_epoch {
-                        return;
+                this.finish_git_action();
+                match result {
+                    Ok(()) => {
+                        debug!(
+                            "git action complete: epoch={} action=Delete Worktree exec_elapsed_ms={} total_elapsed_ms={} worktree={} workspace_key={} archived_thread=true",
+                            epoch,
+                            execution_elapsed.as_millis(),
+                            total_elapsed.as_millis(),
+                            worktree_name,
+                            workspace_key
+                        );
+                        this.shutdown_ai_runtime_for_workspace_blocking(workspace_key.as_str());
+                        this.ai_forget_deleted_workspace_state(workspace_key.as_str());
+                        this.refresh_workspace_targets_from_git_state(cx);
+                        this.refresh_after_git_action("Delete Worktree", cx);
+                        let message =
+                            format!("Archived thread and deleted worktree {}", worktree_name);
+                        this.git_status_message = Some(message.clone());
+                        Self::push_success_notification(message, cx);
                     }
-
-                    let total_elapsed = started_at.elapsed();
-                    this.finish_git_action();
-                    match result {
-                        Ok(()) => {
-                            debug!(
-                                "git action complete: epoch={} action=Delete Worktree exec_elapsed_ms={} total_elapsed_ms={} worktree={} workspace_key={} archived_thread=true",
-                                epoch,
-                                execution_elapsed.as_millis(),
-                                total_elapsed.as_millis(),
-                                worktree_name,
-                                workspace_key
+                    Err(err) => {
+                        let summary = err.to_string();
+                        debug!(
+                            "git action failed: epoch={} action=Delete Worktree exec_elapsed_ms={} total_elapsed_ms={} worktree={} workspace_key={} archived_thread={} err={err:#}",
+                            epoch,
+                            execution_elapsed.as_millis(),
+                            total_elapsed.as_millis(),
+                            worktree_name,
+                            workspace_key,
+                            archived_thread
+                        );
+                        if archived_thread {
+                            this.ai_mark_thread_archived_for_workspace(
+                                workspace_key.as_str(),
+                                thread_id_for_delete.as_str(),
                             );
-                            this.shutdown_ai_runtime_for_workspace_blocking(workspace_key.as_str());
-                            this.ai_forget_deleted_workspace_state(workspace_key.as_str());
-                            this.refresh_workspace_targets_from_git_state(cx);
-                            this.refresh_after_git_action("Delete Worktree", cx);
-                            let message =
-                                format!("Archived thread and deleted worktree {}", worktree_name);
-                            this.git_status_message = Some(message.clone());
-                            Self::push_success_notification(message, cx);
-                            cx.notify();
                         }
-                        Err(err) => {
-                            let summary = err.to_string();
-                            debug!(
-                                "git action failed: epoch={} action=Delete Worktree exec_elapsed_ms={} total_elapsed_ms={} worktree={} workspace_key={} archived_thread={} err={err:#}",
-                                epoch,
-                                execution_elapsed.as_millis(),
-                                total_elapsed.as_millis(),
-                                worktree_name,
-                                workspace_key,
-                                archived_thread
-                            );
-                            if archived_thread {
-                                this.ai_mark_thread_archived_for_workspace(
-                                    workspace_key.as_str(),
-                                    thread_id.as_str(),
-                                );
-                            }
-                            if restore_selection_after_failure {
-                                this.ai_restore_workspace_after_failed_delete(workspace_key.as_str(), cx);
-                            }
-                            let message = format!("Delete worktree failed: {summary}");
-                            this.git_status_message = Some(message.clone());
-                            Self::push_error_notification(message, cx);
-                            cx.notify();
+                        if restore_selection_after_failure {
+                            this.ai_restore_workspace_after_failed_delete(workspace_key.as_str(), cx);
                         }
+                        let message = format!("Delete worktree failed: {summary}");
+                        this.git_status_message = Some(message.clone());
+                        Self::push_error_notification(message, cx);
                     }
-                });
-            }
-        });
+                }
+
+                cx.notify();
+            },
+        );
     }
 
     fn ai_restore_workspace_after_failed_delete(
@@ -521,131 +507,98 @@ impl DiffViewer {
             Some(ai_branch_progress_detail("Branch", branch_name.as_str())),
             cx,
         );
-        let started_at = Instant::now();
+        self.spawn_ai_git_action_with_progress(
+            epoch,
+            cx,
+            move |progress_tx| {
+                (|| -> anyhow::Result<(Option<String>, String)> {
+                    let commit_message = resolve_ai_commit_message_for_working_copy(
+                        AiCodexGenerationConfig {
+                            codex_executable: codex_executable.as_path(),
+                            repo_root: repo_root.as_path(),
+                        },
+                        repo_root.as_path(),
+                        branch_name.as_str(),
+                        prompt_seed.as_deref(),
+                        latest_agent_message.as_deref(),
+                        &fallback_commit_message,
+                    );
+                    send_ai_git_progress(
+                        &progress_tx,
+                        AiGitProgressStep::CreatingCommit,
+                        Some(ai_commit_progress_detail(commit_message.subject.as_str())),
+                    );
+                    let commit_message_text = commit_message.as_git_message();
+                    let committed_subject = match commit_staged_with_details(
+                        repo_root.as_path(),
+                        commit_message_text.as_str(),
+                    ) {
+                        Ok(created) => Some(created.subject),
+                        Err(err) if err.to_string().contains("no changes to commit") => None,
+                        Err(err) => return Err(err),
+                    };
 
-        self.git_action_task = cx.spawn(async move |this, cx| {
-            let (progress_tx, mut progress_rx) = mpsc::unbounded::<AiGitProgressEvent>();
-            let git_task = cx.background_executor().spawn(async move {
-                    let execution_started_at = Instant::now();
-                    let result = (|| -> anyhow::Result<(Option<String>, String)> {
-                        let commit_message = resolve_ai_commit_message_for_working_copy(
-                            AiCodexGenerationConfig {
-                                codex_executable: codex_executable.as_path(),
-                                repo_root: repo_root.as_path(),
-                            },
-                            repo_root.as_path(),
-                            branch_name.as_str(),
-                            prompt_seed.as_deref(),
-                            latest_agent_message.as_deref(),
-                            &fallback_commit_message,
+                    send_ai_git_progress(
+                        &progress_tx,
+                        AiGitProgressStep::PushingBranch,
+                        Some(ai_branch_progress_detail("Branch", branch_name.as_str())),
+                    );
+                    push_current_branch_with_publish_fallback(
+                        repo_root.as_path(),
+                        branch_name.as_str(),
+                    )?;
+
+                    Ok((committed_subject, branch_name))
+                })()
+            },
+            move |this, result, execution_elapsed, total_elapsed, cx| {
+                if epoch != this.git_action_epoch {
+                    return;
+                }
+
+                this.finish_git_action();
+                match result {
+                    Ok((committed_subject, branch_name)) => {
+                        debug!(
+                            "git action complete: epoch={} action=Commit and Push exec_elapsed_ms={} total_elapsed_ms={} branch={}",
+                            epoch,
+                            execution_elapsed.as_millis(),
+                            total_elapsed.as_millis(),
+                            branch_name
                         );
-                        send_ai_git_progress(
-                            &progress_tx,
-                            AiGitProgressStep::CreatingCommit,
-                            Some(ai_commit_progress_detail(commit_message.subject.as_str())),
-                        );
-                        let commit_message_text = commit_message.as_git_message();
-                        let committed_subject = match commit_staged_with_details(
-                            repo_root.as_path(),
-                            commit_message_text.as_str(),
-                        ) {
-                            Ok(created) => Some(created.subject),
-                            Err(err) if err.to_string().contains("no changes to commit") => None,
-                            Err(err) => return Err(err),
-                        };
-
-                        send_ai_git_progress(
-                            &progress_tx,
-                            AiGitProgressStep::PushingBranch,
-                            Some(ai_branch_progress_detail("Branch", branch_name.as_str())),
-                        );
-                        let push_result = match push_current_branch(
-                            repo_root.as_path(),
-                            branch_name.as_str(),
-                            true,
-                        ) {
-                            Ok(()) => Ok(()),
-                            Err(err)
-                                if err
-                                    .to_string()
-                                    .contains("publish this branch before pushing") =>
-                            {
-                                push_current_branch(repo_root.as_path(), branch_name.as_str(), false)
-                            }
-                            Err(err) if err.to_string().contains("already published") => {
-                                push_current_branch(repo_root.as_path(), branch_name.as_str(), true)
-                            }
-                            Err(err) => Err(err),
-                        };
-                        push_result?;
-
-                        Ok((committed_subject, branch_name))
-                    })();
-
-                    (execution_started_at.elapsed(), result)
-                });
-
-            while let Some(update) = progress_rx.next().await {
-                let Some(this) = this.upgrade() else {
-                    break;
-                };
-                this.update(cx, move |this, cx| {
-                    this.apply_ai_git_progress(epoch, update, cx);
-                });
-            }
-            let (execution_elapsed, result) = git_task.await;
-
-            if let Some(this) = this.upgrade() {
-                this.update(cx, |this, cx| {
-                    if epoch != this.git_action_epoch {
-                        return;
-                    }
-
-                    let total_elapsed = started_at.elapsed();
-                    this.finish_git_action();
-                    match result {
-                        Ok((committed_subject, branch_name)) => {
-                            debug!(
-                                "git action complete: epoch={} action=Commit and Push exec_elapsed_ms={} total_elapsed_ms={} branch={}",
-                                epoch,
-                                execution_elapsed.as_millis(),
-                                total_elapsed.as_millis(),
-                                branch_name
-                            );
-                            let committed = committed_subject.is_some();
-                            if let Some(subject) = committed_subject {
-                                this.last_commit_subject = Some(subject);
-                            }
-                            this.request_snapshot_refresh_workflow_only(true, cx);
-                            this.request_recent_commits_refresh(true, cx);
-                            let message = if committed {
-                                format!("Committed and pushed {}", branch_name)
-                            } else {
-                                format!("Pushed {}", branch_name)
-                            };
-                            this.git_status_message = Some(message.clone());
-                            Self::push_success_notification(message, cx);
+                        let committed = committed_subject.is_some();
+                        if let Some(subject) = committed_subject {
+                            this.last_commit_subject = Some(subject);
                         }
-                        Err(err) => {
-                            error!(
-                                "git action failed: epoch={} action=Commit and Push exec_elapsed_ms={} total_elapsed_ms={} err={err:#}",
-                                epoch,
-                                execution_elapsed.as_millis(),
-                                total_elapsed.as_millis()
-                            );
-                            let summary = err.to_string();
-                            this.git_status_message = Some(format!("Git error: {err:#}"));
-                            Self::push_error_notification(
-                                format!("Commit and Push failed: {summary}"),
-                                cx,
-                            );
-                        }
+                        this.request_snapshot_refresh_workflow_only(true, cx);
+                        this.request_recent_commits_refresh(true, cx);
+                        let message = if committed {
+                            format!("Committed and pushed {}", branch_name)
+                        } else {
+                            format!("Pushed {}", branch_name)
+                        };
+                        this.git_status_message = Some(message.clone());
+                        Self::push_success_notification(message, cx);
                     }
+                    Err(err) => {
+                        error!(
+                            "git action failed: epoch={} action=Commit and Push exec_elapsed_ms={} total_elapsed_ms={} err={err:#}",
+                            epoch,
+                            execution_elapsed.as_millis(),
+                            total_elapsed.as_millis()
+                        );
+                        let summary = err.to_string();
+                        this.git_status_message = Some(format!("Git error: {err:#}"));
+                        Self::push_error_notification(
+                            format!("Commit and Push failed: {summary}"),
+                            cx,
+                        );
+                    }
+                }
 
-                    cx.notify();
-                });
-            }
-        });
+                cx.notify();
+            },
+        );
     }
 
     pub(super) fn ai_open_pr_for_current_thread(&mut self, cx: &mut Context<Self>) {
@@ -713,335 +666,171 @@ impl DiffViewer {
             initial_detail,
             cx,
         );
-        let started_at = Instant::now();
-
-        self.git_action_task = cx.spawn(async move |this, cx| {
-            let (progress_tx, mut progress_rx) = mpsc::unbounded::<AiGitProgressEvent>();
-            let git_task = cx.background_executor().spawn(async move {
-                    let execution_started_at = Instant::now();
-                    let result = (|| -> anyhow::Result<(Option<String>, String, String)> {
-                        let review_branch_name = if start_mode == AiNewThreadStartMode::Local {
-                            let requested_branch_name = try_ai_branch_name_for_prompt(
-                                codex_executable.as_path(),
-                                repo_root.as_path(),
-                                review_branch_generation_seed.as_str(),
-                                &[],
-                                false,
-                            )
-                            .unwrap_or_else(|| fallback_review_branch_name.clone());
-                            send_ai_git_progress(
-                                &progress_tx,
-                                AiGitProgressStep::CreatingReviewBranch,
-                                Some(ai_branch_progress_detail(
-                                    "Review branch",
-                                    requested_branch_name.as_str(),
-                                )),
-                            );
-                            activate_new_ai_review_branch(
-                                repo_root.as_path(),
+        self.spawn_ai_git_action_with_progress(
+            epoch,
+            cx,
+            move |progress_tx| {
+                (|| -> anyhow::Result<(Option<String>, String, String)> {
+                    let review_branch_name = if start_mode == AiNewThreadStartMode::Local {
+                        let requested_branch_name = try_ai_branch_name_for_prompt(
+                            codex_executable.as_path(),
+                            repo_root.as_path(),
+                            review_branch_generation_seed.as_str(),
+                            &[],
+                            false,
+                        )
+                        .unwrap_or_else(|| fallback_review_branch_name.clone());
+                        send_ai_git_progress(
+                            &progress_tx,
+                            AiGitProgressStep::CreatingReviewBranch,
+                            Some(ai_branch_progress_detail(
+                                "Review branch",
                                 requested_branch_name.as_str(),
-                            )?
-                        } else {
-                            branch_name.clone()
-                        };
-
-                        send_ai_git_progress(
-                            &progress_tx,
-                            AiGitProgressStep::GeneratingCommitMessage,
-                            Some(ai_branch_progress_detail(
-                                "Review branch",
-                                review_branch_name.as_str(),
                             )),
                         );
-                        let commit_message = resolve_ai_commit_message_for_working_copy(
-                            AiCodexGenerationConfig {
-                                codex_executable: codex_executable.as_path(),
-                                repo_root: repo_root.as_path(),
-                            },
+                        activate_new_ai_review_branch(
                             repo_root.as_path(),
-                            review_branch_name.as_str(),
-                            prompt_seed.as_deref(),
-                            latest_agent_message.as_deref(),
-                            &fallback_commit_message,
-                        );
-                        send_ai_git_progress(
-                            &progress_tx,
-                            AiGitProgressStep::CreatingCommit,
-                            Some(ai_commit_progress_detail(commit_message.subject.as_str())),
-                        );
-                        let commit_message_text = commit_message.as_git_message();
-                        let committed_subject = match commit_staged_with_details(
-                            repo_root.as_path(),
-                            commit_message_text.as_str(),
-                        ) {
-                            Ok(created) => Some(created.subject),
-                            Err(err) if err.to_string().contains("no changes to commit") => None,
-                            Err(err) => return Err(err),
-                        };
-
-                        send_ai_git_progress(
-                            &progress_tx,
-                            AiGitProgressStep::PushingBranch,
-                            Some(ai_branch_progress_detail(
-                                "Review branch",
-                                review_branch_name.as_str(),
-                            )),
-                        );
-                        let push_result = match push_current_branch(
-                            repo_root.as_path(),
-                            review_branch_name.as_str(),
-                            true,
-                        ) {
-                            Ok(()) => Ok(()),
-                            Err(err)
-                                if err
-                                    .to_string()
-                                    .contains("publish this branch before pushing") =>
-                            {
-                                push_current_branch(
-                                    repo_root.as_path(),
-                                    review_branch_name.as_str(),
-                                    false,
-                                )
-                            }
-                            Err(err) if err.to_string().contains("already published") => {
-                                push_current_branch(
-                                    repo_root.as_path(),
-                                    review_branch_name.as_str(),
-                                    true,
-                                )
-                            }
-                            Err(err) => Err(err),
-                        };
-                        push_result?;
-
-                        send_ai_git_progress(
-                            &progress_tx,
-                            AiGitProgressStep::PreparingReviewUrl,
-                            Some(ai_branch_progress_detail(
-                                "Review branch",
-                                review_branch_name.as_str(),
-                            )),
-                        );
-                        let review_url = review_url_for_branch_with_provider_map(
-                            repo_root.as_path(),
-                            review_branch_name.as_str(),
-                            &provider_mappings,
+                            requested_branch_name.as_str(),
                         )?
-                        .ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "no review URL found for {review_branch_name}; configure review_provider_mappings for self-hosted remotes"
-                            )
-                        })?;
-                        let review_title = committed_subject
-                            .clone()
-                            .unwrap_or_else(|| fallback_review_title.clone());
-                        let review_url = with_review_title_prefill(review_url, review_title.as_str());
-                        send_ai_git_progress(
-                            &progress_tx,
-                            AiGitProgressStep::OpeningBrowser,
-                            Some(review_title.clone()),
-                        );
+                    } else {
+                        branch_name.clone()
+                    };
 
-                        Ok((committed_subject, review_url, review_branch_name))
-                    })();
+                    send_ai_git_progress(
+                        &progress_tx,
+                        AiGitProgressStep::GeneratingCommitMessage,
+                        Some(ai_branch_progress_detail(
+                            "Review branch",
+                            review_branch_name.as_str(),
+                        )),
+                    );
+                    let commit_message = resolve_ai_commit_message_for_working_copy(
+                        AiCodexGenerationConfig {
+                            codex_executable: codex_executable.as_path(),
+                            repo_root: repo_root.as_path(),
+                        },
+                        repo_root.as_path(),
+                        review_branch_name.as_str(),
+                        prompt_seed.as_deref(),
+                        latest_agent_message.as_deref(),
+                        &fallback_commit_message,
+                    );
+                    send_ai_git_progress(
+                        &progress_tx,
+                        AiGitProgressStep::CreatingCommit,
+                        Some(ai_commit_progress_detail(commit_message.subject.as_str())),
+                    );
+                    let commit_message_text = commit_message.as_git_message();
+                    let committed_subject = match commit_staged_with_details(
+                        repo_root.as_path(),
+                        commit_message_text.as_str(),
+                    ) {
+                        Ok(created) => Some(created.subject),
+                        Err(err) if err.to_string().contains("no changes to commit") => None,
+                        Err(err) => return Err(err),
+                    };
 
-                    (execution_started_at.elapsed(), result)
-                });
+                    send_ai_git_progress(
+                        &progress_tx,
+                        AiGitProgressStep::PushingBranch,
+                        Some(ai_branch_progress_detail(
+                            "Review branch",
+                            review_branch_name.as_str(),
+                        )),
+                    );
+                    push_current_branch_with_publish_fallback(
+                        repo_root.as_path(),
+                        review_branch_name.as_str(),
+                    )?;
 
-            while let Some(update) = progress_rx.next().await {
-                let Some(this) = this.upgrade() else {
-                    break;
-                };
-                this.update(cx, move |this, cx| {
-                    this.apply_ai_git_progress(epoch, update, cx);
-                });
-            }
-            let (execution_elapsed, result) = git_task.await;
+                    send_ai_git_progress(
+                        &progress_tx,
+                        AiGitProgressStep::PreparingReviewUrl,
+                        Some(ai_branch_progress_detail(
+                            "Review branch",
+                            review_branch_name.as_str(),
+                        )),
+                    );
+                    let review_url = review_url_for_branch_with_provider_map(
+                        repo_root.as_path(),
+                        review_branch_name.as_str(),
+                        &provider_mappings,
+                    )?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "no review URL found for {review_branch_name}; configure review_provider_mappings for self-hosted remotes"
+                        )
+                    })?;
+                    let review_title = committed_subject
+                        .clone()
+                        .unwrap_or_else(|| fallback_review_title.clone());
+                    let review_url = with_review_title_prefill(review_url, review_title.as_str());
+                    send_ai_git_progress(
+                        &progress_tx,
+                        AiGitProgressStep::OpeningBrowser,
+                        Some(review_title.clone()),
+                    );
 
-            if let Some(this) = this.upgrade() {
-                this.update(cx, |this, cx| {
-                    if epoch != this.git_action_epoch {
-                        return;
-                    }
-
-                    let total_elapsed = started_at.elapsed();
-                    this.finish_git_action();
-                    match result {
-                        Ok((committed_subject, review_url, branch_name)) => {
-                            debug!(
-                                "git action complete: epoch={} action=Open PR exec_elapsed_ms={} total_elapsed_ms={} branch={} mode={:?}",
-                                epoch,
-                                execution_elapsed.as_millis(),
-                                total_elapsed.as_millis(),
-                                branch_name,
-                                start_mode
-                            );
-                            if let Some(subject) = committed_subject {
-                                this.last_commit_subject = Some(subject);
-                            }
-                            this.request_snapshot_refresh_workflow_only(true, cx);
-                            this.request_recent_commits_refresh(true, cx);
-                            match open_url_in_browser(review_url.as_str()) {
-                                Ok(()) => {
-                                    let message = format!("Opened PR/MR in browser for {}", branch_name);
-                                    this.git_status_message = Some(message.clone());
-                                    Self::push_success_notification(message, cx);
-                                }
-                                Err(err) => {
-                                    error!("Open review URL failed: {err:#}");
-                                    let summary = err.to_string();
-                                    this.git_status_message = Some(format!("Open URL failed: {summary}"));
-                                    Self::push_error_notification(
-                                        format!("Open review URL failed: {summary}"),
-                                        cx,
-                                    );
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            error!(
-                                "git action failed: epoch={} action=Open PR exec_elapsed_ms={} total_elapsed_ms={} mode={:?} err={err:#}",
-                                epoch,
-                                execution_elapsed.as_millis(),
-                                total_elapsed.as_millis(),
-                                start_mode
-                            );
-                            let summary = err.to_string();
-                            this.git_status_message = Some(format!("Git error: {err:#}"));
-                            Self::push_error_notification(format!("Open PR failed: {summary}"), cx);
-                        }
-                    }
-
-                    cx.notify();
-                });
-            }
-        });
-    }
-}
-
-fn send_ai_git_progress(
-    progress_tx: &mpsc::UnboundedSender<AiGitProgressEvent>,
-    step: AiGitProgressStep,
-    detail: Option<String>,
-) {
-    if progress_tx
-        .unbounded_send(AiGitProgressEvent { step, detail })
-        .is_err()
-    {
-        debug!("dropping AI git progress update because the receiver is gone");
-    }
-}
-
-fn ai_branch_progress_detail(label: &str, branch_name: &str) -> String {
-    format!("{label}: {branch_name}")
-}
-
-fn ai_thread_progress_detail(label: &str, thread_id: &str) -> String {
-    format!("{label}: {thread_id}")
-}
-
-fn ai_commit_progress_detail(subject: &str) -> String {
-    format!("Commit: {subject}")
-}
-
-fn ai_publish_blocker_reason(
-    context: Result<AiThreadGitActionContext, String>,
-) -> Option<String> {
-    context.err()
-}
-
-fn resolve_ai_commit_message_for_working_copy(
-    generation_config: AiCodexGenerationConfig<'_>,
-    repo_root: &std::path::Path,
-    branch_name: &str,
-    prompt_seed: Option<&str>,
-    latest_agent_message: Option<&str>,
-    fallback_commit_message: &AiCommitMessage,
-) -> AiCommitMessage {
-    let working_copy_context =
-        working_copy_context_for_ai(repo_root, 200, 40_000).ok().flatten();
-    let Some(working_copy_context) = working_copy_context else {
-        return fallback_commit_message.clone();
-    };
-
-    try_ai_commit_message(
-        generation_config,
-        AiCommitGenerationContext {
-            branch_name,
-            prompt_seed,
-            latest_agent_message,
-            changed_files_summary: working_copy_context.changed_files_summary.as_str(),
-            diff_patch: working_copy_context.diff_patch.as_str(),
-        },
-    )
-    .unwrap_or_else(|| fallback_commit_message.clone())
-}
-
-fn activate_new_ai_review_branch(
-    repo_root: &std::path::Path,
-    requested_branch_name: &str,
-) -> anyhow::Result<String> {
-    let mut attempt = 0usize;
-    loop {
-        attempt = attempt.saturating_add(1);
-        let candidate_branch_name = if attempt == 1 {
-            requested_branch_name.to_string()
-        } else {
-            format!("{requested_branch_name}-{attempt}")
-        };
-        match checkout_or_create_branch_with_change_transfer(
-            repo_root,
-            candidate_branch_name.as_str(),
-            true,
-        ) {
-            Ok(()) => return Ok(candidate_branch_name),
-            Err(err) => {
-                if err.to_string().contains("already exists") && attempt < 20 {
-                    continue;
+                    Ok((committed_subject, review_url, review_branch_name))
+                })()
+            },
+            move |this, result, execution_elapsed, total_elapsed, cx| {
+                if epoch != this.git_action_epoch {
+                    return;
                 }
-                return Err(err);
-            }
-        }
+
+                this.finish_git_action();
+                match result {
+                    Ok((committed_subject, review_url, branch_name)) => {
+                        debug!(
+                            "git action complete: epoch={} action=Open PR exec_elapsed_ms={} total_elapsed_ms={} branch={} mode={:?}",
+                            epoch,
+                            execution_elapsed.as_millis(),
+                            total_elapsed.as_millis(),
+                            branch_name,
+                            start_mode
+                        );
+                        if let Some(subject) = committed_subject {
+                            this.last_commit_subject = Some(subject);
+                        }
+                        this.request_snapshot_refresh_workflow_only(true, cx);
+                        this.request_recent_commits_refresh(true, cx);
+                        match open_url_in_browser(review_url.as_str()) {
+                            Ok(()) => {
+                                let message =
+                                    format!("Opened PR/MR in browser for {}", branch_name);
+                                this.git_status_message = Some(message.clone());
+                                Self::push_success_notification(message, cx);
+                            }
+                            Err(err) => {
+                                error!("Open review URL failed: {err:#}");
+                                let summary = err.to_string();
+                                this.git_status_message =
+                                    Some(format!("Open URL failed: {summary}"));
+                                Self::push_error_notification(
+                                    format!("Open review URL failed: {summary}"),
+                                    cx,
+                                );
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        error!(
+                            "git action failed: epoch={} action=Open PR exec_elapsed_ms={} total_elapsed_ms={} mode={:?} err={err:#}",
+                            epoch,
+                            execution_elapsed.as_millis(),
+                            total_elapsed.as_millis(),
+                            start_mode
+                        );
+                        let summary = err.to_string();
+                        this.git_status_message = Some(format!("Git error: {err:#}"));
+                        Self::push_error_notification(format!("Open PR failed: {summary}"), cx);
+                    }
+                }
+
+                cx.notify();
+            },
+        );
     }
 }
-
-#[cfg(test)]
-mod ai_git_ops_tests {
-    use super::*;
-
-    fn test_git_action_context(start_mode: AiNewThreadStartMode) -> AiThreadGitActionContext {
-        AiThreadGitActionContext {
-            repo_root: std::path::PathBuf::from("/repo"),
-            thread_id: "thread-1".to_string(),
-            branch_name: "feature/ai-thread".to_string(),
-            start_mode,
-        }
-    }
-
-    #[test]
-    fn publish_blocker_allows_local_threads() {
-        assert_eq!(
-            ai_publish_blocker_reason(Ok(test_git_action_context(AiNewThreadStartMode::Local))),
-            None
-        );
-    }
-
-    #[test]
-    fn publish_blocker_allows_worktree_threads() {
-        assert_eq!(
-            ai_publish_blocker_reason(Ok(test_git_action_context(
-                AiNewThreadStartMode::Worktree,
-            ))),
-            None
-        );
-    }
-
-    #[test]
-    fn publish_blocker_preserves_context_errors() {
-        assert_eq!(
-            ai_publish_blocker_reason(Err("Select a thread before publishing.".to_string())),
-            Some("Select a thread before publishing.".to_string())
-        );
-    }
-}
+include!("ai_git_ops/helpers.rs");

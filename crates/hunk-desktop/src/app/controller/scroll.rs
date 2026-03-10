@@ -236,6 +236,48 @@ impl DiffViewer {
         cx.notify();
     }
 
+    fn reset_diff_surface_rows(&mut self, rows: Vec<SideBySideRow>) {
+        self.diff_rows = rows;
+        self.diff_row_metadata.clear();
+        self.diff_row_segment_cache.clear();
+        self.invalidate_segment_prefetch();
+        self.diff_visible_file_header_lookup.clear();
+        self.diff_visible_hunk_header_lookup.clear();
+        self.file_row_ranges.clear();
+        self.selection_anchor_row = None;
+        self.selection_head_row = None;
+        self.drag_selecting_rows = false;
+        self.sync_diff_list_state();
+        self.recompute_diff_layout();
+    }
+
+    fn apply_loaded_diff_surface_stream(
+        &mut self,
+        stream: DiffStream,
+    ) -> BTreeMap<String, LineStats> {
+        let DiffStream {
+            rows,
+            row_metadata,
+            row_segments,
+            file_ranges,
+            file_line_stats,
+        } = stream;
+
+        self.invalidate_segment_prefetch();
+        self.diff_rows = rows;
+        self.diff_row_metadata = row_metadata;
+        self.diff_row_segment_cache = row_segments;
+        self.clamp_comment_rows_to_diff();
+        self.clamp_selection_to_rows();
+        self.drag_selecting_rows = false;
+        self.sync_diff_list_state();
+        self.file_row_ranges = file_ranges;
+        self.recompute_diff_layout();
+        self.last_visible_row_start = None;
+        self.recompute_diff_visible_header_lookup();
+        file_line_stats
+    }
+
     fn recompute_diff_layout(&mut self) {
         let mut max_left_line_digits = DIFF_LINE_NUMBER_MIN_DIGITS;
         let mut max_right_line_digits = DIFF_LINE_NUMBER_MIN_DIGITS;
