@@ -225,24 +225,11 @@ pub fn create_managed_worktree(
 }
 
 pub fn remove_managed_worktree(path: &Path) -> Result<()> {
-    let target_root = canonicalize_existing_path(discover_repo_root(path)?.as_path())?;
-    let primary_root = primary_repo_root(path)?;
-    if target_root == primary_root {
-        return Err(anyhow!("primary checkout cannot be removed as a worktree"));
-    }
-    if !path_is_within_managed_worktrees(primary_root.as_path(), target_root.as_path())? {
-        return Err(anyhow!("only Hunk-managed linked worktrees can be removed"));
-    }
-
-    ensure_worktree_is_clean(target_root.as_path())?;
+    let target_root = ensure_managed_worktree_is_removable(path)?;
 
     let repo = open_repository(target_root.as_path())?;
     let worktree = git2::Worktree::open_from_repository(&repo)
         .context("failed to resolve linked worktree metadata for removal")?;
-    if let git2::WorktreeLockStatus::Locked(reason) = worktree.is_locked()? {
-        let detail = reason.unwrap_or_else(|| "worktree is locked".to_string());
-        return Err(anyhow!("cannot remove locked worktree: {detail}"));
-    }
 
     let mut prune_options = git2::WorktreePruneOptions::new();
     prune_options.valid(true).working_tree(true);
@@ -253,6 +240,10 @@ pub fn remove_managed_worktree(path: &Path) -> Result<()> {
         )
     })?;
     Ok(())
+}
+
+pub fn validate_managed_worktree_removal(path: &Path) -> Result<()> {
+    ensure_managed_worktree_is_removable(path).map(|_| ())
 }
 
 fn primary_workspace_target_summary(
@@ -334,6 +325,29 @@ fn ensure_worktree_is_clean(path: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn ensure_managed_worktree_is_removable(path: &Path) -> Result<PathBuf> {
+    let target_root = canonicalize_existing_path(discover_repo_root(path)?.as_path())?;
+    let primary_root = primary_repo_root(path)?;
+    if target_root == primary_root {
+        return Err(anyhow!("primary checkout cannot be removed as a worktree"));
+    }
+    if !path_is_within_managed_worktrees(primary_root.as_path(), target_root.as_path())? {
+        return Err(anyhow!("only Hunk-managed linked worktrees can be removed"));
+    }
+
+    ensure_worktree_is_clean(target_root.as_path())?;
+
+    let repo = open_repository(target_root.as_path())?;
+    let worktree = git2::Worktree::open_from_repository(&repo)
+        .context("failed to resolve linked worktree metadata for removal")?;
+    if let git2::WorktreeLockStatus::Locked(reason) = worktree.is_locked()? {
+        let detail = reason.unwrap_or_else(|| "worktree is locked".to_string());
+        return Err(anyhow!("cannot remove locked worktree: {detail}"));
+    }
+
+    Ok(target_root)
 }
 
 fn open_repository(path: &Path) -> Result<Repository> {

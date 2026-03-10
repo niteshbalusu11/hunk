@@ -127,6 +127,14 @@ impl DiffViewer {
             .err()
     }
 
+    fn ai_validate_managed_worktree_delete(
+        &self,
+        context: &AiManagedWorktreeDeleteContext,
+    ) -> Result<(), String> {
+        hunk_git::worktree::validate_managed_worktree_removal(context.worktree_root.as_path())
+            .map_err(|err| err.to_string())
+    }
+
     pub(super) fn ai_confirm_delete_current_worktree_action(
         &mut self,
         window: &mut Window,
@@ -143,6 +151,13 @@ impl DiffViewer {
                     return;
                 }
             };
+        if let Err(reason) = self.ai_validate_managed_worktree_delete(&context) {
+            let message = format!("Delete worktree unavailable: {reason}");
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, Some(window), cx);
+            cx.notify();
+            return;
+        }
         let worktree_name = context.worktree_name.clone();
         let branch_name = context.branch_name.clone();
         let worktree_path = context.worktree_root.display().to_string();
@@ -190,6 +205,13 @@ impl DiffViewer {
         context: AiManagedWorktreeDeleteContext,
         cx: &mut Context<Self>,
     ) {
+        if let Err(reason) = self.ai_validate_managed_worktree_delete(&context) {
+            let message = format!("Delete worktree unavailable: {reason}");
+            self.git_status_message = Some(message.clone());
+            Self::push_warning_notification(message, None, cx);
+            cx.notify();
+            return;
+        }
         let Some(codex_home) = resolve_codex_home_path() else {
             let message =
                 "Delete worktree unavailable: unable to resolve Codex home for thread archive."

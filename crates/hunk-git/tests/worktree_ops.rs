@@ -14,7 +14,7 @@ use hunk_git::worktree::{
     CreateWorktreeRequest, PRIMARY_WORKSPACE_TARGET_ID, WorkspaceTargetKind,
     create_managed_worktree, list_workspace_targets, managed_worktree_path, managed_worktrees_root,
     path_is_within_managed_worktrees, remove_managed_worktree,
-    repo_relative_path_is_within_managed_worktrees,
+    repo_relative_path_is_within_managed_worktrees, validate_managed_worktree_removal,
 };
 use tempfile::TempDir;
 
@@ -276,6 +276,28 @@ fn removing_managed_worktree_rejects_dirty_checkouts() -> Result<()> {
 
     let err = remove_managed_worktree(worktree.root.as_path())
         .expect_err("dirty worktree removal should fail");
+
+    assert!(err.to_string().contains("uncommitted changes"));
+    assert!(worktree.root.exists());
+    Ok(())
+}
+
+#[test]
+fn validating_managed_worktree_removal_rejects_dirty_checkouts() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.write_file("tracked.txt", "base\n")?;
+    fixture.commit_all("initial")?;
+    let worktree = create_managed_worktree(
+        fixture.root(),
+        &CreateWorktreeRequest {
+            branch_name: "feature/dirty-validate".to_string(),
+            base_branch_name: None,
+        },
+    )?;
+    fs::write(worktree.root.join("tracked.txt"), "base\ndirty\n")?;
+
+    let err = validate_managed_worktree_removal(worktree.root.as_path())
+        .expect_err("dirty worktree validation should fail");
 
     assert!(err.to_string().contains("uncommitted changes"));
     assert!(worktree.root.exists());
