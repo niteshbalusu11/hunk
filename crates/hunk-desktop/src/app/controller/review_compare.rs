@@ -542,18 +542,7 @@ impl DiffViewer {
         self.comment_miss_streaks.clear();
         self.reset_comment_row_match_cache();
         self.clear_comment_ui_state();
-        self.diff_rows = vec![message_row(DiffRowKind::Empty, empty_message)];
-        self.diff_row_metadata.clear();
-        self.diff_row_segment_cache.clear();
-        self.diff_visible_file_header_lookup.clear();
-        self.diff_visible_hunk_header_lookup.clear();
-        self.file_row_ranges.clear();
-        self.selection_anchor_row = None;
-        self.selection_head_row = None;
-        self.drag_selecting_rows = false;
-        self.invalidate_segment_prefetch();
-        self.sync_diff_list_state();
-        self.recompute_diff_layout();
+        self.reset_diff_surface_rows(vec![message_row(DiffRowKind::Empty, empty_message)]);
         self.request_repo_tree_reload(cx);
         cx.notify();
     }
@@ -577,18 +566,10 @@ impl DiffViewer {
         self.review_compare_loading = true;
         self.review_compare_error = None;
         self.patch_loading = false;
-        self.diff_rows = vec![message_row(DiffRowKind::Meta, "Loading comparison...")];
-        self.diff_row_metadata.clear();
-        self.diff_row_segment_cache.clear();
-        self.diff_visible_file_header_lookup.clear();
-        self.diff_visible_hunk_header_lookup.clear();
-        self.file_row_ranges.clear();
-        self.selection_anchor_row = None;
-        self.selection_head_row = None;
-        self.drag_selecting_rows = false;
-        self.invalidate_segment_prefetch();
-        self.sync_diff_list_state();
-        self.recompute_diff_layout();
+        self.reset_diff_surface_rows(vec![message_row(
+            DiffRowKind::Meta,
+            "Loading comparison...",
+        )]);
 
         self.patch_task = cx.spawn(async move |this, cx| {
             let started_at = Instant::now();
@@ -665,16 +646,7 @@ impl DiffViewer {
         self.collapsed_files
             .retain(|path| self.review_files.iter().any(|file| file.path == *path));
 
-        self.invalidate_segment_prefetch();
-        self.diff_rows = stream.rows;
-        self.diff_row_metadata = stream.row_metadata;
-        self.diff_row_segment_cache = stream.row_segments;
-        self.clamp_comment_rows_to_diff();
-        self.clamp_selection_to_rows();
-        self.drag_selecting_rows = false;
-        self.sync_diff_list_state();
-        self.file_row_ranges = stream.file_ranges;
-        self.recompute_diff_layout();
+        let _ = self.apply_loaded_diff_surface_stream(stream);
 
         let has_selection = self
             .selected_path
@@ -687,8 +659,6 @@ impl DiffViewer {
             .selected_path
             .as_deref()
             .and_then(|selected| self.status_for_path(selected));
-        self.last_visible_row_start = None;
-        self.recompute_diff_visible_header_lookup();
         self.refresh_comments_cache_from_store();
         self.rebuild_comment_row_match_cache();
         if self.review_comments_enabled() {

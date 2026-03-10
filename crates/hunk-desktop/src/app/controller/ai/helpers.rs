@@ -454,16 +454,27 @@ fn ai_timeline_row_is_renderable_for_layout(
     }
 }
 
+fn ai_timeline_row_is_renderable_for_controller(this: &DiffViewer, row: &AiTimelineRow) -> bool {
+    match &row.source {
+        AiTimelineRowSource::Item { .. } | AiTimelineRowSource::TurnDiff { .. } => {
+            ai_timeline_row_is_renderable_for_layout(&this.ai_state_snapshot, row)
+        }
+        AiTimelineRowSource::Group { group_id } => this
+            .ai_timeline_group(group_id.as_str())
+            .is_some_and(|group| {
+                group.child_row_ids.iter().any(|child_row_id| {
+                    this.ai_timeline_row(child_row_id.as_str())
+                        .is_some_and(|child_row| {
+                            ai_timeline_row_is_renderable_for_controller(this, child_row)
+                        })
+                })
+            }),
+    }
+}
+
 fn current_ai_renderable_visible_row_ids(this: &DiffViewer, thread_id: &str) -> Vec<String> {
     let (_, _, _, visible_row_ids) = this.ai_timeline_visible_rows_for_thread(thread_id);
     visible_row_ids
-        .into_iter()
-        .filter(|row_id| {
-            this.ai_timeline_row(row_id.as_str()).is_some_and(|row| {
-                ai_timeline_row_is_renderable_for_layout(&this.ai_state_snapshot, row)
-            })
-        })
-        .collect()
 }
 
 fn timeline_row_ids_with_height_changes(

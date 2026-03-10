@@ -39,9 +39,6 @@ impl DiffViewer {
         let diff_list_state = self.diff_list_state.clone();
         let logical_top = diff_list_state.logical_scroll_top();
         let visible_row = logical_top.item_ix;
-        if visible_row < self.diff_rows.len() {
-            self.sync_selected_file_from_visible_row(visible_row, cx);
-        }
         let sticky_hunk_banner = self.render_visible_hunk_banner(visible_row, cx);
         let sticky_file_banner =
             self.render_visible_file_banner(visible_row, logical_top.offset_in_item, cx);

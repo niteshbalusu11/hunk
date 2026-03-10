@@ -47,37 +47,16 @@ impl DiffViewer {
             .ai_selected_worktree_base_branch_name()
             .unwrap_or("Choose base branch")
             .to_string();
-        let previous_timeline_row_count = self.ai_timeline_list_row_count;
         let (
             timeline_total_turn_count,
             timeline_visible_turn_count,
             timeline_hidden_turn_count,
             timeline_visible_row_ids,
         ) = if let Some(thread_id) = selected_thread_id.as_deref() {
-            let (total_turn_count, visible_turn_count, hidden_turn_count, visible_row_ids) =
-                self.ai_timeline_visible_rows_for_thread(thread_id);
-            let visible_row_ids = visible_row_ids
-                .into_iter()
-                .filter(|row_id| {
-                    self.ai_timeline_row(row_id.as_str())
-                        .is_some_and(|row| ai_timeline_row_is_renderable(self, row))
-                })
-                .collect::<Vec<_>>();
-            self.sync_ai_timeline_list_state(visible_row_ids.len());
-            (
-                total_turn_count,
-                visible_turn_count,
-                hidden_turn_count,
-                visible_row_ids,
-            )
+            self.ai_timeline_visible_rows_for_thread(thread_id)
         } else {
-            self.sync_ai_timeline_list_state(0);
             (0, 0, 0, Vec::new())
         };
-        self.sync_ai_timeline_follow_output(
-            timeline_visible_row_ids.len(),
-            timeline_visible_row_ids.len() == previous_timeline_row_count,
-        );
         let ai_timeline_follow_output = self.ai_timeline_follow_output;
         let show_no_turns_empty_state = ai_should_show_no_turns_empty_state(
             timeline_visible_row_ids.len(),

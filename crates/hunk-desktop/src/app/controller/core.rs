@@ -646,6 +646,7 @@ impl DiffViewer {
         )
         .detach();
 
+        view.install_list_scroll_handlers(cx);
         view.subscribe_review_compare_picker_states(cx);
 
         view.update_branch_picker_state(window, cx);
@@ -670,6 +671,32 @@ impl DiffViewer {
         view.prune_expired_comments();
         view.refresh_comments_cache_from_store();
         view
+    }
+
+    fn install_list_scroll_handlers(&self, cx: &mut Context<Self>) {
+        let weak_view = cx.entity().downgrade();
+
+        self.diff_list_state.set_scroll_handler({
+            let weak_view = weak_view.clone();
+            move |event, _, cx| {
+                let visible_row = event.visible_range.start;
+                let _ = weak_view.update(cx, |this, cx| {
+                    this.sync_selected_file_from_visible_row(visible_row, cx);
+                });
+            }
+        });
+
+        self.ai_timeline_list_state.set_scroll_handler({
+            move |_, _, cx| {
+                let _ = weak_view.update(cx, |this, cx| {
+                    let previous_follow_output = this.ai_timeline_follow_output;
+                    this.refresh_ai_timeline_follow_output_from_scroll();
+                    if this.ai_timeline_follow_output != previous_follow_output {
+                        cx.notify();
+                    }
+                });
+            }
+        });
     }
 
     fn update_branch_picker_state(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2178,22 +2205,11 @@ impl DiffViewer {
         self.comment_miss_streaks.clear();
         self.reset_comment_row_match_cache();
         self.clear_comment_ui_state();
-        self.file_row_ranges.clear();
         self.file_line_stats.clear();
-        self.diff_row_metadata.clear();
-        self.diff_row_segment_cache.clear();
-        self.invalidate_segment_prefetch();
-        self.diff_visible_file_header_lookup.clear();
-        self.diff_visible_hunk_header_lookup.clear();
-        self.selection_anchor_row = None;
-        self.selection_head_row = None;
-        self.drag_selecting_rows = false;
-        self.diff_rows = vec![message_row(
+        self.reset_diff_surface_rows(vec![message_row(
             DiffRowKind::Empty,
             "Use File > Open Project... (Cmd/Ctrl+Shift+O) to load a Git repository.",
-        )];
-        self.sync_diff_list_state();
-        self.recompute_diff_layout();
+        )]);
         self.repo_discovery_failed = true;
         self.error_message = None;
         self.repo_tree.nodes.clear();
@@ -2255,39 +2271,17 @@ impl DiffViewer {
             self.comment_miss_streaks.clear();
             self.reset_comment_row_match_cache();
             self.clear_comment_ui_state();
-            self.diff_rows.clear();
-            self.diff_row_metadata.clear();
-            self.diff_row_segment_cache.clear();
-            self.invalidate_segment_prefetch();
-            self.diff_visible_file_header_lookup.clear();
-            self.diff_visible_hunk_header_lookup.clear();
-            self.selection_anchor_row = None;
-            self.selection_head_row = None;
-            self.drag_selecting_rows = false;
-            self.sync_diff_list_state();
-            self.file_row_ranges.clear();
+            self.reset_diff_surface_rows(Vec::new());
             self.file_line_stats.clear();
             self.recompute_overall_line_stats_from_file_stats();
-            self.recompute_diff_layout();
             return;
         };
 
         if self.files.is_empty() {
             self.cancel_patch_reload();
-            self.diff_rows = vec![message_row(DiffRowKind::Empty, "No changed files.")];
-            self.diff_row_metadata.clear();
-            self.diff_row_segment_cache.clear();
-            self.invalidate_segment_prefetch();
-            self.diff_visible_file_header_lookup.clear();
-            self.diff_visible_hunk_header_lookup.clear();
-            self.selection_anchor_row = None;
-            self.selection_head_row = None;
-            self.drag_selecting_rows = false;
-            self.sync_diff_list_state();
-            self.file_row_ranges.clear();
+            self.reset_diff_surface_rows(vec![message_row(DiffRowKind::Empty, "No changed files.")]);
             self.file_line_stats.clear();
             self.recompute_overall_line_stats_from_file_stats();
-            self.recompute_diff_layout();
             self.reconcile_comments_with_loaded_diff();
             cx.notify();
             return;
@@ -2315,21 +2309,10 @@ impl DiffViewer {
         self.invalidate_segment_prefetch();
         self.patch_loading = true;
         if self.diff_rows.is_empty() {
-            self.diff_rows = vec![message_row(
+            self.reset_diff_surface_rows(vec![message_row(
                 DiffRowKind::Meta,
                 format!("Loading diffs for {} files...", files.len()),
-            )];
-            self.diff_row_metadata.clear();
-            self.diff_row_segment_cache.clear();
-            self.invalidate_segment_prefetch();
-            self.diff_visible_file_header_lookup.clear();
-            self.diff_visible_hunk_header_lookup.clear();
-            self.file_row_ranges.clear();
-            self.selection_anchor_row = None;
-            self.selection_head_row = None;
-            self.drag_selecting_rows = false;
-            self.sync_diff_list_state();
-            self.recompute_diff_layout();
+            )]);
             cx.notify();
         }
 
@@ -2582,20 +2565,10 @@ impl DiffViewer {
     }
 
     fn apply_loaded_diff_stream(&mut self, stream: DiffStream) {
-        self.invalidate_segment_prefetch();
-        self.diff_rows = stream.rows;
-        self.diff_row_metadata = stream.row_metadata;
-        self.diff_row_segment_cache = stream.row_segments;
-        self.clamp_comment_rows_to_diff();
-        self.clamp_selection_to_rows();
-        self.drag_selecting_rows = false;
-        self.sync_diff_list_state();
-        self.file_row_ranges = stream.file_ranges;
-        self.file_line_stats = stream.file_line_stats;
+        self.file_line_stats = self.apply_loaded_diff_surface_stream(stream);
         if !self.patch_loading || !self.line_stats_loading {
             self.recompute_overall_line_stats_from_file_stats();
         }
-        self.recompute_diff_layout();
 
         if self.workspace_view_mode == WorkspaceViewMode::Files {
             if self.selected_path.is_none() {
@@ -2615,8 +2588,6 @@ impl DiffViewer {
             .selected_path
             .as_deref()
             .and_then(|selected| self.status_for_path(selected));
-        self.last_visible_row_start = None;
-        self.recompute_diff_visible_header_lookup();
         self.rebuild_comment_row_match_cache();
 
         if self.scroll_selected_after_reload {
@@ -2631,21 +2602,10 @@ impl DiffViewer {
     }
 
     fn apply_diff_stream_error(&mut self, err: anyhow::Error) {
-        self.diff_rows = vec![message_row(
+        self.reset_diff_surface_rows(vec![message_row(
             DiffRowKind::Meta,
             format!("Failed to load diff stream: {err:#}"),
-        )];
-        self.diff_row_metadata.clear();
-        self.diff_row_segment_cache.clear();
-        self.invalidate_segment_prefetch();
-        self.selection_anchor_row = None;
-        self.selection_head_row = None;
-        self.drag_selecting_rows = false;
-        self.sync_diff_list_state();
-        self.file_row_ranges.clear();
-        self.recompute_diff_layout();
-        self.diff_visible_file_header_lookup.clear();
-        self.diff_visible_hunk_header_lookup.clear();
+        )]);
         self.scroll_selected_after_reload = false;
         self.clamp_comment_rows_to_diff();
         self.rebuild_comment_row_match_cache();

@@ -532,6 +532,7 @@ impl DiffViewer {
         }
         let visible_row_ids = current_ai_renderable_visible_row_ids(self, thread_id.as_str());
         reset_ai_timeline_list_measurements(self, visible_row_ids.len());
+        self.flush_ai_timeline_scroll_request();
         self.sync_ai_session_selection_from_state();
         self.send_ai_worker_command(AiWorkerCommand::SelectThread { thread_id }, cx);
         cx.notify();
@@ -540,6 +541,7 @@ impl DiffViewer {
     pub(super) fn ai_scroll_timeline_to_bottom_action(&mut self, cx: &mut Context<Self>) {
         self.ai_timeline_follow_output = true;
         self.ai_scroll_timeline_to_bottom = true;
+        self.flush_ai_timeline_scroll_request();
         cx.notify();
     }
 
@@ -788,7 +790,13 @@ impl DiffViewer {
             row_ids,
             &self.ai_timeline_rows_by_id,
             visible_turn_ids.as_slice(),
-        );
+        )
+        .into_iter()
+        .filter(|row_id| {
+            self.ai_timeline_row(row_id.as_str())
+                .is_some_and(|row| ai_timeline_row_is_renderable_for_controller(self, row))
+        })
+        .collect::<Vec<_>>();
         (
             total_turn_count,
             visible_turn_count,
@@ -895,29 +903,8 @@ impl DiffViewer {
         self.ai_timeline_group_parent_by_child_row_id = parent_by_child_row_id;
     }
 
-    pub(super) fn sync_ai_timeline_list_state(&mut self, row_count: usize) {
-        if self.ai_timeline_list_row_count != row_count {
-            reset_ai_timeline_list_measurements(self, row_count);
-        }
-
-        if self.ai_scroll_timeline_to_bottom && row_count > 0 {
-            self.scroll_ai_timeline_list_to_bottom();
-            self.ai_scroll_timeline_to_bottom = false;
-        }
-    }
-
-    pub(super) fn sync_ai_timeline_follow_output(
-        &mut self,
-        row_count: usize,
-        can_refresh_from_metrics: bool,
-    ) {
-        if !can_refresh_from_metrics {
-            if row_count == 0 {
-                self.ai_timeline_follow_output = true;
-            }
-            return;
-        }
-
+    fn refresh_ai_timeline_follow_output_from_scroll(&mut self) {
+        let row_count = self.ai_timeline_list_state.item_count();
         let scroll_offset_y = self
             .ai_timeline_list_state
             .scroll_px_offset_for_scrollbar()
@@ -930,6 +917,13 @@ impl DiffViewer {
             .as_f32();
         self.ai_timeline_follow_output =
             should_follow_timeline_output(row_count, scroll_offset_y, max_scroll_offset_y);
+    }
+
+    fn flush_ai_timeline_scroll_request(&mut self) {
+        if self.ai_scroll_timeline_to_bottom && self.ai_timeline_list_state.item_count() > 0 {
+            self.scroll_ai_timeline_list_to_bottom();
+            self.ai_scroll_timeline_to_bottom = false;
+        }
     }
 
     fn scroll_ai_timeline_list_to_bottom(&self) {
@@ -1014,6 +1008,7 @@ impl DiffViewer {
             self.ai_text_selection = None;
             let visible_row_ids = current_ai_renderable_visible_row_ids(self, thread_id.as_str());
             reset_ai_timeline_list_measurements(self, visible_row_ids.len());
+            self.flush_ai_timeline_scroll_request();
         }
         cx.notify();
     }
@@ -1029,6 +1024,7 @@ impl DiffViewer {
             self.ai_text_selection = None;
             let visible_row_ids = current_ai_renderable_visible_row_ids(self, thread_id.as_str());
             reset_ai_timeline_list_measurements(self, visible_row_ids.len());
+            self.flush_ai_timeline_scroll_request();
         }
         cx.notify();
     }

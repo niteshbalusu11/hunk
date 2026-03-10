@@ -348,6 +348,7 @@ impl DiffViewer {
                 &changed_row_ids,
             );
         }
+        self.flush_ai_timeline_scroll_request();
 
         self.prune_ai_composer_drafts();
         if previous_draft_key != self.current_ai_composer_draft_key() {
