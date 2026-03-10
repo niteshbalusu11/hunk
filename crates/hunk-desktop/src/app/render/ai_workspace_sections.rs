@@ -763,6 +763,8 @@ impl DiffViewer {
         .with_sizing_behavior(ListSizingBehavior::Auto);
 
         v_flex()
+            .flex_1()
+            .min_h_0()
             .w_full()
             .gap_2()
             .when(state.show_no_turns_empty_state, |this| {
