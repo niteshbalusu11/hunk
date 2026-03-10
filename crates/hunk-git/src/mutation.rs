@@ -418,11 +418,40 @@ fn has_index_changes(status: git2::Status) -> bool {
 }
 
 fn create_commit_from_index(repo: &git2::Repository, message: &str) -> Result<git2::Oid> {
-    run_git_commit(repo, message)?;
-    let refreshed_repo = reopen_existing_repo(repo)?;
-    current_head_commit(&refreshed_repo)?
-        .map(|commit| commit.id())
-        .ok_or_else(|| anyhow!("git commit completed without creating a HEAD commit"))
+    if commit_signing_enabled(repo)? {
+        run_git_commit(repo, message)?;
+        let refreshed_repo = reopen_existing_repo(repo)?;
+        return current_head_commit(&refreshed_repo)?
+            .map(|commit| commit.id())
+            .ok_or_else(|| anyhow!("git commit completed without creating a HEAD commit"));
+    }
+
+    create_commit_with_git2(repo, message)
+}
+
+fn commit_signing_enabled(repo: &git2::Repository) -> Result<bool> {
+    let config = repo.config()?;
+    Ok(config.get_bool("commit.gpgSign").unwrap_or(false))
+}
+
+fn create_commit_with_git2(repo: &git2::Repository, message: &str) -> Result<git2::Oid> {
+    let signature = repo
+        .signature()
+        .context("failed to resolve Git author signature for commit")?;
+    let mut index = repo.index()?;
+    let tree_id = index.write_tree()?;
+    let tree = repo.find_tree(tree_id)?;
+    let parents = current_head_commit(repo)?.into_iter().collect::<Vec<_>>();
+    let parent_refs = parents.iter().collect::<Vec<_>>();
+    repo.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        message,
+        &tree,
+        parent_refs.as_slice(),
+    )
+    .context("failed to create commit from staged index")
 }
 
 fn run_git_commit(repo: &git2::Repository, message: &str) -> Result<()> {
