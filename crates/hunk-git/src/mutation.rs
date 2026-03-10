@@ -5,6 +5,7 @@ use std::process::Command;
 use anyhow::{Context as _, Result, anyhow};
 
 use crate::branch::is_valid_branch_name;
+use crate::git2_helpers::{load_statuses, open_git2_repo};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WorktreeChange {
@@ -286,8 +287,7 @@ fn commit_paths_internal(
 }
 
 fn open_repo(repo_root: &Path) -> Result<git2::Repository> {
-    git2::Repository::open(repo_root)
-        .with_context(|| format!("failed to open Git repository at {}", repo_root.display()))
+    open_git2_repo(repo_root)
 }
 
 fn has_any_worktree_changes(repo: &git2::Repository) -> Result<bool> {
@@ -393,16 +393,7 @@ fn worktree_change_status_code(change: WorktreeChange) -> &'static str {
 }
 
 fn ensure_no_hidden_index_changes(repo: &git2::Repository, action_message: &str) -> Result<()> {
-    let mut status_options = git2::StatusOptions::new();
-    status_options
-        .include_untracked(true)
-        .recurse_untracked_dirs(true)
-        .include_ignored(false)
-        .include_unmodified(false)
-        .renames_head_to_index(false)
-        .renames_index_to_workdir(false);
-
-    let statuses = repo.statuses(Some(&mut status_options))?;
+    let statuses = load_statuses(repo, || "failed to inspect worktree status".to_string())?;
     for entry in statuses.iter() {
         let status = entry.status();
         if status.is_conflicted() {
@@ -427,11 +418,40 @@ fn has_index_changes(status: git2::Status) -> bool {
 }
 
 fn create_commit_from_index(repo: &git2::Repository, message: &str) -> Result<git2::Oid> {
-    run_git_commit(repo, message)?;
-    let refreshed_repo = reopen_existing_repo(repo)?;
-    current_head_commit(&refreshed_repo)?
-        .map(|commit| commit.id())
-        .ok_or_else(|| anyhow!("git commit completed without creating a HEAD commit"))
+    if commit_signing_enabled(repo)? {
+        run_git_commit(repo, message)?;
+        let refreshed_repo = reopen_existing_repo(repo)?;
+        return current_head_commit(&refreshed_repo)?
+            .map(|commit| commit.id())
+            .ok_or_else(|| anyhow!("git commit completed without creating a HEAD commit"));
+    }
+
+    create_commit_with_git2(repo, message)
+}
+
+fn commit_signing_enabled(repo: &git2::Repository) -> Result<bool> {
+    let config = repo.config()?;
+    Ok(config.get_bool("commit.gpgSign").unwrap_or(false))
+}
+
+fn create_commit_with_git2(repo: &git2::Repository, message: &str) -> Result<git2::Oid> {
+    let signature = repo
+        .signature()
+        .context("failed to resolve Git author signature for commit")?;
+    let mut index = repo.index()?;
+    let tree_id = index.write_tree()?;
+    let tree = repo.find_tree(tree_id)?;
+    let parents = current_head_commit(repo)?.into_iter().collect::<Vec<_>>();
+    let parent_refs = parents.iter().collect::<Vec<_>>();
+    repo.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        message,
+        &tree,
+        parent_refs.as_slice(),
+    )
+    .context("failed to create commit from staged index")
 }
 
 fn run_git_commit(repo: &git2::Repository, message: &str) -> Result<()> {

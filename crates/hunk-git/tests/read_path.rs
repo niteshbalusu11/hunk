@@ -12,7 +12,8 @@ use git2::{
 use hunk_git::git::{
     FileStatus, LineStats, RepoTreeEntryKind, count_non_ignored_repo_tree_entries, load_patch,
     load_patches_for_files_from_session, load_repo_file_line_stats_without_refresh,
-    load_repo_line_stats, load_repo_tree, load_workflow_snapshot,
+    load_repo_line_stats, load_repo_line_stats_without_refresh, load_repo_tree, load_snapshot,
+    load_snapshot_without_refresh, load_workflow_snapshot,
     load_workflow_snapshot_if_changed_without_refresh, load_workflow_snapshot_with_fingerprint,
     load_workflow_snapshot_without_refresh, open_patch_session,
 };
@@ -116,6 +117,44 @@ fn workflow_snapshot_without_refresh_matches_full_snapshot_for_worktree_changes(
     assert_eq!(light.files, full.files);
     assert_eq!(light.last_commit_subject, full.last_commit_subject);
     assert_eq!(light.working_copy_commit_id, full.working_copy_commit_id);
+    Ok(())
+}
+
+#[test]
+fn repo_snapshot_without_refresh_preserves_full_snapshot_line_stats() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.write_file("src/lib.rs", "one\ntwo\n")?;
+    fixture.commit_all("initial")?;
+    fixture.write_file("src/lib.rs", "one\nthree\nfour\n")?;
+    fixture.write_file("notes.txt", "alpha\n")?;
+
+    let full = load_snapshot(fixture.root())?;
+    let without_refresh = load_snapshot_without_refresh(fixture.root())?;
+    let line_stats = load_repo_line_stats_without_refresh(fixture.root())?;
+
+    assert_eq!(without_refresh.root, full.root);
+    assert_eq!(
+        without_refresh.working_copy_commit_id,
+        full.working_copy_commit_id
+    );
+    assert_eq!(without_refresh.branch_name, full.branch_name);
+    assert_eq!(
+        without_refresh.branch_has_upstream,
+        full.branch_has_upstream
+    );
+    assert_eq!(without_refresh.branch_ahead_count, full.branch_ahead_count);
+    assert_eq!(
+        without_refresh.branch_behind_count,
+        full.branch_behind_count
+    );
+    assert_eq!(without_refresh.branches, full.branches);
+    assert_eq!(without_refresh.files, full.files);
+    assert_eq!(without_refresh.line_stats, full.line_stats);
+    assert_eq!(
+        without_refresh.last_commit_subject,
+        full.last_commit_subject
+    );
+    assert_eq!(line_stats, full.line_stats);
     Ok(())
 }
 
