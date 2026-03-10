@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS comments (
   line_side TEXT NOT NULL CHECK (line_side IN ('left', 'right', 'meta')),
   old_line INTEGER,
   new_line INTEGER,
-  row_stable_id INTEGER,
+  row_stable_id INTEGER CHECK (row_stable_id IS NULL OR row_stable_id >= 0),
   hunk_header TEXT,
 
   line_text TEXT NOT NULL,

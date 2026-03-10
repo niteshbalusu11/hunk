@@ -308,53 +308,38 @@ fn parse_inline_node(
     match node {
         Node::Text(text) => push_inline_span(out, text.value.as_str(), style),
         Node::InlineCode(code) => {
-            let mut next_style = style.clone();
-            next_style.code = true;
+            let next_style = updated_inline_style(style, |next| next.code = true);
             push_inline_span(out, code.value.as_str(), &next_style);
         }
         Node::InlineMath(math) => {
-            let mut next_style = style.clone();
-            next_style.code = true;
+            let next_style = updated_inline_style(style, |next| next.code = true);
             push_inline_span(out, math.value.as_str(), &next_style);
         }
         Node::Emphasis(node) => {
-            let mut next_style = style.clone();
-            next_style.italic = true;
-            for child in &node.children {
-                parse_inline_node(child, &next_style, references, out);
-            }
+            let next_style = updated_inline_style(style, |next| next.italic = true);
+            push_inline_children(&node.children, &next_style, references, out);
         }
         Node::Strong(node) => {
-            let mut next_style = style.clone();
-            next_style.bold = true;
-            for child in &node.children {
-                parse_inline_node(child, &next_style, references, out);
-            }
+            let next_style = updated_inline_style(style, |next| next.bold = true);
+            push_inline_children(&node.children, &next_style, references, out);
         }
         Node::Delete(node) => {
-            let mut next_style = style.clone();
-            next_style.strikethrough = true;
-            for child in &node.children {
-                parse_inline_node(child, &next_style, references, out);
-            }
+            let next_style = updated_inline_style(style, |next| next.strikethrough = true);
+            push_inline_children(&node.children, &next_style, references, out);
         }
         Node::Link(link) => {
-            let mut next_style = style.clone();
-            next_style.link = Some(link.url.clone());
-            for child in &link.children {
-                parse_inline_node(child, &next_style, references, out);
-            }
+            let next_style = updated_inline_style(style, |next| next.link = Some(link.url.clone()));
+            push_inline_children(&link.children, &next_style, references, out);
         }
         Node::LinkReference(link_reference) => {
-            let mut next_style = style.clone();
-            next_style.link = references.resolve_link(link_reference.identifier.as_str());
-            for child in &link_reference.children {
-                parse_inline_node(child, &next_style, references, out);
-            }
+            let next_style = updated_inline_style(style, |next| {
+                next.link = references.resolve_link(link_reference.identifier.as_str())
+            });
+            push_inline_children(&link_reference.children, &next_style, references, out);
         }
         Node::Image(image) => {
-            let mut next_style = style.clone();
-            next_style.link = Some(image.url.clone());
+            let next_style =
+                updated_inline_style(style, |next| next.link = Some(image.url.clone()));
             let label = if image.alt.is_empty() {
                 "image"
             } else {
@@ -363,8 +348,9 @@ fn parse_inline_node(
             push_inline_span(out, format!("[{label}]").as_str(), &next_style);
         }
         Node::ImageReference(image_reference) => {
-            let mut next_style = style.clone();
-            next_style.link = references.resolve_link(image_reference.identifier.as_str());
+            let next_style = updated_inline_style(style, |next| {
+                next.link = references.resolve_link(image_reference.identifier.as_str())
+            });
             let label = if image_reference.alt.is_empty() {
                 "image"
             } else {
@@ -397,6 +383,26 @@ fn parse_inline_node(
     }
 }
 
+fn updated_inline_style(
+    style: &MarkdownInlineStyle,
+    update: impl FnOnce(&mut MarkdownInlineStyle),
+) -> MarkdownInlineStyle {
+    let mut next_style = style.clone();
+    update(&mut next_style);
+    next_style
+}
+
+fn push_inline_children(
+    children: &[Node],
+    style: &MarkdownInlineStyle,
+    references: &MarkdownReferences,
+    out: &mut Vec<MarkdownInlineSpan>,
+) {
+    for child in children {
+        parse_inline_node(child, style, references, out);
+    }
+}
+
 fn push_inline_span(out: &mut Vec<MarkdownInlineSpan>, text: &str, style: &MarkdownInlineStyle) {
     if text.is_empty() {
         return;
@@ -416,8 +422,7 @@ fn push_inline_span(out: &mut Vec<MarkdownInlineSpan>, text: &str, style: &Markd
 }
 
 fn push_hard_break_span(out: &mut Vec<MarkdownInlineSpan>, style: &MarkdownInlineStyle) {
-    let mut next_style = style.clone();
-    next_style.hard_break = true;
+    let next_style = updated_inline_style(style, |next| next.hard_break = true);
     out.push(MarkdownInlineSpan {
         text: String::new(),
         style: next_style,

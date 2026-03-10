@@ -206,6 +206,7 @@ impl DatabaseStore {
     pub fn create_comment(&self, input: &NewComment) -> Result<CommentRecord> {
         let id = next_comment_id();
         let now = now_unix_ms();
+        let row_stable_id = input.row_stable_id.map(sql_u64_to_i64).transpose()?;
 
         let conn = self.open_connection()?;
         conn.execute(
@@ -220,7 +221,7 @@ impl DatabaseStore {
                 input.line_side.as_str(),
                 input.old_line.map(i64::from),
                 input.new_line.map(i64::from),
-                input.row_stable_id.map(|value| value as i64),
+                row_stable_id,
                 input.hunk_header,
                 input.line_text,
                 input.context_before,
@@ -234,19 +235,13 @@ impl DatabaseStore {
         )
         .context("failed to insert comment")?;
 
-        self.get_comment(&id)?
+        get_comment_with_connection(&conn, &id)?
             .ok_or_else(|| anyhow!("inserted comment id {id} was not found"))
     }
 
     pub fn get_comment(&self, id: &str) -> Result<Option<CommentRecord>> {
         let conn = self.open_connection()?;
-        let mut stmt = conn
-            .prepare(sql::comments::SELECT_BY_ID)
-            .context("failed to prepare select comment by id query")?;
-
-        stmt.query_row(params![id], map_comment_row)
-            .optional()
-            .context("failed to query comment by id")
+        get_comment_with_connection(&conn, id)
     }
 
     pub fn list_comments(
@@ -314,27 +309,23 @@ impl DatabaseStore {
         };
 
         let mut conn = self.open_connection()?;
-        let tx = conn
-            .transaction()
-            .context("failed to start sqlite transaction for status batch update")?;
-        let mut stmt = tx
-            .prepare(sql::comments::UPDATE_STATUS)
-            .context("failed to prepare status batch update statement")?;
-        let mut updated = 0usize;
-        for id in ids {
-            updated += stmt
-                .execute(params![
+        execute_many_comment_ids(
+            &mut conn,
+            sql::comments::UPDATE_STATUS,
+            ids,
+            "failed to start sqlite transaction for status batch update",
+            "failed to prepare status batch update statement",
+            "failed to commit status batch update transaction",
+            |stmt, id| {
+                stmt.execute(params![
                     id,
                     status.as_str(),
                     stale_reason_value,
                     updated_at_unix_ms,
                 ])
-                .with_context(|| format!("failed to batch update status for comment {id}"))?;
-        }
-        drop(stmt);
-        tx.commit()
-            .context("failed to commit status batch update transaction")?;
-        Ok(updated)
+                .with_context(|| format!("failed to batch update status for comment {id}"))
+            },
+        )
     }
 
     pub fn touch_comment_seen(&self, id: &str, seen_at_unix_ms: i64) -> Result<bool> {
@@ -351,22 +342,18 @@ impl DatabaseStore {
         }
 
         let mut conn = self.open_connection()?;
-        let tx = conn
-            .transaction()
-            .context("failed to start sqlite transaction for last_seen batch update")?;
-        let mut stmt = tx
-            .prepare(sql::comments::TOUCH_SEEN)
-            .context("failed to prepare last_seen batch update statement")?;
-        let mut updated = 0usize;
-        for id in ids {
-            updated += stmt
-                .execute(params![id, seen_at_unix_ms])
-                .with_context(|| format!("failed to batch update last_seen for comment {id}"))?;
-        }
-        drop(stmt);
-        tx.commit()
-            .context("failed to commit last_seen batch update transaction")?;
-        Ok(updated)
+        execute_many_comment_ids(
+            &mut conn,
+            sql::comments::TOUCH_SEEN,
+            ids,
+            "failed to start sqlite transaction for last_seen batch update",
+            "failed to prepare last_seen batch update statement",
+            "failed to commit last_seen batch update transaction",
+            |stmt, id| {
+                stmt.execute(params![id, seen_at_unix_ms])
+                    .with_context(|| format!("failed to batch update last_seen for comment {id}"))
+            },
+        )
     }
 
     pub fn delete_comment(&self, id: &str) -> Result<bool> {
@@ -383,22 +370,18 @@ impl DatabaseStore {
         }
 
         let mut conn = self.open_connection()?;
-        let tx = conn
-            .transaction()
-            .context("failed to start sqlite transaction for comment batch delete")?;
-        let mut stmt = tx
-            .prepare(sql::comments::DELETE_BY_ID)
-            .context("failed to prepare comment batch delete statement")?;
-        let mut deleted = 0usize;
-        for id in ids {
-            deleted += stmt
-                .execute(params![id])
-                .with_context(|| format!("failed to batch delete comment {id}"))?;
-        }
-        drop(stmt);
-        tx.commit()
-            .context("failed to commit comment batch delete transaction")?;
-        Ok(deleted)
+        execute_many_comment_ids(
+            &mut conn,
+            sql::comments::DELETE_BY_ID,
+            ids,
+            "failed to start sqlite transaction for comment batch delete",
+            "failed to prepare comment batch delete statement",
+            "failed to commit comment batch delete transaction",
+            |stmt, id| {
+                stmt.execute(params![id])
+                    .with_context(|| format!("failed to batch delete comment {id}"))
+            },
+        )
     }
 
     pub fn prune_non_open_comments(&self, cutoff_unix_ms: i64) -> Result<usize> {
@@ -427,6 +410,42 @@ fn next_comment_id() -> String {
     format!("comment-{now_nanos:032x}-{pid:08x}-{counter:016x}")
 }
 
+fn execute_many_comment_ids<F>(
+    conn: &mut rusqlite::Connection,
+    sql: &str,
+    ids: &[String],
+    transaction_context: &'static str,
+    prepare_context: &'static str,
+    commit_context: &'static str,
+    mut execute: F,
+) -> Result<usize>
+where
+    F: FnMut(&mut rusqlite::Statement<'_>, &str) -> Result<usize>,
+{
+    let tx = conn.transaction().context(transaction_context)?;
+    let mut stmt = tx.prepare(sql).context(prepare_context)?;
+    let mut affected = 0usize;
+    for id in ids {
+        affected += execute(&mut stmt, id.as_str())?;
+    }
+    drop(stmt);
+    tx.commit().context(commit_context)?;
+    Ok(affected)
+}
+
+fn get_comment_with_connection(
+    conn: &rusqlite::Connection,
+    id: &str,
+) -> Result<Option<CommentRecord>> {
+    let mut stmt = conn
+        .prepare(sql::comments::SELECT_BY_ID)
+        .context("failed to prepare select comment by id query")?;
+
+    stmt.query_row(params![id], map_comment_row)
+        .optional()
+        .context("failed to query comment by id")
+}
+
 fn map_comment_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CommentRecord> {
     let status_raw: String = row.get("status")?;
     let line_side_raw: String = row.get("line_side")?;
@@ -441,7 +460,7 @@ fn map_comment_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CommentRecord> {
 
     let old_line = old_line_db.map(sql_i64_to_u32).transpose()?;
     let new_line = new_line_db.map(sql_i64_to_u32).transpose()?;
-    let row_stable_id = row_stable_id_db.map(|value| value as u64);
+    let row_stable_id = row_stable_id_db.map(sql_i64_to_u64).transpose()?;
 
     Ok(CommentRecord {
         id: row.get("id")?,
@@ -479,6 +498,24 @@ fn sql_i64_to_u32(value: i64) -> rusqlite::Result<u32> {
             )),
         )
     })
+}
+
+fn sql_i64_to_u64(value: i64) -> rusqlite::Result<u64> {
+    u64::try_from(value).map_err(|_| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Integer,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("cannot convert sqlite integer {value} to u64"),
+            )),
+        )
+    })
+}
+
+fn sql_u64_to_i64(value: u64) -> Result<i64> {
+    i64::try_from(value)
+        .map_err(|_| anyhow!("cannot convert row_stable_id {value} to sqlite integer"))
 }
 
 fn invalid_text_value(column: &str, value: &str) -> rusqlite::Error {
