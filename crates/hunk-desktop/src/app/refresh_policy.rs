@@ -159,6 +159,12 @@ pub(super) const fn should_run_cold_start_reconcile(
         && matches!(behavior, SnapshotRefreshBehavior::RefreshWorkingCopy)
 }
 
+pub(super) const fn should_request_startup_git_workspace_refresh(
+    selected_target_is_primary: bool,
+) -> bool {
+    !selected_target_is_primary
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct GitActionRefreshPlan {
     pub(super) refresh_primary_snapshot: bool,

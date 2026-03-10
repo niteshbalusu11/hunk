@@ -75,7 +75,8 @@ use refresh_policy::{
     SnapshotRefreshRequest, diff_state_changed, line_stats_paths_from_dirty_paths,
     missing_line_stat_paths, repo_watch_refresh_request, should_refresh_line_stats_after_snapshot,
     should_reload_diff_after_snapshot, should_reload_repo_tree_after_snapshot,
-    should_run_cold_start_reconcile, should_scroll_selected_after_reload,
+    should_request_startup_git_workspace_refresh, should_run_cold_start_reconcile,
+    should_scroll_selected_after_reload,
 };
 use review_compare_picker::{
     ReviewComparePickerDelegate, ReviewCompareSourceOption, build_review_compare_picker_delegate,
