@@ -342,11 +342,23 @@ mod ai_tests {
     }
 
     #[test]
-    fn stale_turn_retry_helper_matches_jsonrpc_server_errors_only() {
+    fn stale_turn_retry_helper_matches_retryable_turn_steer_server_errors() {
         assert!(should_retry_stale_turn_after_steer_error(
             &CodexIntegrationError::JsonRpcServerError {
                 code: -32602,
                 message: "expected_turn_id is stale".to_string(),
+            }
+        ));
+        assert!(should_retry_stale_turn_after_steer_error(
+            &CodexIntegrationError::JsonRpcServerError {
+                code: -32600,
+                message: "expected active turn id `turn-1` but found `turn-2`".to_string(),
+            }
+        ));
+        assert!(should_retry_stale_turn_after_steer_error(
+            &CodexIntegrationError::JsonRpcServerError {
+                code: -32600,
+                message: "no active turn to steer".to_string(),
             }
         ));
         assert!(!should_retry_stale_turn_after_steer_error(

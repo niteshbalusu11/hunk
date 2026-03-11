@@ -25,7 +25,7 @@ fn should_retry_stale_turn_after_steer_error(error: &CodexIntegrationError) -> b
     let CodexIntegrationError::JsonRpcServerError { code, message } = error else {
         return false;
     };
-    if !matches!(*code, -32602 | -32000 | -32001) {
+    if !matches!(*code, -32600 | -32602 | -32000 | -32001) {
         return false;
     }
 
@@ -33,9 +33,11 @@ fn should_retry_stale_turn_after_steer_error(error: &CodexIntegrationError) -> b
     normalized_message.contains("stale")
         || normalized_message.contains("expected_turn_id")
         || normalized_message.contains("expected turn id")
+        || normalized_message.contains("expected active turn id")
         || normalized_message.contains("turn id mismatch")
         || normalized_message.contains("in-progress turn")
         || normalized_message.contains("in progress turn")
+        || normalized_message.contains("no active turn to steer")
 }
 
 fn is_transient_rollout_load_error(error: &CodexIntegrationError) -> bool {
