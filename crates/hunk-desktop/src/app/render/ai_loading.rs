@@ -90,9 +90,6 @@ fn render_ai_git_progress_overlay(
             div()
                 .size_full()
                 .p_4()
-                .flex()
-                .items_center()
-                .justify_center()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| {
                     cx.stop_propagation();
                 })
@@ -106,119 +103,144 @@ fn render_ai_git_progress_overlay(
                     cx.stop_propagation();
                 })
                 .child(
-                    v_flex()
-                        .id("ai-git-progress-popup")
-                        .w_full()
-                        .max_w(px(460.0))
-                        .gap_4()
-                        .rounded(px(14.0))
-                        .border_1()
-                        .border_color(modal_surface.border)
-                        .bg(modal_surface.background)
-                        .p_4()
+                    div()
+                        .size_full()
+                        .overflow_y_scrollbar()
                         .child(
-                            h_flex()
+                            div()
                                 .w_full()
+                                .min_h_full()
+                                .py_8()
+                                .flex()
                                 .items_start()
-                                .gap_3()
-                                .child(
-                                    gpui_component::spinner::Spinner::new()
-                                        .with_size(gpui_component::Size::Medium)
-                                        .color(cx.theme().accent),
-                                )
+                                .justify_center()
                                 .child(
                                     v_flex()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .gap_1()
-                                        .child(
-                                            div()
-                                                .text_lg()
-                                                .font_semibold()
-                                                .text_color(cx.theme().foreground)
-                                                .child(progress.action.title()),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_sm()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .whitespace_normal()
-                                                .child(progress.action.summary()),
-                                        ),
-                                ),
-                        )
-                        .when_some(progress.detail.clone(), |this, detail| {
-                            this.child(
-                                div()
-                                    .rounded_md()
-                                    .border_1()
-                                    .border_color(hunk_opacity(
-                                        cx.theme().border,
-                                        is_dark,
-                                        0.88,
-                                        0.70,
-                                    ))
-                                    .bg(hunk_blend(
-                                        cx.theme().background,
-                                        cx.theme().muted,
-                                        is_dark,
-                                        0.12,
-                                        0.18,
-                                    ))
-                                    .px_3()
-                                    .py_2()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(detail),
-                            )
-                        })
-                        .child(
-                            v_flex()
-                                .w_full()
-                                .gap_2()
-                                .children(progress.steps.iter().enumerate().map(|(index, step)| {
-                                    let is_complete = index < current_step_index;
-                                    let is_current = index == current_step_index;
-
-                                    h_flex()
+                                        .id("ai-git-progress-popup")
                                         .w_full()
-                                        .items_center()
-                                        .gap_3()
-                                        .child(if is_current {
-                                            gpui_component::spinner::Spinner::new()
-                                                .with_size(gpui_component::Size::Small)
-                                                .color(cx.theme().accent)
-                                                .into_any_element()
-                                        } else if is_complete {
-                                            Icon::new(IconName::Check)
-                                                .size(px(14.0))
-                                                .text_color(cx.theme().success)
-                                                .into_any_element()
-                                        } else {
-                                            div()
-                                                .size(px(10.0))
-                                                .rounded_full()
-                                                .bg(hunk_opacity(
-                                                    cx.theme().muted,
-                                                    is_dark,
-                                                    0.34,
-                                                    0.46,
-                                                ))
-                                                .into_any_element()
+                                        .max_w(px(460.0))
+                                        .max_h(px(520.0))
+                                        .min_h_0()
+                                        .gap_4()
+                                        .rounded(px(14.0))
+                                        .border_1()
+                                        .border_color(modal_surface.border)
+                                        .bg(modal_surface.background)
+                                        .p_4()
+                                        .child(
+                                            v_flex()
+                                                .w_full()
+                                                .min_w_0()
+                                                .gap_1()
+                                                .child(
+                                                    div()
+                                                        .text_lg()
+                                                        .font_semibold()
+                                                        .text_color(cx.theme().foreground)
+                                                        .child(progress.action.title()),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .text_sm()
+                                                        .text_color(cx.theme().muted_foreground)
+                                                        .whitespace_normal()
+                                                        .child(progress.action.summary()),
+                                                ),
+                                        )
+                                        .when_some(progress.detail.clone(), |this, detail| {
+                                            this.child(
+                                                div()
+                                                    .w_full()
+                                                    .rounded_md()
+                                                    .border_1()
+                                                    .border_color(hunk_opacity(
+                                                        cx.theme().border,
+                                                        is_dark,
+                                                        0.88,
+                                                        0.70,
+                                                    ))
+                                                    .bg(hunk_blend(
+                                                        cx.theme().background,
+                                                        cx.theme().muted,
+                                                        is_dark,
+                                                        0.12,
+                                                        0.18,
+                                                    ))
+                                                    .px_3()
+                                                    .py_2()
+                                                    .text_xs()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child(detail),
+                                            )
                                         })
                                         .child(
                                             div()
-                                                .text_sm()
-                                                .when(is_current, |this| this.font_semibold())
-                                                .text_color(if is_complete || is_current {
-                                                    cx.theme().foreground
-                                                } else {
-                                                    cx.theme().muted_foreground
-                                                })
-                                                .child(step.label()),
-                                        )
-                                        .into_any_element()
-                                })),
+                                                .flex_1()
+                                                .h_full()
+                                                .w_full()
+                                                .min_w_0()
+                                                .min_h_0()
+                                                .overflow_y_scrollbar()
+                                                .child(
+                                                    v_flex()
+                                                        .w_full()
+                                                        .gap_2()
+                                                        .children(progress.steps.iter().enumerate().map(
+                                                            |(index, step)| {
+                                                                let is_complete = index < current_step_index;
+                                                                let is_current = index == current_step_index;
+
+                                                                h_flex()
+                                                                    .w_full()
+                                                                    .items_center()
+                                                                    .gap_3()
+                                                                    .child(
+                                                                        div()
+                                                                            .w(px(16.0))
+                                                                            .flex()
+                                                                            .justify_center()
+                                                                            .child(if is_current {
+                                                                                gpui_component::spinner::Spinner::new()
+                                                                                    .with_size(gpui_component::Size::Small)
+                                                                                    .color(cx.theme().accent)
+                                                                                    .into_any_element()
+                                                                            } else if is_complete {
+                                                                                Icon::new(IconName::Check)
+                                                                                    .size(px(14.0))
+                                                                                    .text_color(cx.theme().success)
+                                                                                    .into_any_element()
+                                                                            } else {
+                                                                                div()
+                                                                                    .size(px(10.0))
+                                                                                    .rounded_full()
+                                                                                    .bg(hunk_opacity(
+                                                                                        cx.theme().muted,
+                                                                                        is_dark,
+                                                                                        0.34,
+                                                                                        0.46,
+                                                                                    ))
+                                                                                    .into_any_element()
+                                                                            }),
+                                                                    )
+                                                                    .child(
+                                                                        div()
+                                                                            .flex_1()
+                                                                            .min_w_0()
+                                                                            .text_sm()
+                                                                            .when(is_current, |this| this.font_semibold())
+                                                                            .text_color(if is_complete || is_current {
+                                                                                cx.theme().foreground
+                                                                            } else {
+                                                                                cx.theme().muted_foreground
+                                                                            })
+                                                                            .child(step.label()),
+                                                                    )
+                                                                    .into_any_element()
+                                                            },
+                                                        )),
+                                                ),
+                                        ),
+                                ),
                         ),
                 ),
         )
