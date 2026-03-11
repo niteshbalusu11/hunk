@@ -151,6 +151,7 @@ impl DiffViewer {
             model_supports_image_inputs,
             selected_thread_mode_for_picker,
             thread_mode_picker_editable,
+            session_controls_read_only: composer_interrupt_available,
             composer_send_waiting_on_connection,
             composer_interrupt_available,
             review_action_enabled,

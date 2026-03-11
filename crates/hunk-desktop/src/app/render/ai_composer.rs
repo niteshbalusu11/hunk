@@ -4,6 +4,7 @@ struct AiComposerPanelState {
     model_supports_image_inputs: bool,
     selected_thread_mode_for_picker: AiNewThreadStartMode,
     thread_mode_picker_editable: bool,
+    session_controls_read_only: bool,
     composer_send_waiting_on_connection: bool,
     composer_interrupt_available: bool,
     review_action_enabled: bool,
@@ -186,6 +187,7 @@ impl DiffViewer {
                                                 view.clone(),
                                                 state.selected_thread_mode_for_picker,
                                                 state.thread_mode_picker_editable,
+                                                state.session_controls_read_only,
                                                 cx,
                                             )),
                                     )

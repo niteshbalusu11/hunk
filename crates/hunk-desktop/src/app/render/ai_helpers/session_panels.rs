@@ -185,6 +185,7 @@ struct AiSessionControlsPanelView<'a> {
     selected_effort: Option<&'a str>,
     selected_thread_mode: AiNewThreadStartMode,
     thread_mode_editable: bool,
+    read_only: bool,
     selected_collaboration_mode: hunk_domain::state::AiCollaborationModeSelection,
     selected_service_tier: AiServiceTierSelection,
 }
@@ -194,6 +195,7 @@ fn render_ai_session_controls_panel_for_view(
     view: Entity<DiffViewer>,
     selected_thread_mode: AiNewThreadStartMode,
     thread_mode_editable: bool,
+    read_only: bool,
     cx: &mut Context<DiffViewer>,
 ) -> AnyElement {
     render_ai_session_controls_panel(
@@ -204,6 +206,7 @@ fn render_ai_session_controls_panel_for_view(
             selected_effort: this.ai_selected_effort.as_deref(),
             selected_thread_mode,
             thread_mode_editable,
+            read_only,
             selected_collaboration_mode: this.ai_selected_collaboration_mode,
             selected_service_tier: this.ai_selected_service_tier,
         },
@@ -243,6 +246,7 @@ fn render_ai_session_controls_panel(
     let service_tier_label = ai_service_tier_picker_label(panel.selected_service_tier);
     let thread_mode_label = panel.selected_thread_mode.label().to_string();
     let collaboration_label = ai_collaboration_picker_label(panel.selected_collaboration_mode);
+    let controls_locked_tooltip = "Session settings are locked while the agent is working.";
     let (visible_models, hidden_models): (Vec<_>, Vec<_>) = panel
         .models
         .iter()
@@ -263,7 +267,9 @@ fn render_ai_session_controls_panel(
                 .rounded(px(999.0))
                 .with_size(gpui_component::Size::Small)
                 .dropdown_caret(true)
+                .disabled(panel.read_only)
                 .label(model_label)
+                .when(panel.read_only, |this| this.tooltip(controls_locked_tooltip))
                 .dropdown_menu(move |menu, _, _| {
                     let mut menu = menu.item(
                         PopupMenuItem::new("Server default")
@@ -333,8 +339,9 @@ fn render_ai_session_controls_panel(
                 .rounded(px(999.0))
                 .with_size(gpui_component::Size::Small)
                 .dropdown_caret(true)
-                .disabled(selected_model.is_none())
+                .disabled(panel.read_only || selected_model.is_none())
                 .label(effort_label)
+                .when(panel.read_only, |this| this.tooltip(controls_locked_tooltip))
                 .dropdown_menu(move |menu, _, _| {
                     let mut menu = menu.item(
                         PopupMenuItem::new("Model default")
@@ -379,7 +386,9 @@ fn render_ai_session_controls_panel(
                 .rounded(px(999.0))
                 .with_size(gpui_component::Size::Small)
                 .dropdown_caret(true)
+                .disabled(panel.read_only)
                 .label(service_tier_label)
+                .when(panel.read_only, |this| this.tooltip(controls_locked_tooltip))
                 .dropdown_menu(move |menu, _, _| {
                     let mut menu = menu;
                     for (service_tier, label) in ai_service_tier_options() {
@@ -410,8 +419,12 @@ fn render_ai_session_controls_panel(
                 .with_size(gpui_component::Size::Small)
                 .dropdown_caret(true)
                 .label(thread_mode_label)
-                .disabled(!panel.thread_mode_editable)
-                .tooltip("Thread mode can only be changed before the first prompt is sent.")
+                .disabled(panel.read_only || !panel.thread_mode_editable)
+                .tooltip(if panel.read_only {
+                    controls_locked_tooltip
+                } else {
+                    "Thread mode can only be changed before the first prompt is sent."
+                })
                 .dropdown_menu(move |menu, _, _| {
                     menu.item(
                         PopupMenuItem::new("Local")
@@ -455,7 +468,9 @@ fn render_ai_session_controls_panel(
                     .rounded(px(999.0))
                     .with_size(gpui_component::Size::Small)
                     .dropdown_caret(true)
+                    .disabled(panel.read_only)
                     .label(collaboration_label)
+                    .when(panel.read_only, |this| this.tooltip(controls_locked_tooltip))
                     .dropdown_menu(move |menu, _, _| {
                         menu.item(
                             PopupMenuItem::new("Default")
