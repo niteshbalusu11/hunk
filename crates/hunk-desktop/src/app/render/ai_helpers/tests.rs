@@ -5,6 +5,8 @@ mod ai_helper_tests {
     use super::ai_chat_markdown_text;
     use super::ai_command_execution_display_details;
     use super::ai_composer_status_tone;
+    use super::ai_experimental_features_dropdown_label;
+    use super::ai_sorted_experimental_feature_items;
     use super::ai_collaboration_picker_label;
     use super::ai_should_show_no_turns_empty_state;
     use super::ai_tool_compact_summary;
@@ -138,6 +140,43 @@ mod ai_helper_tests {
         assert_eq!(
             ai_collaboration_picker_label(AiCollaborationModeSelection::Plan),
             "Plan"
+        );
+    }
+
+    fn experimental_feature(
+        name: &str,
+        enabled: bool,
+    ) -> codex_app_server_protocol::ExperimentalFeature {
+        codex_app_server_protocol::ExperimentalFeature {
+            name: name.to_string(),
+            stage: codex_app_server_protocol::ExperimentalFeatureStage::Beta,
+            display_name: None,
+            description: None,
+            announcement: None,
+            enabled,
+            default_enabled: false,
+        }
+    }
+
+    #[test]
+    fn experimental_features_dropdown_uses_curated_subset() {
+        let features = vec![
+            experimental_feature("collaboration_modes", true),
+            experimental_feature("request_permissions_tool", false),
+            experimental_feature("mock_internal_feature", true),
+        ];
+
+        let curated = ai_sorted_experimental_feature_items(&features);
+        assert_eq!(
+            curated,
+            vec![
+                ("Collaboration modes".to_string(), true),
+                ("Request permissions".to_string(), false),
+            ]
+        );
+        assert_eq!(
+            ai_experimental_features_dropdown_label(&features),
+            "Experiments 1/2"
         );
     }
 
