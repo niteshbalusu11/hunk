@@ -220,10 +220,6 @@ fn render_ai_session_controls_panel(
     view: Entity<DiffViewer>,
     _cx: &mut Context<DiffViewer>,
 ) -> AnyElement {
-    let experimental_features_label =
-        ai_experimental_features_dropdown_label(panel.experimental_features);
-    let experimental_feature_items =
-        ai_sorted_experimental_feature_items(panel.experimental_features);
     let model_label = ai_model_picker_label(panel.models, panel.selected_model);
     let selected_model = panel
         .selected_model
@@ -413,33 +409,6 @@ fn render_ai_session_controls_panel(
                     menu
                 })
         })
-        .when(!experimental_feature_items.is_empty(), |this| {
-            this.child({
-                let experimental_feature_items = experimental_feature_items.clone();
-                Button::new("ai-session-experimental-features-dropdown")
-                    .compact()
-                    .ghost()
-                    .rounded(px(999.0))
-                    .with_size(gpui_component::Size::Small)
-                    .dropdown_caret(true)
-                    .disabled(panel.read_only)
-                    .label(experimental_features_label)
-                    .tooltip(if panel.read_only {
-                        controls_locked_tooltip
-                    } else {
-                        "Curated experimental capabilities reported by the server."
-                    })
-                    .dropdown_menu(move |menu, _, _| {
-                        let mut menu = menu;
-                        for (feature_name, enabled) in &experimental_feature_items {
-                            menu = menu.item(
-                                PopupMenuItem::new(feature_name.clone()).checked(*enabled),
-                            );
-                        }
-                        menu
-                    })
-            })
-        })
         .child({
             let view = view.clone();
             let selected_mode = panel.selected_thread_mode;
@@ -567,71 +536,6 @@ fn ai_account_summary(
         None => "No account connected.".to_string(),
     }
 }
-
-fn ai_experimental_features_dropdown_label(
-    features: &[codex_app_server_protocol::ExperimentalFeature],
-) -> String {
-    let curated = ai_sorted_experimental_feature_items(features);
-    if curated.is_empty() {
-        return "Experiments".to_string();
-    }
-
-    let enabled_count = curated.iter().filter(|(_, enabled)| *enabled).count();
-    format!("Experiments {enabled_count}/{}", curated.len())
-}
-
-fn ai_sorted_experimental_feature_items(
-    features: &[codex_app_server_protocol::ExperimentalFeature],
-) -> Vec<(String, bool)> {
-    let mut items = AI_CURATED_EXPERIMENTAL_FEATURES
-        .iter()
-        .filter_map(|group| {
-            let enabled = features
-                .iter()
-                .find(|feature| group.keys.contains(&feature.name.as_str()))
-                .map(|feature| feature.enabled)?;
-            Some((group.label.to_string(), enabled))
-        })
-        .collect::<Vec<_>>();
-    items.sort_by(|lhs, rhs| lhs.0.cmp(&rhs.0));
-    items
-}
-
-struct AiCuratedExperimentalFeatureGroup {
-    label: &'static str,
-    keys: &'static [&'static str],
-}
-
-const AI_CURATED_EXPERIMENTAL_FEATURES: &[AiCuratedExperimentalFeatureGroup] = &[
-    AiCuratedExperimentalFeatureGroup {
-        label: "Apps",
-        keys: &["apps"],
-    },
-    AiCuratedExperimentalFeatureGroup {
-        label: "Code mode",
-        keys: &["code_mode"],
-    },
-    AiCuratedExperimentalFeatureGroup {
-        label: "Collaboration modes",
-        keys: &["collaboration_modes"],
-    },
-    AiCuratedExperimentalFeatureGroup {
-        label: "Hooks",
-        keys: &["codex_hooks"],
-    },
-    AiCuratedExperimentalFeatureGroup {
-        label: "Image generation",
-        keys: &["image_generation"],
-    },
-    AiCuratedExperimentalFeatureGroup {
-        label: "Plugins",
-        keys: &["plugins"],
-    },
-    AiCuratedExperimentalFeatureGroup {
-        label: "Request permissions",
-        keys: &["request_permissions", "request_permissions_tool"],
-    },
-];
 
 fn ai_rate_limit_summary(
     rate_limits: Option<&codex_app_server_protocol::RateLimitSnapshot>,
