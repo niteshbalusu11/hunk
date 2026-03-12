@@ -1,10 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path};
-use std::process::Command;
 
 use anyhow::{Context as _, Result, anyhow};
 
 use crate::branch::is_valid_branch_name;
+use crate::command_env::git_cli_command;
 use crate::git2_helpers::{load_statuses, open_git2_repo};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -458,7 +458,7 @@ fn run_git_commit(repo: &git2::Repository, message: &str) -> Result<()> {
     let workdir = repo
         .workdir()
         .ok_or_else(|| anyhow!("committing without a worktree is not supported"))?;
-    let output = Command::new("git")
+    let output = git_cli_command("git")
         .current_dir(workdir)
         .args(["commit", "--quiet", "--cleanup=verbatim", "-m"])
         .arg(message)

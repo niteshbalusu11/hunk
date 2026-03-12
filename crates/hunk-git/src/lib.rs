@@ -2,6 +2,7 @@ pub mod config {
     pub use hunk_domain::config::{ReviewProviderKind, ReviewProviderMapping};
 }
 
+mod command_env;
 mod git2_helpers;
 
 pub mod branch;
