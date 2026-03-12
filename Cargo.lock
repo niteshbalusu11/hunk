@@ -1092,8 +1092,8 @@ dependencies = [
 
 [[package]]
 name = "codex-app-server-protocol"
-version = "0.115.0-alpha.3"
-source = "git+https://github.com/openai/codex.git?tag=rust-v0.115.0-alpha.3#5edcfc6954059bc17289831b78fa4df252e27b13"
+version = "0.115.0-alpha.11"
+source = "git+https://github.com/openai/codex.git?tag=rust-v0.115.0-alpha.11#dd532c4f6ad6292a7e5ec7db176b73fdfd9be1e2"
 dependencies = [
  "anyhow",
  "clap",
@@ -1116,8 +1116,8 @@ dependencies = [
 
 [[package]]
 name = "codex-execpolicy"
-version = "0.115.0-alpha.3"
-source = "git+https://github.com/openai/codex.git?tag=rust-v0.115.0-alpha.3#5edcfc6954059bc17289831b78fa4df252e27b13"
+version = "0.115.0-alpha.11"
+source = "git+https://github.com/openai/codex.git?tag=rust-v0.115.0-alpha.11#dd532c4f6ad6292a7e5ec7db176b73fdfd9be1e2"
 dependencies = [
  "anyhow",
  "clap",
@@ -1132,8 +1132,8 @@ dependencies = [
 
 [[package]]
 name = "codex-experimental-api-macros"
-version = "0.115.0-alpha.3"
-source = "git+https://github.com/openai/codex.git?tag=rust-v0.115.0-alpha.3#5edcfc6954059bc17289831b78fa4df252e27b13"
+version = "0.115.0-alpha.11"
+source = "git+https://github.com/openai/codex.git?tag=rust-v0.115.0-alpha.11#dd532c4f6ad6292a7e5ec7db176b73fdfd9be1e2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1142,8 +1142,8 @@ dependencies = [
 
 [[package]]
 name = "codex-git"
-version = "0.115.0-alpha.3"
-source = "git+https://github.com/openai/codex.git?tag=rust-v0.115.0-alpha.3#5edcfc6954059bc17289831b78fa4df252e27b13"
+version = "0.115.0-alpha.11"
+source = "git+https://github.com/openai/codex.git?tag=rust-v0.115.0-alpha.11#dd532c4f6ad6292a7e5ec7db176b73fdfd9be1e2"
 dependencies = [
  "once_cell",
  "regex",
@@ -1157,8 +1157,8 @@ dependencies = [
 
 [[package]]
 name = "codex-protocol"
-version = "0.115.0-alpha.3"
-source = "git+https://github.com/openai/codex.git?tag=rust-v0.115.0-alpha.3#5edcfc6954059bc17289831b78fa4df252e27b13"
+version = "0.115.0-alpha.11"
+source = "git+https://github.com/openai/codex.git?tag=rust-v0.115.0-alpha.11#dd532c4f6ad6292a7e5ec7db176b73fdfd9be1e2"
 dependencies = [
  "codex-execpolicy",
  "codex-git",
@@ -1182,8 +1182,8 @@ dependencies = [
 
 [[package]]
 name = "codex-utils-absolute-path"
-version = "0.115.0-alpha.3"
-source = "git+https://github.com/openai/codex.git?tag=rust-v0.115.0-alpha.3#5edcfc6954059bc17289831b78fa4df252e27b13"
+version = "0.115.0-alpha.11"
+source = "git+https://github.com/openai/codex.git?tag=rust-v0.115.0-alpha.11#dd532c4f6ad6292a7e5ec7db176b73fdfd9be1e2"
 dependencies = [
  "dirs 6.0.0",
  "path-absolutize",
@@ -1194,8 +1194,8 @@ dependencies = [
 
 [[package]]
 name = "codex-utils-cache"
-version = "0.115.0-alpha.3"
-source = "git+https://github.com/openai/codex.git?tag=rust-v0.115.0-alpha.3#5edcfc6954059bc17289831b78fa4df252e27b13"
+version = "0.115.0-alpha.11"
+source = "git+https://github.com/openai/codex.git?tag=rust-v0.115.0-alpha.11#dd532c4f6ad6292a7e5ec7db176b73fdfd9be1e2"
 dependencies = [
  "lru",
  "sha1",
@@ -1204,8 +1204,8 @@ dependencies = [
 
 [[package]]
 name = "codex-utils-image"
-version = "0.115.0-alpha.3"
-source = "git+https://github.com/openai/codex.git?tag=rust-v0.115.0-alpha.3#5edcfc6954059bc17289831b78fa4df252e27b13"
+version = "0.115.0-alpha.11"
+source = "git+https://github.com/openai/codex.git?tag=rust-v0.115.0-alpha.11#dd532c4f6ad6292a7e5ec7db176b73fdfd9be1e2"
 dependencies = [
  "base64",
  "codex-utils-cache",
