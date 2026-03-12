@@ -11,6 +11,7 @@ fn item_status_chip(status: hunk_codex::state::ItemStatus) -> &'static str {
 mod ai_tests {
     use super::ai_composer_draft_key;
     use super::ai_composer_prompt_for_target;
+    use super::ai_composer_retained_thread_ids;
     use super::ai_prompt_send_waiting_on_connection;
     use super::ai_pending_steer_seed_content;
     use super::resolved_ai_thread_mode_picker_state;

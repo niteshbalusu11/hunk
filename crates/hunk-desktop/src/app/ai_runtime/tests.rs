@@ -45,6 +45,7 @@ mod ai_tests {
     use super::map_command_approval_decision;
     use super::map_file_change_approval_decision;
     use super::panic_payload_message;
+    use super::pending_steer_with_state_baseline;
     use super::preferred_rate_limit_snapshot;
     use super::request_id_key;
     use super::retry_transient_rollout_load;
@@ -105,6 +106,58 @@ mod ai_tests {
         apply_thread_start_policy(true, &mut params);
         assert_eq!(params.approval_policy, Some(AskForApproval::Never));
         assert_eq!(params.sandbox, Some(SandboxMode::DangerFullAccess));
+    }
+
+    #[test]
+    fn pending_steer_with_state_baseline_uses_the_latest_refreshed_turn_sequence() {
+        let mut state = AiState::default();
+        let _ = state.apply_stream_event(StreamEvent {
+            sequence: 8,
+            dedupe_key: None,
+            payload: ReducerEvent::ItemStarted {
+                thread_id: "thread-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                item_id: "item-older".to_string(),
+                kind: "userMessage".to_string(),
+            },
+        });
+        let _ = state.apply_stream_event(StreamEvent {
+            sequence: 9,
+            dedupe_key: None,
+            payload: ReducerEvent::ItemDelta {
+                thread_id: "thread-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                item_id: "item-older".to_string(),
+                delta: "same follow-up".to_string(),
+            },
+        });
+        let _ = state.apply_stream_event(StreamEvent {
+            sequence: 10,
+            dedupe_key: None,
+            payload: ReducerEvent::ItemCompleted {
+                thread_id: "thread-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                item_id: "item-older".to_string(),
+            },
+        });
+        let _ = state.apply_stream_event(StreamEvent {
+            sequence: 12,
+            dedupe_key: None,
+            payload: ReducerEvent::TurnStarted {
+                thread_id: "thread-1".to_string(),
+                turn_id: "turn-1".to_string(),
+            },
+        });
+
+        let pending = pending_steer_with_state_baseline(
+            &state,
+            "thread-1".to_string(),
+            "turn-1".to_string(),
+            Some("same follow-up"),
+            &[],
+        );
+
+        assert_eq!(pending.accepted_after_sequence, 12);
     }
 
     #[test]

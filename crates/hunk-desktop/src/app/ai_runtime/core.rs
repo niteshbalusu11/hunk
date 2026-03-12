@@ -721,10 +721,12 @@ impl AiWorkerRuntime {
             });
         }
         if let Some(in_progress_turn_id) = self.in_progress_turn_id(thread_id.as_str()) {
-            let accepted_after_sequence = accepted_after_sequence_for_pending_steer(
+            let pending_steer = pending_steer_with_state_baseline(
                 self.service.state(),
-                thread_id.as_str(),
-                in_progress_turn_id.as_str(),
+                thread_id.clone(),
+                in_progress_turn_id.clone(),
+                trimmed,
+                &local_image_paths,
             );
             let steer_result = self.service.steer_turn(
                 &mut self.session,
@@ -737,15 +739,7 @@ impl AiWorkerRuntime {
             );
 
             match steer_result {
-                Ok(_) => {
-                    return Ok(Some(pending_steer_from_send_prompt(
-                        thread_id,
-                        in_progress_turn_id,
-                        trimmed,
-                        &local_image_paths,
-                        accepted_after_sequence,
-                    )));
-                }
+                Ok(_) => return Ok(Some(pending_steer)),
                 Err(error) if should_retry_stale_turn_after_steer_error(&error) => {
                     self.service.read_thread(
                         &mut self.session,
@@ -754,6 +748,13 @@ impl AiWorkerRuntime {
                         self.request_timeout,
                     )?;
                     if let Some(refreshed_turn_id) = self.in_progress_turn_id(thread_id.as_str()) {
+                        let pending_steer = pending_steer_with_state_baseline(
+                            self.service.state(),
+                            thread_id.clone(),
+                            refreshed_turn_id.clone(),
+                            trimmed,
+                            &local_image_paths,
+                        );
                         self.service.steer_turn(
                             &mut self.session,
                             TurnSteerParams {
@@ -763,13 +764,7 @@ impl AiWorkerRuntime {
                             },
                             self.request_timeout,
                         )?;
-                        return Ok(Some(pending_steer_from_send_prompt(
-                            thread_id,
-                            refreshed_turn_id,
-                            trimmed,
-                            &local_image_paths,
-                            accepted_after_sequence,
-                        )));
+                        return Ok(Some(pending_steer));
                     }
                 }
                 Err(error) => return Err(error),

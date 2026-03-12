@@ -1,4 +1,8 @@
 impl DiffViewer {
+    fn ai_composer_retained_thread_ids(&self) -> BTreeSet<String> {
+        ai_composer_retained_thread_ids(&self.ai_state_snapshot, &self.ai_workspace_states)
+    }
+
     fn workspace_ai_composer_draft_key(&self) -> Option<AiComposerDraftKey> {
         let workspace_key = self.ai_workspace_key_for_draft();
         ai_composer_draft_key(None, workspace_key.as_deref())
@@ -110,12 +114,7 @@ impl DiffViewer {
     }
 
     fn prune_ai_composer_drafts(&mut self) {
-        let thread_ids = self
-            .ai_state_snapshot
-            .threads
-            .keys()
-            .cloned()
-            .collect::<BTreeSet<_>>();
+        let thread_ids = self.ai_composer_retained_thread_ids();
         self.ai_composer_drafts.retain(|key, _| match key {
             AiComposerDraftKey::Thread(thread_id) => thread_ids.contains(thread_id),
             AiComposerDraftKey::Workspace(_) => true,
@@ -123,12 +122,7 @@ impl DiffViewer {
     }
 
     fn prune_ai_composer_statuses(&mut self) {
-        let thread_ids = self
-            .ai_state_snapshot
-            .threads
-            .keys()
-            .cloned()
-            .collect::<BTreeSet<_>>();
+        let thread_ids = self.ai_composer_retained_thread_ids();
         self.ai_composer_status_by_draft.retain(|key, _| match key {
             AiComposerDraftKey::Thread(thread_id) => thread_ids.contains(thread_id),
             AiComposerDraftKey::Workspace(_) => true,
@@ -174,4 +168,17 @@ impl DiffViewer {
         self.ai_composer_activity_elapsed_second = next;
         true
     }
+}
+
+fn ai_composer_retained_thread_ids(
+    state_snapshot: &hunk_codex::state::AiState,
+    workspace_states: &BTreeMap<String, AiWorkspaceState>,
+) -> BTreeSet<String> {
+    let mut thread_ids = state_snapshot.threads.keys().cloned().collect::<BTreeSet<_>>();
+
+    for workspace_state in workspace_states.values() {
+        thread_ids.extend(workspace_state.state_snapshot.threads.keys().cloned());
+    }
+
+    thread_ids
 }

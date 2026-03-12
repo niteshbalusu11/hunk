@@ -34,3 +34,21 @@ fn pending_steer_from_send_prompt(
         started_at: Instant::now(),
     }
 }
+
+fn pending_steer_with_state_baseline(
+    state: &AiState,
+    thread_id: String,
+    turn_id: String,
+    prompt: Option<&str>,
+    local_image_paths: &[PathBuf],
+) -> AiPendingSteer {
+    let accepted_after_sequence =
+        accepted_after_sequence_for_pending_steer(state, thread_id.as_str(), turn_id.as_str());
+    pending_steer_from_send_prompt(
+        thread_id,
+        turn_id,
+        prompt,
+        local_image_paths,
+        accepted_after_sequence,
+    )
+}

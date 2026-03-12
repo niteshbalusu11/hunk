@@ -1001,6 +1001,45 @@
     }
 
     #[test]
+    fn ai_composer_retained_thread_ids_include_hidden_workspace_threads() {
+        let mut visible_state = AiState::default();
+        visible_state.threads.insert(
+            "thread-visible".to_string(),
+            ThreadSummary {
+                id: "thread-visible".to_string(),
+                cwd: "/repo-a".to_string(),
+                title: Some("Visible".to_string()),
+                status: ThreadLifecycleStatus::Active,
+                created_at: 1,
+                updated_at: 1,
+                last_sequence: 1,
+            },
+        );
+
+        let mut hidden_workspace_state = AiWorkspaceState::default();
+        hidden_workspace_state.state_snapshot.threads.insert(
+            "thread-hidden".to_string(),
+            ThreadSummary {
+                id: "thread-hidden".to_string(),
+                cwd: "/repo-b".to_string(),
+                title: Some("Hidden".to_string()),
+                status: ThreadLifecycleStatus::Active,
+                created_at: 2,
+                updated_at: 2,
+                last_sequence: 2,
+            },
+        );
+
+        let thread_ids = ai_composer_retained_thread_ids(
+            &visible_state,
+            &BTreeMap::from([("/repo-b".to_string(), hidden_workspace_state)]),
+        );
+
+        assert!(thread_ids.contains("thread-visible"));
+        assert!(thread_ids.contains("thread-hidden"));
+    }
+
+    #[test]
     fn reconcile_ai_pending_steers_matches_committed_user_messages_in_order() {
         let mut pending_steers = vec![
             AiPendingSteer {
