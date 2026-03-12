@@ -139,12 +139,9 @@ fn bundled_codex_executable_candidates(current_exe: &std::path::Path) -> Vec<std
             .join("codex-runtime")
             .join(platform_dir)
             .join(binary_name),
-        exe_dir.join(binary_name),
     ];
 
-    if cfg!(target_os = "macos")
-        && let Some(contents_dir) = exe_dir.parent()
-    {
+    if cfg!(target_os = "macos") && let Some(contents_dir) = exe_dir.parent() {
         candidates.push(
             contents_dir
                 .join("Resources")
@@ -152,7 +149,17 @@ fn bundled_codex_executable_candidates(current_exe: &std::path::Path) -> Vec<std
                 .join(platform_dir)
                 .join(binary_name),
         );
+    } else {
+        candidates.push(
+            exe_dir
+                .join("Resources")
+                .join("codex-runtime")
+                .join(platform_dir)
+                .join(binary_name),
+        );
     }
+
+    candidates.push(exe_dir.join(binary_name));
 
     candidates
 }

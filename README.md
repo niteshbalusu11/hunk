@@ -90,6 +90,22 @@ Optional flags:
 - `--debug` to build debug artifacts.
 - `--no-stage-runtime` to skip copying the bundled Codex runtime into the target output tree.
 
+Release packaging helpers:
+
+```bash
+./scripts/package_macos_release.sh
+./scripts/package_linux_release.sh
+pwsh ./scripts/package_windows_release.ps1
+```
+
+These produce:
+
+- macOS ARM64: signed/notarized `Hunk-<version>-macos-arm64.dmg` when Apple secrets are configured
+- Linux x86_64: `Hunk-<version>-linux-x86_64.AppImage` plus fallback `Hunk-<version>-linux-x86_64.tar.gz`
+- Windows x86_64: `Hunk-<version>-windows-x86_64.msi`
+
+Linux AppImage packaging requires `mksquashfs` from `squashfs-tools` and `patchelf`.
+
 ## Build Codex App-Server Binaries For Embedding
 
 Hunk embeds a native `codex` runtime and launches app-server mode with:
@@ -121,6 +137,12 @@ From the Hunk repo root, copy the generated binary into this repo for the platfo
 - Linux: `cp /path/to/codex/codex-rs/target/release/codex assets/codex-runtime/linux/codex && chmod +x assets/codex-runtime/linux/codex`
 - Windows: `copy C:/path/to/codex/codex-rs/target/release/codex.exe assets/codex-runtime/windows/codex.exe`
 
+For CI and release packaging we now prefer downloading the pinned Codex release assets directly:
+
+- macOS ARM64: `codex-aarch64-apple-darwin.tar.gz`
+- Linux x86_64: `codex-x86_64-unknown-linux-musl.tar.gz`
+- Windows x86_64: `codex-x86_64-pc-windows-msvc.exe.zip`
+
 ### Validate + stage + bundle (macOS workflow today)
 
 If you already have `codex` installed on your PATH (npm/homebrew/releases), use:
@@ -135,6 +157,22 @@ just bundle
 
 You can also pass an explicit source binary path to the installer:
 `./scripts/install_codex_runtime_macos.sh /absolute/path/to/codex`
+
+## GitHub Actions Release Flow
+
+- `.github/workflows/pr-build.yml` stays as the main PR CI workflow.
+- `.github/workflows/release.yml` builds DMG/MSI/AppImage artifacts and publishes them to a GitHub Release when you push a `v*` tag.
+
+Apple signing/notarization secrets used by the workflows:
+
+- `APPLE_CERTIFICATE_P12_BASE64`
+- `APPLE_CERTIFICATE_PASSWORD`
+- `APPLE_SIGNING_IDENTITY`
+- `APPLE_NOTARY_API_KEY_BASE64`
+- `APPLE_NOTARY_KEY_ID`
+- `APPLE_NOTARY_ISSUER`
+
+Windows signing is not configured in this repo yet. The current release workflow produces an unsigned MSI until you add a paid Windows signing solution.
 
 ## Large Diff Stress Fixture
 

@@ -78,7 +78,7 @@ if ! compgen -G "$TARGET_LIBDIR/libcore-*" >/dev/null && ! compgen -G "$TARGET_L
   exit 1
 fi
 
-build_args=(build -p hunk-desktop --target "$TARGET_TRIPLE")
+build_args=(build -p hunk-desktop --locked --target "$TARGET_TRIPLE")
 if [[ "$PROFILE" == "release" ]]; then
   build_args+=(--release)
 fi
@@ -89,7 +89,7 @@ echo "Building hunk-desktop for Windows target '$TARGET_TRIPLE' ($PROFILE profil
   cargo "${build_args[@]}"
 )
 
-BINARY_PATH="$TARGET_DIR/$TARGET_TRIPLE/$PROFILE/hunk-desktop.exe"
+BINARY_PATH="$TARGET_DIR/$TARGET_TRIPLE/$PROFILE/hunk_desktop.exe"
 if [[ ! -f "$BINARY_PATH" ]]; then
   echo "error: expected Windows binary was not produced at $BINARY_PATH" >&2
   exit 1

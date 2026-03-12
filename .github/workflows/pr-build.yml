@@ -1,4 +1,4 @@
-name: PR Build
+name: CI
 
 on:
   pull_request:
@@ -8,16 +8,16 @@ on:
       - synchronize
       - ready_for_review
     paths:
-      - ".github/workflows/pr-build.yml"
+      - ".github/workflows/**"
       - ".cargo/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - "justfile"
       - "crates/**"
-      - "scripts/build_linux.sh"
-      - "scripts/build_windows.sh"
-      - "scripts/resolve_cargo_target_dir.sh"
+      - "scripts/**"
+      - "assets/icons/**"
+      - "README.md"
 
 permissions:
   contents: read
