@@ -203,6 +203,7 @@ impl DiffViewer {
         is_dark: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.helix_files_editor.borrow_mut().sync_theme(is_dark);
         let view = cx.entity();
         let helix_status = self.helix_files_editor.borrow().status_snapshot();
         let is_editor_focused = self.files_editor_focus_handle.is_focused(window);

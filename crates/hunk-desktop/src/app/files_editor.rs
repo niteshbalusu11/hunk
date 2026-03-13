@@ -1,5 +1,7 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::env;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
@@ -8,8 +10,6 @@ use anyhow::{Context as _, Result};
 use arc_swap::{ArcSwap, access::Map};
 use gpui::*;
 use helix_core::coords_at_pos;
-use helix_core::syntax::{HighlightEvent, Highlighter};
-use helix_core::textobject::{TextObject, textobject_word};
 use helix_core::{Range, Selection, movement::Direction};
 use helix_term::commands;
 use helix_term::compositor::{Component, Compositor, Context as CompositorContext, EventResult};
@@ -18,7 +18,7 @@ use helix_term::job::Jobs;
 use helix_term::keymap::Keymaps;
 use helix_term::ui::EditorView;
 use helix_view::editor::Action;
-use helix_view::graphics::{Color, Rect, Style as HelixStyle};
+use helix_view::graphics::Rect;
 use helix_view::handlers::completion::{CompletionEvent, CompletionHandler};
 use helix_view::handlers::lsp::{
     DocumentColorsEvent, PullAllDocumentsDiagnosticsEvent, PullDiagnosticsEvent,
@@ -27,13 +27,23 @@ use helix_view::handlers::word_index;
 use helix_view::handlers::{AutoSaveEvent, Handlers};
 use helix_view::input::{Event as HelixEvent, KeyEvent};
 use helix_view::keyboard::{KeyCode, KeyModifiers};
-use helix_view::{Document, DocumentId, Editor, Theme, ViewId, theme};
+use helix_view::{Document, DocumentId, Editor, ViewId, theme as helix_theme};
+use tracing::{debug, warn};
+mod highlight;
 mod paint;
+mod selection;
+mod theme;
 
+use self::highlight::syntax_runs;
 use self::paint::{
     clamp_to_bounds, cursor_bounds, mouse_text_position, paint_current_line_background,
     paint_line_numbers, paint_selection_backgrounds, palette_text_width,
 };
+use self::selection::{line_selection_range, word_selection_range};
+use self::theme::load_hunk_helix_theme;
+
+const HELIX_GIT_REV_PREFIX: &str = "78b999f";
+
 pub(crate) type SharedHelixFilesEditor = Rc<RefCell<HelixFilesEditor>>;
 
 pub(crate) struct HelixFilesEditor {
@@ -54,6 +64,8 @@ struct HelixRuntime {
     compositor: Compositor,
     view: EditorView,
     jobs: Jobs,
+    theme_loader: Arc<helix_theme::Loader>,
+    is_dark_theme: bool,
 }
 
 #[derive(Clone)]
@@ -109,15 +121,6 @@ struct LineNumberPaintParams {
 }
 
 struct RopeWrapper<'a>(helix_core::ropey::RopeSlice<'a>);
-
-struct SyntaxStyleIter<'h, 'r, 't> {
-    inner: Option<Highlighter<'h>>,
-    text: helix_core::ropey::RopeSlice<'r>,
-    pos: usize,
-    theme: &'t Theme,
-    text_style: HelixStyle,
-    style: HelixStyle,
-}
 
 impl HelixFilesEditor {
     pub(crate) fn new() -> Self {
@@ -271,6 +274,12 @@ impl HelixFilesEditor {
         };
         commands::scroll(&mut ctx, line_count, direction, false);
     }
+    pub(crate) fn sync_theme(&mut self, is_dark: bool) {
+        let Some(runtime) = self.runtime.as_mut() else {
+            return;
+        };
+        runtime.sync_theme(is_dark);
+    }
     pub(crate) fn handle_mouse_down(
         &mut self,
         position: Point<Pixels>,
@@ -344,38 +353,6 @@ impl HelixFilesEditor {
     }
 }
 
-fn word_selection_range(text: helix_core::ropey::RopeSlice<'_>, pos: usize) -> Range {
-    textobject_word(text, Range::point(pos), TextObject::Inside, 1, false)
-}
-
-fn line_selection_range(
-    text: helix_core::ropey::RopeSlice<'_>,
-    current: &Range,
-    pos: usize,
-    extend: bool,
-) -> Range {
-    let target_line = text.char_to_line(pos.min(text.len_chars()));
-    let target_start = text.line_to_char(target_line);
-    let target_end = line_end_char(text, target_line);
-    if !extend {
-        return Range::new(target_start, target_end);
-    }
-
-    let anchor_line = text.char_to_line(current.anchor.min(text.len_chars()));
-    let anchor_start = text.line_to_char(anchor_line);
-    let anchor_end = line_end_char(text, anchor_line);
-    if target_line >= anchor_line {
-        Range::new(anchor_start, target_end)
-    } else {
-        Range::new(anchor_end, target_start)
-    }
-}
-
-fn line_end_char(text: helix_core::ropey::RopeSlice<'_>, line: usize) -> usize {
-    let next_line = (line + 1).min(text.len_lines());
-    text.line_to_char(next_line).min(text.len_chars())
-}
-
 impl HelixRuntime {
     fn new() -> Result<Self> {
         ensure_helix_loader_initialized();
@@ -386,12 +363,9 @@ impl HelixRuntime {
 
         let mut theme_parent_dirs = vec![helix_loader::config_dir()];
         theme_parent_dirs.extend(helix_loader::runtime_dirs().iter().cloned());
-        let theme_loader = Arc::new(theme::Loader::new(&theme_parent_dirs));
-        let theme = config
-            .theme
-            .as_ref()
-            .and_then(|theme_config| theme_loader.load(theme_config.choose(None)).ok())
-            .unwrap_or_else(|| theme_loader.default_theme(true));
+        let theme_loader = Arc::new(helix_theme::Loader::new(&theme_parent_dirs));
+        let is_dark_theme = true;
+        let theme = load_hunk_helix_theme(&theme_loader, is_dark_theme);
 
         let lang_loader = helix_core::config::user_lang_loader()
             .unwrap_or_else(|_| helix_core::config::default_lang_loader());
@@ -446,7 +420,18 @@ impl HelixRuntime {
             compositor: Compositor::new(area),
             view: EditorView::new(Keymaps::new(keys)),
             jobs: Jobs::new(),
+            theme_loader,
+            is_dark_theme,
         })
+    }
+
+    fn sync_theme(&mut self, is_dark: bool) {
+        if self.is_dark_theme == is_dark {
+            return;
+        }
+        self.editor
+            .set_theme(load_hunk_helix_theme(&self.theme_loader, is_dark));
+        self.is_dark_theme = is_dark;
     }
 
     fn current_view_id(&self) -> Option<ViewId> {
@@ -756,78 +741,6 @@ impl<'a> From<RopeWrapper<'a>> for SharedString {
     }
 }
 
-impl<'h, 'r, 't> SyntaxStyleIter<'h, 'r, 't> {
-    fn new(
-        inner: Option<Highlighter<'h>>,
-        text: helix_core::ropey::RopeSlice<'r>,
-        theme: &'t Theme,
-        text_style: HelixStyle,
-    ) -> Self {
-        let mut highlighter = Self {
-            inner,
-            text,
-            pos: 0,
-            theme,
-            text_style,
-            style: text_style,
-        };
-        highlighter.update_pos();
-        highlighter
-    }
-
-    fn update_pos(&mut self) {
-        self.pos = self
-            .inner
-            .as_ref()
-            .map(|highlighter| {
-                let next_byte_idx = highlighter.next_event_offset();
-                if next_byte_idx == u32::MAX {
-                    usize::MAX
-                } else {
-                    let bounded = (next_byte_idx as usize).min(self.text.len_bytes());
-                    let mut char_idx = self.text.byte_to_char(bounded);
-                    while char_idx < self.text.len_chars()
-                        && self.text.char_to_byte(char_idx) < bounded
-                    {
-                        char_idx += 1;
-                    }
-                    char_idx
-                }
-            })
-            .unwrap_or(usize::MAX);
-    }
-
-    fn advance(&mut self) {
-        let Some(highlighter) = self.inner.as_mut() else {
-            return;
-        };
-
-        let (event, highlights) = highlighter.advance();
-        let base = match event {
-            HighlightEvent::Refresh => self.text_style,
-            HighlightEvent::Push => self.style,
-        };
-        self.style = highlights.fold(base, |acc, highlight| {
-            acc.patch(self.theme.highlight(highlight))
-        });
-        self.update_pos();
-    }
-}
-
-impl Iterator for SyntaxStyleIter<'_, '_, '_> {
-    type Item = (HelixStyle, usize, usize);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.pos == usize::MAX {
-            return None;
-        }
-
-        let start = self.pos;
-        self.advance();
-        Some((self.style, start, self.pos))
-    }
-}
-
 pub(crate) fn scroll_direction_and_count(
     event: &ScrollWheelEvent,
     line_height: Pixels,
@@ -845,88 +758,6 @@ pub(crate) fn scroll_direction_and_count(
         },
         ((delta.y.abs() / line_height).ceil() as usize).max(1),
     ))
-}
-
-fn syntax_runs(
-    editor: &Editor,
-    doc: &Document,
-    anchor: usize,
-    lines: u16,
-    end_char: usize,
-    default_foreground: Hsla,
-    font: Font,
-) -> Vec<TextRun> {
-    let loader = editor.syn_loader.load();
-    let highlighter = EditorView::doc_syntax_highlighter(doc, anchor, lines, &loader);
-    let base_text_style = editor.theme.get("ui.text");
-    let default_foreground = base_text_style
-        .fg
-        .and_then(color_to_hsla)
-        .unwrap_or(default_foreground);
-    let mut styles = SyntaxStyleIter::new(
-        highlighter,
-        doc.text().slice(..),
-        &editor.theme,
-        base_text_style,
-    );
-    let mut current_span = styles.next().unwrap_or((base_text_style, 0, usize::MAX));
-    let mut position = anchor;
-    let mut runs = Vec::new();
-
-    loop {
-        let (style, span_start, span_end) = current_span;
-        let effective_style = if position < span_start {
-            HelixStyle::default()
-        } else {
-            style
-        };
-        let fg = effective_style
-            .fg
-            .and_then(color_to_hsla)
-            .unwrap_or(default_foreground);
-        let bg = effective_style.bg.and_then(color_to_hsla);
-        let len = if position < span_start {
-            span_start.saturating_sub(position)
-        } else {
-            span_end.saturating_sub(position)
-        }
-        .min(end_char.saturating_sub(position));
-
-        if len == 0 {
-            break;
-        }
-
-        runs.push(TextRun {
-            len,
-            font: font.clone(),
-            color: fg,
-            background_color: bg,
-            underline: None,
-            strikethrough: None,
-        });
-        position += len;
-        if position >= end_char {
-            break;
-        }
-        if position >= span_end {
-            current_span = styles
-                .next()
-                .unwrap_or((HelixStyle::default(), position, usize::MAX));
-        }
-    }
-
-    if runs.is_empty() {
-        runs.push(TextRun {
-            len: end_char.saturating_sub(anchor),
-            font,
-            color: default_foreground,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        });
-    }
-
-    runs
 }
 
 fn translate_key(keystroke: &Keystroke) -> Option<KeyEvent> {
@@ -965,83 +796,18 @@ fn translate_key(keystroke: &Keystroke) -> Option<KeyEvent> {
     Some(KeyEvent { code, modifiers })
 }
 
-fn color_to_hsla(color: Color) -> Option<Hsla> {
-    match color {
-        Color::Reset => None,
-        Color::Black => Some(black()),
-        Color::Red => Some(red()),
-        Color::Green => Some(green()),
-        Color::Yellow => Some(yellow()),
-        Color::Blue => Some(blue()),
-        Color::Magenta => Some(hsla(0.82, 0.72, 0.68, 1.0)),
-        Color::Cyan => Some(hsla(0.52, 0.70, 0.62, 1.0)),
-        Color::Gray => Some(hsla(0.0, 0.0, 0.55, 1.0)),
-        Color::LightRed => Some(hsla(0.0, 0.85, 0.68, 1.0)),
-        Color::LightGreen => Some(hsla(0.34, 0.80, 0.62, 1.0)),
-        Color::LightYellow => Some(hsla(0.15, 0.90, 0.67, 1.0)),
-        Color::LightBlue => Some(hsla(0.60, 0.85, 0.70, 1.0)),
-        Color::LightMagenta => Some(hsla(0.82, 0.80, 0.75, 1.0)),
-        Color::LightCyan => Some(hsla(0.52, 0.82, 0.72, 1.0)),
-        Color::LightGray => Some(hsla(0.0, 0.0, 0.78, 1.0)),
-        Color::White => Some(white()),
-        Color::Rgb(r, g, b) => {
-            Some(rgb(((r as u32) << 16) | ((g as u32) << 8) | (b as u32)).into())
-        }
-        Color::Indexed(index) => indexed_color_to_hsla(index),
-    }
-}
-
-fn indexed_color_to_hsla(index: u8) -> Option<Hsla> {
-    let (r, g, b) = match index {
-        0 => (0, 0, 0),
-        1 => (205, 49, 49),
-        2 => (13, 188, 121),
-        3 => (229, 229, 16),
-        4 => (36, 114, 200),
-        5 => (188, 63, 188),
-        6 => (17, 168, 205),
-        7 => (229, 229, 229),
-        8 => (102, 102, 102),
-        9 => (241, 76, 76),
-        10 => (35, 209, 139),
-        11 => (245, 245, 67),
-        12 => (59, 142, 234),
-        13 => (214, 112, 214),
-        14 => (41, 184, 219),
-        15 => (255, 255, 255),
-        16..=231 => {
-            let cube = index - 16;
-            let red = cube / 36;
-            let green = (cube % 36) / 6;
-            let blue = cube % 6;
-            (
-                xterm_cube_component(red),
-                xterm_cube_component(green),
-                xterm_cube_component(blue),
-            )
-        }
-        232..=255 => {
-            let gray = 8 + (index - 232) * 10;
-            (gray, gray, gray)
-        }
-    };
-    Some(rgb(((r as u32) << 16) | ((g as u32) << 8) | (b as u32)).into())
-}
-
-fn xterm_cube_component(value: u8) -> u8 {
-    match value {
-        0 => 0,
-        1 => 95,
-        2 => 135,
-        3 => 175,
-        4 => 215,
-        _ => 255,
-    }
-}
-
 fn ensure_helix_loader_initialized() {
     static HELIX_LOADER_INIT: OnceLock<()> = OnceLock::new();
     HELIX_LOADER_INIT.get_or_init(|| {
+        if env::var_os("HELIX_RUNTIME").is_none() {
+            if let Some(runtime_dir) = discover_helix_runtime_dir() {
+                debug!("setting HELIX_RUNTIME to {}", runtime_dir.to_string_lossy());
+                // This runs once during startup before background Helix work is initialized.
+                unsafe { env::set_var("HELIX_RUNTIME", runtime_dir) };
+            } else {
+                warn!("failed to discover Helix runtime directory");
+            }
+        }
         helix_loader::initialize_config_file(None);
         helix_loader::initialize_log_file(None);
     });
@@ -1064,4 +830,50 @@ fn with_tokio_runtime<T>(f: impl FnOnce() -> T) -> T {
     let result = f();
     drop(guard);
     result
+}
+
+fn discover_helix_runtime_dir() -> Option<OsString> {
+    let workspace_runtime = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(|dir| dir.join("runtime"));
+    if let Some(runtime) = workspace_runtime.filter(|path| path.is_dir()) {
+        return Some(runtime.into_os_string());
+    }
+
+    let cargo_home = default_cargo_home()?;
+    let checkouts_dir = cargo_home.join("git").join("checkouts");
+    let entries = std::fs::read_dir(checkouts_dir).ok()?;
+    for entry in entries.flatten() {
+        let repo_dir = entry.path();
+        if !repo_dir.is_dir() {
+            continue;
+        }
+        if !repo_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("helix-"))
+        {
+            continue;
+        }
+
+        let preferred_runtime = repo_dir.join(HELIX_GIT_REV_PREFIX).join("runtime");
+        if preferred_runtime.is_dir() {
+            return Some(preferred_runtime.into_os_string());
+        }
+
+        let revisions = std::fs::read_dir(&repo_dir).ok()?;
+        for revision in revisions.flatten() {
+            let runtime = revision.path().join("runtime");
+            if runtime.is_dir() {
+                return Some(runtime.into_os_string());
+            }
+        }
+    }
+    None
+}
+
+fn default_cargo_home() -> Option<PathBuf> {
+    env::var_os("CARGO_HOME")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".cargo")))
 }
