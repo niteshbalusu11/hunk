@@ -26,7 +26,7 @@ use gpui_component::{
     scroll::ScrollableElement,
     select::{SelectEvent, SelectState},
     v_flex,
-}
+};
 use gpui_component_assets::Assets;
 use tracing::error;
 

@@ -73,12 +73,12 @@ Implication:
 - initial `didOpen` behavior
 - progress/status surfaces
 
-That means a Helix-backed Files editor can support LSP. But LSP should not be phase 1.
+That means a Helix-backed Files editor can support LSP. For V1, though, LSP is intentionally deferred.
 
 Implication:
 
 - syntax-highlighted editing is phase 1
-- diagnostics and basic LSP UI are phase 2
+- diagnostics and basic LSP UI are future work after V1
 - completions, hover, code actions, and deeper IDE behavior are later phases
 
 ## Architectural Direction
@@ -215,10 +215,13 @@ Still pending:
 
 - [x] richer selection parity beyond the current primary-selection rendering
 - [x] view-state persistence across file switches
+- [ ] final cleanup after the initial Helix rollout
+
+Deferred until after V1:
+
 - [ ] real LSP enablement
 - [ ] diagnostics rendering
 - [ ] completion / hover / code actions
-- [ ] final cleanup after the initial Helix rollout
 
 ### Phase 0: Spike and dependency validation
 
