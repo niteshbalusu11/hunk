@@ -2,7 +2,7 @@
 
 Date: 2026-03-13
 Owner: Codex
-Status: Proposed
+Status: In Progress
 Scope: Replace the current Files-tab editor pane with a Helix-backed editor implementation while keeping the existing file tree, Files workspace shell, and Hunk app architecture intact.
 
 ## Decision
@@ -194,6 +194,33 @@ The Files controller remains the caller for:
 
 ## Phase Plan
 
+## Implementation Status
+
+Completed in the first implementation slice:
+
+- [x] Added Helix dependencies to `hunk-desktop`
+- [x] Moved Hunk to a current upstream Helix revision instead of the old `helix-gpui` pin
+- [x] Added a dedicated Files-tab Helix editor subsystem
+- [x] Kept Hunk's existing Files tree, file selection flow, and save/reload authority
+- [x] Wired file open/load into the Helix-backed pane
+- [x] Wired current buffer text and dirty tracking into Hunk's save flow
+- [x] Added Helix-backed rendering for syntax-colored text, line numbers, cursor, focus, and wheel scrolling
+- [x] Kept the existing Files header and save/reload UI
+- [x] Preserved markdown preview mode by continuing to use Hunk's existing preview flow
+- [x] Kept the old `InputState` Files editor as a fallback path if Helix fails to open
+
+Still pending:
+
+- [ ] mouse cursor placement and selection handling inside the Helix pane
+- [ ] selection rendering parity
+- [ ] view-state persistence across file switches
+- [ ] statusline / richer editor state UI
+- [ ] real LSP enablement
+- [ ] diagnostics rendering
+- [ ] completion / hover / code actions
+- [ ] removing the old Files-mode `InputState` implementation
+- [ ] final cleanup after the coexistence phase
+
 ### Phase 0: Spike and dependency validation
 
 Goals:
@@ -204,10 +231,10 @@ Goals:
 
 Tasks:
 
-- add a throwaway Helix-backed editor pane prototype behind a local feature branch
-- validate startup/runtime behavior for the editor entity inside Files mode
-- confirm theme/color mapping strategy from Helix theme styles into Hunk theme colors
-- document exact new dependencies in `Cargo.toml`
+- [x] add a throwaway Helix-backed editor pane prototype behind a local feature branch
+- [x] validate startup/runtime behavior for the editor entity inside Files mode
+- [x] confirm theme/color mapping strategy from Helix theme styles into Hunk theme colors
+- [x] document exact new dependencies in `Cargo.toml`
 
 Exit criteria:
 
@@ -222,18 +249,18 @@ Goals:
 
 Tasks:
 
-- add a Files-editor-specific GPUI entity/view for Helix rendering
-- open the selected file using Hunk's existing file-loading path
-- initialize Helix editor state for the opened document
-- paint text, cursor, selection, line numbers, and gutter
-- keep current file header and save/reload buttons
+- [x] add a Files-editor-specific GPUI entity/view for Helix rendering
+- [x] open the selected file using Hunk's existing file-loading path
+- [x] initialize Helix editor state for the opened document
+- [ ] paint text, cursor, selection, line numbers, and gutter
+- [x] keep current file header and save/reload buttons
 
 Exit criteria:
 
-- Files tab can open and display text files using Helix-backed rendering
-- syntax highlighting works
-- line numbers render
-- focus stays inside the editor when expected
+- [x] Files tab can open and display text files using Helix-backed rendering
+- [x] syntax highlighting works
+- [x] line numbers render
+- [x] focus stays inside the editor when expected
 
 ### Phase 2: Editing parity and dirty-state integration
 
@@ -244,16 +271,16 @@ Goals:
 
 Tasks:
 
-- wire GPUI key events into Helix key/input handling
-- support insert/delete/newline/tab/navigation/selection
-- expose current buffer text to Hunk save flow
-- replace `editor_input_state` dirty detection with editor-pane dirty detection
-- keep existing save action entry points but back them with Helix buffer text
+- [x] wire GPUI key events into Helix key/input handling
+- [ ] support insert/delete/newline/tab/navigation/selection
+- [x] expose current buffer text to Hunk save flow
+- [x] replace `editor_input_state` dirty detection with editor-pane dirty detection
+- [x] keep existing save action entry points but back them with Helix buffer text
 
 Exit criteria:
 
-- edit, save, reload, and file switching work correctly
-- unsaved-change guardrails still block destructive file switches
+- [x] edit, save, reload, and file switching work correctly
+- [x] unsaved-change guardrails still block destructive file switches
 
 ### Phase 3: View-state persistence and Files UX parity
 
@@ -263,15 +290,15 @@ Goals:
 
 Tasks:
 
-- preserve cursor and scroll position when switching files
-- preserve current markdown-preview behavior decision
-- decide whether markdown preview remains a separate right-pane mode or is temporarily removed
-- add statusline or inline state for mode, path, dirty state, and cursor position if useful
+- [ ] preserve cursor and scroll position when switching files
+- [x] preserve current markdown-preview behavior decision
+- [x] decide whether markdown preview remains a separate right-pane mode or is temporarily removed
+- [ ] add statusline or inline state for mode, path, dirty state, and cursor position if useful
 
 Exit criteria:
 
-- common Files-tab flows feel stable and predictable
-- there is no obvious regression in switching and reopening files
+- [ ] common Files-tab flows feel stable and predictable
+- [ ] there is no obvious regression in switching and reopening files
 
 ### Phase 4: LSP and diagnostics
 
@@ -281,15 +308,15 @@ Goals:
 
 Tasks:
 
-- port the minimal Helix job/event loop needed for editor async work
-- handle diagnostics
-- surface diagnostics in gutter and/or inline overlay
-- surface status/progress without introducing noisy app-wide overlays
+- [ ] port the minimal Helix job/event loop needed for editor async work
+- [ ] handle diagnostics
+- [ ] surface diagnostics in gutter and/or inline overlay
+- [ ] surface status/progress without introducing noisy app-wide overlays
 
 Exit criteria:
 
-- diagnostics appear for supported languages
-- editor remains responsive while background jobs run
+- [ ] diagnostics appear for supported languages
+- [ ] editor remains responsive while background jobs run
 
 ### Phase 5: Hardening and cleanup
 
@@ -300,15 +327,15 @@ Goals:
 
 Tasks:
 
-- delete Files-mode dependence on `editor_input_state`
-- remove obsolete Files editor code paths in controller/render modules
-- keep markdown preview only if it still fits the product direction
-- document the final Files editor architecture
+- [ ] delete Files-mode dependence on `editor_input_state`
+- [ ] remove obsolete Files editor code paths in controller/render modules
+- [ ] keep markdown preview only if it still fits the product direction
+- [ ] document the final Files editor architecture
 
 Exit criteria:
 
-- there is one editor implementation for Files mode
-- controller code is simpler than the temporary coexistence phase
+- [ ] there is one editor implementation for Files mode
+- [ ] controller code is simpler than the temporary coexistence phase
 
 ## Explicit Non-Goals For First Release
 

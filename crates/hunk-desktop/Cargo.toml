@@ -43,10 +43,10 @@ gpui-component = { git = "https://github.com/niteshbalusu11/gpui-component", rev
   "tree-sitter-languages",
 ] }
 gpui-component-assets = { git = "https://github.com/niteshbalusu11/gpui-component", rev = "4640591715ae6732b6b2075f040672eeabdb5c87" }
-helix-core = { git = "https://github.com/helix-editor/helix", tag = "25.07.1" }
-helix-loader = { git = "https://github.com/helix-editor/helix", tag = "25.07.1" }
-helix-term = { git = "https://github.com/helix-editor/helix", tag = "25.07.1" }
-helix-view = { git = "https://github.com/helix-editor/helix", tag = "25.07.1" }
+helix-core = { git = "https://github.com/helix-editor/helix", rev = "78b999f11eb67de3ed4cd9946ad71fc00b8737c7" }
+helix-loader = { git = "https://github.com/helix-editor/helix", rev = "78b999f11eb67de3ed4cd9946ad71fc00b8737c7" }
+helix-term = { git = "https://github.com/helix-editor/helix", rev = "78b999f11eb67de3ed4cd9946ad71fc00b8737c7" }
+helix-view = { git = "https://github.com/helix-editor/helix", rev = "78b999f11eb67de3ed4cd9946ad71fc00b8737c7" }
 notify = "8.2.0"
 syntect = "5.3"
 toml = "0.9"

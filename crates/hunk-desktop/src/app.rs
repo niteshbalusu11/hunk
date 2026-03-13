@@ -139,6 +139,7 @@ mod ai_runtime;
 mod controller;
 mod data;
 mod data_segments;
+mod files_editor;
 mod highlight;
 mod render;
 mod theme;
@@ -751,6 +752,7 @@ struct DiffViewer {
     in_app_menu_bar: Option<Entity<AppMenuBar>>,
     focus_handle: FocusHandle,
     repo_tree_focus_handle: FocusHandle,
+    files_editor_focus_handle: FocusHandle,
     selection_anchor_row: Option<usize>,
     selection_head_row: Option<usize>,
     drag_selecting_rows: bool,
@@ -772,6 +774,7 @@ struct DiffViewer {
     repo_tree: RepoTreeState,
     repo_tree_inline_edit: Option<RepoTreeInlineEditState>,
     repo_tree_context_menu: Option<RepoTreeContextMenuState>,
+    helix_files_editor: files_editor::SharedHelixFilesEditor,
     editor_input_state: Entity<InputState>,
     editor_path: Option<String>,
     editor_loading: bool,

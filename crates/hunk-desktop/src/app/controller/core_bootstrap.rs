@@ -345,6 +345,7 @@ impl DiffViewer {
                 .soft_wrap(false)
                 .placeholder("Select a file from Files tree to edit it.")
         });
+        let helix_files_editor = Rc::new(RefCell::new(crate::app::files_editor::HelixFilesEditor::new()));
         let comment_input_state = cx.new(|cx| {
             InputState::new(window, cx)
                 .multi_line(true)
@@ -546,6 +547,7 @@ impl DiffViewer {
             in_app_menu_bar,
             focus_handle: cx.focus_handle(),
             repo_tree_focus_handle: cx.focus_handle(),
+            files_editor_focus_handle: cx.focus_handle(),
             selection_anchor_row: None,
             selection_head_row: None,
             drag_selecting_rows: false,
@@ -567,6 +569,7 @@ impl DiffViewer {
             repo_tree: RepoTreeState::new(),
             repo_tree_inline_edit: None,
             repo_tree_context_menu: None,
+            helix_files_editor,
             editor_input_state,
             editor_path: None,
             editor_loading: false,

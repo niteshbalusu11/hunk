@@ -2,6 +2,7 @@ use anyhow::Context as _;
 use futures::StreamExt;
 use futures::channel::{mpsc, oneshot};
 use notify::Watcher;
+use std::cell::RefCell;
 use std::rc::Rc;
 use tracing::{debug, error, warn};
 

@@ -1,5 +1,7 @@
+use gpui::{Pixels, TextStyle, relative};
+
 impl DiffViewer {
-    fn render_file_editor(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn render_file_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if self.editor_loading {
             return v_flex()
                 .size_full()
@@ -49,6 +51,12 @@ impl DiffViewer {
         let editor_font_size = cx.theme().mono_font_size * 1.2;
         let is_markdown_file = is_markdown_path(file_path.as_str());
         let preview_active = is_markdown_file && self.editor_markdown_preview;
+        let helix_ready = self.helix_files_editor_ready();
+        let helix_error = self
+            .helix_files_editor
+            .borrow()
+            .last_error()
+            .map(ToOwned::to_owned);
         let status_color = if self.editor_save_loading {
             cx.theme().warning
         } else if self.editor_dirty {
@@ -93,6 +101,14 @@ impl DiffViewer {
                                     .text_color(cx.theme().muted_foreground)
                                     .child(file_path),
                             )
+                            .when_some(helix_error.clone().filter(|_| !helix_ready), |this, error| {
+                                this.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().warning)
+                                        .child(format!("Helix fallback: {error}")),
+                                )
+                            })
                             .child(
                                 div()
                                     .text_xs()
@@ -184,21 +200,135 @@ impl DiffViewer {
             .child(if preview_active {
                 self.render_markdown_preview(is_dark, cx)
             } else {
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .p_2()
-                    .child(
-                        Input::new(&self.editor_input_state)
-                            .h_full()
-                            .text_size(editor_font_size)
-                            .disabled(self.editor_loading || self.editor_save_loading)
-                            .rounded(px(8.0))
-                            .border_1()
-                            .border_color(hunk_opacity(cx.theme().border, is_dark, 0.92, 0.78)),
-                    )
-                    .into_any_element()
+                self.render_file_editor_surface(window, editor_font_size, is_dark, helix_ready, cx)
             })
+            .into_any_element()
+    }
+
+    fn render_file_editor_surface(
+        &mut self,
+        window: &mut Window,
+        editor_font_size: Pixels,
+        is_dark: bool,
+        helix_ready: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if helix_ready {
+            let view = cx.entity();
+            let text_style = TextStyle {
+                color: cx.theme().foreground,
+                font_family: cx.theme().mono_font_family.clone(),
+                font_size: editor_font_size.into(),
+                line_height: relative(1.45),
+                ..Default::default()
+            };
+            let mut current_line_background = hunk_opacity(
+                cx.theme().secondary_active,
+                is_dark,
+                0.18,
+                0.28,
+            );
+            current_line_background.a = current_line_background.a.max(0.12);
+            let helix_element = crate::app::files_editor::HelixFilesEditorElement::new(
+                self.helix_files_editor.clone(),
+                self.files_editor_focus_handle.is_focused(window),
+                text_style,
+                crate::app::files_editor::HelixFilesEditorPalette {
+                    background: cx.theme().background,
+                    line_number: cx.theme().muted_foreground,
+                    current_line_number: cx.theme().foreground,
+                    border: hunk_opacity(cx.theme().border, is_dark, 0.92, 0.78),
+                    default_foreground: cx.theme().foreground,
+                    current_line_background,
+                    cursor: cx.theme().primary,
+                },
+            );
+
+            return div()
+                .flex_1()
+                .min_h_0()
+                .p_2()
+                .track_focus(&self.files_editor_focus_handle)
+                .on_mouse_down(MouseButton::Left, {
+                    let view = view.clone();
+                    move |_, window, cx| {
+                        view.update(cx, |this, cx| {
+                            this.files_editor_focus_handle.focus(window, cx);
+                        });
+                    }
+                })
+                .on_key_down({
+                    let view = view.clone();
+                    move |event, window, cx| {
+                        let handled = view.update(cx, |this, cx| {
+                            if this.editor_markdown_preview
+                                || !this.files_editor_focus_handle.is_focused(window)
+                            {
+                                return false;
+                            }
+
+                            if this
+                                .helix_files_editor
+                                .borrow_mut()
+                                .handle_keystroke(&event.keystroke)
+                            {
+                                this.sync_editor_dirty_from_input(cx);
+                                cx.notify();
+                                return true;
+                            }
+                            false
+                        });
+                        if handled {
+                            cx.stop_propagation();
+                        }
+                    }
+                })
+                .on_scroll_wheel({
+                    let view = view.clone();
+                    move |event, _, cx| {
+                        let handled = view.update(cx, |this, cx| {
+                            let line_height = (editor_font_size * 1.45).max(px(14.0));
+                            if let Some((direction, line_count)) =
+                                crate::app::files_editor::scroll_direction_and_count(event, line_height)
+                            {
+                                this.helix_files_editor
+                                    .borrow_mut()
+                                    .scroll_lines(line_count, direction);
+                                this.sync_editor_dirty_from_input(cx);
+                                cx.notify();
+                                return true;
+                            }
+                            false
+                        });
+                        if handled {
+                            cx.stop_propagation();
+                        }
+                    }
+                })
+                .child(
+                    div()
+                        .h_full()
+                        .rounded(px(8.0))
+                        .border_1()
+                        .border_color(hunk_opacity(cx.theme().border, is_dark, 0.92, 0.78))
+                        .child(helix_element),
+                )
+                .into_any_element();
+        }
+
+        div()
+            .flex_1()
+            .min_h_0()
+            .p_2()
+            .child(
+                Input::new(&self.editor_input_state)
+                    .h_full()
+                    .text_size(editor_font_size)
+                    .disabled(self.editor_loading || self.editor_save_loading)
+                    .rounded(px(8.0))
+                    .border_1()
+                    .border_color(hunk_opacity(cx.theme().border, is_dark, 0.92, 0.78)),
+            )
             .into_any_element()
     }
 
