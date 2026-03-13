@@ -303,7 +303,7 @@ Exit criteria:
 
 Goals:
 
-- enable real language-server support inside the Files editor pane
+- keep real language-server support out of V1 and stage it as future work after the core Files editor ships cleanly
 
 Tasks:
 

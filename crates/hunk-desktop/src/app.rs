@@ -26,7 +26,7 @@ use gpui_component::{
     scroll::ScrollableElement,
     select::{SelectEvent, SelectState},
     v_flex,
-};
+}
 use gpui_component_assets::Assets;
 use tracing::error;
 
@@ -794,6 +794,7 @@ struct DiffViewer {
 
 impl Drop for DiffViewer {
     fn drop(&mut self) {
+        self.helix_files_editor.borrow_mut().shutdown();
         self.shutdown_ai_worker_blocking();
     }
 }

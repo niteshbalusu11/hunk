@@ -21,9 +21,6 @@ use helix_term::ui::EditorView;
 use helix_view::editor::Action;
 use helix_view::graphics::Rect;
 use helix_view::handlers::completion::{CompletionEvent, CompletionHandler};
-use helix_view::handlers::lsp::{
-    DocumentColorsEvent, PullAllDocumentsDiagnosticsEvent, PullDiagnosticsEvent,
-};
 use helix_view::handlers::word_index;
 use helix_view::handlers::{AutoSaveEvent, Handlers};
 use helix_view::input::{Event as HelixEvent, KeyEvent};
@@ -167,6 +164,10 @@ impl HelixFilesEditor {
         self.capture_active_view_state();
         self.active_path = None;
         self.view_state_by_path.clear();
+    }
+    pub(crate) fn shutdown(&mut self) {
+        self.clear();
+        self.runtime = None;
     }
     pub(crate) fn is_dirty(&self) -> bool {
         if self.active_path.is_none() {
@@ -454,12 +455,10 @@ impl HelixRuntime {
         let (completions, _completions_rx) = tokio::sync::mpsc::channel::<CompletionEvent>(1);
         let (signature_hints, _signature_hints_rx) = tokio::sync::mpsc::channel(1);
         let (auto_save, _auto_save_rx) = tokio::sync::mpsc::channel::<AutoSaveEvent>(1);
-        let (document_colors, _document_colors_rx) =
-            tokio::sync::mpsc::channel::<DocumentColorsEvent>(1);
-        let (pull_diagnostics, _pull_diagnostics_rx) =
-            tokio::sync::mpsc::channel::<PullDiagnosticsEvent>(1);
+        let (document_colors, _document_colors_rx) = tokio::sync::mpsc::channel(1);
+        let (pull_diagnostics, _pull_diagnostics_rx) = tokio::sync::mpsc::channel(1);
         let (pull_all_documents_diagnostics, _pull_all_documents_diagnostics_rx) =
-            tokio::sync::mpsc::channel::<PullAllDocumentsDiagnosticsEvent>(1);
+            tokio::sync::mpsc::channel(1);
         let mut editor = with_tokio_runtime(|| {
             let handlers = Handlers {
                 completions: CompletionHandler::new(completions),
