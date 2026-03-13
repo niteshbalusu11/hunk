@@ -188,6 +188,43 @@ pub(super) fn cursor_bounds(
     }
 }
 
+pub(super) struct CursorPaintParams<'a> {
+    pub(super) document: &'a Document,
+    pub(super) view: &'a View,
+    pub(super) text: helix_core::ropey::RopeSlice<'a>,
+    pub(super) content_origin: Point<Pixels>,
+    pub(super) cell_width: Pixels,
+    pub(super) line_height: Pixels,
+    pub(super) kind: CursorKind,
+    pub(super) color: Hsla,
+}
+
+pub(super) fn paint_cursors(window: &mut Window, params: CursorPaintParams<'_>) {
+    let selection = params.document.selection(params.view.id);
+    let primary_index = selection.primary_index();
+    for (index, range) in selection.ranges().iter().enumerate() {
+        let cursor = range.cursor(params.text);
+        let Some(position) = params
+            .view
+            .screen_coords_at_pos(params.document, params.text, cursor)
+        else {
+            continue;
+        };
+        let bounds = cursor_bounds(
+            point(
+                params.content_origin.x + (params.cell_width * position.col as f32),
+                params.content_origin.y + (params.line_height * position.row as f32),
+            ),
+            params.kind,
+            params.cell_width,
+            params.line_height,
+        );
+        let mut fill_color = params.color;
+        fill_color.a = if index == primary_index { 0.55 } else { 0.32 };
+        window.paint_quad(fill(bounds, fill_color));
+    }
+}
+
 pub(super) fn mouse_text_position(
     view: &View,
     doc: &Document,

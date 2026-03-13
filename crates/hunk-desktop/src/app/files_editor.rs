@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -27,6 +28,7 @@ use helix_view::handlers::word_index;
 use helix_view::handlers::{AutoSaveEvent, Handlers};
 use helix_view::input::{Event as HelixEvent, KeyEvent};
 use helix_view::keyboard::{KeyCode, KeyModifiers};
+use helix_view::view::ViewPosition;
 use helix_view::{Document, DocumentId, Editor, ViewId, theme as helix_theme};
 use tracing::{debug, warn};
 mod highlight;
@@ -36,8 +38,8 @@ mod theme;
 
 use self::highlight::syntax_runs;
 use self::paint::{
-    clamp_to_bounds, cursor_bounds, mouse_text_position, paint_current_line_background,
-    paint_line_numbers, paint_selection_backgrounds, palette_text_width,
+    CursorPaintParams, clamp_to_bounds, mouse_text_position, paint_current_line_background,
+    paint_cursors, paint_line_numbers, paint_selection_backgrounds, palette_text_width,
 };
 use self::selection::{line_selection_range, word_selection_range};
 use self::theme::load_hunk_helix_theme;
@@ -49,6 +51,7 @@ pub(crate) type SharedHelixFilesEditor = Rc<RefCell<HelixFilesEditor>>;
 pub(crate) struct HelixFilesEditor {
     runtime: Option<HelixRuntime>,
     active_path: Option<PathBuf>,
+    view_state_by_path: BTreeMap<PathBuf, HelixDocumentViewState>,
 }
 
 #[derive(Clone)]
@@ -66,6 +69,12 @@ struct HelixRuntime {
     jobs: Jobs,
     theme_loader: Arc<helix_theme::Loader>,
     is_dark_theme: bool,
+}
+
+#[derive(Clone)]
+struct HelixDocumentViewState {
+    selection: Selection,
+    view_offset: ViewPosition,
 }
 
 #[derive(Clone)]
@@ -127,6 +136,7 @@ impl HelixFilesEditor {
         Self {
             runtime: None,
             active_path: None,
+            view_state_by_path: BTreeMap::new(),
         }
     }
     pub(crate) fn open_path(&mut self, path: &Path) -> Result<()> {
@@ -136,6 +146,7 @@ impl HelixFilesEditor {
                 Err(err) => return Err(err),
             }
         }
+        self.capture_active_view_state();
         let runtime = self
             .runtime
             .as_mut()
@@ -149,10 +160,13 @@ impl HelixFilesEditor {
         open_result
             .with_context(|| format!("failed to open {} in Helix editor", path.display()))?;
         self.active_path = Some(path.to_path_buf());
+        self.restore_view_state(path);
         Ok(())
     }
     pub(crate) fn clear(&mut self) {
+        self.capture_active_view_state();
         self.active_path = None;
+        self.view_state_by_path.clear();
     }
     pub(crate) fn is_dirty(&self) -> bool {
         if self.active_path.is_none() {
@@ -285,6 +299,7 @@ impl HelixFilesEditor {
         position: Point<Pixels>,
         layout: &DocumentLayout,
         extend: bool,
+        add_cursor: bool,
         click_count: usize,
     ) -> bool {
         let Some((runtime, view_id, doc_id, pos)) = self.mouse_target(position, layout) else {
@@ -296,6 +311,12 @@ impl HelixFilesEditor {
             .document_mut(doc_id)
             .expect("current doc exists");
         let text = doc.text().slice(..);
+        if add_cursor {
+            let selection = doc.selection(view_id).clone();
+            doc.set_selection(view_id, selection.push(Range::point(pos)));
+            runtime.editor.ensure_cursor_in_view(view_id);
+            return true;
+        }
         let range = if layout.is_in_gutter(position) || click_count >= 3 {
             line_selection_range(text, &doc.selection(view_id).primary(), pos, extend)
         } else if click_count == 2 {
@@ -350,6 +371,58 @@ impl HelixFilesEditor {
         let view = runtime.editor.tree.get(view_id);
         let pos = mouse_text_position(view, doc, position, layout)?;
         Some((runtime, view_id, doc_id, pos))
+    }
+
+    fn capture_active_view_state(&mut self) {
+        let Some(path) = self.active_path.clone() else {
+            return;
+        };
+        let Some(runtime) = self.runtime.as_ref() else {
+            return;
+        };
+        let Some(view_id) = runtime.current_view_id() else {
+            return;
+        };
+        let Some(doc_id) = runtime.current_doc_id() else {
+            return;
+        };
+        let Some(document) = runtime.editor.document(doc_id) else {
+            return;
+        };
+        self.view_state_by_path.insert(
+            path,
+            HelixDocumentViewState {
+                selection: document.selection(view_id).clone(),
+                view_offset: document.view_offset(view_id),
+            },
+        );
+    }
+
+    fn restore_view_state(&mut self, path: &Path) {
+        let Some(saved_state) = self.view_state_by_path.get(path).cloned() else {
+            return;
+        };
+        let Some(runtime) = self.runtime.as_mut() else {
+            return;
+        };
+        let Some(view_id) = runtime.current_view_id() else {
+            return;
+        };
+        let Some(doc_id) = runtime.current_doc_id() else {
+            return;
+        };
+        let Some(document) = runtime.editor.document_mut(doc_id) else {
+            return;
+        };
+        let text = document.text().slice(..);
+        let selection = saved_state.selection.ensure_invariants(text);
+        let mut view_offset = saved_state.view_offset;
+        view_offset.anchor = view_offset.anchor.min(text.len_chars());
+        view_offset.vertical_offset = view_offset
+            .vertical_offset
+            .min(text.char_to_line(view_offset.anchor));
+        document.set_selection(view_id, selection);
+        document.set_view_offset(view_id, view_offset);
     }
 }
 
@@ -570,6 +643,7 @@ impl Element for HelixFilesEditorElement {
                     event.position,
                     &mouse_down_layout,
                     event.modifiers.shift,
+                    event.modifiers.alt,
                     event.click_count,
                 )
             {
@@ -705,26 +779,24 @@ impl Element for HelixFilesEditorElement {
 
             if self.is_focused {
                 let (_, cursor_kind) = runtime.editor.cursor();
-                let primary_idx = document.selection(view_id).primary().cursor(text.slice(..));
-                if let Some(position) =
-                    view.screen_coords_at_pos(document, text.slice(..), primary_idx)
-                {
-                    let cursor_bounds = cursor_bounds(
-                        point(
+                paint_cursors(
+                    window,
+                    CursorPaintParams {
+                        document,
+                        view,
+                        text: text.slice(..),
+                        content_origin: point(
                             bounds.origin.x
                                 + px(10.0)
-                                + (layout.cell_width * (layout.gutter_columns as f32 + 1.0))
-                                + (layout.cell_width * position.col as f32),
-                            bounds.origin.y + px(1.0) + (layout.line_height * position.row as f32),
+                                + (layout.cell_width * (layout.gutter_columns as f32 + 1.0)),
+                            bounds.origin.y + px(1.0),
                         ),
-                        cursor_kind,
-                        layout.cell_width,
-                        layout.line_height,
-                    );
-                    let mut cursor_fill = self.palette.cursor;
-                    cursor_fill.a = 0.55;
-                    window.paint_quad(fill(cursor_bounds, cursor_fill));
-                }
+                        cell_width: layout.cell_width,
+                        line_height: layout.line_height,
+                        kind: cursor_kind,
+                        color: self.palette.cursor,
+                    },
+                );
             }
 
             if layout.hitbox.is_hovered(window) {

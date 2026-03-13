@@ -213,8 +213,8 @@ Completed in the first implementation slice:
 
 Still pending:
 
-- [ ] richer selection parity beyond the current primary-selection rendering
-- [ ] view-state persistence across file switches
+- [x] richer selection parity beyond the current primary-selection rendering
+- [x] view-state persistence across file switches
 - [ ] real LSP enablement
 - [ ] diagnostics rendering
 - [ ] completion / hover / code actions
@@ -289,7 +289,7 @@ Goals:
 
 Tasks:
 
-- [ ] preserve cursor and scroll position when switching files
+- [x] preserve cursor and scroll position when switching files
 - [x] preserve current markdown-preview behavior decision
 - [x] decide whether markdown preview remains a separate right-pane mode or is temporarily removed
 - [x] add statusline or inline state for mode, path, dirty state, and cursor position if useful
