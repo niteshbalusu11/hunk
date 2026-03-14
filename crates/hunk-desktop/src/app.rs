@@ -172,6 +172,9 @@ actions!(
         AiInterruptSelectedTurn,
         OpenProject,
         QuickOpenFile,
+        FilesEditorCopy,
+        FilesEditorCut,
+        FilesEditorPaste,
         SaveCurrentFile,
         OpenSettings,
         QuitApp,
@@ -403,6 +406,36 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
     );
     bindings.push(KeyBinding::new("cmd-p", QuickOpenFile, Some("DiffViewer")));
     bindings.push(KeyBinding::new("ctrl-p", QuickOpenFile, Some("DiffViewer")));
+    bindings.push(KeyBinding::new(
+        "cmd-c",
+        FilesEditorCopy,
+        Some("FilesEditor"),
+    ));
+    bindings.push(KeyBinding::new(
+        "ctrl-c",
+        FilesEditorCopy,
+        Some("FilesEditor"),
+    ));
+    bindings.push(KeyBinding::new(
+        "cmd-x",
+        FilesEditorCut,
+        Some("FilesEditor"),
+    ));
+    bindings.push(KeyBinding::new(
+        "ctrl-x",
+        FilesEditorCut,
+        Some("FilesEditor"),
+    ));
+    bindings.push(KeyBinding::new(
+        "cmd-v",
+        FilesEditorPaste,
+        Some("FilesEditor"),
+    ));
+    bindings.push(KeyBinding::new(
+        "ctrl-v",
+        FilesEditorPaste,
+        Some("FilesEditor"),
+    ));
     bindings.extend(
         shortcuts
             .save_current_file
@@ -468,6 +501,7 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
 }
 
 pub fn run() -> Result<()> {
+    files_editor::initialize_helix_runtime_environment();
     let app = gpui_platform::application().with_assets(Assets);
     let keyboard_shortcuts = load_keyboard_shortcuts();
     app.on_reopen(|cx: &mut App| {

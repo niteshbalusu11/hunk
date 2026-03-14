@@ -74,8 +74,12 @@ impl DiffViewer {
                             this.editor_last_saved_text = Some(text.clone());
                             this.editor_dirty = false;
                             this.editor_error = None;
-                            let open_result =
-                                this.open_helix_editor_document(path.as_str(), &repo_root, cx);
+                            let open_result = this.open_helix_editor_document(
+                                path.as_str(),
+                                &repo_root,
+                                text.as_str(),
+                                cx,
+                            );
                             if let Err(err) = open_result {
                                 this.editor_error = Some(format!(
                                     "Helix editor failed to open {}: {err:#}",
@@ -368,14 +372,67 @@ impl DiffViewer {
             .ok_or_else(|| anyhow::anyhow!("no active Helix editor buffer"))
     }
 
+    pub(super) fn files_editor_copy_action(
+        &mut self,
+        _: &FilesEditorCopy,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.editor_markdown_preview || !self.files_editor_focus_handle.is_focused(window) {
+            return;
+        }
+        let Some(text) = self.helix_files_editor.borrow().copy_selection_text() else {
+            return;
+        };
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+    }
+
+    pub(super) fn files_editor_cut_action(
+        &mut self,
+        _: &FilesEditorCut,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.editor_markdown_preview || !self.files_editor_focus_handle.is_focused(window) {
+            return;
+        }
+        let Some(text) = self.helix_files_editor.borrow_mut().cut_selection_text() else {
+            return;
+        };
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        self.sync_editor_dirty_from_input(cx);
+        cx.notify();
+    }
+
+    pub(super) fn files_editor_paste_action(
+        &mut self,
+        _: &FilesEditorPaste,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.editor_markdown_preview || !self.files_editor_focus_handle.is_focused(window) {
+            return;
+        }
+        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+            return;
+        };
+        if self.helix_files_editor.borrow_mut().paste_text(text.as_str()) {
+            self.sync_editor_dirty_from_input(cx);
+            cx.notify();
+        }
+    }
+
     fn open_helix_editor_document(
         &mut self,
         relative_path: &str,
         repo_root: &std::path::Path,
+        text: &str,
         cx: &mut Context<Self>,
     ) -> anyhow::Result<()> {
         let absolute_path = repo_root.join(relative_path);
-        self.helix_files_editor.borrow_mut().open_path(&absolute_path)?;
+        self.helix_files_editor
+            .borrow_mut()
+            .open_document(&absolute_path, text)?;
 
         let focus_handle = self.files_editor_focus_handle.clone();
         if let Err(err) = Self::update_any_window(cx, |window, cx| {

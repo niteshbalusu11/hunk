@@ -1,17 +1,15 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::env;
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 use arc_swap::{ArcSwap, access::Map};
 use gpui::*;
 use helix_core::coords_at_pos;
-use helix_core::{Range, Selection, movement::Direction};
+use helix_core::{Range, Selection, Transaction, movement::Direction};
 use helix_term::commands;
 use helix_term::compositor::{Component, Compositor, Context as CompositorContext, EventResult};
 use helix_term::config::Config as HelixConfig;
@@ -27,9 +25,10 @@ use helix_view::input::{Event as HelixEvent, KeyEvent};
 use helix_view::keyboard::{KeyCode, KeyModifiers};
 use helix_view::view::ViewPosition;
 use helix_view::{Document, DocumentId, Editor, ViewId, theme as helix_theme};
-use tracing::{debug, warn};
+use tracing::warn;
 mod highlight;
 mod paint;
+mod runtime_env;
 mod selection;
 mod theme;
 
@@ -38,12 +37,15 @@ use self::paint::{
     CursorPaintParams, animated_cursor_kind, clamp_to_bounds, mouse_text_position, paint_cursors,
     paint_line_numbers, paint_selection_backgrounds, palette_text_width, visible_row_char_range,
 };
+use self::runtime_env::{ensure_helix_loader_initialized, with_tokio_runtime};
 use self::selection::{line_selection_range, word_selection_range};
 use self::theme::load_hunk_helix_theme;
 
-const HELIX_GIT_REV_PREFIX: &str = "78b999f";
-
 pub(crate) type SharedHelixFilesEditor = Rc<RefCell<HelixFilesEditor>>;
+
+pub(crate) fn initialize_helix_runtime_environment() {
+    runtime_env::initialize_helix_runtime_environment();
+}
 
 pub(crate) struct HelixFilesEditor {
     runtime: Option<HelixRuntime>,
@@ -135,7 +137,7 @@ impl HelixFilesEditor {
             view_state_by_path: BTreeMap::new(),
         }
     }
-    pub(crate) fn open_path(&mut self, path: &Path) -> Result<()> {
+    pub(crate) fn open_document(&mut self, path: &Path, contents: &str) -> Result<()> {
         if self.runtime.is_none() {
             match HelixRuntime::new() {
                 Ok(runtime) => self.runtime = Some(runtime),
@@ -151,8 +153,8 @@ impl HelixFilesEditor {
         } else {
             Action::VerticalSplit
         };
-        let open_result = with_tokio_runtime(|| runtime.editor.open(path, open_action));
-        open_result
+        runtime
+            .replace_document(path, contents, open_action)
             .with_context(|| format!("failed to open {} in Helix editor", path.display()))?;
         self.active_path = Some(path.to_path_buf());
         self.restore_view_state(path);
@@ -236,6 +238,61 @@ impl HelixFilesEditor {
             doc.reset_modified();
             doc.pickup_last_saved_time();
         }
+    }
+    pub(crate) fn copy_selection_text(&self) -> Option<String> {
+        self.active_path.as_ref()?;
+        let runtime = self.runtime.as_ref()?;
+        let view_id = runtime.current_view_id()?;
+        let doc_id = runtime.current_doc_id()?;
+        let document = runtime.editor.document(doc_id)?;
+        let text = document.text().slice(..);
+        let fragments: Vec<Cow<'_, str>> = document.selection(view_id).fragments(text).collect();
+        if fragments.iter().all(|fragment| fragment.is_empty()) {
+            return None;
+        }
+        Some(
+            fragments
+                .into_iter()
+                .map(Cow::into_owned)
+                .collect::<Vec<_>>()
+                .join(document.line_ending.as_str()),
+        )
+    }
+    pub(crate) fn cut_selection_text(&mut self) -> Option<String> {
+        let copied = self.copy_selection_text()?;
+        let runtime = self.runtime.as_mut()?;
+        let scrolloff = runtime.editor.config().scrolloff;
+        let (view, doc) = helix_view::current!(runtime.editor);
+        let selection = doc.selection(view.id).clone();
+        let transaction = Transaction::delete_by_selection(doc.text(), &selection, |range| {
+            (range.from(), range.to())
+        });
+        doc.apply(&transaction, view.id);
+        doc.append_changes_to_history(view);
+        view.ensure_cursor_in_view(doc, scrolloff);
+        if matches!(runtime.editor.mode(), helix_view::document::Mode::Select) {
+            runtime.editor.enter_normal_mode();
+        }
+        Some(copied)
+    }
+    pub(crate) fn paste_text(&mut self, text: &str) -> bool {
+        if text.is_empty() || self.active_path.is_none() {
+            return false;
+        }
+        let Some(runtime) = self.runtime.as_mut() else {
+            return false;
+        };
+        let scrolloff = runtime.editor.config().scrolloff;
+        let pasted: Arc<str> = Arc::from(text);
+        let (view, doc) = helix_view::current!(runtime.editor);
+        let selection = doc.selection(view.id).clone();
+        let transaction = Transaction::change_by_selection(doc.text(), &selection, |range| {
+            (range.from(), range.to(), Some(pasted.as_ref().into()))
+        });
+        doc.apply(&transaction, view.id);
+        doc.append_changes_to_history(view);
+        view.ensure_cursor_in_view(doc, scrolloff);
+        true
     }
     pub(crate) fn handle_keystroke(&mut self, keystroke: &Keystroke) -> bool {
         if self.active_path.is_none() {
@@ -517,6 +574,33 @@ impl HelixRuntime {
     fn current_doc_id(&self) -> Option<DocumentId> {
         let view_id = self.current_view_id()?;
         Some(self.editor.tree.get(view_id).doc)
+    }
+
+    fn replace_document(&mut self, path: &Path, contents: &str, action: Action) -> Result<()> {
+        let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        if let Some(doc_id) = self.editor.document_id_by_path(&canonical_path) {
+            self.editor.close_document(doc_id, true).map_err(|error| {
+                let _ = error;
+                anyhow::anyhow!("failed to close stale Helix document {}", path.display())
+            })?;
+        }
+
+        let doc_id = self.editor.new_file(action);
+        let (view, doc) = helix_view::current!(self.editor);
+        let transaction = Transaction::change(
+            doc.text(),
+            std::iter::once((0, doc.text().len_chars(), Some(contents.into()))),
+        );
+        doc.apply(&transaction, view.id);
+        doc.set_selection(view.id, Selection::point(0));
+        doc.append_changes_to_history(view);
+
+        self.editor.set_doc_path(doc_id, &canonical_path);
+        if let Some(document) = self.editor.document_mut(doc_id) {
+            document.reset_modified();
+            document.pickup_last_saved_time();
+        }
+        Ok(())
     }
 }
 
@@ -904,85 +988,7 @@ fn translate_key(keystroke: &Keystroke) -> Option<KeyEvent> {
 
     Some(KeyEvent { code, modifiers })
 }
-
-fn ensure_helix_loader_initialized() {
-    static HELIX_LOADER_INIT: OnceLock<()> = OnceLock::new();
-    HELIX_LOADER_INIT.get_or_init(|| {
-        if env::var_os("HELIX_RUNTIME").is_none() {
-            if let Some(runtime_dir) = discover_helix_runtime_dir() {
-                debug!("setting HELIX_RUNTIME to {}", runtime_dir.to_string_lossy());
-                // This runs once during startup before background Helix work is initialized.
-                unsafe { env::set_var("HELIX_RUNTIME", runtime_dir) };
-            } else {
-                warn!("failed to discover Helix runtime directory");
-            }
-        }
-        helix_loader::initialize_config_file(None);
-        helix_loader::initialize_log_file(None);
-    });
-}
-
 fn ensure_helix_events_registered() {
-    static HELIX_EVENTS_INIT: OnceLock<()> = OnceLock::new();
+    static HELIX_EVENTS_INIT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
     HELIX_EVENTS_INIT.get_or_init(helix_term::events::register);
-}
-
-fn with_tokio_runtime<T>(f: impl FnOnce() -> T) -> T {
-    static HELIX_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
-    let runtime = HELIX_RUNTIME.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("helix helper runtime must build")
-    });
-    let guard = runtime.enter();
-    let result = f();
-    drop(guard);
-    result
-}
-
-fn discover_helix_runtime_dir() -> Option<OsString> {
-    let workspace_runtime = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(|dir| dir.join("runtime"));
-    if let Some(runtime) = workspace_runtime.filter(|path| path.is_dir()) {
-        return Some(runtime.into_os_string());
-    }
-
-    let cargo_home = default_cargo_home()?;
-    let checkouts_dir = cargo_home.join("git").join("checkouts");
-    let entries = std::fs::read_dir(checkouts_dir).ok()?;
-    for entry in entries.flatten() {
-        let repo_dir = entry.path();
-        if !repo_dir.is_dir() {
-            continue;
-        }
-        if !repo_dir
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.starts_with("helix-"))
-        {
-            continue;
-        }
-
-        let preferred_runtime = repo_dir.join(HELIX_GIT_REV_PREFIX).join("runtime");
-        if preferred_runtime.is_dir() {
-            return Some(preferred_runtime.into_os_string());
-        }
-
-        let revisions = std::fs::read_dir(&repo_dir).ok()?;
-        for revision in revisions.flatten() {
-            let runtime = revision.path().join("runtime");
-            if runtime.is_dir() {
-                return Some(runtime.into_os_string());
-            }
-        }
-    }
-    None
-}
-
-fn default_cargo_home() -> Option<PathBuf> {
-    env::var_os("CARGO_HOME")
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|home| home.join(".cargo")))
 }

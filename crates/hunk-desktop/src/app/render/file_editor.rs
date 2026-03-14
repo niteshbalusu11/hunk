@@ -262,7 +262,11 @@ impl DiffViewer {
             .flex_1()
             .min_h_0()
             .p_2()
+            .key_context("FilesEditor")
             .track_focus(&self.files_editor_focus_handle)
+            .on_action(cx.listener(Self::files_editor_copy_action))
+            .on_action(cx.listener(Self::files_editor_cut_action))
+            .on_action(cx.listener(Self::files_editor_paste_action))
             .on_mouse_down(MouseButton::Left, {
                 let view = view.clone();
                 move |_, window, cx| {
@@ -277,6 +281,7 @@ impl DiffViewer {
                     let handled = view.update(cx, |this, cx| {
                         if this.editor_markdown_preview
                             || !this.files_editor_focus_handle.is_focused(window)
+                            || is_desktop_clipboard_shortcut(&event.keystroke)
                         {
                             return false;
                         }
@@ -783,4 +788,12 @@ impl DiffViewer {
             MarkdownCodeTokenKind::Operator => github(0xff7b72, 0xcf222e),
         }
     }
+}
+
+fn is_desktop_clipboard_shortcut(keystroke: &gpui::Keystroke) -> bool {
+    let uses_desktop_modifier = keystroke.modifiers.platform || keystroke.modifiers.control;
+    uses_desktop_modifier
+        && !keystroke.modifiers.alt
+        && !keystroke.modifiers.function
+        && matches!(keystroke.key.as_str(), "c" | "x" | "v")
 }
