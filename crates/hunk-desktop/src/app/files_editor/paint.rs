@@ -247,23 +247,16 @@ pub(super) fn cursor_bounds(
     }
 }
 
-pub(super) fn mode_cursor_kind(
-    mode: helix_view::document::Mode,
-    fallback_kind: CursorKind,
-) -> CursorKind {
-    match mode {
-        helix_view::document::Mode::Insert => {
+pub(super) fn animated_cursor_kind(cursor_kind: CursorKind) -> CursorKind {
+    match cursor_kind {
+        CursorKind::Bar => {
             if insert_cursor_is_visible() {
                 CursorKind::Bar
             } else {
                 CursorKind::Hidden
             }
         }
-        helix_view::document::Mode::Select => CursorKind::Block,
-        helix_view::document::Mode::Normal => match fallback_kind {
-            CursorKind::Hidden => CursorKind::Block,
-            _ => CursorKind::Block,
-        },
+        _ => cursor_kind,
     }
 }
 

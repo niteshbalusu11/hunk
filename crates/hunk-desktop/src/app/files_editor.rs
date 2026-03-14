@@ -18,7 +18,7 @@ use helix_term::config::Config as HelixConfig;
 use helix_term::job::Jobs;
 use helix_term::keymap::Keymaps;
 use helix_term::ui::EditorView;
-use helix_view::editor::Action;
+use helix_view::editor::{Action, CursorShapeConfig};
 use helix_view::graphics::Rect;
 use helix_view::handlers::completion::{CompletionEvent, CompletionHandler};
 use helix_view::handlers::word_index;
@@ -35,7 +35,7 @@ mod theme;
 
 use self::highlight::syntax_runs;
 use self::paint::{
-    CursorPaintParams, clamp_to_bounds, mode_cursor_kind, mouse_text_position,
+    CursorPaintParams, animated_cursor_kind, clamp_to_bounds, mouse_text_position,
     paint_current_line_background, paint_cursors, paint_line_numbers, paint_selection_backgrounds,
     palette_text_width, visible_row_char_range,
 };
@@ -438,6 +438,7 @@ impl HelixRuntime {
 
         let mut config = HelixConfig::load_default().unwrap_or_default();
         config.editor.lsp.enable = false;
+        config.editor.cursor_shape = default_hunk_cursor_shape();
 
         let mut theme_parent_dirs = vec![helix_loader::config_dir()];
         theme_parent_dirs.extend(helix_loader::runtime_dirs().iter().cloned());
@@ -794,12 +795,11 @@ impl Element for HelixFilesEditorElement {
             }
 
             if self.is_focused {
-                let mode = runtime.editor.mode();
                 let (_, cursor_kind) = runtime.editor.cursor();
-                let cursor_kind = mode_cursor_kind(mode, cursor_kind);
-                if matches!(mode, helix_view::document::Mode::Insert) {
+                if matches!(cursor_kind, helix_view::graphics::CursorKind::Bar) {
                     window.request_animation_frame();
                 }
+                let cursor_kind = animated_cursor_kind(cursor_kind);
                 paint_cursors(
                     window,
                     CursorPaintParams {
@@ -820,6 +820,20 @@ impl Element for HelixFilesEditorElement {
             }
         });
     }
+}
+
+fn default_hunk_cursor_shape() -> CursorShapeConfig {
+    toml::from_str(
+        r#"
+normal = "block"
+insert = "bar"
+select = "block"
+"#,
+    )
+    .unwrap_or_else(|error| {
+        warn!("failed to load default Helix cursor shape config: {error:#}");
+        CursorShapeConfig::default()
+    })
 }
 
 impl<'a> From<RopeWrapper<'a>> for SharedString {
