@@ -1,4 +1,5 @@
 use gpui::*;
+use helix_core::Position;
 use helix_view::graphics::CursorKind;
 use helix_view::{Document, View};
 
@@ -47,15 +48,39 @@ pub(super) fn paint_selection_backgrounds(
     );
     let content_width = (layout.hitbox.bounds.right() - content_origin.x).max(Pixels::ZERO);
     let max_col = (content_width / layout.cell_width) as usize;
+    let Some((visible_start, _)) =
+        visible_row_char_range(document, view, text, 0, layout.rows, max_col)
+    else {
+        return;
+    };
+    let Some((_, visible_end)) = visible_row_char_range(
+        document,
+        view,
+        text,
+        layout.rows.saturating_sub(1),
+        layout.rows,
+        max_col,
+    ) else {
+        return;
+    };
     for range in selection.ranges() {
         if range.is_empty() {
             continue;
         }
-        let Some(start) = view.screen_coords_at_pos(document, text, range.from()) else {
+        if range.to() <= visible_start || range.from() >= visible_end {
             continue;
+        }
+        let start = if range.from() <= visible_start {
+            Position::new(0, 0)
+        } else {
+            view.screen_coords_at_pos(document, text, range.from())
+                .unwrap_or_else(|| Position::new(0, 0))
         };
-        let Some(end) = view.screen_coords_at_pos(document, text, range.to()) else {
-            continue;
+        let end = if range.to() >= visible_end {
+            Position::new(layout.rows.saturating_sub(1), max_col)
+        } else {
+            view.screen_coords_at_pos(document, text, range.to())
+                .unwrap_or_else(|| Position::new(layout.rows.saturating_sub(1), max_col))
         };
         if start.row == end.row {
             paint_selection_segment(
@@ -160,6 +185,35 @@ pub(super) fn paint_line_numbers(
 
 pub(super) fn palette_text_width(total_lines: usize) -> usize {
     total_lines.max(1).to_string().len()
+}
+
+pub(super) fn visible_row_char_range(
+    document: &Document,
+    view: &View,
+    text: helix_core::ropey::RopeSlice<'_>,
+    row: usize,
+    rows: usize,
+    max_col: usize,
+) -> Option<(usize, usize)> {
+    let row = row.min(u16::MAX as usize) as u16;
+    let max_col = max_col.min(u16::MAX as usize) as u16;
+    let start = view.pos_at_visual_coords(document, row, 0, true)?;
+    let mut end = if (row as usize) + 1 < rows {
+        view.pos_at_visual_coords(document, row.saturating_add(1), 0, true)
+            .unwrap_or_else(|| text.len_chars())
+    } else {
+        view.pos_at_visual_coords(document, row, max_col, true)
+            .unwrap_or_else(|| text.len_chars())
+    }
+    .min(text.len_chars());
+    while end > start
+        && text
+            .get_char(end - 1)
+            .is_some_and(|ch| matches!(ch, '\n' | '\r'))
+    {
+        end -= 1;
+    }
+    Some((start, end.max(start)))
 }
 
 pub(super) fn cursor_bounds(

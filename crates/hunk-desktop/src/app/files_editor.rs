@@ -37,6 +37,7 @@ use self::highlight::syntax_runs;
 use self::paint::{
     CursorPaintParams, clamp_to_bounds, mouse_text_position, paint_current_line_background,
     paint_cursors, paint_line_numbers, paint_selection_backgrounds, palette_text_width,
+    visible_row_char_range,
 };
 use self::selection::{line_selection_range, word_selection_range};
 use self::theme::load_hunk_helix_theme;
@@ -696,22 +697,14 @@ impl Element for HelixFilesEditorElement {
             let first_row = text.char_to_line(view_offset.anchor.min(text.len_chars()));
             let total_lines = text.len_lines();
             let last_row = (first_row + layout.rows + 1).min(total_lines);
-            let end_char = text.line_to_char(last_row.min(total_lines));
-            let text_view = text.slice(view_offset.anchor..end_char);
-            let visible_text: SharedString = RopeWrapper(text_view).into();
-            let syntax_runs = syntax_runs(
-                &runtime.editor,
-                document,
-                view_offset.anchor,
-                layout.rows.min(u16::MAX as usize) as u16,
-                end_char,
-                self.palette.default_foreground,
-                self.style.font(),
+            let content_origin = point(
+                bounds.origin.x
+                    + px(10.0)
+                    + (layout.cell_width * (layout.gutter_columns as f32 + 1.0)),
+                bounds.origin.y + px(1.0),
             );
-            let shaped_lines = window
-                .text_system()
-                .shape_text(visible_text, layout.font_size, &syntax_runs, None, None)
-                .unwrap_or_default();
+            let content_width = (layout.hitbox.bounds.right() - content_origin.x).max(Pixels::ZERO);
+            let visible_columns = ((content_width / layout.cell_width).ceil() as usize).max(1);
 
             let current_line = document
                 .selection(view_id)
@@ -761,22 +754,43 @@ impl Element for HelixFilesEditorElement {
                 self.palette.border,
             ));
 
-            let mut origin = point(
-                bounds.origin.x
-                    + px(10.0)
-                    + (layout.cell_width * (layout.gutter_columns as f32 + 1.0)),
-                bounds.origin.y + px(1.0),
-            );
-            for line in shaped_lines {
-                let _ = line.paint(
-                    origin,
-                    layout.line_height,
-                    TextAlign::Left,
-                    None,
-                    window,
-                    cx,
-                );
-                origin.y += layout.line_height;
+            let mut row_origin = content_origin;
+            for row in 0..layout.rows {
+                if let Some((row_start, row_end)) = visible_row_char_range(
+                    document,
+                    view,
+                    text.slice(..),
+                    row,
+                    layout.rows,
+                    visible_columns,
+                ) {
+                    let visible_text: SharedString =
+                        RopeWrapper(text.slice(row_start..row_end)).into();
+                    let syntax_runs = syntax_runs(
+                        &runtime.editor,
+                        document,
+                        row_start,
+                        1,
+                        row_end,
+                        self.palette.default_foreground,
+                        self.style.font(),
+                    );
+                    let line = window.text_system().shape_line(
+                        visible_text,
+                        layout.font_size,
+                        &syntax_runs,
+                        None,
+                    );
+                    let _ = line.paint(
+                        row_origin,
+                        layout.line_height,
+                        TextAlign::Left,
+                        None,
+                        window,
+                        cx,
+                    );
+                }
+                row_origin.y += layout.line_height;
             }
 
             if self.is_focused {
@@ -787,12 +801,7 @@ impl Element for HelixFilesEditorElement {
                         document,
                         view,
                         text: text.slice(..),
-                        content_origin: point(
-                            bounds.origin.x
-                                + px(10.0)
-                                + (layout.cell_width * (layout.gutter_columns as f32 + 1.0)),
-                            bounds.origin.y + px(1.0),
-                        ),
+                        content_origin,
                         cell_width: layout.cell_width,
                         line_height: layout.line_height,
                         kind: cursor_kind,
@@ -836,11 +845,28 @@ pub(crate) fn scroll_direction_and_count(
 
 fn translate_key(keystroke: &Keystroke) -> Option<KeyEvent> {
     let mut modifiers = KeyModifiers::NONE;
-    if keystroke.modifiers.shift {
+    let has_non_shift_modifier = keystroke.modifiers.control
+        || keystroke.modifiers.alt
+        || keystroke.modifiers.platform
+        || keystroke.modifiers.function;
+    let printable_key_char = (!has_non_shift_modifier)
+        .then_some(keystroke.key_char.as_ref())
+        .flatten()
+        .filter(|value| value.chars().count() == 1);
+    if printable_key_char.is_none() && keystroke.modifiers.shift {
         modifiers |= KeyModifiers::SHIFT;
     }
+    if keystroke.modifiers.control {
+        modifiers |= KeyModifiers::CONTROL;
+    }
+    if keystroke.modifiers.alt {
+        modifiers |= KeyModifiers::ALT;
+    }
+    if keystroke.modifiers.platform {
+        modifiers |= KeyModifiers::SUPER;
+    }
 
-    let key = keystroke.key_char.as_ref().unwrap_or(&keystroke.key);
+    let key = printable_key_char.unwrap_or(&keystroke.key);
     let code = match key.as_str() {
         "backspace" => KeyCode::Backspace,
         "enter" => KeyCode::Enter,

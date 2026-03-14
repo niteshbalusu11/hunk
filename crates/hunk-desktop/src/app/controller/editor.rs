@@ -121,13 +121,21 @@ impl DiffViewer {
         };
 
         self.sync_editor_dirty_from_input(cx);
+        let current_text = match self.current_editor_text() {
+            Ok(text) => text,
+            Err(err) => {
+                self.editor_error = Some(format!("Editor unavailable: {err:#}"));
+                self.git_status_message = Some(format!("Save blocked for {path}: {err:#}"));
+                cx.notify();
+                return;
+            }
+        };
         if !self.editor_dirty {
             self.git_status_message = Some("No unsaved changes.".to_string());
             cx.notify();
             return;
         }
 
-        let current_text = self.current_editor_text();
         let text_to_write = current_text.clone();
         let saved_text = current_text;
         let path_for_write = path.clone();
@@ -198,7 +206,16 @@ impl DiffViewer {
             return;
         }
 
-        let current_text = self.current_editor_text();
+        let current_text = match self.current_editor_text() {
+            Ok(text) => text,
+            Err(err) => {
+                self.editor_error = Some(format!("Editor unavailable: {err:#}"));
+                self.editor_dirty = false;
+                self.clear_editor_markdown_preview_state();
+                cx.notify();
+                return;
+            }
+        };
         let saved_text = self.editor_last_saved_text.as_deref().unwrap_or_default();
         let dirty =
             self.helix_files_editor.borrow().is_dirty() || current_text.as_str() != saved_text;
@@ -237,7 +254,10 @@ impl DiffViewer {
 
         self.cancel_editor_markdown_preview_task();
         let revision = self.next_editor_markdown_preview_revision();
-        let markdown_text = self.current_editor_text();
+        let Ok(markdown_text) = self.current_editor_text() else {
+            self.clear_editor_markdown_preview_state();
+            return;
+        };
         self.editor_markdown_preview_loading = true;
         cx.notify();
 
@@ -341,11 +361,11 @@ impl DiffViewer {
         self.helix_files_editor.borrow_mut().clear();
     }
 
-    pub(crate) fn current_editor_text(&self) -> String {
+    pub(crate) fn current_editor_text(&self) -> anyhow::Result<String> {
         self.helix_files_editor
             .borrow()
             .current_text()
-            .unwrap_or_default()
+            .ok_or_else(|| anyhow::anyhow!("no active Helix editor buffer"))
     }
 
     fn open_helix_editor_document(

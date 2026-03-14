@@ -107,14 +107,11 @@ pub(super) fn syntax_runs(
             .and_then(color_to_hsla)
             .unwrap_or(default_foreground);
         let bg = styles.style.bg.and_then(color_to_hsla);
-        let len = styles
-            .pos
-            .saturating_sub(position)
-            .min(end_char.saturating_sub(position));
-
-        if len == 0 {
+        let next_position = styles.pos.min(end_char);
+        if next_position <= position {
             break;
         }
+        let len = styles.text.char_to_byte(next_position) - styles.text.char_to_byte(position);
 
         runs.push(TextRun {
             len,
@@ -129,7 +126,7 @@ pub(super) fn syntax_runs(
 
     if runs.is_empty() {
         runs.push(TextRun {
-            len: end_char.saturating_sub(anchor),
+            len: styles.text.char_to_byte(end_char) - styles.text.char_to_byte(anchor),
             font,
             color: default_foreground,
             background_color: None,
