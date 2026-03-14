@@ -1,8 +1,12 @@
 {
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.rust-overlay = {
+    url = "github:oxalica/rust-overlay";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
 
   outputs =
-    { nixpkgs, ... }:
+    { nixpkgs, rust-overlay, ... }:
     let
       systems = [
         "x86_64-linux"
@@ -15,7 +19,13 @@
       devShells = forAllSystems (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ rust-overlay.overlays.default ];
+          };
+          rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+            extensions = [ "rust-src" ];
+          };
           linuxRuntimeLibraries =
             with pkgs;
             [
@@ -49,13 +59,11 @@
         in
         {
           default = pkgs.mkShell {
+            name = "hunk-dev-shell";
             packages =
               with pkgs;
               [
-                cargo
-                rustc
-                clippy
-                rustfmt
+                rustToolchain
                 just
                 openssl
                 pkgconf
@@ -79,13 +87,18 @@
                 patchelf
               ];
 
-            RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
+            RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
             LD_LIBRARY_PATH = pkgs.lib.optionalString pkgs.stdenv.isLinux (
               pkgs.lib.makeLibraryPath linuxRuntimeLibraries
             );
             LIBGL_DRIVERS_PATH = pkgs.lib.optionalString pkgs.stdenv.isLinux (
               "${pkgs.mesa}/lib/dri"
             );
+            shellHook = ''
+              if [ -d "$HOME/.cargo/bin" ]; then
+                export PATH="$PATH:$HOME/.cargo/bin"
+              fi
+            '';
           };
         }
       );

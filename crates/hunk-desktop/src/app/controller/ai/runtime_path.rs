@@ -201,13 +201,6 @@ fn bundled_codex_executable_candidates(current_exe: &std::path::Path) -> Vec<std
             push_linux_packager_candidates(root_dir.as_path(), &binary_names, &mut candidates);
         }
 
-        if let Some(appdir) = std::env::var_os("APPDIR") {
-            push_linux_packager_candidates(
-                std::path::Path::new(&appdir),
-                &binary_names,
-                &mut candidates,
-            );
-        }
     }
 
     push_candidates(exe_dir, &mut candidates);
