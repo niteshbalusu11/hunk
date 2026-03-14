@@ -1,12 +1,9 @@
 name: Release
 
 on:
-  pull_request:
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: read
@@ -255,6 +252,8 @@ jobs:
       - windows
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: write
 
     steps:
       - name: Download release artifacts
@@ -269,6 +268,8 @@ jobs:
         shell: bash
 
       - name: List prepared release artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           mapfile -d '' files < <(find dist -type f -print0 | sort -z)
           if [[ ${#files[@]} -eq 0 ]]; then
@@ -276,12 +277,11 @@ jobs:
             exit 1
           fi
 
-          # Disabled while testing this workflow on pull requests.
-          # if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-          #   gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --verify-tag --generate-notes
-          # fi
-          #
-          # gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --verify-tag --generate-notes
+          fi
+
+          gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
 
           printf 'Prepared release artifacts:\n'
           printf ' - %s\n' "${files[@]}"
