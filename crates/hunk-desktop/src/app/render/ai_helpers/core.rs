@@ -278,6 +278,7 @@ fn ai_item_display_label(kind: &str) -> &str {
     }
 }
 
+#[cfg(test)]
 fn ai_truncate_multiline_content(content: &str, max_lines: usize) -> (String, bool) {
     if max_lines == 0 {
         return (String::new(), !content.is_empty());

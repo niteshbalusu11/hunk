@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use git2::{BranchType, IndexAddOption, Repository, Signature, build::CheckoutBuilder};
 use hunk_git::git::load_workflow_snapshot;
+use hunk_git::mutation::{commit_index_with_details, stage_paths};
 use hunk_git::network::{
     push_current_branch, sync_branch_from_remote, sync_branch_from_remote_if_tracked,
     sync_current_branch,
@@ -51,6 +52,37 @@ fn push_branch_updates_tracking_ref_after_new_commit() -> Result<()> {
     assert!(after_push.branch_has_upstream);
     assert_eq!(after_push.branch_ahead_count, 0);
     assert_eq!(after_push.branch_behind_count, 0);
+    Ok(())
+}
+
+#[test]
+fn push_branch_allows_dirty_worktree_after_partial_commit() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.configure_signature()?;
+    fixture.write_file("src/lib.rs", "one\n")?;
+    fixture.write_file("README.md", "hello\n")?;
+    fixture.commit_all("initial")?;
+    fixture.create_bare_remote("origin")?;
+    fixture.checkout_branch("feature/push-dirty")?;
+    push_current_branch(fixture.root(), "feature/push-dirty", false)?;
+
+    fixture.write_file("src/lib.rs", "one\ntwo\n")?;
+    fixture.write_file("README.md", "hello\nworld\n")?;
+    stage_paths(fixture.root(), &[String::from("src/lib.rs")])?;
+    commit_index_with_details(fixture.root(), "partial")?;
+
+    let before_push = load_workflow_snapshot(fixture.root())?;
+    assert_eq!(before_push.branch_ahead_count, 1);
+    assert_eq!(before_push.files.len(), 1);
+    assert_eq!(before_push.files[0].path, "README.md");
+
+    push_current_branch(fixture.root(), "feature/push-dirty", true)?;
+
+    let after_push = load_workflow_snapshot(fixture.root())?;
+    assert!(after_push.branch_has_upstream);
+    assert_eq!(after_push.branch_ahead_count, 0);
+    assert_eq!(after_push.files.len(), 1);
+    assert_eq!(after_push.files[0].path, "README.md");
     Ok(())
 }
 

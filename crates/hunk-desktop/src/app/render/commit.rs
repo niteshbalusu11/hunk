@@ -188,8 +188,6 @@ impl DiffViewer {
             "Publish this branch before pushing."
         } else if self.git_workspace.branch_ahead_count == 0 {
             "No local commits to push."
-        } else if !self.git_workspace.files.is_empty() {
-            "Commit or discard working tree changes before pushing."
         } else {
             "Push all local commits on this branch."
         };

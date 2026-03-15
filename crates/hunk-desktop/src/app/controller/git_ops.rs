@@ -585,7 +585,6 @@ impl DiffViewer {
         self.can_run_active_branch_actions_for_ui()
             && self.git_workspace.branch_has_upstream
             && self.git_workspace.branch_ahead_count > 0
-            && self.tracking_area_clean()
             && !self.git_rail_controls_busy()
     }
 
@@ -690,13 +689,6 @@ impl DiffViewer {
         }
         if !self.git_workspace.branch_has_upstream {
             let message = "Publish this branch before pushing.".to_string();
-            self.git_status_message = Some(message.clone());
-            Self::push_warning_notification(message, None, cx);
-            cx.notify();
-            return;
-        }
-        if !self.tracking_area_clean() {
-            let message = "Commit or discard working tree changes before pushing.".to_string();
             self.git_status_message = Some(message.clone());
             Self::push_warning_notification(message, None, cx);
             cx.notify();
