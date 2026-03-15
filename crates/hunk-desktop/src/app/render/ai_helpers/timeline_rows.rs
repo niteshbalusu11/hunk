@@ -23,15 +23,17 @@ struct AiCommandExecutionDisplayDetails {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct AiTurnDiffPreviewLine {
-    sign: char,
-    content: String,
+struct AiTurnDiffFileSummary {
+    path: String,
+    added: usize,
+    removed: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct AiTurnDiffPreview {
-    changed_line_count: usize,
-    lines: Vec<AiTurnDiffPreviewLine>,
+struct AiTurnDiffSummary {
+    files: Vec<AiTurnDiffFileSummary>,
+    total_added: usize,
+    total_removed: usize,
 }
 
 fn ai_timeline_item_role(kind: &str) -> AiTimelineItemRole {
@@ -229,56 +231,107 @@ fn ai_duration_ms_label(duration_ms: Option<i64>) -> Option<String> {
     )))
 }
 
-fn ai_truncate_inline_content(content: &str, max_chars: usize) -> String {
-    if max_chars == 0 {
-        return String::new();
-    }
-
-    let mut truncated = String::new();
-    for (index, ch) in content.chars().enumerate() {
-        if index >= max_chars {
-            truncated.push_str("...");
-            return truncated;
+fn ai_turn_diff_file_header_paths(line: &str) -> Option<(String, String)> {
+    let mut parts = line.split_whitespace();
+    match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some("diff"), Some("--git"), Some(old_path), Some(new_path)) => {
+            Some((old_path.to_string(), new_path.to_string()))
         }
-        truncated.push(ch);
+        _ => None,
     }
-    truncated
 }
 
-fn ai_turn_diff_preview_line(line: &str, max_chars: usize) -> Option<AiTurnDiffPreviewLine> {
-    let (sign, content) = if let Some(content) = line.strip_prefix('+') {
-        if line.starts_with("+++") {
-            return None;
-        }
-        ('+', content)
-    } else if let Some(content) = line.strip_prefix('-') {
-        if line.starts_with("---") {
-            return None;
-        }
-        ('-', content)
-    } else {
-        return None;
-    };
+fn ai_turn_diff_display_path(old_path: &str, new_path: &str) -> String {
+    let normalized_new = new_path.strip_prefix("b/").unwrap_or(new_path);
+    if normalized_new != "/dev/null" {
+        return normalized_new.to_string();
+    }
 
-    Some(AiTurnDiffPreviewLine {
-        sign,
-        content: ai_truncate_inline_content(content.trim_start(), max_chars),
-    })
+    let normalized_old = old_path.strip_prefix("a/").unwrap_or(old_path);
+    if normalized_old != "/dev/null" {
+        return normalized_old.to_string();
+    }
+
+    "changes".to_string()
 }
 
-fn ai_turn_diff_preview(
-    diff_text: &str,
-    max_lines: usize,
-    max_chars_per_line: usize,
-) -> AiTurnDiffPreview {
-    let changed_lines = diff_text
-        .lines()
-        .filter_map(|line| ai_turn_diff_preview_line(line, max_chars_per_line))
-        .collect::<Vec<_>>();
+fn ai_turn_diff_fallback_file(files: &mut Vec<AiTurnDiffFileSummary>) -> &mut AiTurnDiffFileSummary {
+    if files.is_empty() {
+        files.push(AiTurnDiffFileSummary {
+            path: "changes".to_string(),
+            added: 0,
+            removed: 0,
+        });
+    }
 
-    AiTurnDiffPreview {
-        changed_line_count: changed_lines.len(),
-        lines: changed_lines.into_iter().take(max_lines).collect(),
+    files
+        .last_mut()
+        .expect("fallback diff file must exist after initialization")
+}
+
+fn ai_turn_diff_summary(diff_text: &str) -> AiTurnDiffSummary {
+    let mut files = Vec::new();
+    let mut total_added = 0usize;
+    let mut total_removed = 0usize;
+
+    for line in diff_text.lines() {
+        if let Some((old_path, new_path)) = ai_turn_diff_file_header_paths(line) {
+            files.push(AiTurnDiffFileSummary {
+                path: ai_turn_diff_display_path(old_path.as_str(), new_path.as_str()),
+                added: 0,
+                removed: 0,
+            });
+            continue;
+        }
+
+        if let Some(path) = line.strip_prefix("+++ ") {
+            let path = path.strip_prefix("b/").unwrap_or(path);
+            let file = ai_turn_diff_fallback_file(&mut files);
+            if file.path == "changes" && path != "/dev/null" {
+                file.path = path.to_string();
+            }
+            continue;
+        }
+
+        if let Some(path) = line.strip_prefix("--- ") {
+            let path = path.strip_prefix("a/").unwrap_or(path);
+            let file = ai_turn_diff_fallback_file(&mut files);
+            if file.path == "changes" && path != "/dev/null" {
+                file.path = path.to_string();
+            }
+            continue;
+        }
+
+        if line.starts_with("+++") || line.starts_with("---") {
+            continue;
+        }
+
+        if line.starts_with('+') {
+            let file = ai_turn_diff_fallback_file(&mut files);
+            file.added = file.added.saturating_add(1);
+            total_added = total_added.saturating_add(1);
+            continue;
+        }
+
+        if line.starts_with('-') {
+            let file = ai_turn_diff_fallback_file(&mut files);
+            file.removed = file.removed.saturating_add(1);
+            total_removed = total_removed.saturating_add(1);
+        }
+    }
+
+    if files.is_empty() && !diff_text.trim().is_empty() {
+        files.push(AiTurnDiffFileSummary {
+            path: "changes".to_string(),
+            added: total_added,
+            removed: total_removed,
+        });
+    }
+
+    AiTurnDiffSummary {
+        files,
+        total_added,
+        total_removed,
     }
 }
 
@@ -546,77 +599,102 @@ fn render_ai_turn_diff_row(
     is_dark: bool,
     cx: &mut Context<DiffViewer>,
 ) -> AnyElement {
-    let preview = ai_turn_diff_preview(diff_text, 3, 42);
-    let diff_line_count = diff_text.lines().count();
-    let preview_has_more = preview.changed_line_count > preview.lines.len();
+    const AI_TURN_DIFF_VISIBLE_FILE_LIMIT: usize = 4;
+
+    let summary = ai_turn_diff_summary(diff_text);
     let disclosure_colors = hunk_disclosure_row(cx.theme(), is_dark);
     let line_stats_colors = hunk_line_stats(cx.theme(), is_dark);
-
-    let preview_elements = preview
-        .lines
+    let row_id = row.id.clone();
+    let visible_files = summary
+        .files
         .iter()
-        .enumerate()
-        .flat_map(|(index, line)| {
-            let mut elements = Vec::new();
-            if index > 0 {
-                elements.push(
+        .take(AI_TURN_DIFF_VISIBLE_FILE_LIMIT)
+        .map(|file| {
+            let path = file.path.as_str();
+            let file_name = path.rsplit('/').next().unwrap_or(path).to_string();
+            let directory = path
+                .rsplit_once('/')
+                .map(|(prefix, _)| prefix.to_string())
+                .filter(|prefix| !prefix.is_empty());
+
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .items_center()
+                .gap_2()
+                .child(
                     div()
                         .flex_none()
-                        .text_xs()
+                        .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child("|")
-                        .into_any_element(),
-                );
-            }
-
-            let line_color = if line.sign == '+' {
-                line_stats_colors.added
-            } else {
-                line_stats_colors.removed
-            };
-            let preview_text = if line.content.is_empty() {
-                line.sign.to_string()
-            } else {
-                format!("{}{}", line.sign, line.content)
-            };
-            elements.push(
-                div()
-                    .flex_none()
-                    .text_xs()
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .text_color(line_color)
-                    .whitespace_nowrap()
-                    .child(preview_text)
-                    .into_any_element(),
-            );
-
-            elements
+                        .child("Edited"),
+                )
+                .child(
+                    h_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .items_baseline()
+                        .gap_1p5()
+                        .child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .text_sm()
+                                .font_semibold()
+                                .text_color(cx.theme().accent)
+                                .child(file_name),
+                        )
+                        .when_some(directory, |this, directory| {
+                            this.child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(directory),
+                            )
+                        }),
+                )
+                .child(
+                    h_flex()
+                        .flex_none()
+                        .items_center()
+                        .gap_1p5()
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .text_xs()
+                        .child(
+                            div()
+                                .text_color(line_stats_colors.added)
+                                .child(format!("+{}", file.added)),
+                        )
+                        .child(
+                            div()
+                                .text_color(line_stats_colors.removed)
+                                .child(format!("-{}", file.removed)),
+                        ),
+                )
+                .into_any_element()
         })
         .collect::<Vec<_>>();
-
-    let line_count_label = if diff_line_count == 1 {
-        "1 line".to_string()
-    } else {
-        format!("{diff_line_count} lines")
-    };
-    let row_id = row.id.clone();
+    let hidden_file_count = summary.files.len().saturating_sub(AI_TURN_DIFF_VISIBLE_FILE_LIMIT);
 
     let row_element = h_flex()
         .w_full()
         .min_w_0()
         .justify_start()
         .child(
-            div()
+            v_flex()
                 .w_full()
                 .min_w_0()
                 .max_w(px(940.0))
+                .gap_1()
                 .child(
-                    h_flex()
+                    v_flex()
                         .w_full()
                         .min_w_0()
-                        .items_center()
-                        .justify_between()
-                        .gap_2()
+                        .items_stretch()
+                        .gap_0p5()
                         .px_2()
                         .py_1p5()
                         .rounded(px(8.0))
@@ -633,52 +711,47 @@ fn render_ai_turn_diff_row(
                                 });
                             }
                         })
+                        .children(visible_files)
+                        .when(hidden_file_count > 0, |this| {
+                            this.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(format!("+{hidden_file_count} more files")),
+                            )
+                        })
                         .child(
                             h_flex()
-                                .flex_1()
-                                .min_w_0()
                                 .items_center()
+                                .justify_between()
                                 .gap_2()
                                 .child(
-                                    div()
-                                        .flex_none()
-                                        .text_xs()
-                                        .font_semibold()
-                                        .text_color(disclosure_colors.title)
-                                        .child("Code Diff"),
-                                )
-                                .when(!preview_elements.is_empty(), |this| {
-                                    this.child(
-                                        h_flex()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .items_center()
-                                            .gap_1()
-                                            .overflow_hidden()
-                                            .children(preview_elements)
-                                            .when(preview_has_more, |this| {
-                                                this.child(
-                                                    div()
-                                                        .flex_none()
-                                                        .text_xs()
-                                                        .text_color(cx.theme().muted_foreground)
-                                                        .child("..."),
-                                                )
-                                            }),
-                                    )
-                                }),
-                        )
-                        .child(
-                            h_flex()
-                                .flex_none()
-                                .items_center()
-                                .gap_1p5()
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(line_count_label),
+                                    h_flex()
+                                        .items_center()
+                                        .gap_1p5()
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(disclosure_colors.title)
+                                                .child(format!(
+                                                    "{} files changed",
+                                                    summary.files.len()
+                                                )),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .font_family(cx.theme().mono_font_family.clone())
+                                                .text_color(line_stats_colors.added)
+                                                .child(format!("+{}", summary.total_added)),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .font_family(cx.theme().mono_font_family.clone())
+                                                .text_color(line_stats_colors.removed)
+                                                .child(format!("-{}", summary.total_removed)),
+                                        ),
                                 )
                                 .child(
                                     Icon::new(IconName::ChevronRight)
