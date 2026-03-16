@@ -112,6 +112,7 @@ inject_helix_runtime_into_app_bundle() {
   rm -rf "$runtime_destination"
   mkdir -p "$(dirname "$runtime_destination")"
   cp -R "$runtime_source_dir" "$runtime_destination"
+  rm -rf "$runtime_destination/grammars/sources"
 
   if [[ ! -d "$runtime_destination/queries" || ! -d "$runtime_destination/grammars" ]]; then
     echo "error: bundled Helix runtime is missing queries/ or grammars/" >&2
@@ -119,6 +120,20 @@ inject_helix_runtime_into_app_bundle() {
   fi
 
   echo "Bundled Helix runtime from $runtime_source_dir" >&2
+}
+
+sign_macos_app_bundle() {
+  local sign_target
+
+  if [[ -d "$APP_FRAMEWORKS_DIR" ]]; then
+    while IFS= read -r sign_target; do
+      [[ -n "$sign_target" ]] || continue
+      codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$sign_target"
+    done < <(find "$APP_FRAMEWORKS_DIR" -type f \( -name '*.dylib' -o -perm -111 \) | sort)
+  fi
+
+  codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$APP_EXECUTABLE_PATH"
+  codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$APP_PATH"
 }
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -158,7 +173,7 @@ validate_macos_binary_dependencies "$APP_EXECUTABLE_PATH"
 
 if [[ -n "${APPLE_SIGNING_IDENTITY:-}" ]]; then
   echo "Signing macOS app bundle with Developer ID..." >&2
-  codesign --force --deep --options runtime --sign "$APPLE_SIGNING_IDENTITY" "$APP_PATH"
+  sign_macos_app_bundle
   codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 fi
 

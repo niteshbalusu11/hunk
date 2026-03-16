@@ -104,7 +104,7 @@ resources = [
     $tomlBeforeResourceRewrite = $updatedCargoToml
     $updatedCargoToml = [regex]::Replace(
         $updatedCargoToml,
-        '(?m)^resources = \["\.\./\.\./assets/codex-runtime"\]$',
+        '(?m)^\s*resources\s*=\s*\[\s*"\.\./\.\./assets/codex-runtime"\s*\]\s*\r?$',
         $resourceBlock,
         1
     )
