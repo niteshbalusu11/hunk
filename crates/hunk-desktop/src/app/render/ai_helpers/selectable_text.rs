@@ -9,32 +9,8 @@ struct AiSelectableStyledText {
     selection_background: Hsla,
     view: Entity<DiffViewer>,
 }
-
+ 
 impl AiSelectableStyledText {
-    fn new(
-        row_id: impl Into<String>,
-        surface_id: impl Into<String>,
-        selection_surfaces: std::sync::Arc<[AiTextSelectionSurfaceSpec]>,
-        link_ranges: std::sync::Arc<[MarkdownLinkRange]>,
-        text: StyledText,
-        selection_range: Option<std::ops::Range<usize>>,
-        selection_background: Hsla,
-        view: Entity<DiffViewer>,
-    ) -> Self {
-        let surface_id = surface_id.into();
-        Self {
-            element_id: surface_id.clone().into(),
-            row_id: row_id.into(),
-            surface_id,
-            selection_surfaces,
-            link_ranges,
-            text,
-            selection_range,
-            selection_background,
-            view,
-        }
-    }
-
     fn paint_selection(&self, layout: &gpui::TextLayout, window: &mut Window, cx: &mut App) {
         let Some(selection_range) = self.selection_range.clone() else {
             return;
@@ -298,16 +274,17 @@ fn ai_render_selectable_styled_text(
 ) -> AiSelectableStyledText {
     let surface_id = surface_id.into();
     let selection_range = this.ai_text_selection_range_for_surface(surface_id.as_str());
-    AiSelectableStyledText::new(
-        row_id,
+    AiSelectableStyledText {
+        element_id: surface_id.clone().into(),
+        row_id: row_id.to_string(),
         surface_id,
         selection_surfaces,
         link_ranges,
-        styled_text,
+        text: styled_text,
         selection_range,
-        hunk_text_selection_background(cx.theme(), is_dark),
+        selection_background: hunk_text_selection_background(cx.theme(), is_dark),
         view,
-    )
+    }
 }
 
 fn ai_timeline_text_surface_id(

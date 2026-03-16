@@ -406,16 +406,20 @@ fn ai_render_chat_markdown_block(
     }
 }
 
+type AiMarkdownHighlights = Vec<(std::ops::Range<usize>, HighlightStyle)>;
+
+struct AiMarkdownInlineRenderData {
+    text: SharedString,
+    highlights: AiMarkdownHighlights,
+    link_ranges: Vec<MarkdownLinkRange>,
+}
+
 fn ai_chat_markdown_text_and_highlights(
     spans: &[MarkdownInlineSpan],
     base_color: Hsla,
     is_dark: bool,
     cx: &mut Context<DiffViewer>,
-) -> (
-    SharedString,
-    Vec<(std::ops::Range<usize>, HighlightStyle)>,
-    Vec<MarkdownLinkRange>,
-) {
+) -> AiMarkdownInlineRenderData {
     let (text, link_ranges) = markdown_inline_text_and_link_ranges(spans);
     let mut highlights = Vec::new();
     let link_color = cx.theme().primary;
@@ -470,7 +474,11 @@ fn ai_chat_markdown_text_and_highlights(
         }
     }
 
-    (text.into(), highlights, link_ranges)
+    AiMarkdownInlineRenderData {
+        text: text.into(),
+        highlights,
+        link_ranges,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -487,8 +495,11 @@ fn ai_render_chat_inline_spans(
     is_dark: bool,
     cx: &mut Context<DiffViewer>,
 ) -> AnyElement {
-    let (text, highlights, link_ranges) =
-        ai_chat_markdown_text_and_highlights(spans, base_color, is_dark, cx);
+    let AiMarkdownInlineRenderData {
+        text,
+        highlights,
+        link_ranges,
+    } = ai_chat_markdown_text_and_highlights(spans, base_color, is_dark, cx);
     if text.is_empty() {
         return div().w_full().text_sm().child("").into_any_element();
     }

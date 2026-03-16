@@ -5,7 +5,24 @@ use crate::app::theme::{
     hunk_toolbar_chip,
 };
 
+#[derive(Clone, Copy)]
+struct MarkdownInlineRenderStyle {
+    base_color: Hsla,
+    is_dark: bool,
+}
+
 impl DiffViewer {
+    fn markdown_inline_render_style(
+        &self,
+        base_color: Hsla,
+        is_dark: bool,
+    ) -> MarkdownInlineRenderStyle {
+        MarkdownInlineRenderStyle {
+            base_color,
+            is_dark,
+        }
+    }
+
     fn render_file_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if self.editor_loading {
             return v_flex()
@@ -526,8 +543,7 @@ impl DiffViewer {
                         spans,
                         true,
                         true,
-                        cx.theme().foreground,
-                        is_dark,
+                        self.markdown_inline_render_style(cx.theme().foreground, is_dark),
                         cx,
                     ),
                     _ => self.render_markdown_inline_spans(
@@ -535,8 +551,7 @@ impl DiffViewer {
                         spans,
                         false,
                         true,
-                        cx.theme().foreground,
-                        is_dark,
+                        self.markdown_inline_render_style(cx.theme().foreground, is_dark),
                         cx,
                     ),
                 };
@@ -548,8 +563,7 @@ impl DiffViewer {
                     spans,
                     false,
                     false,
-                    cx.theme().foreground,
-                    is_dark,
+                    self.markdown_inline_render_style(cx.theme().foreground, is_dark),
                     cx,
                 )
                 .into_any_element(),
@@ -569,8 +583,7 @@ impl DiffViewer {
                         spans,
                         false,
                         false,
-                        cx.theme().foreground,
-                        is_dark,
+                        self.markdown_inline_render_style(cx.theme().foreground, is_dark),
                         cx,
                     ),
                 )
@@ -591,8 +604,7 @@ impl DiffViewer {
                         spans,
                         false,
                         false,
-                        cx.theme().foreground,
-                        is_dark,
+                        self.markdown_inline_render_style(cx.theme().foreground, is_dark),
                         cx,
                     ),
                 )
@@ -613,8 +625,7 @@ impl DiffViewer {
                         spans,
                         false,
                         false,
-                        cx.theme().muted_foreground,
-                        is_dark,
+                        self.markdown_inline_render_style(cx.theme().muted_foreground, is_dark),
                         cx,
                     ),
                 )
@@ -696,8 +707,7 @@ impl DiffViewer {
         spans: &[MarkdownInlineSpan],
         large: bool,
         emphasized: bool,
-        base_color: Hsla,
-        is_dark: bool,
+        style: MarkdownInlineRenderStyle,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if spans.is_empty() {
@@ -709,15 +719,13 @@ impl DiffViewer {
             .min_w_0()
             .items_start()
             .gap_0()
-            .text_color(base_color)
+            .text_color(style.base_color)
             .flex_wrap()
             .whitespace_normal()
             .children(
                 spans
                     .iter()
-                    .map(|span| {
-                        self.render_markdown_inline_span(view.clone(), span, base_color, is_dark, cx)
-                    }),
+                    .map(|span| self.render_markdown_inline_span(view.clone(), span, style, cx)),
             );
 
         if large {
@@ -736,8 +744,7 @@ impl DiffViewer {
         &self,
         view: Entity<Self>,
         span: &MarkdownInlineSpan,
-        base_color: Hsla,
-        is_dark: bool,
+        style: MarkdownInlineRenderStyle,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if span.style.hard_break {
@@ -747,7 +754,7 @@ impl DiffViewer {
         let mut element = div()
             .flex_none()
             .whitespace_nowrap()
-            .text_color(base_color)
+            .text_color(style.base_color)
             .child(span.text.clone());
 
         if span.style.bold {
@@ -762,9 +769,9 @@ impl DiffViewer {
         if span.style.code {
             element = element
                 .font_family(cx.theme().mono_font_family.clone())
-                .bg(hunk_opacity(cx.theme().secondary, is_dark, 0.34, 0.48))
+                .bg(hunk_opacity(cx.theme().secondary, style.is_dark, 0.34, 0.48))
                 .border_1()
-                .border_color(hunk_opacity(cx.theme().border, is_dark, 0.88, 0.74))
+                .border_color(hunk_opacity(cx.theme().border, style.is_dark, 0.88, 0.74))
                 .rounded(px(4.0))
                 .px_1();
         }

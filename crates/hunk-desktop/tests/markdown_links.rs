@@ -46,7 +46,7 @@ fn resolves_workspace_file_links_inside_root() {
     let file_path = nested.join("main.rs");
     fs::write(&file_path, "fn main() {}\n").expect("write workspace file");
 
-    let relative = resolve_markdown_link_target("src/main.rs#L72", Some(root.as_path()));
+    let relative = resolve_markdown_link_target("src/main.rs#L72", Some(root.as_path()), None);
     assert_eq!(
         relative,
         Some(MarkdownLinkTarget::WorkspaceFile(
@@ -59,7 +59,8 @@ fn resolves_workspace_file_links_inside_root() {
     );
 
     let absolute_target = format!("{}:9", file_path.display());
-    let absolute = resolve_markdown_link_target(absolute_target.as_str(), Some(root.as_path()));
+    let absolute =
+        resolve_markdown_link_target(absolute_target.as_str(), Some(root.as_path()), None);
     assert_eq!(
         absolute,
         Some(MarkdownLinkTarget::WorkspaceFile(
@@ -84,9 +85,47 @@ fn rejects_workspace_file_links_outside_root() {
     assert_eq!(
         resolve_markdown_link_target(
             outside_file.to_string_lossy().as_ref(),
-            Some(root.as_path())
+            Some(root.as_path()),
+            None,
         ),
         None
+    );
+}
+
+#[test]
+fn resolves_workspace_file_links_relative_to_current_document() {
+    let root = test_temp_dir("resolve-relative-markdown-links");
+    let docs = root.join("docs");
+    let shared = root.join("shared");
+    fs::create_dir_all(&docs).expect("create docs dir");
+    fs::create_dir_all(&shared).expect("create shared dir");
+    fs::write(docs.join("guide.md"), "# guide\n").expect("write guide");
+    fs::write(shared.join("intro.md"), "# intro\n").expect("write intro");
+
+    assert_eq!(
+        resolve_markdown_link_target("guide.md", Some(root.as_path()), Some("docs/README.md"),),
+        Some(MarkdownLinkTarget::WorkspaceFile(
+            MarkdownWorkspaceFileLink {
+                raw_target: "guide.md".to_string(),
+                normalized_path: "docs/guide.md".to_string(),
+                line: None,
+            }
+        ))
+    );
+
+    assert_eq!(
+        resolve_markdown_link_target(
+            "../shared/intro.md#L5",
+            Some(root.as_path()),
+            Some("docs/README.md"),
+        ),
+        Some(MarkdownLinkTarget::WorkspaceFile(
+            MarkdownWorkspaceFileLink {
+                raw_target: "../shared/intro.md#L5".to_string(),
+                normalized_path: "shared/intro.md".to_string(),
+                line: Some(5),
+            }
+        ))
     );
 }
 

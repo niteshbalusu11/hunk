@@ -58,6 +58,7 @@ pub(crate) fn markdown_inline_text_and_link_ranges(
 pub(crate) fn resolve_markdown_link_target(
     raw_target: &str,
     workspace_root: Option<&Path>,
+    current_document_path: Option<&str>,
 ) -> Option<MarkdownLinkTarget> {
     let trimmed = raw_target.trim();
     if trimmed.is_empty() {
@@ -73,7 +74,7 @@ pub(crate) fn resolve_markdown_link_target(
     let normalized_path = if Path::new(path_part).is_absolute() {
         normalize_absolute_workspace_path(Path::new(path_part), workspace_root)?
     } else {
-        normalize_workspace_relative_path(path_part)?
+        normalize_workspace_relative_path(path_part, current_document_path)?
     };
 
     workspace_root
@@ -88,6 +89,7 @@ pub(crate) fn resolve_markdown_link_target(
         ))
 }
 
+#[cfg_attr(test, allow(dead_code))]
 pub(crate) fn open_url_in_browser(url: &str) -> anyhow::Result<()> {
     #[cfg(target_os = "macos")]
     {
@@ -201,27 +203,44 @@ fn normalize_absolute_workspace_path(path: &Path, workspace_root: &Path) -> Opti
         .and_then(pathbuf_to_workspace_relative)
 }
 
-fn normalize_workspace_relative_path(path: &str) -> Option<String> {
-    pathbuf_to_workspace_relative(normalize_workspace_relative_pathbuf(path)?.as_path())
+fn normalize_workspace_relative_path(
+    path: &str,
+    current_document_path: Option<&str>,
+) -> Option<String> {
+    let candidate = if let Some(current_document_path) = current_document_path {
+        Path::new(current_document_path)
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .join(path)
+    } else {
+        PathBuf::from(path)
+    };
+
+    pathbuf_to_workspace_relative(
+        normalize_workspace_relative_pathbuf(candidate.as_path())?.as_path(),
+    )
 }
 
-fn normalize_workspace_relative_pathbuf(path: &str) -> Option<PathBuf> {
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
+fn normalize_workspace_relative_pathbuf(path: &Path) -> Option<PathBuf> {
+    if path.as_os_str().is_empty() {
         return None;
     }
 
-    let candidate = Path::new(trimmed);
-    if candidate.is_absolute() {
+    if path.is_absolute() {
         return None;
     }
 
     let mut normalized = PathBuf::new();
-    for component in candidate.components() {
+    for component in path.components() {
         match component {
             Component::CurDir => {}
             Component::Normal(part) => normalized.push(part),
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    return None;
+                }
+            }
+            Component::RootDir | Component::Prefix(_) => return None,
         }
     }
 

@@ -17,8 +17,15 @@ impl DiffViewer {
             self.selected_git_workspace_root()
                 .or_else(|| self.repo_root.clone())
         };
+        let current_document_path = (self.workspace_view_mode == WorkspaceViewMode::Files)
+            .then_some(self.editor_path.as_deref())
+            .flatten();
         let Some(target) =
-            resolve_markdown_link_target(raw_target.as_str(), workspace_root.as_deref())
+            resolve_markdown_link_target(
+                raw_target.as_str(),
+                workspace_root.as_deref(),
+                current_document_path,
+            )
         else {
             return false;
         };
@@ -47,6 +54,14 @@ impl DiffViewer {
         window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) -> bool {
+        let path = link.normalized_path;
+        let editor_already_open = self.editor_path.as_deref() == Some(path.as_str())
+            && !self.editor_loading
+            && self.editor_error.is_none();
+        if !editor_already_open && self.prevent_unsaved_editor_discard(Some(path.as_str()), cx) {
+            return false;
+        }
+
         if let Some(window) = window {
             self.focus_handle.focus(window, cx);
         }
@@ -58,13 +73,9 @@ impl DiffViewer {
             }
         }
 
-        let path = link.normalized_path;
         self.selected_path = Some(path.clone());
         self.selected_status = self.status_for_path(path.as_str());
 
-        let editor_already_open = self.editor_path.as_deref() == Some(path.as_str())
-            && !self.editor_loading
-            && self.editor_error.is_none();
         if !editor_already_open {
             self.request_file_editor_reload(path.clone(), cx);
         }
