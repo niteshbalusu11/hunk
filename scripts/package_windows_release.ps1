@@ -19,7 +19,49 @@ function Get-WindowsPackagerVersion {
     return $Matches["base"]
 }
 
-function Invoke-CargoPackagerWithVersionOverride {
+function Resolve-HelixRuntimeSourceDir {
+    $cargoHome = if ($env:CARGO_HOME) {
+        $env:CARGO_HOME
+    } else {
+        Join-Path $HOME ".cargo"
+    }
+
+    $checkoutsDir = Join-Path $cargoHome "git/checkouts"
+    if (-not (Test-Path $checkoutsDir)) {
+        throw "Helix git checkouts directory was not found: $checkoutsDir"
+    }
+
+    $preferredRevision = "78b999f"
+    $helixRepos = Get-ChildItem -Path $checkoutsDir -Directory -Filter "helix-*"
+    foreach ($repo in $helixRepos) {
+        $preferredRuntime = Join-Path $repo.FullName "$preferredRevision/runtime"
+        if (Test-Path $preferredRuntime) {
+            return (Resolve-Path $preferredRuntime).Path
+        }
+    }
+
+    foreach ($repo in $helixRepos) {
+        $runtimeDir = Get-ChildItem -Path $repo.FullName -Directory | Where-Object {
+            Test-Path (Join-Path $_.FullName "runtime")
+        } | Select-Object -First 1
+        if ($runtimeDir) {
+            return (Resolve-Path (Join-Path $runtimeDir.FullName "runtime")).Path
+        }
+    }
+
+    throw "Failed to locate a Helix runtime under $checkoutsDir"
+}
+
+function Escape-TomlString {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Value
+    )
+
+    return ($Value -replace '"', '\"')
+}
+
+function Invoke-CargoPackagerWithManifestOverride {
     param(
         [Parameter(Mandatory = $true)]
         [string]$CargoTomlPath,
@@ -32,19 +74,42 @@ function Invoke-CargoPackagerWithVersionOverride {
         [Parameter(Mandatory = $true)]
         [string]$TargetTriple,
         [Parameter(Mandatory = $true)]
-        [string]$PackagerOutDir
+        [string]$PackagerOutDir,
+        [Parameter(Mandatory = $true)]
+        [string]$HelixRuntimeSourceDir
     )
 
     $originalCargoToml = Get-Content $CargoTomlPath -Raw
+    $updatedCargoToml = $originalCargoToml
+    if ($WindowsPackagerVersion -ne $OriginalVersion) {
+        $updatedCargoToml = [regex]::Replace(
+            $updatedCargoToml,
+            '(?ms)^(\[package\]\s.*?^version = ")([^"]+)(")',
+            ('${1}' + $WindowsPackagerVersion + '${3}'),
+            1
+        )
+
+        if ($updatedCargoToml -eq $originalCargoToml) {
+            throw "Failed to rewrite [package] version in $CargoTomlPath"
+        }
+    }
+
+    $escapedHelixRuntimeSourceDir = Escape-TomlString (($HelixRuntimeSourceDir -replace '\\', '/'))
+    $resourceBlock = @"
+resources = [
+  "../../assets/codex-runtime",
+  { src = "$escapedHelixRuntimeSourceDir", target = "runtime" },
+]
+"@
+    $tomlBeforeResourceRewrite = $updatedCargoToml
     $updatedCargoToml = [regex]::Replace(
-        $originalCargoToml,
-        '(?ms)^(\[package\]\s.*?^version = ")([^"]+)(")',
-        ('${1}' + $WindowsPackagerVersion + '${3}'),
+        $updatedCargoToml,
+        '(?m)^resources = \["\.\./\.\./assets/codex-runtime"\]$',
+        $resourceBlock,
         1
     )
-
-    if ($updatedCargoToml -eq $originalCargoToml) {
-        throw "Failed to rewrite [package] version in $CargoTomlPath"
+    if ($updatedCargoToml -eq $tomlBeforeResourceRewrite) {
+        throw "Failed to rewrite [package.metadata.packager] resources in $CargoTomlPath"
     }
 
     $originalCargoLockBytes = $null
@@ -56,7 +121,9 @@ function Invoke-CargoPackagerWithVersionOverride {
     $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
     try {
         [System.IO.File]::WriteAllText($CargoTomlPath, $updatedCargoToml, $utf8NoBom)
-        Write-Host "Using Windows packager version $WindowsPackagerVersion for Cargo version $OriginalVersion"
+        if ($WindowsPackagerVersion -ne $OriginalVersion) {
+            Write-Host "Using Windows packager version $WindowsPackagerVersion for Cargo version $OriginalVersion"
+        }
         cargo packager -p hunk-desktop --release -f wix --target $TargetTriple --out-dir $PackagerOutDir
     } finally {
         [System.IO.File]::WriteAllText($CargoTomlPath, $originalCargoToml, $utf8NoBom)
@@ -83,6 +150,7 @@ $versionLabel = if ($env:HUNK_RELEASE_VERSION) {
     [regex]::Match($versionLine.Line, '^version = "(.*)"$').Groups[1].Value
 }
 $windowsPackagerVersion = Get-WindowsPackagerVersion -Version $versionLabel
+$helixRuntimeSourceDir = Resolve-HelixRuntimeSourceDir
 
 Push-Location $rootDir
 $originalCargoTargetDir = $env:CARGO_TARGET_DIR
@@ -97,17 +165,14 @@ try {
     Write-Host "Building Windows release binary..."
     cargo build -p hunk-desktop --release --target $targetTriple --locked
     Write-Host "Building Windows MSI package..."
-    if ($windowsPackagerVersion -eq $versionLabel) {
-        cargo packager -p hunk-desktop --release -f wix --target $targetTriple --out-dir $packagerOutDir
-    } else {
-        Invoke-CargoPackagerWithVersionOverride `
-            -CargoTomlPath $cargoTomlPath `
-            -CargoLockPath $cargoLockPath `
-            -OriginalVersion $versionLabel `
-            -WindowsPackagerVersion $windowsPackagerVersion `
-            -TargetTriple $targetTriple `
-            -PackagerOutDir $packagerOutDir
-    }
+    Invoke-CargoPackagerWithManifestOverride `
+        -CargoTomlPath $cargoTomlPath `
+        -CargoLockPath $cargoLockPath `
+        -OriginalVersion $versionLabel `
+        -WindowsPackagerVersion $windowsPackagerVersion `
+        -TargetTriple $targetTriple `
+        -PackagerOutDir $packagerOutDir `
+        -HelixRuntimeSourceDir $helixRuntimeSourceDir
 } finally {
     if ($null -eq $originalCargoTargetDir) {
         Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue

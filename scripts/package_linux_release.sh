@@ -15,6 +15,7 @@ LAUNCHER_SOURCE_PATH="$ROOT_DIR/scripts/linux_gui_binary_launcher.sh"
 PACKAGED_BINARY_PATH="$PACKAGE_DIR/$REAL_BINARY_NAME"
 PACKAGED_LAUNCHER_PATH="$PACKAGE_DIR/hunk-desktop"
 PACKAGE_LIB_DIR="$PACKAGE_DIR/lib"
+PACKAGED_HELIX_RUNTIME_DIR="$PACKAGE_DIR/runtime"
 CODEX_SOURCE_PATH="$TARGET_DIR/$TARGET_TRIPLE/release/codex-runtime/linux/codex"
 PACKAGED_CODEX_PATH="$PACKAGE_DIR/codex-runtime/linux/codex"
 APPDIR_PATH="$TARGET_DIR/appimage/Hunk.AppDir"
@@ -27,6 +28,7 @@ APP_DESKTOP_ENTRY_PATH="$APPDIR_PATH/usr/share/applications/hunk_desktop.desktop
 APP_ICON_PATH="$APPDIR_PATH/usr/share/icons/hicolor/1024x1024/apps/hunk_desktop.png"
 APPDIR_REAL_BINARY_PATH="$APPDIR_PATH/usr/bin/$REAL_BINARY_NAME"
 APPDIR_LAUNCHER_PATH="$APPDIR_PATH/usr/bin/hunk_desktop"
+APPDIR_HELIX_RUNTIME_PATH="$APPDIR_PATH/usr/bin/runtime"
 
 download_cached_appimage_tool() {
   local url="$1"
@@ -79,6 +81,7 @@ create_linux_appdir() {
   cp "$APPIMAGE_APPRUN_PATH" "$APPDIR_PATH/AppRun"
   cp "$PACKAGED_BINARY_PATH" "$APPDIR_REAL_BINARY_PATH"
   cp "$PACKAGED_LAUNCHER_PATH" "$APPDIR_LAUNCHER_PATH"
+  cp -R "$PACKAGED_HELIX_RUNTIME_DIR" "$APPDIR_HELIX_RUNTIME_PATH"
   cp -R "$PACKAGE_LIB_DIR/." "$APPDIR_PATH/usr/lib/"
   cp "$PACKAGED_CODEX_PATH" "$APPDIR_PATH/usr/lib/hunk_desktop/codex-runtime/linux/codex"
   chmod +x "$APPDIR_PATH/AppRun" "$APPDIR_REAL_BINARY_PATH" "$APPDIR_LAUNCHER_PATH" \
@@ -104,6 +107,21 @@ EOF
   cp "$ROOT_DIR/assets/icons/hunk_new.png" "$APPDIR_PATH/.DirIcon"
   cp "$ROOT_DIR/assets/icons/hunk_new.png" "$APPDIR_PATH/hunk_desktop.png"
   ln -sf "usr/share/applications/hunk_desktop.desktop" "$APPDIR_PATH/hunk_desktop.desktop"
+}
+
+bundle_helix_runtime() {
+  local runtime_source_dir runtime_destination
+  runtime_source_dir="$("$ROOT_DIR/scripts/resolve_helix_runtime_dir.sh")"
+  runtime_destination="$1"
+
+  rm -rf "$runtime_destination"
+  mkdir -p "$(dirname "$runtime_destination")"
+  cp -R "$runtime_source_dir" "$runtime_destination"
+
+  if [[ ! -f "$runtime_destination/languages.toml" ]]; then
+    echo "error: bundled Helix runtime is missing languages.toml" >&2
+    exit 1
+  fi
 }
 
 build_linux_appimage() {
@@ -246,6 +264,7 @@ mkdir -p "$PACKAGE_LIB_DIR"
 cp "$BINARY_SOURCE_PATH" "$PACKAGED_BINARY_PATH"
 cp "$LAUNCHER_SOURCE_PATH" "$PACKAGED_LAUNCHER_PATH"
 cp "$CODEX_SOURCE_PATH" "$PACKAGED_CODEX_PATH"
+bundle_helix_runtime "$PACKAGED_HELIX_RUNTIME_DIR"
 chmod +x "$PACKAGED_BINARY_PATH" "$PACKAGED_LAUNCHER_PATH" "$PACKAGED_CODEX_PATH"
 
 echo "Bundling Linux shared libraries into tarball fallback..." >&2

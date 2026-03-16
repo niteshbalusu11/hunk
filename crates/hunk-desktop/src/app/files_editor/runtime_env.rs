@@ -44,6 +44,12 @@ pub(super) fn with_tokio_runtime<T>(f: impl FnOnce() -> T) -> T {
 }
 
 fn discover_helix_runtime_dir() -> Option<OsString> {
+    if let Ok(current_exe) = env::current_exe()
+        && let Some(runtime) = discover_bundled_helix_runtime_dir(current_exe.as_path())
+    {
+        return Some(runtime.into_os_string());
+    }
+
     let workspace_runtime = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .map(|dir| dir.join("runtime"));
@@ -81,6 +87,42 @@ fn discover_helix_runtime_dir() -> Option<OsString> {
         }
     }
     None
+}
+
+fn discover_bundled_helix_runtime_dir(current_exe: &Path) -> Option<PathBuf> {
+    let candidates = helix_runtime_dir_candidates(current_exe);
+    debug!(
+        current_exe = %current_exe.display(),
+        candidates = ?candidates,
+        "probing bundled Helix runtime directories"
+    );
+    candidates.into_iter().find(|candidate| candidate.is_dir())
+}
+
+fn helix_runtime_dir_candidates(current_exe: &Path) -> Vec<PathBuf> {
+    let Some(exe_dir) = current_exe.parent() else {
+        return Vec::new();
+    };
+
+    let mut candidates = Vec::new();
+    if cfg!(target_os = "macos")
+        && let Some(contents_dir) = exe_dir.parent()
+        && contents_dir
+            .file_name()
+            .is_some_and(|name| name == "Contents")
+    {
+        candidates.push(contents_dir.join("Resources").join("runtime"));
+    }
+
+    candidates.push(exe_dir.join("Resources").join("runtime"));
+    candidates.push(exe_dir.join("runtime"));
+    candidates
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) fn discover_bundled_helix_runtime_dir_for_tests(current_exe: &Path) -> Option<PathBuf> {
+    discover_bundled_helix_runtime_dir(current_exe)
 }
 
 fn default_cargo_home() -> Option<PathBuf> {
