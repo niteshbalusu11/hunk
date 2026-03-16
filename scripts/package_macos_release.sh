@@ -136,6 +136,28 @@ sign_macos_app_bundle() {
   codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$APP_PATH"
 }
 
+staple_macos_artifact_with_retry() {
+  local artifact_path="$1"
+  local max_attempts=6
+  local attempt
+
+  for attempt in $(seq 1 "$max_attempts"); do
+    if xcrun stapler staple -v "$artifact_path"; then
+      if xcrun stapler validate -v "$artifact_path"; then
+        return 0
+      fi
+    fi
+
+    if [[ "$attempt" -lt "$max_attempts" ]]; then
+      echo "Stapling attempt $attempt failed for $artifact_path; retrying after notarization propagation delay..." >&2
+      sleep 15
+    fi
+  done
+
+  echo "error: failed to staple notarization ticket to $artifact_path after $max_attempts attempts" >&2
+  return 1
+}
+
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "error: macOS release packaging must run on macOS" >&2
   exit 1
@@ -203,8 +225,7 @@ if [[ -n "${APPLE_NOTARY_KEY_ID:-}" || -n "${APPLE_NOTARY_ISSUER:-}" || -n "${AP
     --issuer "$APPLE_NOTARY_ISSUER" \
     --wait
   echo "Stapling notarization tickets..." >&2
-  xcrun stapler staple "$DMG_PATH"
-  xcrun stapler validate "$DMG_PATH"
+  staple_macos_artifact_with_retry "$DMG_PATH"
 fi
 
 echo "Created macOS release artifact at $DMG_PATH" >&2
