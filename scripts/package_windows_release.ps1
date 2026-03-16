@@ -19,37 +19,100 @@ function Get-WindowsPackagerVersion {
     return $Matches["base"]
 }
 
+function Get-HelixGitRevision {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CargoTomlPath
+    )
+
+    $cargoToml = Get-Content $CargoTomlPath -Raw
+    $revisionMatch = [regex]::Match(
+        $cargoToml,
+        '(?m)^helix-core\s*=\s*\{[^}]*\brev\s*=\s*"(?<revision>[0-9a-f]{7,40})"'
+    )
+    if (-not $revisionMatch.Success) {
+        throw "Failed to resolve Helix git revision from $CargoTomlPath"
+    }
+
+    return $revisionMatch.Groups["revision"].Value
+}
+
+function Download-HelixRuntimeSourceDir {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Revision
+    )
+
+    $downloadRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("hunk-helix-source-" + [System.Guid]::NewGuid().ToString("N"))
+    $zipPath = Join-Path $downloadRoot "helix.zip"
+    $extractDir = Join-Path $downloadRoot "extract"
+    $archiveUrl = "https://github.com/helix-editor/helix/archive/$Revision.zip"
+
+    New-Item -ItemType Directory -Path $downloadRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
+
+    Write-Host "Downloading Helix runtime source archive for revision $Revision..."
+    Invoke-WebRequest -Uri $archiveUrl -OutFile $zipPath
+    Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+
+    $runtimeDir = Get-ChildItem -Path $extractDir -Directory | Where-Object {
+        Test-Path (Join-Path $_.FullName "runtime")
+    } | Select-Object -First 1
+    if (-not $runtimeDir) {
+        throw "Downloaded Helix archive for revision $Revision did not contain a runtime/ directory"
+    }
+
+    return [pscustomobject]@{
+        Path        = (Resolve-Path (Join-Path $runtimeDir.FullName "runtime")).Path
+        CleanupRoot = $downloadRoot
+        Source      = "download"
+    }
+}
+
 function Resolve-HelixRuntimeSourceDir {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CargoTomlPath
+    )
+
     $cargoHome = if ($env:CARGO_HOME) {
         $env:CARGO_HOME
     } else {
         Join-Path $HOME ".cargo"
     }
 
+    $preferredRevision = Get-HelixGitRevision -CargoTomlPath $CargoTomlPath
+    $preferredRevisionPrefix = $preferredRevision.Substring(0, [Math]::Min(7, $preferredRevision.Length))
     $checkoutsDir = Join-Path $cargoHome "git/checkouts"
-    if (-not (Test-Path $checkoutsDir)) {
-        throw "Helix git checkouts directory was not found: $checkoutsDir"
-    }
+    if (Test-Path $checkoutsDir) {
+        $helixRepos = Get-ChildItem -Path $checkoutsDir -Directory -Filter "helix-*"
+        foreach ($repo in $helixRepos) {
+            $preferredRuntime = Join-Path $repo.FullName "$preferredRevisionPrefix/runtime"
+            if (Test-Path $preferredRuntime) {
+                return [pscustomobject]@{
+                    Path        = (Resolve-Path $preferredRuntime).Path
+                    CleanupRoot = $null
+                    Source      = "cargo-git-checkout"
+                }
+            }
+        }
 
-    $preferredRevision = "78b999f"
-    $helixRepos = Get-ChildItem -Path $checkoutsDir -Directory -Filter "helix-*"
-    foreach ($repo in $helixRepos) {
-        $preferredRuntime = Join-Path $repo.FullName "$preferredRevision/runtime"
-        if (Test-Path $preferredRuntime) {
-            return (Resolve-Path $preferredRuntime).Path
+        foreach ($repo in $helixRepos) {
+            $runtimeDir = Get-ChildItem -Path $repo.FullName -Directory | Where-Object {
+                Test-Path (Join-Path $_.FullName "runtime")
+            } | Select-Object -First 1
+            if ($runtimeDir) {
+                return [pscustomobject]@{
+                    Path        = (Resolve-Path (Join-Path $runtimeDir.FullName "runtime")).Path
+                    CleanupRoot = $null
+                    Source      = "cargo-git-checkout"
+                }
+            }
         }
     }
 
-    foreach ($repo in $helixRepos) {
-        $runtimeDir = Get-ChildItem -Path $repo.FullName -Directory | Where-Object {
-            Test-Path (Join-Path $_.FullName "runtime")
-        } | Select-Object -First 1
-        if ($runtimeDir) {
-            return (Resolve-Path (Join-Path $runtimeDir.FullName "runtime")).Path
-        }
-    }
-
-    throw "Failed to locate a Helix runtime under $checkoutsDir"
+    Write-Host "Helix runtime was not found under $checkoutsDir; falling back to the Helix source archive for revision $preferredRevision"
+    return Download-HelixRuntimeSourceDir -Revision $preferredRevision
 }
 
 function Escape-TomlString {
@@ -173,15 +236,17 @@ $versionLabel = if ($env:HUNK_RELEASE_VERSION) {
     [regex]::Match($versionLine.Line, '^version = "(.*)"$').Groups[1].Value
 }
 $windowsPackagerVersion = Get-WindowsPackagerVersion -Version $versionLabel
-$helixRuntimeSourceDir = Resolve-HelixRuntimeSourceDir
+$helixRuntimeSource = Resolve-HelixRuntimeSourceDir -CargoTomlPath $cargoTomlPath
 $stagedHelixRuntimeDir = $null
+$downloadedHelixRuntimeRoot = $helixRuntimeSource.CleanupRoot
 
 Push-Location $rootDir
 $originalCargoTargetDir = $env:CARGO_TARGET_DIR
 try {
     $targetDir = (& $resolveTargetDirScript -RootDir $rootDir).Trim()
     $packagerOutDir = Join-Path $targetDir "packager"
-    $stagedHelixRuntimeDir = New-StagedHelixRuntimeDir -HelixRuntimeSourceDir $helixRuntimeSourceDir
+    Write-Host "Using Helix runtime source from $($helixRuntimeSource.Source): $($helixRuntimeSource.Path)"
+    $stagedHelixRuntimeDir = New-StagedHelixRuntimeDir -HelixRuntimeSourceDir $helixRuntimeSource.Path
     $env:CARGO_TARGET_DIR = $targetDir
     Write-Host "Downloading bundled Codex runtime for Windows..."
     & ./scripts/download_codex_runtime_windows.ps1 | Out-Null
@@ -201,6 +266,9 @@ try {
 } finally {
     if ($stagedHelixRuntimeDir) {
         Remove-Item -Path (Split-Path $stagedHelixRuntimeDir -Parent) -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if ($downloadedHelixRuntimeRoot) {
+        Remove-Item -Path $downloadedHelixRuntimeRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
     if ($null -eq $originalCargoTargetDir) {
         Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue
