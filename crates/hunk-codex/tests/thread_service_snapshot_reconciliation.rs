@@ -5,6 +5,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+use codex_app_server_protocol::ApprovalsReviewer;
 use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::JSONRPCMessage;
 use codex_app_server_protocol::JSONRPCNotification;
@@ -287,6 +288,7 @@ fn thread_resume_response(thread: Thread) -> ThreadResumeResponse {
         model_provider: "openai".to_string(),
         service_tier: None,
         approval_policy: AskForApproval::OnRequest,
+        approvals_reviewer: ApprovalsReviewer::User,
         sandbox: SandboxPolicy::DangerFullAccess,
         reasoning_effort: None,
     }
