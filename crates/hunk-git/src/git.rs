@@ -588,6 +588,11 @@ pub(crate) fn read_worktree_file_in_git_form(
     path: &str,
 ) -> Result<Vec<u8>> {
     let absolute_path = root.join(path);
+    if index.entry_by_path(path.as_bytes().as_bstr()).is_none() {
+        return fs::read(absolute_path.as_path())
+            .with_context(|| format!("failed to read untracked worktree file '{}'", path));
+    }
+
     let file = fs::File::open(absolute_path.as_path())
         .with_context(|| format!("failed to open worktree file '{}'", absolute_path.display()))?;
     read_to_git_output(

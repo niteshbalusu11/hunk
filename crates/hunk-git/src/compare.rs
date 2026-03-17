@@ -511,6 +511,9 @@ fn render_workspace_tree_diff_entry(
         .as_str()
         .ok_or_else(|| anyhow!("workspace compare patch for '{path}' is not valid UTF-8"))?
         .to_string();
+    if patch_text.is_empty() {
+        return Ok(None);
+    }
     let (_, additions, deletions) = patch
         .line_stats()
         .with_context(|| format!("failed to compute workspace patch line stats for {path}"))?;

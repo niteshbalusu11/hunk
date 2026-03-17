@@ -360,9 +360,10 @@ fn compare_snapshot_supports_branch_to_worktree_diffs() -> Result<()> {
         },
     )?;
 
+    println!("{snapshot:#?}");
     assert_eq!(snapshot.files.len(), 1);
     assert_eq!(snapshot.files[0].path, "tracked.txt");
-    assert!(snapshot.overall_line_stats.added >= 1);
+    assert!(snapshot.overall_line_stats.added >= 1, "{snapshot:#?}");
     assert!(
         snapshot
             .patches_by_path
@@ -405,6 +406,43 @@ fn compare_snapshot_supports_worktree_to_branch_diffs() -> Result<()> {
             .patches_by_path
             .get("tracked.txt")
             .is_some_and(|patch| patch.contains("@@") && patch.contains("worktree change"))
+    );
+    Ok(())
+}
+
+#[test]
+fn compare_snapshot_supports_branch_to_worktree_new_files() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+    fixture.write_file("tracked.txt", "base\n")?;
+    fixture.commit_all("initial")?;
+    let worktree = create_managed_worktree(
+        fixture.root(),
+        &CreateWorktreeRequest {
+            branch_name: "feature/compare-new-file".to_string(),
+            base_branch_name: None,
+        },
+    )?;
+    fs::write(worktree.root.join("test.md"), "hello\nnew file\n")?;
+
+    let snapshot = load_compare_snapshot(
+        fixture.root(),
+        &CompareSource::Branch {
+            name: "main".to_string(),
+        },
+        &CompareSource::WorkspaceTarget {
+            target_id: worktree.id.clone(),
+            root: worktree.root.clone(),
+        },
+    )?;
+
+    assert_eq!(snapshot.files.len(), 1);
+    assert_eq!(snapshot.files[0].path, "test.md");
+    assert!(snapshot.overall_line_stats.added >= 1);
+    assert!(
+        snapshot
+            .patches_by_path
+            .get("test.md")
+            .is_some_and(|patch| patch.contains("@@") && patch.contains("new file"))
     );
     Ok(())
 }
