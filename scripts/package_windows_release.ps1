@@ -147,6 +147,25 @@ function New-StagedHelixRuntimeDir {
     return $stagedRuntimeDir
 }
 
+function Test-WindowsCodexRuntimeBundle {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RootDir
+    )
+
+    $runtimeDir = Join-Path $RootDir "assets/codex-runtime/windows"
+    if (-not (Test-Path $runtimeDir -PathType Container)) {
+        throw "Missing Windows Codex runtime directory: $runtimeDir"
+    }
+
+    foreach ($fileName in @("codex.cmd", "codex.exe")) {
+        $filePath = Join-Path $runtimeDir $fileName
+        if (-not (Test-Path $filePath -PathType Leaf)) {
+            throw "Missing Windows Codex runtime file: $filePath"
+        }
+    }
+}
+
 function Invoke-CargoPackagerWithManifestOverride {
     param(
         [Parameter(Mandatory = $true)]
@@ -251,7 +270,7 @@ try {
     Write-Host "Downloading bundled Codex runtime for Windows..."
     & ./scripts/download_codex_runtime_windows.ps1 | Out-Null
     Write-Host "Validating bundled Codex runtime for Windows..."
-    bash ./scripts/validate_codex_runtime_bundle.sh --strict --platform windows | Out-Null
+    Test-WindowsCodexRuntimeBundle -RootDir $rootDir
     Write-Host "Building Windows release binary..."
     cargo build -p hunk-desktop --release --target $targetTriple --locked
     Write-Host "Building Windows MSI package..."
