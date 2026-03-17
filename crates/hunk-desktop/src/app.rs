@@ -143,6 +143,7 @@ mod data_segments;
 mod files_editor;
 mod highlight;
 mod markdown_links;
+mod notifications;
 mod render;
 mod repo_file_search;
 mod theme;

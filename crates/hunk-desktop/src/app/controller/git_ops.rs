@@ -37,7 +37,7 @@ impl DiffViewer {
             if let Err(err) = cx.update_window(window_handle, |_, window, cx| {
                 gpui_component::WindowExt::push_notification(
                     window,
-                    gpui_component::notification::Notification::success(message.clone()),
+                    crate::app::notifications::success(message.clone()),
                     cx,
                 );
             }) {
@@ -57,7 +57,7 @@ impl DiffViewer {
             if let Err(err) = cx.update_window(window_handle, |_, window, cx| {
                 gpui_component::WindowExt::push_notification(
                     window,
-                    gpui_component::notification::Notification::error(message.clone()),
+                    crate::app::notifications::error(message.clone()),
                     cx,
                 );
             }) {
@@ -74,7 +74,7 @@ impl DiffViewer {
         if let Some(window) = window {
             gpui_component::WindowExt::push_notification(
                 window,
-                gpui_component::notification::Notification::warning(message),
+                crate::app::notifications::warning(message),
                 cx,
             );
             return;
@@ -90,7 +90,7 @@ impl DiffViewer {
             if let Err(err) = cx.update_window(window_handle, |_, window, cx| {
                 gpui_component::WindowExt::push_notification(
                     window,
-                    gpui_component::notification::Notification::warning(message.clone()),
+                    crate::app::notifications::warning(message.clone()),
                     cx,
                 );
             }) {

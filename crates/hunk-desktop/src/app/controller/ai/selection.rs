@@ -33,7 +33,7 @@ impl DiffViewer {
         cx.write_to_clipboard(ClipboardItem::new_string(text));
         gpui_component::WindowExt::push_notification(
             window,
-            gpui_component::notification::Notification::success(success_message),
+            crate::app::notifications::success(success_message),
             cx,
         );
         cx.notify();

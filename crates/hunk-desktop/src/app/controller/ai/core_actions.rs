@@ -703,7 +703,7 @@ impl DiffViewer {
         let message = format!("Copied thread ID: {thread_id}");
         gpui_component::WindowExt::push_notification(
             window,
-            gpui_component::notification::Notification::success(message),
+            crate::app::notifications::success(message),
             cx,
         );
         cx.notify();

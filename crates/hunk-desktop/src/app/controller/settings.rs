@@ -457,7 +457,7 @@ impl DiffViewer {
         ));
         gpui_component::WindowExt::push_notification(
             window,
-            gpui_component::notification::Notification::success(save_message),
+            crate::app::notifications::success(save_message),
             cx,
         );
 
