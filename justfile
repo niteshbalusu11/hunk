@@ -1,7 +1,5 @@
 set export
 
-CARGO_TARGET_DIR := `./scripts/resolve_cargo_target_dir.sh`
-
 start:
     cargo run -p hunk-desktop
 
@@ -31,7 +29,7 @@ dev:
 
 bundle:
     cargo build -p hunk-desktop --release --locked
-    cargo packager -p hunk-desktop --release -f app --out-dir "{{CARGO_TARGET_DIR}}/packager"
+    cargo packager -p hunk-desktop --release -f app --out-dir "$(./scripts/resolve_cargo_target_dir.sh)/packager"
 
 package-macos-release:
     ./scripts/package_macos_release.sh
@@ -45,7 +43,7 @@ package-windows-release:
 prod:
     osascript -e 'tell application "Hunk" to quit' || true
     just bundle
-    open "{{CARGO_TARGET_DIR}}/packager/Hunk.app"
+    open "$(./scripts/resolve_cargo_target_dir.sh)/packager/Hunk.app"
 
 validate-codex-runtime:
     ./scripts/validate_codex_runtime_bundle.sh
