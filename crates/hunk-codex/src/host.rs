@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-#[cfg(unix)]
 use std::io;
 use std::io::BufRead;
 use std::io::BufReader;
@@ -380,9 +379,14 @@ impl HostRuntime {
             {
                 return Ok(());
             }
+
+            self.force_stop_child(process_id, child)
         }
 
-        self.force_stop_child(process_id, child)
+        #[cfg(not(unix))]
+        {
+            self.force_stop_child(process_id, child)
+        }
     }
 
     fn force_stop_child(&self, process_id: u32, child: &mut Child) -> Result<()> {
@@ -405,7 +409,12 @@ impl HostRuntime {
 
         #[cfg(not(unix))]
         {
-            let _ = process_id;
+            if stop_windows_process_tree(process_id)
+                .map_err(CodexIntegrationError::HostProcessIo)?
+            {
+                return Ok(());
+            }
+
             if let Err(error) = child.kill() {
                 let already_exited = matches!(child.try_wait(), Ok(Some(_)));
                 if !already_exited {
@@ -756,21 +765,28 @@ fn stop_spawned_child_during_shutdown(process_id: u32, child: &mut Child) {
 }
 
 #[cfg(not(unix))]
-fn stop_spawned_child_during_shutdown(_process_id: u32, child: &mut Child) {
+fn cleanup_tracked_host_process(process_id: u32) {
+    if let Err(error) = stop_windows_process_tree(process_id) {
+        warn!("failed to kill tracked codex host process tree {process_id}: {error}");
+    }
+}
+
+#[cfg(not(unix))]
+fn stop_spawned_child_during_shutdown(process_id: u32, child: &mut Child) {
+    let _ = stop_windows_process_tree(process_id);
     let _ = child.kill();
     let _ = child.wait();
 }
 
 #[cfg(not(unix))]
-fn cleanup_tracked_host_process(process_id: u32) {
+fn stop_windows_process_tree(process_id: u32) -> io::Result<bool> {
     let status = Command::new("taskkill")
         .args(["/PID", &process_id.to_string(), "/T", "/F"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status();
-    if let Err(error) = status {
-        warn!("failed to kill tracked codex host process tree {process_id}: {error}");
-    }
+        .status()?;
+
+    Ok(status.success())
 }
 
 #[cfg(unix)]

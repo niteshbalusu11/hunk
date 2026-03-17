@@ -8,6 +8,7 @@ use hunk_domain::paths::hunk_home_dir;
 use crate::branch::is_valid_branch_name;
 use crate::git::discover_repo_root;
 use crate::git2_helpers::{load_statuses, open_git2_repo};
+use crate::path::normalize_windows_path_prefix;
 
 pub const PRIMARY_WORKSPACE_TARGET_ID: &str = "primary";
 pub const MANAGED_WORKTREES_DIR_NAME: &str = "worktrees";
@@ -347,7 +348,9 @@ fn open_repository(path: &Path) -> Result<Repository> {
 }
 
 fn canonicalize_existing_path(path: &Path) -> Result<PathBuf> {
-    fs::canonicalize(path).with_context(|| format!("failed to resolve path {}", path.display()))
+    fs::canonicalize(path)
+        .map(normalize_windows_path_prefix)
+        .with_context(|| format!("failed to resolve path {}", path.display()))
 }
 
 fn normalize_absolute_path(primary_repo_root: &Path, path: &Path) -> Result<PathBuf> {

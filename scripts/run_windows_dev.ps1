@@ -24,11 +24,11 @@ if (-not (Test-Path $runtimeLauncher) -or -not (Test-Path $runtimeBinary)) {
     & $downloadRuntimeScript | Out-Null
 }
 
-$resolvedLauncher = (Resolve-Path $runtimeLauncher).Path
-$env:HUNK_CODEX_EXECUTABLE = $resolvedLauncher
+$resolvedRuntimeBinary = (Resolve-Path $runtimeBinary).Path
+$env:HUNK_CODEX_EXECUTABLE = $resolvedRuntimeBinary
 
 Write-Host "Using CARGO_TARGET_DIR=$env:CARGO_TARGET_DIR"
-Write-Host "Using HUNK_CODEX_EXECUTABLE=$resolvedLauncher"
+Write-Host "Using HUNK_CODEX_EXECUTABLE=$resolvedRuntimeBinary"
 
 Push-Location $rootDir
 try {

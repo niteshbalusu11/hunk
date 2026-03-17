@@ -14,6 +14,7 @@ use gix::diff::blob::intern::InternedInput;
 use gix::filter::plumbing::pipeline::convert::ToGitOutcome;
 
 use crate::git2_helpers::open_git2_repo;
+use crate::path::normalize_windows_path_prefix;
 use crate::worktree::{
     WorkspaceTargetKind, list_workspace_targets, repo_relative_path_is_within_managed_worktrees,
 };

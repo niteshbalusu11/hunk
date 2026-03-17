@@ -541,7 +541,7 @@
 
     #[cfg(target_os = "windows")]
     #[test]
-    fn bundled_codex_resolution_prefers_windows_cmd_over_exe() {
+    fn bundled_codex_resolution_prefers_windows_exe_over_cmd() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock should be monotonic")
@@ -570,7 +570,7 @@
         write_fake_codex_launcher(launcher_path.as_path());
 
         let resolved = resolve_bundled_codex_executable_from_exe(exe_path.as_path());
-        assert_eq!(resolved, Some(launcher_path));
+        assert_eq!(resolved, Some(runtime_path));
 
         let _ = std::fs::remove_dir_all(root);
     }

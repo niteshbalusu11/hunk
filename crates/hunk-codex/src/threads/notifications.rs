@@ -536,7 +536,7 @@ impl ThreadService {
             .or_else(|| (!thread.preview.trim().is_empty()).then(|| thread.preview.clone()));
         self.apply_event(ReducerEvent::ThreadStarted {
             thread_id: thread.id.clone(),
-            cwd: thread.cwd.to_string_lossy().to_string(),
+            cwd: workspace_path_key(thread.cwd.as_path()),
             title,
             created_at: Some(thread.created_at),
             updated_at: Some(thread.updated_at),
@@ -639,7 +639,7 @@ impl ThreadService {
         Err(CodexIntegrationError::ThreadOutsideWorkspace {
             thread_id: thread.id.clone(),
             expected_cwd: self.cwd_key(),
-            actual_cwd: thread.cwd.to_string_lossy().to_string(),
+            actual_cwd: workspace_path_key(thread.cwd.as_path()),
         })
     }
 
@@ -672,7 +672,7 @@ impl ThreadService {
     }
 
     fn thread_matches_workspace(&self, thread: &Thread) -> bool {
-        thread.cwd == self.cwd
+        normalize_workspace_path(thread.cwd.as_path()) == self.cwd
     }
 
     fn is_known_thread(&self, thread_id: &str) -> bool {
@@ -697,8 +697,58 @@ impl ThreadService {
     }
 
     fn cwd_key(&self) -> String {
-        self.cwd.to_string_lossy().to_string()
+        workspace_path_key(self.cwd.as_path())
     }
+}
+
+fn workspace_path_key(path: &Path) -> String {
+    normalize_workspace_path(path).to_string_lossy().to_string()
+}
+
+fn workspace_path_aliases(path: &Path) -> Vec<String> {
+    let normalized = normalize_workspace_path(path);
+    let mut aliases = vec![normalized.to_string_lossy().to_string()];
+
+    #[cfg(windows)]
+    {
+        let text = aliases[0].clone();
+        if let Some(legacy) = windows_verbatim_workspace_alias(text.as_str())
+            && !aliases.iter().any(|alias| alias == &legacy)
+        {
+            aliases.push(legacy);
+        }
+    }
+
+    aliases
+}
+
+fn normalize_workspace_path(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let text = path.to_string_lossy();
+        if let Some(stripped) = text.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{stripped}"));
+        }
+        if let Some(stripped) = text.strip_prefix(r"\\?\") {
+            return PathBuf::from(stripped);
+        }
+    }
+
+    path.to_path_buf()
+}
+
+#[cfg(windows)]
+fn windows_verbatim_workspace_alias(path: &str) -> Option<String> {
+    if path.starts_with(r"\\?\") {
+        return None;
+    }
+    if let Some(stripped) = path.strip_prefix(r"\\") {
+        return Some(format!(r"\\?\UNC\{stripped}"));
+    }
+    if path.len() >= 3 && path.as_bytes()[1] == b':' && path.as_bytes()[2] == b'\\' {
+        return Some(format!(r"\\?\{path}"));
+    }
+    None
 }
 
 fn is_rollout_fallback_item_id(item_id: &str) -> bool {

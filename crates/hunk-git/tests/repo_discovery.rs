@@ -51,6 +51,21 @@ fn fingerprint_reports_unborn_head_without_commit_id() -> Result<()> {
     Ok(())
 }
 
+#[cfg(windows)]
+#[test]
+fn discovered_repo_root_uses_normal_windows_path_prefix() -> Result<()> {
+    let fixture = TempGitRepo::new()?;
+
+    let discovered = discover_repo_root(fixture.root())?;
+
+    assert!(
+        !discovered.to_string_lossy().starts_with(r"\\?\"),
+        "repo root should not use a verbatim Windows prefix: {}",
+        discovered.display()
+    );
+    Ok(())
+}
+
 struct TempGitRepo {
     _tempdir: TempDir,
     root: PathBuf,
@@ -61,7 +76,7 @@ impl TempGitRepo {
         let tempdir = tempfile::tempdir()?;
         let root = tempdir.path().join("repo");
         gix::init(root.as_path())?;
-        let root = fs::canonicalize(root)?;
+        let root = normalize_windows_prefix(fs::canonicalize(root)?);
         Ok(Self {
             _tempdir: tempdir,
             root,
@@ -71,4 +86,19 @@ impl TempGitRepo {
     fn root(&self) -> &Path {
         &self.root
     }
+}
+
+fn normalize_windows_prefix(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let text = path.to_string_lossy();
+        if let Some(stripped) = text.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{stripped}"));
+        }
+        if let Some(stripped) = text.strip_prefix(r"\\?\") {
+            return PathBuf::from(stripped);
+        }
+    }
+
+    path
 }

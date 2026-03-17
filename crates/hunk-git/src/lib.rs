@@ -4,6 +4,7 @@ pub mod config {
 
 mod command_env;
 mod git2_helpers;
+mod path;
 
 pub mod branch;
 pub mod compare;

@@ -379,6 +379,7 @@ where
 
 fn canonicalize_existing_path(path: &Path) -> Result<PathBuf> {
     fs::canonicalize(path)
+        .map(normalize_windows_path_prefix)
         .with_context(|| format!("failed to canonicalize existing path {}", path.display()))
 }
 

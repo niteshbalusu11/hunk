@@ -136,7 +136,7 @@ fn windows_file_has_mz_header(path: &std::path::Path) -> bool {
 }
 
 #[cfg(target_os = "windows")]
-const BUNDLED_CODEX_ENTRYPOINT_FILE_NAMES: &[&str] = &["codex.cmd", "codex.exe"];
+const BUNDLED_CODEX_ENTRYPOINT_FILE_NAMES: &[&str] = &["codex.exe", "codex.cmd"];
 #[cfg(not(target_os = "windows"))]
 const BUNDLED_CODEX_ENTRYPOINT_FILE_NAMES: &[&str] = &["codex"];
 

@@ -158,6 +158,25 @@ fn graceful_shutdown_leaves_no_running_process() {
     assert!(connect_result.is_err());
 }
 
+#[cfg(windows)]
+#[test]
+fn graceful_shutdown_kills_wrapped_windows_process_tree() {
+    let _guard = host_runtime_test_guard();
+    let setup = TestSetup::new();
+    let mut runtime = HostRuntime::new(setup.host_config_via_windows_cmd_wrapper());
+
+    runtime
+        .start(Duration::from_secs(5))
+        .expect("wrapped host should start");
+    runtime.stop().expect("wrapped host should stop");
+
+    assert_eq!(runtime.state(), HostLifecycleState::Stopped);
+    assert!(runtime.pid().is_none());
+
+    let connect_result = tungstenite::connect(runtime.config().websocket_url());
+    assert!(connect_result.is_err());
+}
+
 #[test]
 fn shared_host_lease_reuses_one_process_across_worktrees() {
     let _guard = host_runtime_test_guard();
@@ -417,6 +436,24 @@ impl TestSetup {
             )
             .cleared_environment,
         }
+    }
+
+    #[cfg(windows)]
+    fn host_config_via_windows_cmd_wrapper(&self) -> HostConfig {
+        let mut config = self.host_config();
+        let wrapper_path = self.temp_dir.path().join("codex-wrapper.cmd");
+        let escaped_test_executable = self.test_executable.display().to_string();
+        fs::write(
+            &wrapper_path,
+            format!(
+                "@echo off\r\n\"{}\" --exact fixture_server_entrypoint --nocapture\r\n",
+                escaped_test_executable
+            ),
+        )
+        .expect("wrapper cmd should be written");
+        config.executable_path = wrapper_path;
+        config.arguments.clear();
+        config
     }
 
     #[cfg(unix)]

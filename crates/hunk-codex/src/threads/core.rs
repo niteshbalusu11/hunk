@@ -107,7 +107,7 @@ pub struct RolloutFallbackTurn {
 impl ThreadService {
     pub fn new(cwd: PathBuf) -> Self {
         Self {
-            cwd,
+            cwd: normalize_workspace_path(cwd.as_path()),
             state: AiState::default(),
             next_sequence: 1,
         }
@@ -192,6 +192,38 @@ impl ThreadService {
         limit: Option<u32>,
         timeout: Duration,
     ) -> Result<ThreadListResponse> {
+        let mut aliases = workspace_path_aliases(self.cwd.as_path()).into_iter();
+        let primary_cwd = aliases.next().unwrap_or_else(|| self.cwd_key());
+        let mut response =
+            self.list_threads_for_cwd(session, cursor.clone(), limit, primary_cwd, timeout)?;
+        let mut merged_alias_results = false;
+
+        if cursor.is_none() {
+            for alias in aliases {
+                let alias_response = self.list_threads_for_cwd(session, None, limit, alias, timeout)?;
+                merge_thread_list_response(&mut response, alias_response);
+                merged_alias_results = true;
+            }
+        }
+
+        if merged_alias_results {
+            sort_threads_for_workspace_list(&mut response.data);
+            if let Some(limit) = limit {
+                response.data.truncate(limit as usize);
+            }
+        }
+
+        Ok(response)
+    }
+
+    fn list_threads_for_cwd(
+        &mut self,
+        session: &mut JsonRpcSession,
+        cursor: Option<String>,
+        limit: Option<u32>,
+        cwd: String,
+        timeout: Duration,
+    ) -> Result<ThreadListResponse> {
         let params = ThreadListParams {
             cursor,
             limit,
@@ -199,7 +231,7 @@ impl ThreadService {
             model_providers: None,
             source_kinds: None,
             archived: Some(false),
-            cwd: Some(self.cwd_key()),
+            cwd: Some(cwd),
             search_term: None,
         };
 
@@ -572,4 +604,26 @@ impl ThreadService {
         }
         self.request_with_notifications(session, api::method::COMMAND_EXEC, Some(&params), timeout)
     }
+}
+
+fn merge_thread_list_response(
+    response: &mut ThreadListResponse,
+    alias_response: ThreadListResponse,
+) {
+    for thread in alias_response.data {
+        if response.data.iter().any(|existing| existing.id == thread.id) {
+            continue;
+        }
+        response.data.push(thread);
+    }
+}
+
+fn sort_threads_for_workspace_list(threads: &mut [Thread]) {
+    threads.sort_by(|left, right| {
+        right
+            .updated_at
+            .cmp(&left.updated_at)
+            .then_with(|| right.created_at.cmp(&left.created_at))
+            .then_with(|| left.id.cmp(&right.id))
+    });
 }
