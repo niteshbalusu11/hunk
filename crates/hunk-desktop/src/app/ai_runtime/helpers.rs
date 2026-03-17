@@ -286,6 +286,13 @@ fn apply_login_completed_state(
 }
 
 fn allocate_loopback_port() -> u16 {
+    if let Ok(listener) = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        && let Ok(address) = listener.local_addr()
+        && address.port() != 0
+    {
+        return address.port();
+    }
+
     let initial_seed = {
         let pid = std::process::id() as u16;
         let nanos = std::time::SystemTime::now()
@@ -312,6 +319,9 @@ fn should_retry_bootstrap_with_new_port(error: &CodexIntegrationError) -> bool {
             normalized.contains("address already in use")
                 || normalized.contains("addrinuse")
                 || normalized.contains("10048")
+                || normalized.contains("10013")
+                || normalized.contains("forbidden by its access permissions")
+                || normalized.contains("access permissions")
         }
         CodexIntegrationError::HostStartupTimedOut { .. } => true,
         CodexIntegrationError::WebSocketTransport(message) => {

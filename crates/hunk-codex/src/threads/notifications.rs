@@ -718,7 +718,7 @@ fn workspace_path_aliases(path: &Path) -> Vec<String> {
         {
             aliases.push(legacy);
         }
-        return aliases;
+        aliases
     }
 
     #[cfg(not(windows))]

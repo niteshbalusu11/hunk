@@ -51,6 +51,7 @@ mod ai_tests {
     use super::retry_transient_rollout_load;
     use super::selected_ai_service_tier;
     use super::should_attempt_runtime_reconnect;
+    use super::should_retry_bootstrap_with_new_port;
     use super::should_retry_stale_turn_after_steer_error;
     use super::thread_missing_item_turn_ids;
 
@@ -704,6 +705,20 @@ mod ai_tests {
             &CodexIntegrationError::JsonRpcServerError {
                 code: -32602,
                 message: "invalid params".to_string(),
+            }
+        ));
+    }
+
+    #[test]
+    fn bootstrap_retry_helper_treats_windows_socket_permission_denied_as_retryable() {
+        assert!(should_retry_bootstrap_with_new_port(
+            &CodexIntegrationError::HostExitedBeforeReady {
+                status: "exit code: 1; stderr: Error: An attempt was made to access a socket in a way forbidden by its access permissions. (os error 10013)".to_string(),
+            }
+        ));
+        assert!(!should_retry_bootstrap_with_new_port(
+            &CodexIntegrationError::HostExitedBeforeReady {
+                status: "exit code: 1; stderr: Error: failed to read config file".to_string(),
             }
         ));
     }
