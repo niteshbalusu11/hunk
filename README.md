@@ -51,6 +51,14 @@ Launch from anywhere, then use `File > Open Project...` (or `Cmd/Ctrl+Shift+O`) 
 
 `cargo run -p hunk-desktop` starts from Terminal, so macOS may still present it like a terminal-launched app.
 
+On Windows, use:
+
+```powershell
+just start-windows
+```
+
+That helper resolves `CARGO_TARGET_DIR`, downloads the pinned Windows Codex runtime if needed, and sets `HUNK_CODEX_EXECUTABLE` to the generated `codex.cmd` launcher before starting Hunk.
+
 ## Worktrees
 
 Hunk treats the primary checkout and each linked Git worktree as separate workspace targets.
