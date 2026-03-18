@@ -4298,11 +4298,11 @@ dependencies = [
  "tree-sitter-c-sharp",
  "tree-sitter-cmake",
  "tree-sitter-cpp",
- "tree-sitter-css",
+ "tree-sitter-css 0.23.2",
  "tree-sitter-diff",
  "tree-sitter-elixir",
  "tree-sitter-embedded-template",
- "tree-sitter-go",
+ "tree-sitter-go 0.23.4",
  "tree-sitter-graphql",
  "tree-sitter-html",
  "tree-sitter-java",
@@ -5202,6 +5202,19 @@ dependencies = [
 [[package]]
 name = "hunk-language"
 version = "0.1.0"
+dependencies = [
+ "hunk-text",
+ "tree-sitter",
+ "tree-sitter-css 0.25.0",
+ "tree-sitter-go 0.25.0",
+ "tree-sitter-highlight",
+ "tree-sitter-html",
+ "tree-sitter-javascript",
+ "tree-sitter-json",
+ "tree-sitter-rust",
+ "tree-sitter-typescript",
+ "tree-sitter-yaml",
+]
 
 [[package]]
 name = "hunk-text"
@@ -10291,6 +10304,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-css"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5cbc5e18f29a2c6d6435891f42569525cf95435a3e01c2f1947abcde178686f"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-diff"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10331,6 +10354,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-go"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8560a4d2f835cc0d4d2c2e03cbd0dde2f6114b43bc491164238d333e28b16ea"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-graphql"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10338,6 +10371,18 @@ checksum = "efedc4cac157161cc23a0adc4553a2cedc908e1cd754b6cd033a919bb81ce5d6"
 dependencies = [
  "cc",
  "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-highlight"
+version = "0.25.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "adc5f880ad8d8f94e88cb81c3557024cf1a8b75e3b504c50481ed4f5a6006ff3"
+dependencies = [
+ "regex",
+ "streaming-iterator",
+ "thiserror 2.0.18",
+ "tree-sitter",
 ]
 
 [[package]]

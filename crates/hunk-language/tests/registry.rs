@@ -1,38 +1,30 @@
 use std::path::Path;
 
-use hunk_language::{FileMatcher, LanguageDefinition, LanguageId, LanguageRegistry};
+use hunk_language::{HighlightStyleMap, LanguageId, LanguageRegistry};
 
-fn rust_language() -> LanguageDefinition {
-    LanguageDefinition {
-        id: LanguageId::new(1),
-        name: "Rust".to_string(),
-        file_matcher: FileMatcher {
-            extensions: vec!["rs".to_string()],
-            file_names: vec!["Cargo.toml".to_string()],
-        },
-        grammar_name: "tree-sitter-rust".to_string(),
-        highlight_query: "(identifier) @variable".to_string(),
-        injection_query: None,
-        locals_query: None,
-    }
+#[test]
+fn registry_resolves_builtin_languages_by_name_and_path() {
+    let registry = LanguageRegistry::builtin();
+
+    let rust = registry.language_by_name("rust").expect("rust language");
+    assert_eq!(rust.id, LanguageId::new(1));
+
+    let tsx = registry
+        .language_for_path(Path::new("/tmp/component.tsx"))
+        .expect("tsx language");
+    assert_eq!(tsx.scope_name, "tsx");
 }
 
 #[test]
-fn registry_resolves_language_by_name_case_insensitively() {
-    let mut registry = LanguageRegistry::new();
-    registry.register(rust_language());
+fn style_map_prefers_most_specific_capture_name() {
+    let map = HighlightStyleMap::default();
 
-    let language = registry.language_by_name("rust").expect("language");
-    assert_eq!(language.id, LanguageId::new(1));
-}
-
-#[test]
-fn registry_resolves_language_by_path() {
-    let mut registry = LanguageRegistry::new();
-    registry.register(rust_language());
-
-    let language = registry
-        .language_for_path(Path::new("/tmp/example.rs"))
-        .expect("language");
-    assert_eq!(language.name, "Rust");
+    assert_eq!(
+        map.resolve("function.method.builtin"),
+        Some("function.builtin")
+    );
+    assert_eq!(
+        map.resolve("variable.parameter"),
+        Some("variable.parameter")
+    );
 }
