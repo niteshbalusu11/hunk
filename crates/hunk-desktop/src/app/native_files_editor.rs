@@ -23,10 +23,10 @@ mod language_impl;
 #[path = "native_files_editor_paint.rs"]
 mod paint;
 
+use language_impl::overlay_kind_for_diagnostic_severity;
 use paint::{
     EditorLayout, current_line_text, last_position, raw_column_for_display, uses_primary_shortcut,
 };
-use language_impl::overlay_kind_for_diagnostic_severity;
 
 pub(crate) fn scroll_direction_and_count(
     event: &ScrollWheelEvent,
