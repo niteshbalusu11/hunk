@@ -161,10 +161,12 @@ impl DiffViewer {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let stable_row_id = self.diff_row_stable_id(ix);
+        let chrome = hunk_diff_chrome(cx.theme(), cx.theme().mode.is_dark());
         let code_row = h_flex()
             .id(("diff-code-row", stable_row_id))
             .relative()
             .overflow_x_hidden()
+            .items_stretch()
             .on_mouse_down(MouseButton::Left, {
                 let row_ix = ix;
                 cx.listener(move |this, event, window, cx| {
@@ -188,12 +190,7 @@ impl DiffViewer {
             .on_mouse_up(MouseButton::Middle, cx.listener(Self::on_diff_row_mouse_up))
             .on_mouse_up_out(MouseButton::Middle, cx.listener(Self::on_diff_row_mouse_up))
             .border_b_1()
-            .border_color(hunk_opacity(
-                cx.theme().border,
-                cx.theme().mode.is_dark(),
-                0.78,
-                0.64,
-            ))
+            .border_color(chrome.row_divider)
             .w_full()
             .child(self.render_diff_cell(
                 stable_row_id,
@@ -259,6 +256,7 @@ impl DiffViewer {
         };
 
         let is_dark = cx.theme().mode.is_dark();
+        let chrome = hunk_diff_chrome(cx.theme(), is_dark);
         let dark_add_tint: gpui::Hsla = gpui::rgb(0x2e4736).into();
         let dark_remove_tint: gpui::Hsla = gpui::rgb(0x4a3038).into();
         let dark_add_accent: gpui::Hsla = gpui::rgb(0x8fcea0).into();
@@ -301,7 +299,7 @@ impl DiffViewer {
                     hunk_tone(cx.theme().muted_foreground, is_dark, 0.14, 0.10),
                     hunk_tone(cx.theme().muted_foreground, is_dark, 0.18, 0.12),
                     cx.theme().foreground,
-                    "·",
+                    "",
                 ),
                 (DiffCellKind::None, _) => (
                     cx.theme().background,
@@ -314,7 +312,7 @@ impl DiffViewer {
         if matches!(cell.kind, DiffCellKind::Context | DiffCellKind::None)
             && row_stable_id.is_multiple_of(2)
         {
-            background = hunk_blend(background, cx.theme().muted, is_dark, 0.12, 0.20);
+            background = hunk_blend(background, cx.theme().muted, is_dark, 0.06, 0.10);
         }
         if row_is_selected {
             background = hunk_blend(background, cx.theme().primary, is_dark, 0.22, 0.13);
@@ -345,53 +343,67 @@ impl DiffViewer {
         };
 
         let should_draw_right_divider = side == "left";
-        let gutter_background = cx
-            .theme()
-            .background
-            .blend(hunk_opacity(cx.theme().muted, is_dark, 0.28, 0.46));
-        let gutter_width = line_number_width + DIFF_MARKER_GUTTER_WIDTH + 10.0;
+        let mut gutter_background = match cell.kind {
+            DiffCellKind::Added => {
+                hunk_blend(chrome.gutter_background, cx.theme().success, is_dark, 0.12, 0.07)
+            }
+            DiffCellKind::Removed => {
+                hunk_blend(chrome.gutter_background, cx.theme().danger, is_dark, 0.12, 0.07)
+            }
+            DiffCellKind::None => chrome.empty_gutter_background,
+            DiffCellKind::Context => chrome.gutter_background,
+        };
+        if row_is_selected {
+            gutter_background =
+                hunk_blend(gutter_background, cx.theme().primary, is_dark, 0.14, 0.10);
+        }
+        let gutter_width = line_number_width + DIFF_MARKER_GUTTER_WIDTH + 16.0;
 
         h_flex()
             .id(cell_id)
             .overflow_x_hidden()
-            .px_1p5()
-            .py_0p5()
-            .gap_2()
-            .items_start()
+            .items_stretch()
             .bg(background)
             .when(should_draw_right_divider, |this| {
                 this.border_r_1()
-                    .border_color(hunk_opacity(cx.theme().border, is_dark, 0.86, 0.72))
+                    .border_color(chrome.center_divider)
             })
             .child(
                 h_flex()
                     .items_start()
-                    .gap_2()
+                    .gap_1()
                     .w(px(gutter_width))
                     .min_w(px(gutter_width))
-                    .px_1p5()
+                    .px_2()
                     .py_0p5()
-                    .rounded_sm()
                     .bg(gutter_background)
-                    .border_1()
-                    .border_color(hunk_opacity(cx.theme().border, is_dark, 0.68, 0.54))
+                    .border_r_1()
+                    .border_color(chrome.gutter_divider)
                     .child(
-                        div()
+                        h_flex()
                             .w(px(line_number_width))
-                            .text_xs()
-                            .text_color(line_color)
-                            .font_family(cx.theme().mono_font_family.clone())
-                            .whitespace_nowrap()
-                            .child(line_number),
+                            .justify_end()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(line_color)
+                                    .font_family(cx.theme().mono_font_family.clone())
+                                    .whitespace_nowrap()
+                                    .child(line_number),
+                            ),
                     )
                     .child(
-                        div()
+                        h_flex()
                             .w(px(DIFF_MARKER_GUTTER_WIDTH))
-                            .text_xs()
-                            .text_color(marker_color)
-                            .font_family(cx.theme().mono_font_family.clone())
-                            .whitespace_nowrap()
-                            .child(marker),
+                            .justify_center()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(marker_color)
+                                    .font_family(cx.theme().mono_font_family.clone())
+                                    .whitespace_nowrap()
+                                    .child(marker),
+                            ),
                     ),
             )
             .child(
@@ -400,6 +412,8 @@ impl DiffViewer {
                     .min_w_0()
                     .items_start()
                     .gap_0()
+                    .px_2()
+                    .py_0p5()
                     .text_xs()
                     .font_family(cx.theme().mono_font_family.clone())
                     .text_color(text_color)

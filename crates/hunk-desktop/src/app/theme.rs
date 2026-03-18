@@ -38,7 +38,6 @@ pub(crate) struct HunkDisclosureColors {
 pub(crate) struct HunkFileStatusBannerColors {
     pub label: &'static str,
     pub row_background: Hsla,
-    pub border: Hsla,
     pub badge_background: Hsla,
     pub badge_border: Hsla,
     pub accent_strip: Hsla,
@@ -64,6 +63,17 @@ pub(crate) struct HunkGitWorkspaceColors {
 pub(crate) struct HunkPendingMessageColors {
     pub text: Hsla,
     pub meta: Hsla,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HunkDiffChromeColors {
+    pub row_divider: Hsla,
+    pub center_divider: Hsla,
+    pub gutter_divider: Hsla,
+    pub gutter_background: Hsla,
+    pub empty_gutter_background: Hsla,
+    pub column_header_background: Hsla,
+    pub column_header_badge_background: Hsla,
 }
 
 pub(crate) fn install_hunk_themes(cx: &mut App) {
@@ -131,6 +141,18 @@ pub(crate) fn hunk_git_workspace(theme: &Theme, is_dark: bool) -> HunkGitWorkspa
             background: hunk_blend(theme.background, theme.muted, is_dark, 0.16, 0.20),
             border: hunk_opacity(theme.border, is_dark, 0.88, 0.70),
         },
+    }
+}
+
+pub(crate) fn hunk_diff_chrome(theme: &Theme, is_dark: bool) -> HunkDiffChromeColors {
+    HunkDiffChromeColors {
+        row_divider: hunk_opacity(theme.border, is_dark, 0.74, 0.58),
+        center_divider: hunk_opacity(theme.border, is_dark, 0.88, 0.72),
+        gutter_divider: hunk_opacity(theme.border, is_dark, 0.66, 0.54),
+        gutter_background: hunk_blend(theme.title_bar, theme.muted, is_dark, 0.24, 0.48),
+        empty_gutter_background: hunk_blend(theme.sidebar, theme.muted, is_dark, 0.18, 0.38),
+        column_header_background: hunk_blend(theme.title_bar, theme.muted, is_dark, 0.10, 0.22),
+        column_header_badge_background: hunk_opacity(theme.muted, is_dark, 0.28, 0.42),
     }
 }
 
@@ -224,9 +246,9 @@ pub(crate) fn hunk_file_status_banner(
         FileStatus::Conflicted => ("CONFLICTED", theme.danger),
         FileStatus::Unknown => ("MODIFIED", theme.muted_foreground),
     };
-    let background = hunk_blend(theme.background, accent, is_dark, 0.34, 0.16);
+    let background = hunk_blend(theme.title_bar, accent, is_dark, 0.20, 0.08);
     let row_background = if is_selected {
-        hunk_blend(background, theme.primary, is_dark, 0.28, 0.16)
+        hunk_blend(background, theme.primary, is_dark, 0.20, 0.12)
     } else {
         background
     };
@@ -234,10 +256,9 @@ pub(crate) fn hunk_file_status_banner(
     HunkFileStatusBannerColors {
         label,
         row_background,
-        border: hunk_opacity(accent, is_dark, 0.78, 0.52),
-        badge_background: hunk_opacity(accent, is_dark, 0.50, 0.27),
-        badge_border: hunk_opacity(accent, is_dark, 0.88, 0.44),
-        accent_strip: hunk_tone(accent, is_dark, 0.18, 0.06),
+        badge_background: hunk_opacity(accent, is_dark, 0.22, 0.14),
+        badge_border: hunk_opacity(accent, is_dark, 0.52, 0.24),
+        accent_strip: hunk_tone(accent, is_dark, 0.12, 0.04),
         arrow: hunk_tone(accent, is_dark, 0.34, 0.18),
     }
 }

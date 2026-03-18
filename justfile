@@ -1,8 +1,8 @@
 set windows-shell := ["pwsh", "-Command"]
 set export
 
-start:
-    cargo run -p hunk-desktop
+start-mac:
+    ./scripts/run_with_macos_sdk_env.sh cargo run -p hunk-desktop
 
 start-windows:
     pwsh ./scripts/run_windows_dev.ps1
@@ -11,13 +11,13 @@ start-linux:
     ./scripts/run_linux_dev.sh
 
 build:
-    cargo build -p hunk-desktop
+    ./scripts/run_with_macos_sdk_env.sh cargo build -p hunk-desktop
 
 build-worktree worktree:
     ./scripts/build_worktree.sh {{worktree}}
 
 release:
-    cargo build -p hunk-desktop --release
+    ./scripts/run_with_macos_sdk_env.sh cargo build -p hunk-desktop --release
 
 build-linux:
     ./scripts/build_linux.sh
@@ -25,12 +25,9 @@ build-linux:
 build-windows:
     ./scripts/build_windows.sh
 
-dev:
-    bacon
-
 bundle:
-    cargo build -p hunk-desktop --release --locked
-    cargo packager -p hunk-desktop --release -f app --out-dir "$(./scripts/resolve_cargo_target_dir.sh)/packager"
+    ./scripts/run_with_macos_sdk_env.sh cargo build -p hunk-desktop --release --locked
+    ./scripts/run_with_macos_sdk_env.sh cargo packager -p hunk-desktop --release -f app --out-dir "$(./scripts/resolve_cargo_target_dir.sh)/packager"
 
 package-macos-release:
     ./scripts/package_macos_release.sh
@@ -59,4 +56,4 @@ phase12-macos-smoke:
     ./scripts/install_codex_runtime_macos.sh
     ./scripts/validate_codex_runtime_bundle.sh --strict --platform macos
     ./scripts/stage_codex_runtime_macos.sh
-    cargo test -p hunk-codex --test real_runtime_smoke -- --ignored
+    ./scripts/run_with_macos_sdk_env.sh cargo test -p hunk-codex --test real_runtime_smoke -- --ignored

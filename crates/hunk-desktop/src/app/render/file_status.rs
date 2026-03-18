@@ -10,6 +10,7 @@ impl DiffViewer {
         let view = cx.entity();
         let stable_row_id = self.diff_row_stable_id(row_ix);
         let is_dark = cx.theme().mode.is_dark();
+        let chrome = hunk_diff_chrome(cx.theme(), is_dark);
         let path = path.to_string();
         let is_collapsed = self.collapsed_files.contains(path.as_str());
         let colors = hunk_file_status_banner(cx.theme(), status, is_dark, false);
@@ -24,7 +25,7 @@ impl DiffViewer {
             .px_3()
             .py_0p5()
             .border_b_1()
-            .border_color(hunk_opacity(colors.border, is_dark, 0.92, 0.82))
+            .border_color(chrome.row_divider)
             .bg(colors.row_background)
             .w_full()
             .child({
@@ -57,7 +58,6 @@ impl DiffViewer {
                     .py_0p5()
                     .text_xs()
                     .font_semibold()
-                    .rounded_sm()
                     .bg(colors.badge_background)
                     .border_1()
                     .border_color(colors.badge_border)

@@ -71,6 +71,7 @@ impl DiffViewer {
         let right_inset = px(DIFF_SCROLLBAR_RIGHT_INSET);
         let vertical_bar_bottom = edge_inset;
         let is_dark = cx.theme().mode.is_dark();
+        let chrome = hunk_diff_chrome(cx.theme(), is_dark);
 
         v_flex()
             .size_full()
@@ -86,14 +87,8 @@ impl DiffViewer {
                         h_flex()
                             .w_full()
                             .border_b_1()
-                            .border_color(hunk_opacity(cx.theme().border, is_dark, 0.90, 0.78))
-                            .bg(hunk_blend(
-                                cx.theme().title_bar,
-                                cx.theme().muted,
-                                is_dark,
-                                0.18,
-                                0.30,
-                            ))
+                            .border_color(chrome.row_divider)
+                            .bg(chrome.column_header_background)
                             .child(
                                 h_flex()
                                     .flex_1()
@@ -113,11 +108,10 @@ impl DiffViewer {
                                         div()
                                             .px_1p5()
                                             .py_0p5()
-                                            .rounded_sm()
                                             .text_xs()
                                             .font_semibold()
                                             .font_family(cx.theme().mono_font_family.clone())
-                                            .bg(hunk_opacity(cx.theme().muted, is_dark, 0.44, 0.58))
+                                            .bg(chrome.column_header_badge_background)
                                             .text_color(cx.theme().muted_foreground)
                                             .child("OLD"),
                                     )
@@ -141,11 +135,10 @@ impl DiffViewer {
                                         div()
                                             .px_1p5()
                                             .py_0p5()
-                                            .rounded_sm()
                                             .text_xs()
                                             .font_semibold()
                                             .font_family(cx.theme().mono_font_family.clone())
-                                            .bg(hunk_opacity(cx.theme().muted, is_dark, 0.44, 0.58))
+                                            .bg(chrome.column_header_badge_background)
                                             .text_color(cx.theme().muted_foreground)
                                             .child("NEW"),
                                     )
@@ -269,6 +262,7 @@ impl DiffViewer {
         };
 
         let is_dark = cx.theme().mode.is_dark();
+        let chrome = hunk_diff_chrome(cx.theme(), is_dark);
         h_flex()
             .w_full()
             .items_center()
@@ -276,18 +270,20 @@ impl DiffViewer {
             .px_3()
             .py_0p5()
             .border_b_1()
-            .border_color(hunk_opacity(cx.theme().border, is_dark, 0.88, 0.72))
-            .bg(hunk_blend(cx.theme().title_bar, cx.theme().primary, is_dark, 0.20, 0.09))
+            .border_color(chrome.row_divider)
+            .bg(hunk_blend(
+                chrome.column_header_background,
+                cx.theme().primary,
+                is_dark,
+                0.10,
+                0.05,
+            ))
             .child(
                 div()
-                    .px_1p5()
-                    .py_0p5()
                     .text_xs()
                     .font_semibold()
                     .font_family(cx.theme().mono_font_family.clone())
-                    .rounded_sm()
-                    .bg(hunk_opacity(cx.theme().primary, is_dark, 0.38, 0.22))
-                    .text_color(cx.theme().primary_foreground)
+                    .text_color(hunk_tone(cx.theme().primary, is_dark, 0.34, 0.10))
                     .child("HUNK"),
             )
             .child(
