@@ -17,8 +17,10 @@ fn read_shortcut_input(input: &Entity<InputState>, cx: &Context<DiffViewer>) -> 
 
 fn validate_shortcut_list(action: &str, shortcuts: &[String]) -> Result<(), String> {
     for shortcut in shortcuts {
-        if let Err(err) = gpui::Keystroke::parse(shortcut) {
-            return Err(format!("{action}: invalid shortcut `{shortcut}` ({err})"));
+        for keystroke in shortcut.split_whitespace() {
+            if let Err(err) = gpui::Keystroke::parse(keystroke) {
+                return Err(format!("{action}: invalid shortcut `{shortcut}` ({err})"));
+            }
         }
     }
     Ok(())
@@ -41,6 +43,7 @@ fn validate_keyboard_shortcuts(shortcuts: &KeyboardShortcuts) -> Result<(), Stri
     validate_shortcut_list("Previous Hunk", &shortcuts.previous_hunk)?;
     validate_shortcut_list("Next File", &shortcuts.next_file)?;
     validate_shortcut_list("Previous File", &shortcuts.previous_file)?;
+    validate_shortcut_list("View Review File", &shortcuts.view_current_review_file)?;
     validate_shortcut_list("Toggle File Tree", &shortcuts.toggle_sidebar_tree)?;
     validate_shortcut_list("Switch to Files View", &shortcuts.switch_to_files_view)?;
     validate_shortcut_list("Switch to Review View", &shortcuts.switch_to_review_view)?;
@@ -145,6 +148,12 @@ impl DiffViewer {
             previous_file: settings_shortcut_input(
                 &self.config.keyboard_shortcuts.previous_file,
                 "Comma-separated shortcuts, e.g. alt-up",
+                window,
+                cx,
+            ),
+            view_current_review_file: settings_shortcut_input(
+                &self.config.keyboard_shortcuts.view_current_review_file,
+                "Comma-separated shortcuts, e.g. g space",
                 window,
                 cx,
             ),
@@ -378,6 +387,10 @@ impl DiffViewer {
                 previous_hunk: read_shortcut_input(&settings.shortcuts.previous_hunk, cx),
                 next_file: read_shortcut_input(&settings.shortcuts.next_file, cx),
                 previous_file: read_shortcut_input(&settings.shortcuts.previous_file, cx),
+                view_current_review_file: read_shortcut_input(
+                    &settings.shortcuts.view_current_review_file,
+                    cx,
+                ),
                 toggle_sidebar_tree: read_shortcut_input(
                     &settings.shortcuts.toggle_sidebar_tree,
                     cx,
@@ -462,5 +475,22 @@ impl DiffViewer {
         );
 
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::validate_shortcut_list;
+
+    #[test]
+    fn validate_shortcut_list_accepts_key_sequences() {
+        let shortcuts = vec!["g space".to_string(), "cmd-k left".to_string()];
+        assert!(validate_shortcut_list("Test Action", &shortcuts).is_ok());
+    }
+
+    #[test]
+    fn validate_shortcut_list_rejects_invalid_key_sequences() {
+        let shortcuts = vec!["g not-a-key".to_string()];
+        assert!(validate_shortcut_list("Test Action", &shortcuts).is_err());
     }
 }

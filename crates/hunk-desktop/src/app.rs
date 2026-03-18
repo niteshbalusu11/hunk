@@ -166,6 +166,7 @@ actions!(
         PreviousHunk,
         NextFile,
         PreviousFile,
+        ViewCurrentReviewFile,
         ToggleSidebarTree,
         SwitchToFilesView,
         SwitchToReviewView,
@@ -363,6 +364,13 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
             .iter()
             .map(|shortcut| KeyBinding::new(shortcut.as_str(), PreviousFile, Some("DiffViewer"))),
     );
+    bindings.extend(shortcuts.view_current_review_file.iter().map(|shortcut| {
+        KeyBinding::new(
+            shortcut.as_str(),
+            ViewCurrentReviewFile,
+            Some("ReviewWorkspace"),
+        )
+    }));
     bindings.extend(
         shortcuts.toggle_sidebar_tree.iter().map(|shortcut| {
             KeyBinding::new(shortcut.as_str(), ToggleSidebarTree, Some("DiffViewer"))

@@ -35,6 +35,7 @@ struct SettingsShortcutInputs {
     previous_hunk: Entity<InputState>,
     next_file: Entity<InputState>,
     previous_file: Entity<InputState>,
+    view_current_review_file: Entity<InputState>,
     toggle_sidebar_tree: Entity<InputState>,
     switch_to_files_view: Entity<InputState>,
     switch_to_review_view: Entity<InputState>,
@@ -110,6 +111,12 @@ impl SettingsShortcutInputs {
                 label: "Previous File",
                 hint: "Moves to the previous changed file.",
                 input_state: self.previous_file.clone(),
+            },
+            SettingsShortcutRow {
+                id: "view-current-review-file",
+                label: "View Review File",
+                hint: "Opens the selected review file in Files view.",
+                input_state: self.view_current_review_file.clone(),
             },
             SettingsShortcutRow {
                 id: "toggle-sidebar-tree",

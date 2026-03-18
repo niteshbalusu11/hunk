@@ -75,6 +75,13 @@ impl DiffViewer {
                     .child(path.clone()),
             )
             .child(self.render_line_stats("file", stats, cx))
+            .child(self.render_review_view_file_button(
+                ("diff-file-view-sticky", stable_row_id),
+                path.as_str(),
+                status,
+                view.clone(),
+                cx,
+            ))
             .child(
                 div()
                     .absolute()

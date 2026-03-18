@@ -734,18 +734,33 @@ impl DiffViewer {
 
 fn format_shortcut_label(shortcut: &str) -> String {
     shortcut
-        .split('-')
-        .map(|part| match part.to_ascii_lowercase().as_str() {
-            "cmd" => "Cmd".to_string(),
-            "ctrl" => "Ctrl".to_string(),
-            "alt" => "Alt".to_string(),
-            "shift" => "Shift".to_string(),
-            "super" => "Super".to_string(),
-            "secondary" => "Secondary".to_string(),
-            _ => part.to_ascii_uppercase(),
+        .split_whitespace()
+        .map(|stroke| {
+            stroke
+                .split('-')
+                .map(|part| match part.to_ascii_lowercase().as_str() {
+                    "cmd" => "Cmd".to_string(),
+                    "ctrl" => "Ctrl".to_string(),
+                    "alt" => "Alt".to_string(),
+                    "shift" => "Shift".to_string(),
+                    "super" => "Super".to_string(),
+                    "secondary" => "Secondary".to_string(),
+                    "space" => "Space".to_string(),
+                    "enter" => "Enter".to_string(),
+                    "escape" => "Esc".to_string(),
+                    "up" => "Up".to_string(),
+                    "down" => "Down".to_string(),
+                    "left" => "Left".to_string(),
+                    "right" => "Right".to_string(),
+                    "tab" => "Tab".to_string(),
+                    "backspace" => "Backspace".to_string(),
+                    _ => part.to_ascii_uppercase(),
+                })
+                .collect::<Vec<_>>()
+                .join("+")
         })
         .collect::<Vec<_>>()
-        .join("+")
+        .join(" ")
 }
 
 fn path_extension(path: &str) -> Option<String> {

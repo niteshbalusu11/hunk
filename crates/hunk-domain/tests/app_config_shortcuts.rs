@@ -43,6 +43,10 @@ fn app_config_defaults_include_existing_keyboard_shortcuts() {
         strings(&["alt-up"])
     );
     assert_eq!(
+        config.keyboard_shortcuts.view_current_review_file,
+        strings(&["g space"])
+    );
+    assert_eq!(
         config.keyboard_shortcuts.toggle_sidebar_tree,
         strings(&["cmd-b", "ctrl-b"])
     );
@@ -134,12 +138,20 @@ next_hunk = ["f8"]
     );
     assert_eq!(config.keyboard_shortcuts.next_hunk, strings(&["f8"]));
     assert_eq!(
+        config.keyboard_shortcuts.view_current_review_file,
+        strings(&["g space"])
+    );
+    assert_eq!(
         config.keyboard_shortcuts.save_current_file,
         strings(&["cmd-s", "ctrl-s"])
     );
     assert_eq!(
         config.keyboard_shortcuts.toggle_sidebar_tree,
         strings(&["cmd-b", "ctrl-b"])
+    );
+    assert_eq!(
+        config.keyboard_shortcuts.view_current_review_file,
+        strings(&["g space"])
     );
     assert_eq!(
         config.keyboard_shortcuts.switch_to_files_view,

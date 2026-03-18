@@ -619,7 +619,9 @@ impl DiffViewer {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("Edit comma-separated shortcut strings for each action."),
+                            .child(
+                                "Edit comma-separated shortcut strings for each action. Use spaces for key sequences.",
+                            ),
                     ),
             )
             .children(
@@ -634,7 +636,7 @@ impl DiffViewer {
                     .text_xs()
                     .text_color(hunk_opacity(cx.theme().muted_foreground, is_dark, 0.94, 1.0))
                     .child(
-                        "Use commas to add alternatives. For comma key, use cmd-, literally.",
+                        "Use commas to add alternatives, spaces for key sequences, and cmd-, literally for the comma key.",
                     ),
             )
             .into_any_element()

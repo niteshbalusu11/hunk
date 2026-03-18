@@ -19,6 +19,7 @@ impl DiffViewer {
     fn render_diff_workspace_screen(&mut self, cx: &mut Context<Self>) -> AnyElement {
         div()
             .size_full()
+            .key_context("ReviewWorkspace")
             .child(if self.sidebar_collapsed {
                 self.render_diff(cx).into_any_element()
             } else {
@@ -347,6 +348,7 @@ impl Render for DiffViewer {
             .on_action(cx.listener(Self::previous_hunk_action))
             .on_action(cx.listener(Self::next_file_action))
             .on_action(cx.listener(Self::previous_file_action))
+            .on_action(cx.listener(Self::view_current_review_file_action))
             .on_action(cx.listener(Self::toggle_sidebar_tree_action))
             .on_action(cx.listener(Self::switch_to_files_view_action))
             .on_action(cx.listener(Self::switch_to_review_view_action))

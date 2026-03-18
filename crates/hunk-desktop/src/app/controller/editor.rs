@@ -1,4 +1,27 @@
 impl DiffViewer {
+    pub(super) fn view_current_review_file_action(
+        &mut self,
+        _: &ViewCurrentReviewFile,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.workspace_view_mode != WorkspaceViewMode::Diff {
+            return;
+        }
+
+        let Some(path) = self.selected_path.clone() else {
+            self.set_git_warning_message("No review file is selected.".to_string(), Some(window), cx);
+            return;
+        };
+        let status = self
+            .selected_status
+            .or_else(|| self.status_for_path(path.as_str()))
+            .unwrap_or(FileStatus::Unknown);
+
+        self.focus_handle.focus(window, cx);
+        let _ = self.open_file_in_files_workspace(path, status, window, cx);
+    }
+
     pub(super) fn save_current_file_action(
         &mut self,
         _: &SaveCurrentFile,
@@ -102,6 +125,63 @@ impl DiffViewer {
                 });
             }
         });
+    }
+
+    pub(super) fn can_open_file_in_files_workspace(
+        &self,
+        path: &str,
+        status: FileStatus,
+    ) -> bool {
+        status != FileStatus::Deleted && self.path_exists_in_primary_checkout(path)
+    }
+
+    pub(super) fn open_file_in_files_workspace(
+        &mut self,
+        path: String,
+        status: FileStatus,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.can_open_file_in_files_workspace(path.as_str(), status) {
+            let message = if status == FileStatus::Deleted {
+                format!("{path} was deleted in this review and can't be opened in Files view.")
+            } else {
+                format!("{path} isn't available in the current workspace.")
+            };
+            self.set_git_warning_message(message, Some(window), cx);
+            return false;
+        }
+
+        let editor_already_open = self.editor_path.as_deref() == Some(path.as_str())
+            && !self.editor_loading
+            && self.editor_error.is_none();
+        if !editor_already_open && self.prevent_unsaved_editor_discard(Some(path.as_str()), cx) {
+            return false;
+        }
+
+        if self.workspace_view_mode != WorkspaceViewMode::Files {
+            self.set_workspace_view_mode(WorkspaceViewMode::Files, cx);
+            if self.workspace_view_mode != WorkspaceViewMode::Files {
+                return false;
+            }
+        }
+
+        self.selected_path = Some(path.clone());
+        self.selected_status = self.status_for_path(path.as_str()).or(Some(status));
+
+        let needs_reload = self.editor_path.as_deref() != Some(path.as_str())
+            || self.editor_loading
+            || self.editor_error.is_some();
+        if needs_reload {
+            self.request_file_editor_reload(path.clone(), cx);
+            if self.editor_path.as_deref() != Some(path.as_str()) {
+                return false;
+            }
+        }
+
+        self.files_editor_focus_handle.focus(window, cx);
+        cx.notify();
+        true
     }
 
     pub(super) fn save_current_editor_file(
