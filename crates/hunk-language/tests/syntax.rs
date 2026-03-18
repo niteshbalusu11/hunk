@@ -94,6 +94,63 @@ fn typescript_source_uses_javascript_base_highlights() {
 }
 
 #[test]
+fn python_and_bash_sources_parse_and_highlight_keywords() {
+    let registry = LanguageRegistry::builtin();
+
+    let mut python = SyntaxSession::new();
+    let python_source = "def main():\n    return 42\n";
+    python
+        .parse_for_path(&registry, Path::new("main.py"), python_source)
+        .expect("parse python");
+    let python_captures = python
+        .highlight_visible_range(&registry, python_source, 0..python_source.len())
+        .expect("python highlights");
+    assert!(
+        python_captures
+            .iter()
+            .any(|capture| capture.style_key == "keyword")
+    );
+
+    let mut bash = SyntaxSession::new();
+    let bash_source = "if [ -n \"$HOME\" ]; then\necho ok\nfi\n";
+    bash.parse_for_path(&registry, Path::new("build.sh"), bash_source)
+        .expect("parse bash");
+    let bash_captures = bash
+        .highlight_visible_range(&registry, bash_source, 0..bash_source.len())
+        .expect("bash highlights");
+    assert!(
+        bash_captures
+            .iter()
+            .any(|capture| capture.style_key == "keyword")
+    );
+}
+
+#[test]
+fn powershell_source_parses_and_highlights_keywords() {
+    let registry = LanguageRegistry::builtin();
+    let mut session = SyntaxSession::new();
+    let source = "function Invoke-Build { Write-Host \"hi\" }\n";
+
+    session
+        .parse_for_path(&registry, Path::new("build.ps1"), source)
+        .expect("parse powershell");
+    let captures = session
+        .highlight_visible_range(&registry, source, 0..source.len())
+        .expect("powershell highlights");
+
+    assert!(
+        captures
+            .iter()
+            .any(|capture| capture.style_key == "keyword")
+    );
+    assert!(
+        captures
+            .iter()
+            .any(|capture| capture.style_key == "function" || capture.style_key == "property")
+    );
+}
+
+#[test]
 fn fold_candidates_cover_multiline_rust_blocks() {
     let registry = LanguageRegistry::builtin();
     let mut session = SyntaxSession::new();

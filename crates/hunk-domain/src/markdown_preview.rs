@@ -1,8 +1,5 @@
-use std::sync::OnceLock;
-
 use comrak::nodes::{ListType, NodeCodeBlock, NodeLink, NodeList, NodeValue};
-use syntect::easy::ScopeRegionIterator;
-use syntect::parsing::{ParseState, ScopeStack, SyntaxReference, SyntaxSet};
+use hunk_language::preview_highlight_spans_for_language_hint;
 
 type ComrakNode<'a> = comrak::nodes::Node<'a>;
 
@@ -63,6 +60,23 @@ pub enum MarkdownCodeTokenKind {
     Constant,
     Variable,
     Operator,
+}
+
+impl From<hunk_language::PreviewSyntaxToken> for MarkdownCodeTokenKind {
+    fn from(value: hunk_language::PreviewSyntaxToken) -> Self {
+        match value {
+            hunk_language::PreviewSyntaxToken::Plain => Self::Plain,
+            hunk_language::PreviewSyntaxToken::Keyword => Self::Keyword,
+            hunk_language::PreviewSyntaxToken::String => Self::String,
+            hunk_language::PreviewSyntaxToken::Number => Self::Number,
+            hunk_language::PreviewSyntaxToken::Comment => Self::Comment,
+            hunk_language::PreviewSyntaxToken::Function => Self::Function,
+            hunk_language::PreviewSyntaxToken::TypeName => Self::TypeName,
+            hunk_language::PreviewSyntaxToken::Constant => Self::Constant,
+            hunk_language::PreviewSyntaxToken::Variable => Self::Variable,
+            hunk_language::PreviewSyntaxToken::Operator => Self::Operator,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -500,83 +514,58 @@ fn spans_end_with_whitespace(spans: &[MarkdownInlineSpan]) -> bool {
 }
 
 fn highlight_code_lines(language: Option<&str>, code: &str) -> Vec<Vec<MarkdownCodeSpan>> {
-    let syntax_set = syntax_set();
-    let syntax = syntax_for_language(syntax_set, language);
-    let mut rows = Vec::new();
+    let line_texts = code.lines().collect::<Vec<_>>();
+    if line_texts.is_empty() {
+        return vec![vec![MarkdownCodeSpan {
+            text: String::new(),
+            token: MarkdownCodeTokenKind::Plain,
+        }]];
+    }
 
-    match syntax {
-        Some(syntax) => {
-            let mut parse_state = ParseState::new(syntax);
-            let mut scope_stack = ScopeStack::new();
-            for line in code.lines() {
-                rows.push(highlight_code_line(
-                    line,
-                    syntax_set,
-                    &mut parse_state,
-                    &mut scope_stack,
-                ));
+    let mut rows = line_texts
+        .iter()
+        .map(|line| vec![MarkdownCodeTokenKind::Plain; line.chars().count()])
+        .collect::<Vec<_>>();
+    let line_offsets = line_byte_offsets(&line_texts);
+    let line_char_offsets = line_texts
+        .iter()
+        .zip(line_offsets.iter())
+        .map(|(line, (line_start, _))| char_byte_offsets(line, *line_start))
+        .collect::<Vec<_>>();
+
+    for span in preview_highlight_spans_for_language_hint(language, code) {
+        let token = MarkdownCodeTokenKind::from(span.token);
+        for (line_index, (line_start, line_end)) in line_offsets.iter().enumerate() {
+            let overlap_start = span.byte_range.start.max(*line_start);
+            let overlap_end = span.byte_range.end.min(*line_end);
+            if overlap_start >= overlap_end {
+                continue;
             }
+            mark_code_range(
+                &line_char_offsets[line_index],
+                &mut rows[line_index],
+                overlap_start,
+                overlap_end,
+                token,
+            );
         }
-        None => {
-            for line in code.lines() {
-                rows.push(vec![MarkdownCodeSpan {
-                    text: line.to_owned(),
+    }
+
+    line_texts
+        .into_iter()
+        .zip(rows)
+        .map(|(line, token_map)| {
+            let chars = line.chars().collect::<Vec<_>>();
+            if chars.is_empty() {
+                vec![MarkdownCodeSpan {
+                    text: String::new(),
                     token: MarkdownCodeTokenKind::Plain,
-                }]);
+                }]
+            } else {
+                merge_code_spans(&chars, &token_map)
             }
-        }
-    }
-
-    if rows.is_empty() {
-        rows.push(vec![MarkdownCodeSpan {
-            text: String::new(),
-            token: MarkdownCodeTokenKind::Plain,
-        }]);
-    }
-
-    rows
-}
-
-fn highlight_code_line(
-    line: &str,
-    syntax_set: &SyntaxSet,
-    parse_state: &mut ParseState,
-    scope_stack: &mut ScopeStack,
-) -> Vec<MarkdownCodeSpan> {
-    let chars = line.chars().collect::<Vec<_>>();
-    if chars.is_empty() {
-        return vec![MarkdownCodeSpan {
-            text: String::new(),
-            token: MarkdownCodeTokenKind::Plain,
-        }];
-    }
-
-    let mut token_map = vec![MarkdownCodeTokenKind::Plain; chars.len()];
-    let Ok(ops) = parse_state.parse_line(line, syntax_set) else {
-        return vec![MarkdownCodeSpan {
-            text: line.to_owned(),
-            token: MarkdownCodeTokenKind::Plain,
-        }];
-    };
-
-    let mut start = 0usize;
-    for (region, op) in ScopeRegionIterator::new(&ops, line) {
-        let end = (start + region.chars().count()).min(token_map.len());
-        let token = if scope_stack.apply(op).is_ok() {
-            syntax_token_from_scope_stack(scope_stack)
-        } else {
-            MarkdownCodeTokenKind::Plain
-        };
-        for kind in token_map.iter_mut().take(end).skip(start) {
-            *kind = token;
-        }
-        start = end;
-        if start >= token_map.len() {
-            break;
-        }
-    }
-
-    merge_code_spans(&chars, &token_map)
+        })
+        .collect()
 }
 
 fn merge_code_spans(chars: &[char], token_map: &[MarkdownCodeTokenKind]) -> Vec<MarkdownCodeSpan> {
@@ -607,169 +596,46 @@ fn merge_code_spans(chars: &[char], token_map: &[MarkdownCodeTokenKind]) -> Vec<
     spans
 }
 
-fn syntax_set() -> &'static SyntaxSet {
-    static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
-    SYNTAX_SET.get_or_init(SyntaxSet::load_defaults_nonewlines)
-}
-
-fn syntax_for_language<'a>(
-    syntax_set: &'a SyntaxSet,
-    language: Option<&str>,
-) -> Option<&'a SyntaxReference> {
-    let hint = language?.trim();
-    if hint.is_empty() {
-        return None;
-    }
-
-    let lower = hint.to_ascii_lowercase();
-    if let Some(syntax) = syntax_set.find_syntax_by_token(lower.as_str()) {
-        return Some(syntax);
-    }
-    if let Some(syntax) = syntax_set.find_syntax_by_extension(lower.as_str()) {
-        return Some(syntax);
-    }
-    if let Some(tokens) = language_tokens_for_hint(lower.as_str())
-        && let Some(syntax) = find_first_syntax_by_tokens(syntax_set, tokens)
-    {
-        return Some(syntax);
-    }
-
-    None
-}
-
-fn find_first_syntax_by_tokens<'a>(
-    syntax_set: &'a SyntaxSet,
-    tokens: &[&str],
-) -> Option<&'a SyntaxReference> {
-    tokens
+fn line_byte_offsets(lines: &[&str]) -> Vec<(usize, usize)> {
+    let mut start = 0;
+    lines
         .iter()
-        .find_map(|token| syntax_set.find_syntax_by_token(token))
+        .map(|line| {
+            let end = start + line.len();
+            let range = (start, end);
+            start = end + 1;
+            range
+        })
+        .collect()
 }
 
-fn language_tokens_for_hint(hint: &str) -> Option<&'static [&'static str]> {
-    match hint {
-        "js" | "jsx" | "javascript" => Some(&["js", "javascript"]),
-        "ts" | "tsx" | "typescript" => Some(&["ts", "typescript", "js"]),
-        "rs" | "rust" => Some(&["rs", "rust"]),
-        "py" | "python" => Some(&["py", "python"]),
-        "go" => Some(&["go"]),
-        "json" | "jsonc" => Some(&["json", "js"]),
-        "yml" | "yaml" => Some(&["yaml", "yml"]),
-        "toml" => Some(&["toml"]),
-        "bash" | "sh" | "zsh" | "shell" => Some(&["bash", "sh"]),
-        "c" | "h" => Some(&["c", "cpp"]),
-        "cc" | "cpp" | "cxx" | "hpp" | "hxx" | "c++" => Some(&["cpp", "c++", "c"]),
-        "java" => Some(&["java"]),
-        "kotlin" | "kt" | "kts" => Some(&["kotlin", "java"]),
-        "swift" => Some(&["swift"]),
-        "markdown" | "md" => Some(&["markdown", "md"]),
-        _ => None,
+fn char_byte_offsets(line: &str, line_start: usize) -> Vec<usize> {
+    line.char_indices()
+        .map(|(offset, _)| line_start + offset)
+        .chain(std::iter::once(line_start + line.len()))
+        .collect()
+}
+
+fn mark_code_range(
+    char_offsets: &[usize],
+    token_map: &mut [MarkdownCodeTokenKind],
+    start_byte: usize,
+    end_byte: usize,
+    token: MarkdownCodeTokenKind,
+) {
+    if start_byte >= end_byte {
+        return;
     }
-}
 
-fn syntax_token_from_scope_stack(scope_stack: &ScopeStack) -> MarkdownCodeTokenKind {
-    for scope in scope_stack.as_slice().iter().rev() {
-        let scope_name = scope.build_string();
-        if is_comment_scope(&scope_name) {
-            return MarkdownCodeTokenKind::Comment;
+    for (index, kind) in token_map.iter_mut().enumerate() {
+        let char_start = char_offsets[index];
+        let char_end = char_offsets[index + 1];
+        if char_end <= start_byte {
+            continue;
         }
-        if is_string_scope(&scope_name) {
-            return MarkdownCodeTokenKind::String;
+        if char_start >= end_byte {
+            break;
         }
-        if is_number_scope(&scope_name) {
-            return MarkdownCodeTokenKind::Number;
-        }
-        if is_function_scope(&scope_name) {
-            return MarkdownCodeTokenKind::Function;
-        }
-        if is_type_scope(&scope_name) {
-            return MarkdownCodeTokenKind::TypeName;
-        }
-        if is_constant_scope(&scope_name) {
-            return MarkdownCodeTokenKind::Constant;
-        }
-        if is_keyword_scope(&scope_name) {
-            return MarkdownCodeTokenKind::Keyword;
-        }
-        if is_variable_scope(&scope_name) {
-            return MarkdownCodeTokenKind::Variable;
-        }
-        if is_operator_scope(&scope_name) {
-            return MarkdownCodeTokenKind::Operator;
-        }
+        *kind = token;
     }
-    MarkdownCodeTokenKind::Plain
-}
-
-fn is_comment_scope(scope_name: &str) -> bool {
-    scope_name.starts_with("comment")
-        || scope_name.contains(".comment.")
-        || scope_name.ends_with(".comment")
-}
-
-fn is_string_scope(scope_name: &str) -> bool {
-    scope_name.starts_with("string")
-        || scope_name.contains(".string.")
-        || scope_name.ends_with(".string")
-}
-
-fn is_number_scope(scope_name: &str) -> bool {
-    scope_name.starts_with("constant.numeric")
-        || scope_name.contains(".constant.numeric.")
-        || scope_name.contains(".number.")
-        || scope_name.ends_with(".number")
-        || scope_name.ends_with(".numeric")
-}
-
-fn is_function_scope(scope_name: &str) -> bool {
-    scope_name.starts_with("entity.name.function")
-        || scope_name.contains(".entity.name.function.")
-        || scope_name.starts_with("support.function")
-        || scope_name.contains(".support.function.")
-        || scope_name.starts_with("variable.function")
-        || scope_name.contains(".variable.function.")
-        || scope_name.starts_with("meta.function")
-}
-
-fn is_type_scope(scope_name: &str) -> bool {
-    scope_name.starts_with("entity.name.type")
-        || scope_name.contains(".entity.name.type.")
-        || scope_name.starts_with("entity.name.class")
-        || scope_name.contains(".entity.name.class.")
-        || scope_name.starts_with("support.type")
-        || scope_name.contains(".support.type.")
-        || scope_name.starts_with("storage.type")
-        || scope_name.contains(".storage.type.")
-}
-
-fn is_constant_scope(scope_name: &str) -> bool {
-    scope_name.starts_with("constant")
-        || scope_name.contains(".constant.")
-        || scope_name.ends_with(".constant")
-}
-
-fn is_keyword_scope(scope_name: &str) -> bool {
-    scope_name.starts_with("keyword")
-        || scope_name.contains(".keyword.")
-        || scope_name.ends_with(".keyword")
-        || scope_name.starts_with("storage.modifier")
-        || scope_name.contains(".storage.modifier.")
-        || scope_name.starts_with("storage.control")
-        || scope_name.contains(".storage.control.")
-}
-
-fn is_variable_scope(scope_name: &str) -> bool {
-    scope_name.starts_with("variable")
-        || scope_name.contains(".variable.")
-        || scope_name.starts_with("entity.name.variable")
-        || scope_name.contains(".entity.name.variable.")
-        || scope_name.starts_with("support.variable")
-        || scope_name.contains(".support.variable.")
-}
-
-fn is_operator_scope(scope_name: &str) -> bool {
-    scope_name.starts_with("keyword.operator")
-        || scope_name.contains(".keyword.operator.")
-        || scope_name.starts_with("punctuation")
-        || scope_name.contains(".punctuation.")
 }

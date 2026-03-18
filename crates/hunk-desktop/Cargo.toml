@@ -44,7 +44,6 @@ gpui-component = { git = "https://github.com/niteshbalusu11/gpui-component", rev
 ] }
 gpui-component-assets = { git = "https://github.com/niteshbalusu11/gpui-component", rev = "4640591715ae6732b6b2075f040672eeabdb5c87" }
 notify = "8.2.0"
-syntect = "5.3"
 toml = "0.9"
 serde_json = "1.0"
 lsp-types = { version = "0.97.0", features = ["proposed"] }

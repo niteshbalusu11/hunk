@@ -61,11 +61,15 @@ pub fn builtin_language_definitions() -> Vec<LanguageDefinition> {
         javascript_language(),
         typescript_language(),
         tsx_language(),
+        bash_language(),
         json_language(),
         yaml_language(),
         go_language(),
         html_language(),
         css_language(),
+        toml_language(),
+        python_language(),
+        powershell_language(),
     ]
 }
 
@@ -211,6 +215,24 @@ fn json_language() -> LanguageDefinition {
     )
 }
 
+fn bash_language() -> LanguageDefinition {
+    LanguageDefinition::new(
+        LanguageId::new(11),
+        "Bash",
+        "bash",
+        FileMatcher {
+            extensions: vec!["sh".to_string(), "bash".to_string(), "zsh".to_string()],
+            file_names: Vec::new(),
+        },
+        || tree_sitter_bash::LANGUAGE.into(),
+        tree_sitter_bash::HIGHLIGHT_QUERY,
+        "",
+        "",
+        &[],
+        &["bash", "shell", "sh", "zsh"],
+    )
+}
+
 fn yaml_language() -> LanguageDefinition {
     LanguageDefinition::new(
         LanguageId::new(6),
@@ -290,5 +312,59 @@ fn css_language() -> LanguageDefinition {
         "",
         &["block", "rule_set", "media_statement", "supports_statement"],
         &["css"],
+    )
+}
+
+fn toml_language() -> LanguageDefinition {
+    LanguageDefinition::new(
+        LanguageId::new(10),
+        "TOML",
+        "toml",
+        FileMatcher {
+            extensions: vec!["toml".to_string()],
+            file_names: Vec::new(),
+        },
+        || tree_sitter_toml_ng::LANGUAGE.into(),
+        tree_sitter_toml_ng::HIGHLIGHTS_QUERY,
+        "",
+        "",
+        &["table", "inline_table", "array"],
+        &["toml"],
+    )
+}
+
+fn python_language() -> LanguageDefinition {
+    LanguageDefinition::new(
+        LanguageId::new(12),
+        "Python",
+        "python",
+        FileMatcher {
+            extensions: vec!["py".to_string(), "pyi".to_string()],
+            file_names: Vec::new(),
+        },
+        || tree_sitter_python::LANGUAGE.into(),
+        tree_sitter_python::HIGHLIGHTS_QUERY,
+        "",
+        "",
+        &["block", "dictionary", "list", "tuple", "set"],
+        &["python", "py"],
+    )
+}
+
+fn powershell_language() -> LanguageDefinition {
+    LanguageDefinition::new(
+        LanguageId::new(13),
+        "PowerShell",
+        "powershell",
+        FileMatcher {
+            extensions: vec!["ps1".to_string(), "psm1".to_string(), "psd1".to_string()],
+            file_names: Vec::new(),
+        },
+        || tree_sitter_powershell::LANGUAGE.into(),
+        include_str!("queries/powershell_highlights.scm"),
+        "",
+        "",
+        &[],
+        &["powershell", "pwsh", "ps1"],
     )
 }

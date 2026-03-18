@@ -38,6 +38,73 @@ function Test-WindowsCodexRuntimeBundle {
     }
 }
 
+function Write-WindowsPathSize {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if (-not (Test-Path $Path)) {
+        Write-Host "missing $Path"
+        return
+    }
+
+    $item = Get-Item $Path
+    if ($item.PSIsContainer) {
+        $bytes = (Get-ChildItem -Path $Path -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+    } else {
+        $bytes = $item.Length
+    }
+
+    if ($null -eq $bytes) {
+        $bytes = 0
+    }
+
+    $sizeMiB = [Math]::Round(($bytes / 1MB), 2)
+    Write-Host ("{0} MiB`t{1}" -f $sizeMiB, $Path)
+}
+
+function Write-WindowsPackagerInventory {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Label,
+        [Parameter(Mandatory = $true)]
+        [string]$PackagerOutDir
+    )
+
+    Write-Host "Windows package inventory ($Label):"
+    Write-WindowsPathSize -Path $PackagerOutDir
+
+    if (-not (Test-Path $PackagerOutDir -PathType Container)) {
+        return
+    }
+
+    Write-Host "Top-level Windows packager output:"
+    $entries = Get-ChildItem -Path $PackagerOutDir -Recurse -ErrorAction SilentlyContinue |
+        Sort-Object FullName |
+        Select-Object -First 200
+    foreach ($entry in $entries) {
+        Write-Host "  $($entry.FullName)"
+    }
+
+    $exeCount = @(Get-ChildItem -Path $PackagerOutDir -Recurse -File -Filter *.exe -ErrorAction SilentlyContinue).Count
+    $dllCount = @(Get-ChildItem -Path $PackagerOutDir -Recurse -File -Filter *.dll -ErrorAction SilentlyContinue).Count
+    $msiCount = @(Get-ChildItem -Path $PackagerOutDir -Recurse -File -Filter *.msi -ErrorAction SilentlyContinue).Count
+    Write-Host "Windows executables: $exeCount"
+    Write-Host "Windows DLLs: $dllCount"
+    Write-Host "Windows MSIs: $msiCount"
+
+    $forbiddenMatches = Get-ChildItem -Path $PackagerOutDir -Recurse -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match '(\\|/)(helix|hx-runtime|queries|grammars)(\\|/|$)' } |
+        Select-Object -First 50
+    if ($forbiddenMatches.Count -gt 0) {
+        Write-Host "Forbidden-looking Windows bundle content detected:"
+        foreach ($match in $forbiddenMatches) {
+            Write-Host "  $($match.FullName)"
+        }
+    }
+}
+
 function Invoke-CargoPackagerWithManifestOverride {
     param(
         [Parameter(Mandatory = $true)]
@@ -130,6 +197,7 @@ try {
         -WindowsPackagerVersion $windowsPackagerVersion `
         -TargetTriple $targetTriple `
         -PackagerOutDir $packagerOutDir
+    Write-WindowsPackagerInventory -Label "after cargo packager" -PackagerOutDir $packagerOutDir
     & $validateBundleScript -RootDir $rootDir -PackagerOutDir $packagerOutDir
 } finally {
     if ($null -eq $originalCargoTargetDir) {
@@ -156,6 +224,7 @@ if (-not $bundleMsi) {
 
 New-Item -ItemType Directory -Path $distDir -Force | Out-Null
 Copy-Item -Path $bundleMsi.FullName -Destination $releaseMsiPath -Force
+Write-WindowsPathSize -Path $releaseMsiPath
 
 Write-Host "Created Windows release artifact at $releaseMsiPath"
 

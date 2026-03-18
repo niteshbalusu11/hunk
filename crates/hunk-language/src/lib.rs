@@ -1,5 +1,7 @@
 mod assets;
 mod features;
+mod preview;
+mod preview_tokens;
 
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -18,6 +20,11 @@ pub use features::{
     SymbolOccurrence, merge_highlight_layers, semantic_token_captures,
 };
 use features::{position_to_byte_in_source, text_range_for_byte_range};
+pub use preview::{
+    PreviewHighlightSpan, preview_highlight_spans_for_language_hint,
+    preview_highlight_spans_for_path,
+};
+pub use preview_tokens::PreviewSyntaxToken;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LanguageId(u16);
@@ -264,6 +271,21 @@ impl LanguageRegistry {
     pub fn language_for_injection_name(&self, name: &str) -> Option<&Arc<LanguageDefinition>> {
         let language_id = self.ids_by_injection_name.get(&name.to_ascii_lowercase())?;
         self.definitions.get(language_id)
+    }
+
+    pub fn language_for_hint(&self, hint: &str) -> Option<&Arc<LanguageDefinition>> {
+        let hint = hint.trim();
+        if hint.is_empty() {
+            return None;
+        }
+
+        self.language_by_name(hint)
+            .or_else(|| self.language_for_injection_name(hint))
+            .or_else(|| {
+                preview::language_hint_path(hint)
+                    .as_deref()
+                    .and_then(|path| self.language_for_path(path))
+            })
     }
 }
 

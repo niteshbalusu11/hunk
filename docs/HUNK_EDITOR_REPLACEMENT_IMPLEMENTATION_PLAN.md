@@ -121,7 +121,7 @@ Syntax highlighting should be based on:
 
 We should not build the new editor around `syntect`.
 
-`syntect` can remain for markdown snippets or existing fallback paths, but the new file editor should be Tree-sitter based from the start.
+`syntect` has since been removed from Hunk. Any future syntax work should stay on the Tree-sitter path rather than reintroducing a second highlighting stack.
 
 ### Rendering Quality Matters As Much As Parsing
 
