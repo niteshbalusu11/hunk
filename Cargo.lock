@@ -5181,6 +5181,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "hunk-editor"
+version = "0.1.0"
+dependencies = [
+ "hunk-language",
+ "hunk-text",
+]
+
+[[package]]
 name = "hunk-git"
 version = "0.1.0"
 dependencies = [
@@ -5189,6 +5197,17 @@ dependencies = [
  "gix 0.78.0",
  "hunk-domain",
  "tempfile",
+]
+
+[[package]]
+name = "hunk-language"
+version = "0.1.0"
+
+[[package]]
+name = "hunk-text"
+version = "0.1.0"
+dependencies = [
+ "ropey 1.6.1",
 ]
 
 [[package]]

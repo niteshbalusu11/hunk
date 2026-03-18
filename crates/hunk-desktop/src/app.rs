@@ -838,7 +838,7 @@ struct DiffViewer {
     repo_tree: RepoTreeState,
     repo_tree_inline_edit: Option<RepoTreeInlineEditState>,
     repo_tree_context_menu: Option<RepoTreeContextMenuState>,
-    helix_files_editor: files_editor::SharedHelixFilesEditor,
+    files_editor: files_editor::SharedFilesEditor,
     file_quick_open_input_state: Entity<InputState>,
     file_quick_open_visible: bool,
     file_quick_open_matches: Vec<String>,
@@ -862,7 +862,7 @@ struct DiffViewer {
 
 impl Drop for DiffViewer {
     fn drop(&mut self) {
-        self.helix_files_editor.borrow_mut().shutdown();
+        self.files_editor.borrow_mut().shutdown();
         self.shutdown_ai_worker_blocking();
     }
 }

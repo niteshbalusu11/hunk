@@ -1,0 +1,8 @@
+[package]
+name = "hunk-editor"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+hunk-language = { path = "../hunk-language" }
+hunk-text = { path = "../hunk-text" }

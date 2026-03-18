@@ -220,9 +220,9 @@ impl DiffViewer {
         is_dark: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.helix_files_editor.borrow_mut().sync_theme(is_dark);
+        self.files_editor.borrow_mut().sync_theme(is_dark);
         let view = cx.entity();
-        let helix_status = self.helix_files_editor.borrow().status_snapshot();
+        let editor_status = self.files_editor.borrow().status_snapshot();
         let is_editor_focused = self.files_editor_focus_handle.is_focused(window);
         let text_style = TextStyle {
             color: cx.theme().foreground,
@@ -231,11 +231,11 @@ impl DiffViewer {
             line_height: relative(1.45),
             ..Default::default()
         };
-        let helix_element = crate::app::files_editor::HelixFilesEditorElement::new(
-            self.helix_files_editor.clone(),
+        let editor_element = crate::app::files_editor::FilesEditorElement::new(
+            self.files_editor.clone(),
             is_editor_focused,
             text_style,
-            crate::app::files_editor::HelixFilesEditorPalette {
+            crate::app::files_editor::FilesEditorPalette {
                 background: cx.theme().background,
                 line_number: cx.theme().muted_foreground,
                 current_line_number: cx.theme().foreground,
@@ -250,19 +250,19 @@ impl DiffViewer {
         } else {
             hunk_opacity(cx.theme().border, is_dark, 0.92, 0.78)
         };
-        let header_mode = helix_status
+        let header_mode = editor_status
             .as_ref()
             .map(|status| status.mode)
             .unwrap_or("READY");
-        let header_language = helix_status
+        let header_language = editor_status
             .as_ref()
             .map(|status| status.language.clone())
             .unwrap_or_else(|| "text".to_string());
-        let footer_selection = helix_status
+        let footer_selection = editor_status
             .as_ref()
             .map(|status| status.selection.clone())
             .unwrap_or_else(|| "0 cursors".to_string());
-        let footer_position = helix_status
+        let footer_position = editor_status
             .as_ref()
             .map(|status| status.position.clone())
             .unwrap_or_else(|| "Ln 1  Col 1".to_string());
@@ -304,7 +304,7 @@ impl DiffViewer {
                         }
 
                         if this
-                            .helix_files_editor
+                            .files_editor
                             .borrow_mut()
                             .handle_keystroke(&event.keystroke)
                         {
@@ -327,7 +327,7 @@ impl DiffViewer {
                         if let Some((direction, line_count)) =
                             crate::app::files_editor::scroll_direction_and_count(event, line_height)
                         {
-                            this.helix_files_editor
+                            this.files_editor
                                 .borrow_mut()
                                 .scroll_lines(line_count, direction);
                             this.sync_editor_dirty_from_input(cx);
@@ -379,7 +379,7 @@ impl DiffViewer {
                                             .text_xs()
                                             .font_semibold()
                                             .text_color(cx.theme().foreground)
-                                            .child("HELIX"),
+                                            .child("FILES"),
                                     )
                                     .child(
                                         div()
@@ -430,7 +430,7 @@ impl DiffViewer {
                                     }),
                             ),
                     )
-                    .child(div().flex_1().min_h_0().child(helix_element))
+                    .child(div().flex_1().min_h_0().child(editor_element))
                     .child(
                         h_flex()
                             .w_full()

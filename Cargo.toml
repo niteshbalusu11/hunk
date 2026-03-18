@@ -1,5 +1,8 @@
 [workspace]
 members = [
+  "crates/hunk-text",
+  "crates/hunk-language",
+  "crates/hunk-editor",
   "crates/hunk-domain",
   "crates/hunk-git",
   "crates/hunk-desktop",

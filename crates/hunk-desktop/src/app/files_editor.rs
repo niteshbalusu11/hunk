@@ -41,7 +41,11 @@ use self::runtime_env::{ensure_helix_loader_initialized, with_tokio_runtime};
 use self::selection::{line_selection_range, word_selection_range};
 use self::theme::load_hunk_helix_theme;
 
-pub(crate) type SharedHelixFilesEditor = Rc<RefCell<HelixFilesEditor>>;
+pub(crate) type FilesEditor = HelixFilesEditor;
+pub(crate) type SharedFilesEditor = Rc<RefCell<FilesEditor>>;
+pub(crate) type FilesEditorElement = HelixFilesEditorElement;
+pub(crate) type FilesEditorPalette = HelixFilesEditorPalette;
+pub(crate) type SharedHelixFilesEditor = SharedFilesEditor;
 
 pub(crate) fn initialize_helix_runtime_environment() {
     runtime_env::initialize_helix_runtime_environment();
@@ -155,7 +159,7 @@ impl HelixFilesEditor {
         };
         runtime
             .replace_document(path, contents, open_action)
-            .with_context(|| format!("failed to open {} in Helix editor", path.display()))?;
+            .with_context(|| format!("failed to open {} in file editor", path.display()))?;
         self.active_path = Some(path.to_path_buf());
         self.restore_view_state(path);
         Ok(())

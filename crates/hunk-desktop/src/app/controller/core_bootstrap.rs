@@ -339,7 +339,7 @@ impl DiffViewer {
         });
         let commit_input_state = cx
             .new(|cx| InputState::new(window, cx).multi_line(true).rows(4).placeholder("Commit message"));
-        let helix_files_editor = Rc::new(RefCell::new(crate::app::files_editor::HelixFilesEditor::new()));
+        let files_editor = Rc::new(RefCell::new(crate::app::files_editor::FilesEditor::new()));
         let repo_file_search_provider = Rc::new(RepoFileSearchProvider::new());
         let comment_input_state = cx.new(|cx| {
             InputState::new(window, cx)
@@ -573,7 +573,7 @@ impl DiffViewer {
             repo_tree: RepoTreeState::new(),
             repo_tree_inline_edit: None,
             repo_tree_context_menu: None,
-            helix_files_editor,
+            files_editor,
             file_quick_open_input_state,
             file_quick_open_visible: false,
             file_quick_open_matches: Vec::new(),
