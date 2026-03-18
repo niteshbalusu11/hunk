@@ -19,79 +19,6 @@ MACOS_CXX="/usr/bin/clang++"
 MACOS_AR="/usr/bin/ar"
 MACOS_RANLIB="/usr/bin/ranlib"
 
-print_directory_tree_preview() {
-  local root_path="$1"
-  local max_depth="$2"
-  local max_entries="$3"
-  local total_entries
-
-  if [[ ! -d "$root_path" ]]; then
-    echo "(missing directory: $root_path)" >&2
-    return
-  fi
-
-  find "$root_path" -maxdepth "$max_depth" -mindepth 1 | sort | head -n "$max_entries" | while IFS= read -r entry; do
-    printf '  %s\n' "$entry" >&2
-  done
-
-  total_entries="$(find "$root_path" -maxdepth "$max_depth" -mindepth 1 | wc -l | tr -d ' ')"
-
-  if (( total_entries > max_entries )); then
-    printf '  ... truncated, showing %d of %d entries ...\n' "$max_entries" "$total_entries" >&2
-  fi
-}
-
-print_path_size_if_present() {
-  local target_path="$1"
-  if [[ -e "$target_path" ]]; then
-    du -sh "$target_path" >&2
-  else
-    printf 'missing %s\n' "$target_path" >&2
-  fi
-}
-
-print_macos_bundle_inventory() {
-  local label="$1"
-  local resources_dir="$APP_PATH/Contents/Resources"
-
-  echo "macOS bundle inventory ($label):" >&2
-  print_path_size_if_present "$APP_PATH"
-  print_path_size_if_present "$resources_dir"
-
-  if [[ -d "$resources_dir" ]]; then
-    echo "Top-level macOS resources:" >&2
-    print_directory_tree_preview "$resources_dir" 3 200
-  fi
-
-  printf 'Mach-O dylibs in bundle: %s\n' \
-    "$(find "$APP_PATH/Contents" -type f -name '*.dylib' | wc -l | tr -d ' ')" >&2
-  printf 'Executable-bit files in bundle: %s\n' \
-    "$(find "$APP_PATH/Contents" -type f -perm -111 | wc -l | tr -d ' ')" >&2
-}
-
-print_macos_signing_inventory() {
-  local sign_count
-
-  sign_count="$(find "$APP_PATH/Contents" -type f \( -name '*.dylib' -o -perm -111 \) | wc -l | tr -d ' ')"
-  echo "macOS signing inventory before codesign:" >&2
-  printf 'Sign targets matched by current loop: %s\n' "$sign_count" >&2
-  find "$APP_PATH/Contents" -type f \( -name '*.dylib' -o -perm -111 \) \
-    | sed "s#^$APP_PATH/Contents/##" \
-    | awk -F/ '
-        {
-          key = $1;
-          if (NF >= 2) key = key "/" $2;
-          if (NF >= 3) key = key "/" $3;
-          counts[key] += 1;
-        }
-        END {
-          for (key in counts) printf "%7d %s\n", counts[key], key;
-        }
-      ' \
-    | sort -nr \
-    | sed -n '1,20p' >&2 || true
-}
-
 validate_macos_binary_dependencies() {
   local paths_to_check=("$APP_EXECUTABLE_PATH")
   if [[ -d "$APP_FRAMEWORKS_DIR" ]]; then
@@ -309,13 +236,10 @@ if [[ ! -d "$APP_PATH" ]]; then
   exit 1
 fi
 
-print_macos_bundle_inventory "after cargo packager"
 "$ROOT_DIR/scripts/validate_release_bundle_layout.sh" macos-app "$APP_PATH"
 bundle_macos_non_system_dylibs "$APP_EXECUTABLE_PATH"
 echo "Validating macOS app binary dependencies..." >&2
 validate_macos_binary_dependencies "$APP_EXECUTABLE_PATH"
-print_macos_bundle_inventory "after dylib bundling"
-print_macos_signing_inventory
 
 if [[ -n "${APPLE_SIGNING_IDENTITY:-}" ]]; then
   echo "Signing macOS app bundle with Developer ID..." >&2

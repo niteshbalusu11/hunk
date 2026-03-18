@@ -28,53 +28,6 @@ APP_ICON_PATH="$APPDIR_PATH/usr/share/icons/hicolor/1024x1024/apps/hunk_desktop.
 APPDIR_REAL_BINARY_PATH="$APPDIR_PATH/usr/bin/$REAL_BINARY_NAME"
 APPDIR_LAUNCHER_PATH="$APPDIR_PATH/usr/bin/hunk_desktop"
 
-print_directory_tree_preview() {
-  local root_path="$1"
-  local max_depth="$2"
-  local max_entries="$3"
-
-  if [[ ! -d "$root_path" ]]; then
-    echo "(missing directory: $root_path)" >&2
-    return
-  fi
-
-  mapfile -t tree_entries < <(find "$root_path" -maxdepth "$max_depth" -mindepth 1 | sort)
-  local total_entries="${#tree_entries[@]}"
-  local index
-
-  for ((index = 0; index < total_entries && index < max_entries; index += 1)); do
-    printf '  %s\n' "${tree_entries[$index]}" >&2
-  done
-
-  if (( total_entries > max_entries )); then
-    printf '  ... truncated, showing %d of %d entries ...\n' "$max_entries" "$total_entries" >&2
-  fi
-}
-
-print_path_size_if_present() {
-  local target_path="$1"
-  if [[ -e "$target_path" ]]; then
-    du -sh "$target_path" >&2
-  else
-    printf 'missing %s\n' "$target_path" >&2
-  fi
-}
-
-print_linux_directory_inventory() {
-  local label="$1"
-  local root_path="$2"
-
-  echo "Linux package inventory ($label):" >&2
-  print_path_size_if_present "$root_path"
-  print_directory_tree_preview "$root_path" 4 200
-  if [[ -d "$root_path" ]]; then
-    printf 'Shared libraries: %s\n' \
-      "$(find "$root_path" -type f \( -name '*.so' -o -name '*.so.*' \) | wc -l | tr -d ' ')" >&2
-    printf 'Executables: %s\n' \
-      "$(find "$root_path" -type f -perm -111 | wc -l | tr -d ' ')" >&2
-  fi
-}
-
 download_cached_appimage_tool() {
   local url="$1"
   local destination="$2"
@@ -134,7 +87,6 @@ create_linux_appdir() {
   patch_linux_runtime_paths "$APPDIR_REAL_BINARY_PATH" "$APPDIR_PATH/usr/lib" '$ORIGIN/../lib'
   validate_linux_runtime_bundle "$APPDIR_REAL_BINARY_PATH" "$APPDIR_PATH/usr/lib"
   "$ROOT_DIR/scripts/validate_release_bundle_layout.sh" linux-appdir "$APPDIR_PATH"
-  print_linux_directory_inventory "AppDir staging" "$APPDIR_PATH"
 
   cat >"$APP_DESKTOP_ENTRY_PATH" <<'EOF'
 [Desktop Entry]
@@ -302,7 +254,6 @@ bundle_linux_runtime_dependencies "$BINARY_SOURCE_PATH"
 patch_linux_runtime_paths "$PACKAGED_BINARY_PATH" "$PACKAGE_LIB_DIR" '$ORIGIN/lib'
 validate_linux_runtime_bundle "$PACKAGED_BINARY_PATH" "$PACKAGE_LIB_DIR"
 "$ROOT_DIR/scripts/validate_release_bundle_layout.sh" linux-package "$PACKAGE_DIR"
-print_linux_directory_inventory "tarball package" "$PACKAGE_DIR"
 
 mkdir -p "$DIST_DIR"
 tar -C "$DIST_DIR" -czf "$ARCHIVE_PATH" "$(basename "$PACKAGE_DIR")"
@@ -310,8 +261,6 @@ tar -C "$DIST_DIR" -czf "$ARCHIVE_PATH" "$(basename "$PACKAGE_DIR")"
 echo "Building Linux AppImage package..." >&2
 build_linux_appimage
 chmod +x "$APPIMAGE_PATH"
-print_path_size_if_present "$ARCHIVE_PATH"
-print_path_size_if_present "$APPIMAGE_PATH"
 
 echo "Created Linux AppImage artifact at $APPIMAGE_PATH" >&2
 echo "Created Linux release artifact at $ARCHIVE_PATH" >&2
