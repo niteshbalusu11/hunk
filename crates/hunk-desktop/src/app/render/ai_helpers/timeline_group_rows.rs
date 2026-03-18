@@ -172,6 +172,7 @@ fn render_ai_tool_item_row(
         .max_w(px(940.0))
         .w_full()
         .min_w_0()
+        .items_stretch()
         .gap_1p5()
         .child(header)
         .when(expanded, |this| {
@@ -260,6 +261,7 @@ fn render_ai_timeline_group_row(
                 .max_w(px(940.0))
                 .w_full()
                 .min_w_0()
+                .items_stretch()
                 .gap_1p5()
                 .child(
                     h_flex()
@@ -326,7 +328,14 @@ fn render_ai_timeline_group_row(
                         ),
                 )
                 .when(expanded, |this| {
-                    this.child(v_flex().w_full().min_w_0().gap_1().children(children))
+                    this.child(
+                        v_flex()
+                            .w_full()
+                            .min_w_0()
+                            .items_stretch()
+                            .gap_1()
+                            .children(children),
+                    )
                 }),
         );
 

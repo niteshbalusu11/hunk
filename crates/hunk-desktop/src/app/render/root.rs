@@ -19,7 +19,6 @@ impl DiffViewer {
     fn render_diff_workspace_screen(&mut self, cx: &mut Context<Self>) -> AnyElement {
         div()
             .size_full()
-            .key_context("ReviewWorkspace")
             .child(if self.sidebar_collapsed {
                 self.render_diff(cx).into_any_element()
             } else {
@@ -332,11 +331,16 @@ impl Render for DiffViewer {
             self.last_scroll_activity_at = Instant::now();
         }
         self.frame_sample_count = self.frame_sample_count.saturating_add(1);
+        let root_key_context = if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            "DiffViewer ReviewWorkspace"
+        } else {
+            "DiffViewer"
+        };
 
         v_flex()
             .size_full()
             .relative()
-            .key_context("DiffViewer")
+            .key_context(root_key_context)
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::select_next_line_action))
             .on_action(cx.listener(Self::select_previous_line_action))
