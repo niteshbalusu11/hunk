@@ -434,7 +434,7 @@ impl DiffViewer {
                             segment.plain_text.clone()
                         };
                         let segment_color =
-                            diff_syntax_color(text_color, segment.syntax, cx.theme().mode.is_dark());
+                            diff_syntax_color(cx.theme(), text_color, segment.syntax);
                         div()
                             .flex_none()
                             .whitespace_nowrap()

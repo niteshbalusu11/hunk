@@ -611,6 +611,28 @@ impl DiffViewer {
         });
     }
 
+    pub(super) fn files_editor_move_to_beginning_of_document_action(
+        &mut self,
+        _: &FilesEditorMoveToBeginningOfDocument,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.handle_files_editor_motion(window, cx, |editor| {
+            editor.move_to_document_boundary_action(true, false)
+        });
+    }
+
+    pub(super) fn files_editor_move_to_end_of_document_action(
+        &mut self,
+        _: &FilesEditorMoveToEndOfDocument,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.handle_files_editor_motion(window, cx, |editor| {
+            editor.move_to_document_boundary_action(false, false)
+        });
+    }
+
     pub(super) fn files_editor_select_to_beginning_of_line_action(
         &mut self,
         _: &FilesEditorSelectToBeginningOfLine,
@@ -630,6 +652,28 @@ impl DiffViewer {
     ) {
         self.handle_files_editor_motion(window, cx, |editor| {
             editor.move_to_line_boundary_action(false, true)
+        });
+    }
+
+    pub(super) fn files_editor_select_to_beginning_of_document_action(
+        &mut self,
+        _: &FilesEditorSelectToBeginningOfDocument,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.handle_files_editor_motion(window, cx, |editor| {
+            editor.move_to_document_boundary_action(true, true)
+        });
+    }
+
+    pub(super) fn files_editor_select_to_end_of_document_action(
+        &mut self,
+        _: &FilesEditorSelectToEndOfDocument,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.handle_files_editor_motion(window, cx, |editor| {
+            editor.move_to_document_boundary_action(false, true)
         });
     }
 

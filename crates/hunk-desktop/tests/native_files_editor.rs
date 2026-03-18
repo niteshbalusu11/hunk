@@ -125,6 +125,44 @@ fn word_navigation_moves_to_word_boundaries() {
 }
 
 #[test]
+fn document_boundary_navigation_moves_to_top_and_bottom() {
+    let mut editor = FilesEditor::new();
+    let path = PathBuf::from("example.ts");
+    editor
+        .open_document(path.as_path(), "first line\nsecond line\nthird")
+        .expect("document should open");
+    editor.set_selection_for_test(Selection::caret(TextPosition::new(1, 4)));
+
+    assert!(editor.move_to_document_boundary_action(true, false));
+    assert_eq!(
+        editor.selection_for_test(),
+        Selection::caret(TextPosition::new(0, 0))
+    );
+
+    assert!(editor.move_to_document_boundary_action(false, false));
+    assert_eq!(
+        editor.selection_for_test(),
+        Selection::caret(TextPosition::new(2, 5))
+    );
+}
+
+#[test]
+fn document_boundary_selection_extends_from_anchor() {
+    let mut editor = FilesEditor::new();
+    let path = PathBuf::from("example.ts");
+    editor
+        .open_document(path.as_path(), "first line\nsecond line\nthird")
+        .expect("document should open");
+    editor.set_selection_for_test(Selection::caret(TextPosition::new(1, 2)));
+
+    assert!(editor.move_to_document_boundary_action(false, true));
+    assert_eq!(
+        editor.selection_for_test(),
+        Selection::new(TextPosition::new(1, 2), TextPosition::new(2, 5))
+    );
+}
+
+#[test]
 fn double_click_selects_the_containing_word() {
     let mut editor = FilesEditor::new();
     let path = PathBuf::from("example.ts");

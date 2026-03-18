@@ -188,6 +188,8 @@ actions!(
         FilesEditorMoveRight,
         FilesEditorMoveToBeginningOfLine,
         FilesEditorMoveToEndOfLine,
+        FilesEditorMoveToBeginningOfDocument,
+        FilesEditorMoveToEndOfDocument,
         FilesEditorMoveToPreviousWordStart,
         FilesEditorMoveToNextWordEnd,
         FilesEditorSelectUp,
@@ -196,6 +198,8 @@ actions!(
         FilesEditorSelectRight,
         FilesEditorSelectToBeginningOfLine,
         FilesEditorSelectToEndOfLine,
+        FilesEditorSelectToBeginningOfDocument,
+        FilesEditorSelectToEndOfDocument,
         FilesEditorSelectToPreviousWordStart,
         FilesEditorSelectToNextWordEnd,
         FilesEditorPageUp,
@@ -550,6 +554,16 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
             Some("FilesEditor"),
         ));
         bindings.push(KeyBinding::new(
+            "cmd-up",
+            FilesEditorMoveToBeginningOfDocument,
+            Some("FilesEditor"),
+        ));
+        bindings.push(KeyBinding::new(
+            "cmd-down",
+            FilesEditorMoveToEndOfDocument,
+            Some("FilesEditor"),
+        ));
+        bindings.push(KeyBinding::new(
             "cmd-shift-left",
             FilesEditorSelectToBeginningOfLine,
             Some("FilesEditor"),
@@ -557,6 +571,26 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
         bindings.push(KeyBinding::new(
             "cmd-shift-right",
             FilesEditorSelectToEndOfLine,
+            Some("FilesEditor"),
+        ));
+        bindings.push(KeyBinding::new(
+            "cmd-shift-up",
+            FilesEditorSelectToBeginningOfDocument,
+            Some("FilesEditor"),
+        ));
+        bindings.push(KeyBinding::new(
+            "cmd-shift-down",
+            FilesEditorSelectToEndOfDocument,
+            Some("FilesEditor"),
+        ));
+        bindings.push(KeyBinding::new(
+            "cmd-home",
+            FilesEditorMoveToBeginningOfDocument,
+            Some("FilesEditor"),
+        ));
+        bindings.push(KeyBinding::new(
+            "cmd-end",
+            FilesEditorMoveToEndOfDocument,
             Some("FilesEditor"),
         ));
         bindings.push(KeyBinding::new(
@@ -598,6 +632,26 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
         bindings.push(KeyBinding::new(
             "ctrl-shift-right",
             FilesEditorSelectToNextWordEnd,
+            Some("FilesEditor"),
+        ));
+        bindings.push(KeyBinding::new(
+            "ctrl-home",
+            FilesEditorMoveToBeginningOfDocument,
+            Some("FilesEditor"),
+        ));
+        bindings.push(KeyBinding::new(
+            "ctrl-end",
+            FilesEditorMoveToEndOfDocument,
+            Some("FilesEditor"),
+        ));
+        bindings.push(KeyBinding::new(
+            "ctrl-shift-home",
+            FilesEditorSelectToBeginningOfDocument,
+            Some("FilesEditor"),
+        ));
+        bindings.push(KeyBinding::new(
+            "ctrl-shift-end",
+            FilesEditorSelectToEndOfDocument,
             Some("FilesEditor"),
         ));
     }

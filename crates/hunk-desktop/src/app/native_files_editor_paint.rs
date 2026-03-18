@@ -311,7 +311,7 @@ pub(super) fn paint_fold_marker(
         return;
     }
 
-    let label = if folded { ">" } else { "v" };
+    let label = if folded { "▸" } else { "▾" };
     let runs = vec![TextRun {
         len: label.len(),
         color: palette.fold_marker,
@@ -438,11 +438,12 @@ pub(super) fn paint_indent_guides(
     }
 
     for column in (tab_width..=indent_width).step_by(tab_width.max(1)) {
-        let x = row_origin.x + (layout.cell_width * column as f32) - px(0.5);
+        let guide_column = column.saturating_sub(tab_width);
+        let x = row_origin.x + (layout.cell_width * guide_column as f32) - px(0.5);
         window.paint_quad(fill(
             Bounds {
-                origin: point(x, row_origin.y + px(2.0)),
-                size: size(px(1.0), layout.line_height - px(4.0)),
+                origin: point(x, row_origin.y),
+                size: size(px(1.0), layout.line_height),
             },
             palette.indent_guide,
         ));

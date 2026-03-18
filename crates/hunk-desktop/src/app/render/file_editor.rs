@@ -63,9 +63,19 @@ impl DiffViewer {
 
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
+        let editor_chrome = crate::app::theme::hunk_editor_chrome_colors(cx.theme(), is_dark);
         let editor_font_size = cx.theme().mono_font_size * 1.2;
         let is_markdown_file = is_markdown_path(file_path.as_str());
         let preview_active = is_markdown_file && self.editor_markdown_preview;
+        let (editor_status, search_match_count, show_whitespace, soft_wrap_enabled) = {
+            let files_editor = self.files_editor.borrow();
+            (
+                files_editor.status_snapshot(),
+                files_editor.search_match_count(),
+                files_editor.show_whitespace(),
+                files_editor.soft_wrap_enabled(),
+            )
+        };
         let status_color = if self.editor_save_loading {
             cx.theme().warning
         } else if self.editor_dirty {
@@ -82,6 +92,29 @@ impl DiffViewer {
         };
         let save_disabled = self.editor_save_loading || !self.editor_dirty;
         let reload_disabled = self.editor_save_loading;
+        let language_label = editor_status
+            .as_ref()
+            .map(|status| status.language.clone())
+            .unwrap_or_else(|| "text".to_string());
+        let selection_label = editor_status
+            .as_ref()
+            .map(|status| status.selection.clone())
+            .unwrap_or_else(|| "0 cursors".to_string());
+        let position_label = editor_status
+            .as_ref()
+            .map(|status| status.position.clone())
+            .unwrap_or_else(|| "Ln 1  Col 1".to_string());
+        let search_count_label = if self.editor_search_visible {
+            match search_match_count {
+                0 => "No matches".to_string(),
+                1 => "1 match".to_string(),
+                count => format!("{count} matches"),
+            }
+        } else {
+            String::new()
+        };
+        let search_surface = hunk_input_surface(cx.theme(), is_dark);
+        let meta_label = format!("{position_label}  {selection_label}");
 
         v_flex()
             .size_full()
@@ -91,11 +124,11 @@ impl DiffViewer {
                     .items_center()
                     .justify_between()
                     .gap_2()
-                    .px_2()
+                    .px_3()
                     .py_1()
                     .border_b_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().background)
+                    .border_color(hunk_opacity(cx.theme().border, is_dark, 0.86, 0.72))
+                    .bg(editor_chrome.background)
                     .child(
                         h_flex()
                             .flex_1()
@@ -107,13 +140,13 @@ impl DiffViewer {
                                     .truncate()
                                     .text_xs()
                                     .font_family(cx.theme().mono_font_family.clone())
-                                    .text_color(cx.theme().muted_foreground)
+                                    .text_color(editor_chrome.foreground)
                                     .child(file_path),
                             )
                             .child(
                                 div()
                                     .text_xs()
-                                    .font_semibold()
+                                    .font_medium()
                                     .text_color(status_color)
                                     .child(status_label),
                             ),
@@ -121,20 +154,143 @@ impl DiffViewer {
                     .child(
                         h_flex()
                             .items_center()
-                            .gap_1()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_family(cx.theme().mono_font_family.clone())
+                                    .text_color(editor_chrome.line_number)
+                                    .child(language_label),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_family(cx.theme().mono_font_family.clone())
+                                    .text_color(editor_chrome.line_number)
+                                    .child(meta_label),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_1p5()
+                            .when(self.editor_search_visible, |this| {
+                                this.child(
+                                    h_flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .child(
+                                            Input::new(&self.editor_search_input_state)
+                                                .w(px(190.0))
+                                                .h(px(30.0))
+                                                .rounded(px(7.0))
+                                                .border_1()
+                                                .border_color(search_surface.border)
+                                                .bg(search_surface.background),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(editor_chrome.line_number)
+                                                .child(search_count_label.clone()),
+                                        )
+                                        .child({
+                                            let view = view.clone();
+                                            Button::new("editor-search-prev")
+                                                .outline()
+                                                .compact()
+                                                .rounded(px(7.0))
+                                                .label("Prev")
+                                                .on_click(move |_, _, cx| {
+                                                    view.update(cx, |this, cx| {
+                                                        this.navigate_editor_search(false, cx);
+                                                    });
+                                                })
+                                        })
+                                        .child({
+                                            let view = view.clone();
+                                            Button::new("editor-search-next")
+                                                .outline()
+                                                .compact()
+                                                .rounded(px(7.0))
+                                                .label("Next")
+                                                .on_click(move |_, _, cx| {
+                                                    view.update(cx, |this, cx| {
+                                                        this.navigate_editor_search(true, cx);
+                                                    });
+                                                })
+                                        }),
+                                )
+                            })
+                            .child({
+                                let view = view.clone();
+                                let mut button = Button::new("editor-search-toggle")
+                                    .compact()
+                                    .rounded(px(7.0))
+                                    .label(if self.editor_search_visible {
+                                        "Done"
+                                    } else {
+                                        "Search"
+                                    })
+                                    .on_click(move |_, window, cx| {
+                                        view.update(cx, |this, cx| {
+                                            this.toggle_editor_search_visibility(window, cx);
+                                        });
+                                    });
+                                if self.editor_search_visible {
+                                    button = button.primary();
+                                } else {
+                                    button = button.outline();
+                                }
+                                button
+                            })
+                            .child({
+                                let view = view.clone();
+                                let mut button = Button::new("editor-wrap-toggle")
+                                    .compact()
+                                    .rounded(px(7.0))
+                                    .label("Wrap")
+                                    .on_click(move |_, _, cx| {
+                                        view.update(cx, |this, cx| {
+                                            if this.files_editor.borrow_mut().toggle_soft_wrap() {
+                                                cx.notify();
+                                            }
+                                        });
+                                    });
+                                if soft_wrap_enabled {
+                                    button = button.primary();
+                                } else {
+                                    button = button.outline();
+                                }
+                                button
+                            })
+                            .child({
+                                let view = view.clone();
+                                let mut button = Button::new("editor-whitespace-toggle")
+                                    .compact()
+                                    .rounded(px(7.0))
+                                    .label("Invisibles")
+                                    .on_click(move |_, _, cx| {
+                                        view.update(cx, |this, cx| {
+                                            if this.files_editor.borrow_mut().toggle_show_whitespace()
+                                            {
+                                                cx.notify();
+                                            }
+                                        });
+                                    });
+                                if show_whitespace {
+                                    button = button.primary();
+                                } else {
+                                    button = button.outline();
+                                }
+                                button
+                            })
                             .child({
                                 let view = view.clone();
                                 Button::new("editor-reload")
                                     .outline()
                                     .compact()
                                     .rounded(px(7.0))
-                                    .bg(hunk_opacity(cx.theme().secondary, is_dark, 0.46, 0.68))
-                                    .border_color(hunk_opacity(
-                                        cx.theme().border,
-                                        is_dark,
-                                        0.86,
-                                        0.70,
-                                    ))
                                     .label("Reload")
                                     .disabled(reload_disabled)
                                     .on_click(move |_, _, cx| {
@@ -162,20 +318,7 @@ impl DiffViewer {
                                     if self.editor_markdown_preview {
                                         preview_button = preview_button.primary();
                                     } else {
-                                        preview_button = preview_button
-                                            .outline()
-                                            .bg(hunk_opacity(
-                                                cx.theme().secondary,
-                                                is_dark,
-                                                0.46,
-                                                0.68,
-                                            ))
-                                            .border_color(hunk_opacity(
-                                                cx.theme().border,
-                                                is_dark,
-                                                0.86,
-                                                0.70,
-                                            ));
+                                        preview_button = preview_button.outline();
                                     }
                                     preview_button.into_any_element()
                                 } else {
@@ -184,8 +327,7 @@ impl DiffViewer {
                             )
                             .child({
                                 let view = view.clone();
-                                Button::new("editor-save")
-                                    .primary()
+                                let mut button = Button::new("editor-save")
                                     .compact()
                                     .rounded(px(7.0))
                                     .label("Save")
@@ -194,7 +336,13 @@ impl DiffViewer {
                                         view.update(cx, |this, cx| {
                                             this.save_current_editor_file(window, cx);
                                         });
-                                    })
+                                    });
+                                if save_disabled {
+                                    button = button.outline();
+                                } else {
+                                    button = button.primary();
+                                }
+                                button
                             }),
                     ),
             )
@@ -384,10 +532,10 @@ impl DiffViewer {
                                 .flex_wrap()
                                 .whitespace_normal()
                                 .children(line_spans.iter().map(|span| {
-                                    let token_color = self.markdown_code_token_color(
+                                    let token_color = markdown_syntax_color(
+                                        cx.theme(),
                                         cx.theme().foreground,
                                         span.token,
-                                        cx,
                                     );
                                     div()
                                         .flex_none()
@@ -522,31 +670,6 @@ impl DiffViewer {
         element.into_any_element()
     }
 
-    fn markdown_code_token_color(
-        &self,
-        default_color: Hsla,
-        token: MarkdownCodeTokenKind,
-        cx: &mut Context<Self>,
-    ) -> Hsla {
-        let is_dark = cx.theme().mode.is_dark();
-        let github = |dark: u32, light: u32| {
-            let hex = format!("#{:06x}", hunk_pick(is_dark, dark, light));
-            Hsla::parse_hex(hex.as_str()).unwrap_or(default_color)
-        };
-
-        match token {
-            MarkdownCodeTokenKind::Plain => default_color,
-            MarkdownCodeTokenKind::Keyword => github(0xff7b72, 0xcf222e),
-            MarkdownCodeTokenKind::String => github(0xa5d6ff, 0x0a3069),
-            MarkdownCodeTokenKind::Number => github(0x79c0ff, 0x0550ae),
-            MarkdownCodeTokenKind::Comment => github(0x8b949e, 0x57606a),
-            MarkdownCodeTokenKind::Function => github(0xd2a8ff, 0x8250df),
-            MarkdownCodeTokenKind::TypeName => github(0xffa657, 0x953800),
-            MarkdownCodeTokenKind::Constant => github(0x79c0ff, 0x0550ae),
-            MarkdownCodeTokenKind::Variable => github(0xffa657, 0x953800),
-            MarkdownCodeTokenKind::Operator => github(0xff7b72, 0xcf222e),
-        }
-    }
 }
 
 fn is_desktop_clipboard_shortcut(keystroke: &gpui::Keystroke) -> bool {

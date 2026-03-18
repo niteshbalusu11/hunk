@@ -17,17 +17,17 @@ fn ai_markdown_code_block_text(
 }
 
 fn ai_markdown_code_token_color(
+    theme: &gpui_component::Theme,
     default_color: Hsla,
     token: MarkdownCodeTokenKind,
-    is_dark: bool,
 ) -> Hsla {
-    markdown_syntax_color(default_color, token, is_dark)
+    markdown_syntax_color(theme, default_color, token)
 }
 
 fn ai_markdown_code_block_text_and_highlights(
     lines: &[Vec<hunk_domain::markdown_preview::MarkdownCodeSpan>],
+    theme: &gpui_component::Theme,
     default_color: Hsla,
-    is_dark: bool,
 ) -> (SharedString, Vec<(std::ops::Range<usize>, HighlightStyle)>) {
     let mut text = String::new();
     let mut highlights = Vec::new();
@@ -48,7 +48,7 @@ fn ai_markdown_code_block_text_and_highlights(
             text.push_str(span.text.as_str());
             cursor += span.text.len();
 
-            let token_color = ai_markdown_code_token_color(default_color, span.token, is_dark);
+            let token_color = ai_markdown_code_token_color(theme, default_color, span.token);
             if token_color != default_color {
                 highlights.push((
                     start..cursor,
@@ -300,9 +300,8 @@ fn ai_render_chat_markdown_block(
             );
             let code_text = ai_markdown_code_block_text(lines);
             let default_color = cx.theme().foreground;
-            let is_dark_theme = cx.theme().mode.is_dark();
             let (text, highlights) =
-                ai_markdown_code_block_text_and_highlights(lines, default_color, is_dark_theme);
+                ai_markdown_code_block_text_and_highlights(lines, cx.theme(), default_color);
             let styled_text = if highlights.is_empty() {
                 StyledText::new(text.clone())
             } else {

@@ -2,7 +2,10 @@ use std::rc::Rc;
 
 use super::{preferred_mono_font_family, preferred_ui_font_family};
 use gpui::{App, Hsla};
-use gpui_component::{Colorize as _, Theme, ThemeMode, highlighter::HighlightThemeStyle};
+use gpui_component::{
+    Colorize as _, Theme, ThemeMode,
+    highlighter::{HighlightThemeStyle, SyntaxColors, ThemeStyle},
+};
 use hunk_git::git::FileStatus;
 
 #[derive(Debug, Clone, Copy)]
@@ -74,6 +77,33 @@ pub(crate) struct HunkDiffChromeColors {
     pub empty_gutter_background: Hsla,
     pub column_header_background: Hsla,
     pub column_header_badge_background: Hsla,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HunkEditorSyntaxColors {
+    pub keyword: Hsla,
+    pub string: Hsla,
+    pub number: Hsla,
+    pub comment: Hsla,
+    pub function: Hsla,
+    pub type_name: Hsla,
+    pub constant: Hsla,
+    pub variable: Hsla,
+    pub operator: Hsla,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HunkEditorChromeColors {
+    pub background: Hsla,
+    pub foreground: Hsla,
+    pub active_line: Hsla,
+    pub line_number: Hsla,
+    pub active_line_number: Hsla,
+    pub selection: Hsla,
+    pub invisible: Hsla,
+    pub indent_guide: Hsla,
+    pub bracket_match: Hsla,
+    pub current_scope: Hsla,
 }
 
 pub(crate) fn install_hunk_themes(cx: &mut App) {
@@ -156,6 +186,89 @@ pub(crate) fn hunk_diff_chrome(theme: &Theme, is_dark: bool) -> HunkDiffChromeCo
     }
 }
 
+pub(crate) fn hunk_editor_syntax_colors(_theme: &Theme, is_dark: bool) -> HunkEditorSyntaxColors {
+    if is_dark {
+        HunkEditorSyntaxColors {
+            keyword: theme_hex("#569cd6"),
+            string: theme_hex("#ce9178"),
+            number: theme_hex("#b5cea8"),
+            comment: theme_hex("#6a9955"),
+            function: theme_hex("#dcdcaa"),
+            type_name: theme_hex("#4ec9b0"),
+            constant: theme_hex("#4fc1ff"),
+            variable: theme_hex("#9cdcfe"),
+            operator: theme_hex("#d4d4d4"),
+        }
+    } else {
+        HunkEditorSyntaxColors {
+            keyword: theme_hex("#0000ff"),
+            string: theme_hex("#a31515"),
+            number: theme_hex("#098658"),
+            comment: theme_hex("#008000"),
+            function: theme_hex("#795e26"),
+            type_name: theme_hex("#267f99"),
+            constant: theme_hex("#0070c1"),
+            variable: theme_hex("#001080"),
+            operator: theme_hex("#000000"),
+        }
+    }
+}
+
+pub(crate) fn hunk_editor_chrome_colors(theme: &Theme, is_dark: bool) -> HunkEditorChromeColors {
+    let style = &theme.highlight_theme.style;
+    if is_dark {
+        HunkEditorChromeColors {
+            background: style
+                .editor_background
+                .unwrap_or_else(|| theme_hex("#1e1e1e")),
+            foreground: style
+                .editor_foreground
+                .unwrap_or_else(|| theme_hex("#d4d4d4")),
+            active_line: style
+                .editor_active_line
+                .unwrap_or_else(|| theme_hex("#2a2d2e")),
+            line_number: style
+                .editor_line_number
+                .unwrap_or_else(|| theme_hex("#858585")),
+            active_line_number: style
+                .editor_active_line_number
+                .unwrap_or_else(|| theme_hex("#c6c6c6")),
+            selection: theme_hex("#264f78"),
+            invisible: style
+                .editor_invisible
+                .unwrap_or_else(|| theme_hex("#404040")),
+            indent_guide: theme_hex("#404040"),
+            bracket_match: theme_hex("#515c6a"),
+            current_scope: theme_hex("#37373d"),
+        }
+    } else {
+        HunkEditorChromeColors {
+            background: style
+                .editor_background
+                .unwrap_or_else(|| theme_hex("#ffffff")),
+            foreground: style
+                .editor_foreground
+                .unwrap_or_else(|| theme_hex("#000000")),
+            active_line: style
+                .editor_active_line
+                .unwrap_or_else(|| theme_hex("#f3f3f3")),
+            line_number: style
+                .editor_line_number
+                .unwrap_or_else(|| theme_hex("#237893")),
+            active_line_number: style
+                .editor_active_line_number
+                .unwrap_or_else(|| theme_hex("#0b216f")),
+            selection: theme_hex("#add6ff"),
+            invisible: style
+                .editor_invisible
+                .unwrap_or_else(|| theme_hex("#d0d0d0")),
+            indent_guide: theme_hex("#d8d8d8"),
+            bracket_match: theme_hex("#c5c5c5"),
+            current_scope: theme_hex("#eef6ff"),
+        }
+    }
+}
+
 pub(crate) fn hunk_tinted_button(
     theme: &Theme,
     is_dark: bool,
@@ -228,7 +341,7 @@ pub(crate) fn hunk_disclosure_row(theme: &Theme, is_dark: bool) -> HunkDisclosur
 }
 
 pub(crate) fn hunk_text_selection_background(theme: &Theme, is_dark: bool) -> Hsla {
-    hunk_opacity(theme.primary, is_dark, 0.26, 0.18)
+    hunk_editor_chrome_colors(theme, is_dark).selection
 }
 
 pub(crate) fn hunk_file_status_banner(
@@ -295,6 +408,76 @@ fn hsla_hex(hex: &str) -> Option<Hsla> {
     Hsla::parse_hex(hex).ok()
 }
 
+fn theme_hex(hex: &str) -> Hsla {
+    hsla_hex(hex).expect("valid theme hex color")
+}
+
+fn syntax_style(hex: &str) -> ThemeStyle {
+    serde_json::from_str(&format!(r#"{{"color":"{hex}"}}"#)).expect("valid syntax theme style")
+}
+
+fn vscode_syntax_colors(mode: ThemeMode) -> SyntaxColors {
+    if mode.is_dark() {
+        SyntaxColors {
+            attribute: Some(syntax_style("#c586c0")),
+            boolean: Some(syntax_style("#569cd6")),
+            comment: Some(syntax_style("#6a9955")),
+            comment_doc: Some(syntax_style("#608b4e")),
+            constant: Some(syntax_style("#4fc1ff")),
+            constructor: Some(syntax_style("#dcdcaa")),
+            enum_: Some(syntax_style("#4ec9b0")),
+            function: Some(syntax_style("#dcdcaa")),
+            keyword: Some(syntax_style("#569cd6")),
+            number: Some(syntax_style("#b5cea8")),
+            operator: Some(syntax_style("#d4d4d4")),
+            preproc: Some(syntax_style("#c586c0")),
+            property: Some(syntax_style("#9cdcfe")),
+            punctuation: Some(syntax_style("#d4d4d4")),
+            punctuation_bracket: Some(syntax_style("#d4d4d4")),
+            punctuation_delimiter: Some(syntax_style("#d4d4d4")),
+            string: Some(syntax_style("#ce9178")),
+            string_escape: Some(syntax_style("#d7ba7d")),
+            string_regex: Some(syntax_style("#d16969")),
+            string_special: Some(syntax_style("#d7ba7d")),
+            tag: Some(syntax_style("#569cd6")),
+            type_: Some(syntax_style("#4ec9b0")),
+            variable: Some(syntax_style("#9cdcfe")),
+            variable_special: Some(syntax_style("#4fc1ff")),
+            variant: Some(syntax_style("#4ec9b0")),
+            ..SyntaxColors::default()
+        }
+    } else {
+        SyntaxColors {
+            attribute: Some(syntax_style("#af00db")),
+            boolean: Some(syntax_style("#0000ff")),
+            comment: Some(syntax_style("#008000")),
+            comment_doc: Some(syntax_style("#008000")),
+            constant: Some(syntax_style("#0070c1")),
+            constructor: Some(syntax_style("#795e26")),
+            enum_: Some(syntax_style("#267f99")),
+            function: Some(syntax_style("#795e26")),
+            keyword: Some(syntax_style("#0000ff")),
+            number: Some(syntax_style("#098658")),
+            operator: Some(syntax_style("#000000")),
+            preproc: Some(syntax_style("#af00db")),
+            property: Some(syntax_style("#001080")),
+            punctuation: Some(syntax_style("#000000")),
+            punctuation_bracket: Some(syntax_style("#000000")),
+            punctuation_delimiter: Some(syntax_style("#000000")),
+            string: Some(syntax_style("#a31515")),
+            string_escape: Some(syntax_style("#ee0000")),
+            string_regex: Some(syntax_style("#811f3f")),
+            string_special: Some(syntax_style("#795e26")),
+            tag: Some(syntax_style("#800000")),
+            type_: Some(syntax_style("#267f99")),
+            variable: Some(syntax_style("#001080")),
+            variable_special: Some(syntax_style("#0070c1")),
+            variant: Some(syntax_style("#267f99")),
+            ..SyntaxColors::default()
+        }
+    }
+}
+
 fn editor_highlight_style(
     base: Option<HighlightThemeStyle>,
     fallback: HighlightThemeStyle,
@@ -302,16 +485,21 @@ fn editor_highlight_style(
 ) -> HighlightThemeStyle {
     let mut style = base.unwrap_or(fallback);
     if mode.is_dark() {
-        style.editor_background = hsla_hex("#20252f");
-        style.editor_active_line = hsla_hex("#2a3140");
-        style.editor_line_number = hsla_hex("#748094");
-        style.editor_active_line_number = hsla_hex("#ced7e6");
+        style.editor_background = hsla_hex("#1e1e1e");
+        style.editor_foreground = hsla_hex("#d4d4d4");
+        style.editor_active_line = hsla_hex("#2a2d2e");
+        style.editor_line_number = hsla_hex("#858585");
+        style.editor_active_line_number = hsla_hex("#c6c6c6");
+        style.editor_invisible = hsla_hex("#404040");
     } else {
-        style.editor_background = hsla_hex("#f4f6fa");
-        style.editor_active_line = hsla_hex("#e7edf7");
-        style.editor_line_number = hsla_hex("#8d97a8");
-        style.editor_active_line_number = hsla_hex("#4a5363");
+        style.editor_background = hsla_hex("#ffffff");
+        style.editor_foreground = hsla_hex("#000000");
+        style.editor_active_line = hsla_hex("#f3f3f3");
+        style.editor_line_number = hsla_hex("#237893");
+        style.editor_active_line_number = hsla_hex("#0b216f");
+        style.editor_invisible = hsla_hex("#d0d0d0");
     }
+    style.syntax = vscode_syntax_colors(mode);
     style
 }
 
@@ -364,23 +552,23 @@ fn apply_soft_dark_theme(cx: &mut App) {
 
     dark_theme.colors.accent = Some("#5f81eb".into());
     dark_theme.colors.accent_foreground = Some("#f8fbff".into());
-    dark_theme.colors.background = Some("#1f2126".into());
-    dark_theme.colors.list = Some("#1f2126".into());
+    dark_theme.colors.background = Some("#1e1e1e".into());
+    dark_theme.colors.list = Some("#1e1e1e".into());
     dark_theme.colors.list_active = Some("#5f81eb33".into());
     dark_theme.colors.list_active_border = Some("#7d9eff".into());
-    dark_theme.colors.list_hover = Some("#343e4c".into());
-    dark_theme.colors.popover = Some("#242831".into());
-    dark_theme.colors.table = Some("#1f2126".into());
-    dark_theme.colors.sidebar = Some("#1b1e24".into());
-    dark_theme.colors.title_bar = Some("#1a1d22".into());
-    dark_theme.colors.list_even = Some("#21242b".into());
-    dark_theme.colors.list_head = Some("#292d36".into());
-    dark_theme.colors.secondary = Some("#2a2f38".into());
-    dark_theme.colors.secondary_hover = Some("#3b4554".into());
-    dark_theme.colors.secondary_active = Some("#465163".into());
-    dark_theme.colors.muted = Some("#272c35".into());
-    dark_theme.colors.muted_foreground = Some("#a3adbb".into());
-    dark_theme.colors.border = Some("#3d4554".into());
+    dark_theme.colors.list_hover = Some("#2a2d2e".into());
+    dark_theme.colors.popover = Some("#252526".into());
+    dark_theme.colors.table = Some("#1e1e1e".into());
+    dark_theme.colors.sidebar = Some("#252526".into());
+    dark_theme.colors.title_bar = Some("#252526".into());
+    dark_theme.colors.list_even = Some("#1e1e1e".into());
+    dark_theme.colors.list_head = Some("#252526".into());
+    dark_theme.colors.secondary = Some("#2d2d30".into());
+    dark_theme.colors.secondary_hover = Some("#37373d".into());
+    dark_theme.colors.secondary_active = Some("#3e3e42".into());
+    dark_theme.colors.muted = Some("#2d2d30".into());
+    dark_theme.colors.muted_foreground = Some("#969696".into());
+    dark_theme.colors.border = Some("#3e3e42".into());
     dark_theme.font_family = Some(preferred_ui_font_family().into());
     dark_theme.font_size = Some(14.0);
     dark_theme.mono_font_family = Some(preferred_mono_font_family().into());

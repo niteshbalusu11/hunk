@@ -44,7 +44,6 @@ pub(crate) type SharedFilesEditor = Rc<RefCell<FilesEditor>>;
 
 #[derive(Clone)]
 pub(crate) struct FilesEditorStatusSnapshot {
-    pub(crate) mode: &'static str,
     pub(crate) language: String,
     pub(crate) position: String,
     pub(crate) selection: String,
@@ -233,7 +232,6 @@ impl FilesEditor {
         let status = self.editor.status_snapshot();
         let selection = self.editor.selection().range();
         Some(FilesEditorStatusSnapshot {
-            mode: "EDIT",
             language: self.language_label.clone(),
             position: format!(
                 "Ln {}  Col {}  {} lines",

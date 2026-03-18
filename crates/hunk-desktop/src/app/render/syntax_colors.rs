@@ -47,39 +47,37 @@ impl From<hunk_domain::markdown_preview::MarkdownCodeTokenKind> for CodeSyntaxCo
 }
 
 fn code_syntax_color(
+    theme: &gpui_component::Theme,
     default_color: gpui::Hsla,
     token: impl Into<CodeSyntaxColorToken>,
-    is_dark: bool,
 ) -> gpui::Hsla {
-    let github = |dark: u32, light: u32| -> gpui::Hsla {
-        gpui::rgb(crate::app::theme::hunk_pick(is_dark, dark, light)).into()
-    };
+    let palette = crate::app::theme::hunk_editor_syntax_colors(theme, theme.mode.is_dark());
     match token.into() {
         CodeSyntaxColorToken::Plain => default_color,
-        CodeSyntaxColorToken::Keyword => github(0xff7b72, 0xcf222e),
-        CodeSyntaxColorToken::String => github(0xa5d6ff, 0x0a3069),
-        CodeSyntaxColorToken::Number => github(0x79c0ff, 0x0550ae),
-        CodeSyntaxColorToken::Comment => github(0x8b949e, 0x57606a),
-        CodeSyntaxColorToken::Function => github(0xd2a8ff, 0x8250df),
-        CodeSyntaxColorToken::TypeName => github(0xffa657, 0x953800),
-        CodeSyntaxColorToken::Constant => github(0x79c0ff, 0x0550ae),
-        CodeSyntaxColorToken::Variable => github(0xffa657, 0x953800),
-        CodeSyntaxColorToken::Operator => github(0xff7b72, 0xcf222e),
+        CodeSyntaxColorToken::Keyword => palette.keyword,
+        CodeSyntaxColorToken::String => palette.string,
+        CodeSyntaxColorToken::Number => palette.number,
+        CodeSyntaxColorToken::Comment => palette.comment,
+        CodeSyntaxColorToken::Function => palette.function,
+        CodeSyntaxColorToken::TypeName => palette.type_name,
+        CodeSyntaxColorToken::Constant => palette.constant,
+        CodeSyntaxColorToken::Variable => palette.variable,
+        CodeSyntaxColorToken::Operator => palette.operator,
     }
 }
 
 pub(crate) fn diff_syntax_color(
+    theme: &gpui_component::Theme,
     default_color: gpui::Hsla,
     token: crate::app::highlight::SyntaxTokenKind,
-    is_dark: bool,
 ) -> gpui::Hsla {
-    code_syntax_color(default_color, token, is_dark)
+    code_syntax_color(theme, default_color, token)
 }
 
 pub(crate) fn markdown_syntax_color(
+    theme: &gpui_component::Theme,
     default_color: gpui::Hsla,
     token: hunk_domain::markdown_preview::MarkdownCodeTokenKind,
-    is_dark: bool,
 ) -> gpui::Hsla {
-    code_syntax_color(default_color, token, is_dark)
+    code_syntax_color(theme, default_color, token)
 }

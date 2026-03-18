@@ -535,8 +535,9 @@ diff --git a/crates/hunk-desktop/src/app/render/ai.rs b/crates/hunk-desktop/src/
         ]];
 
         let default_color = gpui::transparent_black();
+        let theme = gpui_component::Theme::default();
         let (text, highlights) =
-            ai_markdown_code_block_text_and_highlights(&lines, default_color, true);
+            ai_markdown_code_block_text_and_highlights(&lines, &theme, default_color);
 
         assert_eq!(text.as_ref(), "fn main()");
         assert!(!highlights.is_empty());

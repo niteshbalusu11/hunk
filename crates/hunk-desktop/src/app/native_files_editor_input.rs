@@ -185,6 +185,27 @@ impl FilesEditor {
         self.move_to_line_boundary(start, extend)
     }
 
+    pub(crate) fn move_to_document_boundary_action(&mut self, start: bool, extend: bool) -> bool {
+        let snapshot = self.editor.buffer().snapshot();
+        let Some(end_position) = last_position(&snapshot) else {
+            return false;
+        };
+        let target = if start {
+            TextPosition::default()
+        } else {
+            end_position
+        };
+        let selection = self.editor.selection();
+        let next_selection = if extend {
+            Selection::new(selection.anchor, target)
+        } else {
+            Selection::caret(target)
+        };
+        self.editor
+            .apply(EditorCommand::SetSelection(next_selection))
+            .selection_changed
+    }
+
     pub(crate) fn move_word_action(&mut self, forward: bool, extend: bool) -> bool {
         let selection = self.editor.selection();
         if !extend && !selection.is_caret() {
