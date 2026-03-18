@@ -118,6 +118,8 @@ function Invoke-CargoPackagerWithManifestOverride {
         [Parameter(Mandatory = $true)]
         [string]$TargetTriple,
         [Parameter(Mandatory = $true)]
+        [string]$WorkingDirectory,
+        [Parameter(Mandatory = $true)]
         [string]$PackagerOutDir
     )
 
@@ -148,7 +150,18 @@ function Invoke-CargoPackagerWithManifestOverride {
         if ($WindowsPackagerVersion -ne $OriginalVersion) {
             Write-Host "Using Windows packager version $WindowsPackagerVersion for Cargo version $OriginalVersion"
         }
-        cargo packager -p hunk-desktop --release -f wix --target $TargetTriple --out-dir $PackagerOutDir
+        Push-Location $WorkingDirectory
+        try {
+            cargo packager `
+                -p hunk-desktop `
+                --manifest-path Cargo.toml `
+                --release `
+                -f wix `
+                --target $TargetTriple `
+                --out-dir $PackagerOutDir
+        } finally {
+            Pop-Location
+        }
     } finally {
         [System.IO.File]::WriteAllText($CargoTomlPath, $originalCargoToml, $utf8NoBom)
         if ($cargoLockExisted) {
@@ -164,6 +177,7 @@ $resolveTargetDirScript = Join-Path $PSScriptRoot "resolve_cargo_target_dir.ps1"
 $validateBundleScript = Join-Path $PSScriptRoot "validate_windows_release_bundle.ps1"
 $cargoTomlPath = Join-Path $rootDir "crates/hunk-desktop/Cargo.toml"
 $cargoLockPath = Join-Path $rootDir "Cargo.lock"
+$desktopCrateDir = Split-Path $cargoTomlPath -Parent
 $targetTriple = "x86_64-pc-windows-msvc"
 $versionLabel = if ($env:HUNK_RELEASE_VERSION) {
     $env:HUNK_RELEASE_VERSION
@@ -196,6 +210,7 @@ try {
         -OriginalVersion $versionLabel `
         -WindowsPackagerVersion $windowsPackagerVersion `
         -TargetTriple $targetTriple `
+        -WorkingDirectory $desktopCrateDir `
         -PackagerOutDir $packagerOutDir
     Write-WindowsPackagerInventory -Label "after cargo packager" -PackagerOutDir $packagerOutDir
     & $validateBundleScript -RootDir $rootDir -PackagerOutDir $packagerOutDir

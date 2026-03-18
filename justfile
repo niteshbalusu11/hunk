@@ -27,7 +27,13 @@ build-windows:
 
 bundle:
     ./scripts/run_with_macos_sdk_env.sh cargo build -p hunk-desktop --release --locked
-    ./scripts/run_with_macos_sdk_env.sh cargo packager -p hunk-desktop --release -f app --out-dir "$(./scripts/resolve_cargo_target_dir.sh)/packager"
+    cd crates/hunk-desktop && \
+        ../../scripts/run_with_macos_sdk_env.sh cargo packager \
+            -p hunk-desktop \
+            --manifest-path Cargo.toml \
+            --release \
+            -f app \
+            --out-dir "$(../../scripts/resolve_cargo_target_dir.sh)/packager"
 
 package-macos-release:
     ./scripts/package_macos_release.sh

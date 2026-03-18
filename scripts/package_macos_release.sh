@@ -23,19 +23,18 @@ print_directory_tree_preview() {
   local root_path="$1"
   local max_depth="$2"
   local max_entries="$3"
+  local total_entries
 
   if [[ ! -d "$root_path" ]]; then
     echo "(missing directory: $root_path)" >&2
     return
   fi
 
-  mapfile -t tree_entries < <(find "$root_path" -maxdepth "$max_depth" -mindepth 1 | sort)
-  local total_entries="${#tree_entries[@]}"
-  local index
-
-  for ((index = 0; index < total_entries && index < max_entries; index += 1)); do
-    printf '  %s\n' "${tree_entries[$index]}" >&2
+  find "$root_path" -maxdepth "$max_depth" -mindepth 1 | sort | head -n "$max_entries" | while IFS= read -r entry; do
+    printf '  %s\n' "$entry" >&2
   done
+
+  total_entries="$(find "$root_path" -maxdepth "$max_depth" -mindepth 1 | wc -l | tr -d ' ')"
 
   if (( total_entries > max_entries )); then
     printf '  ... truncated, showing %d of %d entries ...\n' "$max_entries" "$total_entries" >&2
@@ -90,7 +89,7 @@ print_macos_signing_inventory() {
         }
       ' \
     | sort -nr \
-    | head -n 20 >&2 || true
+    | sed -n '1,20p' >&2 || true
 }
 
 validate_macos_binary_dependencies() {
@@ -292,7 +291,17 @@ echo "Building macOS app bundle..." >&2
 
   rm -rf "$APP_PATH"
   cargo build -p hunk-desktop --release --target "$TARGET_TRIPLE" --locked
-  cargo packager -p hunk-desktop --release -f app --target "$TARGET_TRIPLE" --out-dir "$PACKAGER_OUT_DIR"
+  (
+    cd "$ROOT_DIR/crates/hunk-desktop"
+    cargo packager \
+      -p hunk-desktop \
+      --manifest-path Cargo.toml \
+      --release \
+      -f app \
+      --target "$TARGET_TRIPLE" \
+      --out-dir "$PACKAGER_OUT_DIR" \
+      1>&2
+  )
 )
 
 if [[ ! -d "$APP_PATH" ]]; then
