@@ -144,9 +144,9 @@ mod ai_runtime;
 mod controller;
 mod data;
 mod data_segments;
-mod files_editor;
 mod highlight;
 mod markdown_links;
+mod native_files_editor;
 mod notifications;
 mod render;
 mod repo_file_search;
@@ -515,7 +515,6 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
 }
 
 pub fn run() -> Result<()> {
-    files_editor::initialize_helix_runtime_environment();
     let app = gpui_platform::application().with_assets(Assets);
     let keyboard_shortcuts = load_keyboard_shortcuts();
     app.on_reopen(|cx: &mut App| {
@@ -838,7 +837,7 @@ struct DiffViewer {
     repo_tree: RepoTreeState,
     repo_tree_inline_edit: Option<RepoTreeInlineEditState>,
     repo_tree_context_menu: Option<RepoTreeContextMenuState>,
-    files_editor: files_editor::SharedFilesEditor,
+    files_editor: native_files_editor::SharedFilesEditor,
     file_quick_open_input_state: Entity<InputState>,
     file_quick_open_visible: bool,
     file_quick_open_matches: Vec<String>,

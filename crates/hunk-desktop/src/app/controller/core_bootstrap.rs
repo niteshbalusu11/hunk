@@ -339,7 +339,9 @@ impl DiffViewer {
         });
         let commit_input_state = cx
             .new(|cx| InputState::new(window, cx).multi_line(true).rows(4).placeholder("Commit message"));
-        let files_editor = Rc::new(RefCell::new(crate::app::files_editor::FilesEditor::new()));
+        let files_editor = Rc::new(RefCell::new(
+            crate::app::native_files_editor::FilesEditor::new(),
+        ));
         let repo_file_search_provider = Rc::new(RepoFileSearchProvider::new());
         let comment_input_state = cx.new(|cx| {
             InputState::new(window, cx)

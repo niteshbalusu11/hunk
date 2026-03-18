@@ -99,3 +99,18 @@ fn copy_cut_and_paste_flow_through_editor_commands() {
     editor.apply(EditorCommand::Paste("there".to_string()));
     assert_eq!(editor.buffer().text(), "hello there");
 }
+
+#[test]
+fn display_rows_preserve_raw_to_display_offsets_for_tab_expansion() {
+    let mut editor = sample_editor("\tword\n");
+    editor.apply(EditorCommand::SetWrapWidth(Some(16)));
+
+    let display = editor.display_snapshot();
+    assert_eq!(display.visible_rows[0].text, "    word");
+    assert_eq!(display.visible_rows[0].raw_start_column, 0);
+    assert_eq!(display.visible_rows[0].raw_end_column, 5);
+    assert_eq!(
+        display.visible_rows[0].raw_column_offsets,
+        vec![0, 4, 5, 6, 7, 8]
+    );
+}

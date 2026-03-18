@@ -1,8 +1,8 @@
 use gpui::{Pixels, TextStyle, relative};
 
 use crate::app::theme::{
-    HunkAccentTone, hunk_text_selection_background, hunk_tinted_button, hunk_toolbar_brand_chip,
-    hunk_toolbar_chip,
+    HunkAccentTone, hunk_blend, hunk_text_selection_background, hunk_tinted_button,
+    hunk_toolbar_brand_chip, hunk_toolbar_chip,
 };
 
 #[derive(Clone, Copy)]
@@ -231,16 +231,24 @@ impl DiffViewer {
             line_height: relative(1.45),
             ..Default::default()
         };
-        let editor_element = crate::app::files_editor::FilesEditorElement::new(
+        let editor_element = crate::app::native_files_editor::FilesEditorElement::new(
             self.files_editor.clone(),
             is_editor_focused,
             text_style,
-            crate::app::files_editor::FilesEditorPalette {
+            crate::app::native_files_editor::FilesEditorPalette {
                 background: cx.theme().background,
+                active_line_background: hunk_blend(
+                    cx.theme().background,
+                    cx.theme().primary,
+                    is_dark,
+                    0.08,
+                    0.04,
+                ),
                 line_number: cx.theme().muted_foreground,
                 current_line_number: cx.theme().foreground,
                 border: hunk_opacity(cx.theme().border, is_dark, 0.92, 0.78),
                 default_foreground: cx.theme().foreground,
+                muted_foreground: cx.theme().muted_foreground,
                 selection_background: hunk_text_selection_background(cx.theme(), is_dark),
                 cursor: cx.theme().primary,
             },
@@ -325,7 +333,10 @@ impl DiffViewer {
                     let handled = view.update(cx, |this, cx| {
                         let line_height = (editor_font_size * 1.45).max(px(14.0));
                         if let Some((direction, line_count)) =
-                            crate::app::files_editor::scroll_direction_and_count(event, line_height)
+                            crate::app::native_files_editor::scroll_direction_and_count(
+                                event,
+                                line_height,
+                            )
                         {
                             this.files_editor
                                 .borrow_mut()

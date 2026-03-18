@@ -86,6 +86,9 @@ pub struct DisplayRow {
     pub row_index: usize,
     pub kind: DisplayRowKind,
     pub source_line: usize,
+    pub raw_start_column: usize,
+    pub raw_end_column: usize,
+    pub raw_column_offsets: Vec<usize>,
     pub start_column: usize,
     pub end_column: usize,
     pub text: String,
@@ -207,6 +210,10 @@ impl EditorState {
 
     pub fn viewport(&self) -> Viewport {
         self.viewport
+    }
+
+    pub fn selection(&self) -> Selection {
+        self.primary_selection
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -638,6 +645,9 @@ impl EditorState {
                 row_index: row.row_index,
                 kind: row.kind,
                 source_line: row.source_line,
+                raw_start_column: row.raw_start_column,
+                raw_end_column: row.raw_end_column,
+                raw_column_offsets: row.raw_column_offsets,
                 start_column: row.start_column,
                 end_column: row.end_column,
                 text: row.text,
@@ -674,6 +684,9 @@ impl EditorState {
                         hidden_line_count: region.end_line - region.start_line,
                     },
                     source_line: line,
+                    raw_start_column: 0,
+                    raw_end_column: expanded_line.raw_len(),
+                    raw_column_offsets: (0..=expanded_line.raw_len()).collect(),
                     start_column: 0,
                     end_column: placeholder.chars().count(),
                     text: placeholder,
@@ -705,6 +718,10 @@ impl EditorState {
                     row_index,
                     kind: DisplayRowKind::Text,
                     source_line: line,
+                    raw_start_column: expanded_line.display_to_raw_column(start_column),
+                    raw_end_column: expanded_line.display_to_raw_column(end_column),
+                    raw_column_offsets: expanded_line
+                        .raw_offsets_in_range(start_column, end_column),
                     start_column,
                     end_column,
                     text: expanded_line.segment(start_column, end_column),
@@ -730,6 +747,9 @@ impl EditorState {
                     row_index,
                     kind: DisplayRowKind::Text,
                     source_line: line,
+                    raw_start_column: 0,
+                    raw_end_column: 0,
+                    raw_column_offsets: vec![0],
                     start_column: 0,
                     end_column: 0,
                     text: String::new(),
@@ -821,6 +841,10 @@ impl ExpandedLine {
         self.display_text.chars().count()
     }
 
+    fn raw_len(&self) -> usize {
+        self.raw_to_display.len().saturating_sub(1)
+    }
+
     fn segment(&self, start: usize, end: usize) -> String {
         self.display_text
             .chars()
@@ -837,6 +861,14 @@ impl ExpandedLine {
     fn display_to_raw_column(&self, display_column: usize) -> usize {
         let index = min(display_column, self.display_to_raw.len().saturating_sub(1));
         self.display_to_raw[index]
+    }
+
+    fn raw_offsets_in_range(&self, start: usize, end: usize) -> Vec<usize> {
+        let raw_start = self.display_to_raw_column(start);
+        let raw_end = self.display_to_raw_column(end);
+        (raw_start..=raw_end)
+            .map(|raw_column| self.raw_to_display_column(raw_column).saturating_sub(start))
+            .collect()
     }
 
     fn markers_in_range(&self, start: usize, end: usize) -> Vec<WhitespaceMarker> {
@@ -857,6 +889,9 @@ struct VisualRow {
     row_index: usize,
     kind: DisplayRowKind,
     source_line: usize,
+    raw_start_column: usize,
+    raw_end_column: usize,
+    raw_column_offsets: Vec<usize>,
     start_column: usize,
     end_column: usize,
     text: String,
@@ -873,6 +908,9 @@ impl VisualRow {
             row_index: 0,
             kind: DisplayRowKind::Text,
             source_line: 0,
+            raw_start_column: 0,
+            raw_end_column: 0,
+            raw_column_offsets: vec![0],
             start_column: 0,
             end_column: 0,
             text: String::new(),
