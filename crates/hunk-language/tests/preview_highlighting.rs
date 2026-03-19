@@ -209,3 +209,56 @@ fn preview_highlighting_supports_phase_three_and_four_language_paths() {
             .any(|span| span.token == PreviewSyntaxToken::Operator)
     );
 }
+
+#[test]
+fn preview_highlighting_supports_markdown_inline_constructs() {
+    let markdown = preview_highlight_spans_for_path(
+        Some("README.md"),
+        "# Hunk\n\nUse `cargo test`, *care*, and [docs](https://example.com).\n",
+    );
+
+    assert!(
+        markdown
+            .iter()
+            .any(|span| span.token == PreviewSyntaxToken::Keyword)
+    );
+    assert!(
+        markdown
+            .iter()
+            .any(|span| span.token == PreviewSyntaxToken::String)
+    );
+    assert!(
+        markdown
+            .iter()
+            .any(|span| span.token == PreviewSyntaxToken::Variable)
+    );
+}
+
+#[test]
+fn preview_highlighting_supports_markdown_frontmatter_and_code_fences() {
+    let markdown = preview_highlight_spans_for_path(
+        Some("README.md"),
+        "---\ntitle: Hunk\n---\n\n```rust\nconst ANSWER: u32 = 42;\n```\n\n<div>hi</div>\n",
+    );
+
+    assert!(
+        markdown
+            .iter()
+            .any(|span| span.token == PreviewSyntaxToken::Variable)
+    );
+    assert!(
+        markdown
+            .iter()
+            .any(|span| span.token == PreviewSyntaxToken::String)
+    );
+    assert!(
+        markdown
+            .iter()
+            .any(|span| span.token == PreviewSyntaxToken::Keyword)
+    );
+    assert!(
+        markdown
+            .iter()
+            .any(|span| span.token == PreviewSyntaxToken::TypeName)
+    );
+}

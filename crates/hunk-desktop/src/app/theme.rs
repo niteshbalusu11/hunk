@@ -416,6 +416,10 @@ fn syntax_style(hex: &str) -> ThemeStyle {
     serde_json::from_str(&format!(r#"{{"color":"{hex}"}}"#)).expect("valid syntax theme style")
 }
 
+fn syntax_style_json(json: &str) -> ThemeStyle {
+    serde_json::from_str(json).expect("valid syntax theme style")
+}
+
 fn vscode_syntax_colors(mode: ThemeMode) -> SyntaxColors {
     if mode.is_dark() {
         SyntaxColors {
@@ -425,9 +429,13 @@ fn vscode_syntax_colors(mode: ThemeMode) -> SyntaxColors {
             comment_doc: Some(syntax_style("#608b4e")),
             constant: Some(syntax_style("#4fc1ff")),
             constructor: Some(syntax_style("#dcdcaa")),
+            emphasis: Some(syntax_style_json(r#"{"font_style":"italic"}"#)),
+            emphasis_strong: Some(syntax_style_json(r#"{"font_weight":700}"#)),
             enum_: Some(syntax_style("#4ec9b0")),
             function: Some(syntax_style("#dcdcaa")),
             keyword: Some(syntax_style("#569cd6")),
+            link_text: Some(syntax_style("#4fc1ff")),
+            link_uri: Some(syntax_style("#3794ff")),
             number: Some(syntax_style("#b5cea8")),
             operator: Some(syntax_style("#d4d4d4")),
             preproc: Some(syntax_style("#c586c0")),
@@ -435,11 +443,16 @@ fn vscode_syntax_colors(mode: ThemeMode) -> SyntaxColors {
             punctuation: Some(syntax_style("#d4d4d4")),
             punctuation_bracket: Some(syntax_style("#d4d4d4")),
             punctuation_delimiter: Some(syntax_style("#d4d4d4")),
+            punctuation_list_marker: Some(syntax_style("#d4d4d4")),
             string: Some(syntax_style("#ce9178")),
             string_escape: Some(syntax_style("#d7ba7d")),
             string_regex: Some(syntax_style("#d16969")),
             string_special: Some(syntax_style("#d7ba7d")),
             tag: Some(syntax_style("#569cd6")),
+            text_literal: Some(syntax_style("#ce9178")),
+            title: Some(syntax_style_json(
+                r##"{"color":"#569cd6","font_weight":700}"##,
+            )),
             type_: Some(syntax_style("#4ec9b0")),
             variable: Some(syntax_style("#9cdcfe")),
             variable_special: Some(syntax_style("#4fc1ff")),
@@ -454,9 +467,13 @@ fn vscode_syntax_colors(mode: ThemeMode) -> SyntaxColors {
             comment_doc: Some(syntax_style("#008000")),
             constant: Some(syntax_style("#0070c1")),
             constructor: Some(syntax_style("#795e26")),
+            emphasis: Some(syntax_style_json(r#"{"font_style":"italic"}"#)),
+            emphasis_strong: Some(syntax_style_json(r#"{"font_weight":700}"#)),
             enum_: Some(syntax_style("#267f99")),
             function: Some(syntax_style("#795e26")),
             keyword: Some(syntax_style("#0000ff")),
+            link_text: Some(syntax_style("#001080")),
+            link_uri: Some(syntax_style("#0000ff")),
             number: Some(syntax_style("#098658")),
             operator: Some(syntax_style("#000000")),
             preproc: Some(syntax_style("#af00db")),
@@ -464,11 +481,16 @@ fn vscode_syntax_colors(mode: ThemeMode) -> SyntaxColors {
             punctuation: Some(syntax_style("#000000")),
             punctuation_bracket: Some(syntax_style("#000000")),
             punctuation_delimiter: Some(syntax_style("#000000")),
+            punctuation_list_marker: Some(syntax_style("#000000")),
             string: Some(syntax_style("#a31515")),
             string_escape: Some(syntax_style("#ee0000")),
             string_regex: Some(syntax_style("#811f3f")),
             string_special: Some(syntax_style("#795e26")),
             tag: Some(syntax_style("#800000")),
+            text_literal: Some(syntax_style("#a31515")),
+            title: Some(syntax_style_json(
+                r##"{"color":"#0000ff","font_weight":700}"##,
+            )),
             type_: Some(syntax_style("#267f99")),
             variable: Some(syntax_style("#001080")),
             variable_special: Some(syntax_style("#0070c1")),

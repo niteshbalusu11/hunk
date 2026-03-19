@@ -347,7 +347,7 @@ fn phase_three_and_four_languages_parse_and_highlight_representative_tokens() {
     );
 
     let mut markdown = SyntaxSession::new();
-    let markdown_source = "# Hunk\n\n- fast diff viewer\n\n```rust\nfn main() {}\n```\n";
+    let markdown_source = "# Hunk\n\n- Use `cargo test` with *care* and [docs](https://example.com).\n\n```rust\nfn main() {}\n```\n";
     markdown
         .parse_for_path(&registry, Path::new("README.md"), markdown_source)
         .expect("parse markdown");
@@ -357,12 +357,32 @@ fn phase_three_and_four_languages_parse_and_highlight_representative_tokens() {
     assert!(
         markdown_captures
             .iter()
-            .any(|capture| capture.style_key == "markup.heading")
+            .any(|capture| capture.style_key == "title")
     );
     assert!(
         markdown_captures
             .iter()
-            .any(|capture| capture.style_key == "markup.raw.block")
+            .any(|capture| capture.style_key == "text.literal")
+    );
+    assert!(
+        markdown_captures
+            .iter()
+            .any(|capture| capture.style_key == "emphasis")
+    );
+    assert!(
+        markdown_captures
+            .iter()
+            .any(|capture| capture.style_key == "link_text")
+    );
+    assert!(
+        markdown_captures
+            .iter()
+            .any(|capture| capture.style_key == "link_uri")
+    );
+    assert!(
+        markdown_captures
+            .iter()
+            .any(|capture| capture.style_key == "keyword")
     );
 }
 
@@ -494,4 +514,45 @@ fn completion_context_tracks_identifier_prefix_and_replace_range() {
         completion.replace_range,
         TextRange::new(TextPosition::new(1, 4), TextPosition::new(1, 8))
     );
+}
+
+#[test]
+fn markdown_frontmatter_html_and_fences_keep_embedded_highlighting() {
+    let registry = LanguageRegistry::builtin();
+    let mut session = SyntaxSession::new();
+    let source =
+        "---\ntitle: Hunk\n---\n\n```rust\nconst ANSWER: u32 = 42;\n```\n\n<div>hi</div>\n";
+
+    session
+        .parse_for_path(&registry, Path::new("README.md"), source)
+        .expect("parse markdown with injections");
+    let captures = session
+        .highlight_visible_range(&registry, source, 0..source.len())
+        .expect("markdown highlights");
+
+    let title_offset = source.find("title").expect("yaml property");
+    let hunk_offset = source.find("Hunk").expect("yaml string");
+    let const_offset = source.find("const").expect("rust keyword");
+    let div_offset = source.find("div").expect("html tag");
+
+    assert!(captures.iter().any(|capture| {
+        capture.style_key == "property"
+            && capture.byte_range.start <= title_offset
+            && title_offset < capture.byte_range.end
+    }));
+    assert!(captures.iter().any(|capture| {
+        capture.style_key == "string"
+            && capture.byte_range.start <= hunk_offset
+            && hunk_offset < capture.byte_range.end
+    }));
+    assert!(captures.iter().any(|capture| {
+        capture.style_key == "keyword"
+            && capture.byte_range.start <= const_offset
+            && const_offset < capture.byte_range.end
+    }));
+    assert!(captures.iter().any(|capture| {
+        capture.style_key == "tag"
+            && capture.byte_range.start <= div_offset
+            && div_offset < capture.byte_range.end
+    }));
 }

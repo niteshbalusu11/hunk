@@ -447,6 +447,16 @@ impl SyntaxSession {
             }
         }
 
+        if language.scope_name == "markdown" {
+            captures.extend(markdown_inline_captures(
+                registry,
+                self.tree.as_ref(),
+                source,
+                &visible_byte_range,
+            )?);
+            captures.sort_by_key(|capture| (capture.byte_range.start, capture.byte_range.end));
+        }
+
         Ok(captures)
     }
 
@@ -575,6 +585,81 @@ fn overlap_range(range: Range<usize>, visible: &Range<usize>) -> Option<Range<us
     let start = range.start.max(visible.start);
     let end = range.end.min(visible.end);
     (start < end).then_some(start..end)
+}
+
+fn markdown_inline_captures(
+    registry: &LanguageRegistry,
+    tree: Option<&Tree>,
+    source: &str,
+    visible_byte_range: &Range<usize>,
+) -> Result<Vec<HighlightCapture>, tree_sitter_highlight::Error> {
+    let Some(tree) = tree else {
+        return Ok(Vec::new());
+    };
+    let Some(language) = registry.language_by_name("markdown-inline") else {
+        return Ok(Vec::new());
+    };
+
+    let mut cursor = tree.walk();
+    let mut inline_ranges = Vec::new();
+    collect_markdown_inline_ranges(&mut cursor, &mut inline_ranges);
+
+    let mut captures = Vec::new();
+    for inline_range in inline_ranges {
+        if overlap_range(inline_range.clone(), visible_byte_range).is_none() {
+            continue;
+        }
+
+        let Some(inline_source) = source.get(inline_range.clone()) else {
+            continue;
+        };
+
+        let mut inline_session = SyntaxSession::new();
+        if inline_session
+            .parse_with_language(registry, Some(language.as_ref()), inline_source)
+            .is_err()
+        {
+            continue;
+        }
+
+        let inline_captures = inline_session.highlight_visible_range(
+            registry,
+            inline_source,
+            0..inline_source.len(),
+        )?;
+
+        captures.extend(inline_captures.into_iter().filter_map(|capture| {
+            let start = inline_range.start.saturating_add(capture.byte_range.start);
+            let end = inline_range.start.saturating_add(capture.byte_range.end);
+            let byte_range = overlap_range(start..end, visible_byte_range)?;
+            Some(HighlightCapture {
+                name: capture.name,
+                byte_range,
+                style_key: capture.style_key,
+            })
+        }));
+    }
+
+    Ok(captures)
+}
+
+fn collect_markdown_inline_ranges(
+    cursor: &mut tree_sitter::TreeCursor<'_>,
+    ranges: &mut Vec<Range<usize>>,
+) {
+    loop {
+        let node = cursor.node();
+        if matches!(node.kind(), "inline" | "pipe_table_cell") {
+            ranges.push(node.byte_range());
+        } else if cursor.goto_first_child() {
+            collect_markdown_inline_ranges(cursor, ranges);
+            let _ = cursor.goto_parent();
+        }
+
+        if !cursor.goto_next_sibling() {
+            break;
+        }
+    }
 }
 
 fn byte_to_point(source: &str, byte: usize) -> Point {

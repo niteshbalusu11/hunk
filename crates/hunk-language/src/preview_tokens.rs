@@ -24,6 +24,9 @@ impl PreviewSyntaxToken {
         if matches_capture(name, &["comment"]) {
             return Self::Comment;
         }
+        if matches_capture(name, &["text.literal", "link_uri"]) {
+            return Self::String;
+        }
         if matches_capture(name, &["string", "escape"]) {
             return Self::String;
         }
@@ -39,8 +42,14 @@ impl PreviewSyntaxToken {
         if matches_capture(name, &["constant"]) {
             return Self::Constant;
         }
+        if matches_capture(name, &["title", "emphasis"]) {
+            return Self::Keyword;
+        }
         if matches_capture(name, &["keyword", "preproc", "attribute"]) {
             return Self::Keyword;
+        }
+        if matches_capture(name, &["link_text"]) {
+            return Self::Variable;
         }
         if matches_capture(name, &["variable", "property", "label"]) {
             return Self::Variable;

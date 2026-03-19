@@ -1,12 +1,11 @@
-;; Based on the tree-sitter-markdown block highlight query, which is under the MIT license.
-;; Source:
-;; https://github.com/tree-sitter-grammars/tree-sitter-markdown/blob/master/tree-sitter-markdown/queries/highlights.scm
+;; Based on gpui-component / tree-sitter-markdown highlight queries.
+;; Adapted to Hunk's supported syntax color names.
 
 (atx_heading
-  (inline) @markup.heading)
+  (inline) @title)
 
 (setext_heading
-  (paragraph) @markup.heading)
+  (paragraph) @title)
 
 [
   (atx_h1_marker)
@@ -23,15 +22,16 @@
   (link_title)
   (indented_code_block)
   (fenced_code_block)
-] @markup.raw.block
+] @text.literal
 
-(fenced_code_block_delimiter) @punctuation.delimiter
+[
+  (fenced_code_block_delimiter)
+  (info_string)
+] @punctuation.delimiter
 
-(code_fence_content) @embedded
+(link_destination) @link_uri
 
-(link_destination) @markup.link.url
-
-(link_label) @markup.link
+(link_label) @link_text
 
 [
   (list_marker_plus)
@@ -40,6 +40,9 @@
   (list_marker_dot)
   (list_marker_parenthesis)
   (thematic_break)
+] @punctuation.list_marker
+
+[
   (block_continuation)
   (block_quote_marker)
 ] @punctuation.special

@@ -11,11 +11,15 @@ pub const CANONICAL_HIGHLIGHT_NAMES: &[&str] = &[
     "constructor",
     "constructor.builtin",
     "embedded",
+    "emphasis",
+    "emphasis.strong",
     "error",
     "escape",
     "function",
     "function.builtin",
     "keyword",
+    "link_text",
+    "link_uri",
     "markup",
     "markup.bold",
     "markup.heading",
@@ -40,6 +44,7 @@ pub const CANONICAL_HIGHLIGHT_NAMES: &[&str] = &[
     "punctuation",
     "punctuation.bracket",
     "punctuation.delimiter",
+    "punctuation.list_marker",
     "punctuation.special",
     "string",
     "string.escape",
@@ -47,6 +52,8 @@ pub const CANONICAL_HIGHLIGHT_NAMES: &[&str] = &[
     "string.special",
     "string.special.symbol",
     "tag",
+    "text.literal",
+    "title",
     "type",
     "type.builtin",
     "variable",
@@ -73,6 +80,7 @@ pub fn builtin_language_definitions() -> Vec<LanguageDefinition> {
         css_language(),
         sql_language(),
         dockerfile_language(),
+        markdown_inline_language(),
         markdown_language(),
         toml_language(),
         python_language(),
@@ -486,10 +494,28 @@ fn markdown_language() -> LanguageDefinition {
         },
         || tree_sitter_md::LANGUAGE.into(),
         include_str!("queries/markdown_highlights.scm"),
-        tree_sitter_md::INJECTION_QUERY_BLOCK,
+        include_str!("queries/markdown_injections.scm"),
         "",
         &["section", "list", "block_quote", "fenced_code_block"],
         &["markdown", "md"],
+    )
+}
+
+fn markdown_inline_language() -> LanguageDefinition {
+    LanguageDefinition::new(
+        LanguageId::new(25),
+        "Markdown Inline",
+        "markdown-inline",
+        FileMatcher {
+            extensions: Vec::new(),
+            file_names: Vec::new(),
+        },
+        || tree_sitter_md::INLINE_LANGUAGE.into(),
+        include_str!("queries/markdown_inline_highlights.scm"),
+        "",
+        "",
+        &[],
+        &["markdown-inline", "markdown_inline"],
     )
 }
 

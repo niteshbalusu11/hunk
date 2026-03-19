@@ -19,6 +19,7 @@ fn registry_resolves_builtin_languages_by_name_and_path() {
     assert!(registry.language_by_name("sql").is_some());
     assert!(registry.language_by_name("dockerfile").is_some());
     assert!(registry.language_by_name("markdown").is_some());
+    assert!(registry.language_by_name("markdown-inline").is_some());
 
     let tsx = registry
         .language_for_path(Path::new("/tmp/component.tsx"))
