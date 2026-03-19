@@ -28,4 +28,7 @@ Important paths:
 - `crates/hunk-codex`: Codex host/process integration, thread service, and AI reducer/state logic.
 - `crates/hunk-git`: shared Git read/write behavior; keep production Git logic here instead of app crates.
 - `crates/hunk-domain`: shared config/state types, markdown preview, and SQLite comment storage/migrations.
+- `crates/hunk-text`: headless rope-backed text buffer, positions/ranges, transactions, and undo/redo primitives.
+- `crates/hunk-language`: Tree-sitter language registry, queries, syntax highlighting, folding, preview highlighting, and language-intelligence seams.
+- `crates/hunk-editor`: headless editor state for selections, viewport/display rows, folds, overlays, and editor commands.
 - `crates/hunk-desktop/src/app`: GPUI app entry/types; `controller/` owns behavior, `render/` owns UI, `theme.rs` owns app colors.

@@ -10,6 +10,15 @@ fn registry_resolves_builtin_languages_by_name_and_path() {
     assert_eq!(rust.id, LanguageId::new(1));
     assert!(registry.language_by_name("python").is_some());
     assert!(registry.language_by_name("powershell").is_some());
+    assert!(registry.language_by_name("java").is_some());
+    assert!(registry.language_by_name("csharp").is_some());
+    assert!(registry.language_by_name("terraform").is_some());
+    assert!(registry.language_by_name("swift").is_some());
+    assert!(registry.language_by_name("kotlin").is_some());
+    assert!(registry.language_by_name("nix").is_some());
+    assert!(registry.language_by_name("sql").is_some());
+    assert!(registry.language_by_name("dockerfile").is_some());
+    assert!(registry.language_by_name("markdown").is_some());
 
     let tsx = registry
         .language_for_path(Path::new("/tmp/component.tsx"))
@@ -28,6 +37,61 @@ fn registry_resolves_builtin_languages_by_name_and_path() {
     assert!(
         registry
             .language_for_path(Path::new("/tmp/tool.py"))
+            .is_some()
+    );
+    assert!(
+        registry
+            .language_for_path(Path::new("/tmp/App.java"))
+            .is_some()
+    );
+    assert!(
+        registry
+            .language_for_path(Path::new("/tmp/main.c"))
+            .is_some()
+    );
+    assert!(
+        registry
+            .language_for_path(Path::new("/tmp/main.cpp"))
+            .is_some()
+    );
+    assert!(
+        registry
+            .language_for_path(Path::new("/tmp/Program.cs"))
+            .is_some()
+    );
+    assert!(
+        registry
+            .language_for_path(Path::new("/tmp/main.tf"))
+            .is_some()
+    );
+    assert!(
+        registry
+            .language_for_path(Path::new("/tmp/main.swift"))
+            .is_some()
+    );
+    assert!(
+        registry
+            .language_for_path(Path::new("/tmp/Main.kt"))
+            .is_some()
+    );
+    assert!(
+        registry
+            .language_for_path(Path::new("/tmp/flake.nix"))
+            .is_some()
+    );
+    assert!(
+        registry
+            .language_for_path(Path::new("/tmp/schema.sql"))
+            .is_some()
+    );
+    assert!(
+        registry
+            .language_for_path(Path::new("/tmp/Dockerfile"))
+            .is_some()
+    );
+    assert!(
+        registry
+            .language_for_path(Path::new("/tmp/README.md"))
             .is_some()
     );
 }

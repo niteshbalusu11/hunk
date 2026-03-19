@@ -32,6 +32,9 @@ Hunk is also has full codex integration so you can use Codex inside of Hunk inst
 
 - `crates/hunk-domain`: config/state/db/diff/markdown domain logic
 - `crates/hunk-git`: Git backend for repo discovery, diffing, branches, commits, push, and sync
+- `crates/hunk-text`: rope-backed text model, positions/ranges, transactions, and undo/redo primitives
+- `crates/hunk-language`: Tree-sitter language registry, syntax highlighting, preview highlighting, folds, and language-intelligence seams
+- `crates/hunk-editor`: headless editor state, selections, display rows, folds, overlays, and editor commands
 - `crates/hunk-desktop`: GPUI desktop app binary
 - `crates/hunk-codex`: Codex Websocket Server handling logic
 
@@ -43,21 +46,32 @@ Hunk is also has full codex integration so you can use Codex inside of Hunk inst
 
 ### Run Dev Locally
 
+Preferred local entry points:
+
 ```bash
-cargo run -p hunk-desktop
+just start-mac
 ```
 
-Launch from anywhere, then use `File > Open Project...` (or `Cmd/Ctrl+Shift+O`) to choose a Git repository.
-
-`cargo run -p hunk-desktop` starts from Terminal, so macOS may still present it like a terminal-launched app.
-
-On Windows, use:
+```bash
+just start-linux
+```
 
 ```powershell
 just start-windows
 ```
 
-That helper resolves `CARGO_TARGET_DIR`, downloads the pinned Windows Codex runtime if needed, and sets `HUNK_CODEX_EXECUTABLE` to the generated `codex.cmd` launcher before starting Hunk.
+Those helpers resolve `CARGO_TARGET_DIR` correctly, apply the macOS SDK wrapper when needed, and stage the bundled Windows Codex runtime automatically.
+
+If you want the raw macOS cargo command, use:
+
+```bash
+CARGO_TARGET_DIR="$(./scripts/resolve_cargo_target_dir.sh)" \
+  ./scripts/run_with_macos_sdk_env.sh cargo run -p hunk-desktop
+```
+
+Launch from anywhere, then use `File > Open Project...` (or `Cmd/Ctrl+Shift+O`) to choose a Git repository.
+
+The app still launches from Terminal in local dev, so macOS may present it like a terminal-launched app.
 
 ## Worktrees
 
@@ -71,10 +85,23 @@ Hunk treats the primary checkout and each linked Git worktree as separate worksp
 
 ### Validate Workspace
 
+On macOS:
+
 ```bash
-cargo check --workspace
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
+CARGO_TARGET_DIR="$(./scripts/resolve_cargo_target_dir.sh)" \
+  ./scripts/run_with_macos_sdk_env.sh cargo build --workspace
+CARGO_TARGET_DIR="$(./scripts/resolve_cargo_target_dir.sh)" \
+  ./scripts/run_with_macos_sdk_env.sh cargo test --workspace
+CARGO_TARGET_DIR="$(./scripts/resolve_cargo_target_dir.sh)" \
+  ./scripts/run_with_macos_sdk_env.sh cargo clippy --workspace --all-targets -- -D warnings
+```
+
+On Linux and Windows, run the same Cargo commands with `CARGO_TARGET_DIR` resolved through [`scripts/resolve_cargo_target_dir.sh`](./scripts/resolve_cargo_target_dir.sh) or the `just` recipes so builds land in `target-shared`.
+
+Example:
+
+```bash
+CARGO_TARGET_DIR="$(./scripts/resolve_cargo_target_dir.sh)" cargo test --workspace
 ```
 
 ### For Production builds
@@ -108,7 +135,7 @@ pwsh ./scripts/package_windows_release.ps1
 
 These produce:
 
-- macOS ARM64: signed/notarized `Hunk-<version>-macos-arm64.dmg` when Apple secrets are configured
+- macOS ARM64: `Hunk-<version>-macos-arm64.dmg`, signed/notarized when Apple secrets are configured
 - Linux x86_64: `Hunk-<version>-linux-x86_64.AppImage` plus fallback `Hunk-<version>-linux-x86_64.tar.gz`
 - Windows x86_64: `Hunk-<version>-windows-x86_64.msi`
 
@@ -153,7 +180,7 @@ These pull the pinned release assets directly from the Codex GitHub release for 
 If you already have a local native binary you want to use for macOS instead, you can still override the source path:
 `./scripts/install_codex_runtime_macos.sh /absolute/path/to/codex`
 
-### Validate + stage + bundle (macOS workflow today)
+### Validate + stage + bundle (macOS local workflow)
 
 Download and stage the pinned macOS runtime:
 
@@ -161,7 +188,8 @@ Download and stage the pinned macOS runtime:
 ./scripts/install_codex_runtime_macos.sh
 ./scripts/validate_codex_runtime_bundle.sh --strict --platform macos
 ./scripts/stage_codex_runtime_macos.sh
-cargo test -p hunk-codex --test real_runtime_smoke -- --ignored
+CARGO_TARGET_DIR="$(./scripts/resolve_cargo_target_dir.sh)" \
+  ./scripts/run_with_macos_sdk_env.sh cargo test -p hunk-codex --test real_runtime_smoke -- --ignored
 just bundle
 ```
 
@@ -169,6 +197,39 @@ just bundle
 
 - `.github/workflows/pr-build.yml` stays as the main PR CI workflow.
 - `.github/workflows/release.yml` builds DMG/MSI/AppImage artifacts and publishes them to a GitHub Release when you push a `v*` tag.
+
+The release workflows no longer bundle the old Helix runtime. The editor now uses the curated Tree-sitter language set compiled into `hunk-language`.
+
+## Syntax Highlighting
+
+The Files editor, file preview, and markdown fenced-code highlighting now use the shared Tree-sitter language registry in `crates/hunk-language`.
+
+Built-in languages/config formats:
+
+- Rust
+- JavaScript
+- TypeScript
+- TSX
+- Bash / shell
+- Python
+- PowerShell
+- JSON
+- YAML
+- Go
+- HTML
+- CSS
+- TOML
+- Java
+- Kotlin
+- C
+- C++
+- C#
+- SQL
+- Markdown
+- Dockerfile
+- Nix
+- Terraform / HCL
+- Swift
 
 Apple signing/notarization secrets used by the workflows:
 

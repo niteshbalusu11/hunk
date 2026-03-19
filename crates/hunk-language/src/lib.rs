@@ -248,9 +248,13 @@ impl LanguageRegistry {
         let definition = Arc::new(definition);
         self.ids_by_lower_name
             .insert(definition.name.to_ascii_lowercase(), definition.id);
+        self.ids_by_lower_name
+            .insert(definition.scope_name.to_ascii_lowercase(), definition.id);
         self.ids_by_injection_name
             .insert(definition.scope_name.to_ascii_lowercase(), definition.id);
         for injection_name in &definition.injection_names {
+            self.ids_by_lower_name
+                .insert(injection_name.to_ascii_lowercase(), definition.id);
             self.ids_by_injection_name
                 .insert(injection_name.to_ascii_lowercase(), definition.id);
         }

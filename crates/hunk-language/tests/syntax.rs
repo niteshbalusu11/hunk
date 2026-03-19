@@ -151,6 +151,222 @@ fn powershell_source_parses_and_highlights_keywords() {
 }
 
 #[test]
+fn phase_one_languages_parse_and_highlight_representative_tokens() {
+    let registry = LanguageRegistry::builtin();
+
+    let mut java = SyntaxSession::new();
+    let java_source = "class Main { static void main(String[] args) { return; } }\n";
+    java.parse_for_path(&registry, Path::new("Main.java"), java_source)
+        .expect("parse java");
+    let java_captures = java
+        .highlight_visible_range(&registry, java_source, 0..java_source.len())
+        .expect("java highlights");
+    assert!(
+        java_captures
+            .iter()
+            .any(|capture| capture.style_key == "keyword")
+    );
+    assert!(
+        java_captures
+            .iter()
+            .any(|capture| capture.style_key == "type")
+    );
+
+    let mut c = SyntaxSession::new();
+    let c_source = "int main(void) { return 0; }\n";
+    c.parse_for_path(&registry, Path::new("main.c"), c_source)
+        .expect("parse c");
+    let c_captures = c
+        .highlight_visible_range(&registry, c_source, 0..c_source.len())
+        .expect("c highlights");
+    assert!(
+        c_captures
+            .iter()
+            .any(|capture| capture.style_key == "keyword")
+    );
+    assert!(c_captures.iter().any(|capture| capture.style_key == "type"));
+
+    let mut cpp = SyntaxSession::new();
+    let cpp_source = "class Widget { public: int value() const { return 1; } };\n";
+    cpp.parse_for_path(&registry, Path::new("main.cpp"), cpp_source)
+        .expect("parse cpp");
+    let cpp_captures = cpp
+        .highlight_visible_range(&registry, cpp_source, 0..cpp_source.len())
+        .expect("cpp highlights");
+    assert!(
+        cpp_captures
+            .iter()
+            .any(|capture| capture.style_key == "keyword")
+    );
+    assert!(
+        cpp_captures
+            .iter()
+            .any(|capture| capture.style_key == "function")
+    );
+
+    let mut csharp = SyntaxSession::new();
+    let csharp_source = "class Program { static void Main() { Console.WriteLine(\"hi\"); } }\n";
+    csharp
+        .parse_for_path(&registry, Path::new("Program.cs"), csharp_source)
+        .expect("parse csharp");
+    let csharp_captures = csharp
+        .highlight_visible_range(&registry, csharp_source, 0..csharp_source.len())
+        .expect("csharp highlights");
+    assert!(
+        csharp_captures
+            .iter()
+            .any(|capture| capture.style_key == "keyword")
+    );
+    assert!(
+        csharp_captures
+            .iter()
+            .any(|capture| capture.style_key == "function")
+    );
+
+    let mut terraform = SyntaxSession::new();
+    let terraform_source = "resource \"aws_s3_bucket\" \"logs\" { bucket = \"demo\" }\n";
+    terraform
+        .parse_for_path(&registry, Path::new("main.tf"), terraform_source)
+        .expect("parse terraform");
+    let terraform_captures = terraform
+        .highlight_visible_range(&registry, terraform_source, 0..terraform_source.len())
+        .expect("terraform highlights");
+    assert!(
+        terraform_captures
+            .iter()
+            .any(|capture| capture.style_key == "keyword")
+    );
+    assert!(
+        terraform_captures
+            .iter()
+            .any(|capture| capture.style_key == "property")
+    );
+
+    let mut swift = SyntaxSession::new();
+    let swift_source = "class App { func run() { print(\"hi\") } }\n";
+    swift
+        .parse_for_path(&registry, Path::new("main.swift"), swift_source)
+        .expect("parse swift");
+    let swift_captures = swift
+        .highlight_visible_range(&registry, swift_source, 0..swift_source.len())
+        .expect("swift highlights");
+    assert!(
+        swift_captures
+            .iter()
+            .any(|capture| capture.style_key == "keyword")
+    );
+    assert!(
+        swift_captures
+            .iter()
+            .any(|capture| capture.style_key == "function")
+    );
+}
+
+#[test]
+fn phase_two_languages_parse_and_highlight_representative_tokens() {
+    let registry = LanguageRegistry::builtin();
+
+    let mut kotlin = SyntaxSession::new();
+    let kotlin_source = "class App { fun run() { println(\"hi\") } }\n";
+    kotlin
+        .parse_for_path(&registry, Path::new("Main.kt"), kotlin_source)
+        .expect("parse kotlin");
+    let kotlin_captures = kotlin
+        .highlight_visible_range(&registry, kotlin_source, 0..kotlin_source.len())
+        .expect("kotlin highlights");
+    assert!(
+        kotlin_captures
+            .iter()
+            .any(|capture| capture.style_key == "keyword")
+    );
+    assert!(
+        kotlin_captures
+            .iter()
+            .any(|capture| capture.style_key == "function")
+    );
+
+    let mut nix = SyntaxSession::new();
+    let nix_source =
+        "{ pkgs, ... }: let name = \"hunk\"; in pkgs.mkShell { buildInputs = [ pkgs.git ]; }\n";
+    nix.parse_for_path(&registry, Path::new("flake.nix"), nix_source)
+        .expect("parse nix");
+    let nix_captures = nix
+        .highlight_visible_range(&registry, nix_source, 0..nix_source.len())
+        .expect("nix highlights");
+    assert!(
+        nix_captures
+            .iter()
+            .any(|capture| capture.style_key == "keyword")
+    );
+    assert!(
+        nix_captures
+            .iter()
+            .any(|capture| capture.style_key == "variable")
+    );
+}
+
+#[test]
+fn phase_three_and_four_languages_parse_and_highlight_representative_tokens() {
+    let registry = LanguageRegistry::builtin();
+
+    let mut sql = SyntaxSession::new();
+    let sql_source = "SELECT users.id FROM users WHERE users.active = true;\n";
+    sql.parse_for_path(&registry, Path::new("schema.sql"), sql_source)
+        .expect("parse sql");
+    let sql_captures = sql
+        .highlight_visible_range(&registry, sql_source, 0..sql_source.len())
+        .expect("sql highlights");
+    assert!(
+        sql_captures
+            .iter()
+            .any(|capture| capture.style_key == "keyword")
+    );
+    assert!(
+        sql_captures
+            .iter()
+            .any(|capture| capture.style_key == "type")
+    );
+
+    let mut dockerfile = SyntaxSession::new();
+    let dockerfile_source = "FROM rust:1.88\nLABEL version=\"1.0\"\nRUN cargo build --release\n";
+    dockerfile
+        .parse_for_path(&registry, Path::new("Dockerfile"), dockerfile_source)
+        .expect("parse dockerfile");
+    let dockerfile_captures = dockerfile
+        .highlight_visible_range(&registry, dockerfile_source, 0..dockerfile_source.len())
+        .expect("dockerfile highlights");
+    assert!(
+        dockerfile_captures
+            .iter()
+            .any(|capture| capture.style_key == "keyword")
+    );
+    assert!(
+        dockerfile_captures
+            .iter()
+            .any(|capture| capture.style_key == "string")
+    );
+
+    let mut markdown = SyntaxSession::new();
+    let markdown_source = "# Hunk\n\n- fast diff viewer\n\n```rust\nfn main() {}\n```\n";
+    markdown
+        .parse_for_path(&registry, Path::new("README.md"), markdown_source)
+        .expect("parse markdown");
+    let markdown_captures = markdown
+        .highlight_visible_range(&registry, markdown_source, 0..markdown_source.len())
+        .expect("markdown highlights");
+    assert!(
+        markdown_captures
+            .iter()
+            .any(|capture| capture.style_key == "markup.heading")
+    );
+    assert!(
+        markdown_captures
+            .iter()
+            .any(|capture| capture.style_key == "markup.raw.block")
+    );
+}
+
+#[test]
 fn reused_session_clears_cached_tree_when_switching_languages() {
     let registry = LanguageRegistry::builtin();
     let mut session = SyntaxSession::new();

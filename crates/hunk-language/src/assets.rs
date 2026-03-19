@@ -62,14 +62,25 @@ pub fn builtin_language_definitions() -> Vec<LanguageDefinition> {
         typescript_language(),
         tsx_language(),
         bash_language(),
+        java_language(),
+        c_language(),
+        cpp_language(),
+        c_sharp_language(),
         json_language(),
         yaml_language(),
         go_language(),
         html_language(),
         css_language(),
+        sql_language(),
+        dockerfile_language(),
+        markdown_language(),
         toml_language(),
         python_language(),
         powershell_language(),
+        hcl_language(),
+        swift_language(),
+        kotlin_language(),
+        nix_language(),
     ]
 }
 
@@ -233,6 +244,105 @@ fn bash_language() -> LanguageDefinition {
     )
 }
 
+fn java_language() -> LanguageDefinition {
+    LanguageDefinition::new(
+        LanguageId::new(14),
+        "Java",
+        "java",
+        FileMatcher {
+            extensions: vec!["java".to_string()],
+            file_names: Vec::new(),
+        },
+        || tree_sitter_java::LANGUAGE.into(),
+        tree_sitter_java::HIGHLIGHTS_QUERY,
+        "",
+        "",
+        &["class_body", "block", "argument_list", "array_initializer"],
+        &["java"],
+    )
+}
+
+fn c_language() -> LanguageDefinition {
+    LanguageDefinition::new(
+        LanguageId::new(15),
+        "C",
+        "c",
+        FileMatcher {
+            extensions: vec!["c".to_string(), "h".to_string()],
+            file_names: Vec::new(),
+        },
+        || tree_sitter_c::LANGUAGE.into(),
+        include_str!("queries/c_highlights.scm"),
+        "",
+        "",
+        &[
+            "compound_statement",
+            "enumerator_list",
+            "field_declaration_list",
+            "initializer_list",
+        ],
+        &["c"],
+    )
+}
+
+fn cpp_language() -> LanguageDefinition {
+    LanguageDefinition::new(
+        LanguageId::new(16),
+        "C++",
+        "cpp",
+        FileMatcher {
+            extensions: vec![
+                "cc".to_string(),
+                "cpp".to_string(),
+                "cxx".to_string(),
+                "hpp".to_string(),
+                "hh".to_string(),
+                "hxx".to_string(),
+            ],
+            file_names: Vec::new(),
+        },
+        || tree_sitter_cpp::LANGUAGE.into(),
+        format!(
+            "{}\n{}",
+            include_str!("queries/c_highlights.scm"),
+            include_str!("queries/cpp_highlights.scm")
+        ),
+        include_str!("queries/cpp_injections.scm"),
+        "",
+        &[
+            "compound_statement",
+            "field_declaration_list",
+            "enumerator_list",
+            "initializer_list",
+            "namespace_definition",
+        ],
+        &["cpp", "c++", "cplusplus"],
+    )
+}
+
+fn c_sharp_language() -> LanguageDefinition {
+    LanguageDefinition::new(
+        LanguageId::new(17),
+        "C#",
+        "csharp",
+        FileMatcher {
+            extensions: vec!["cs".to_string()],
+            file_names: Vec::new(),
+        },
+        || tree_sitter_c_sharp::LANGUAGE.into(),
+        include_str!("queries/c_sharp_highlights.scm"),
+        "",
+        "",
+        &[
+            "block",
+            "declaration_list",
+            "switch_body",
+            "initializer_expression",
+        ],
+        &["csharp", "c#", "cs"],
+    )
+}
+
 fn yaml_language() -> LanguageDefinition {
     LanguageDefinition::new(
         LanguageId::new(6),
@@ -315,6 +425,74 @@ fn css_language() -> LanguageDefinition {
     )
 }
 
+fn sql_language() -> LanguageDefinition {
+    LanguageDefinition::new(
+        LanguageId::new(22),
+        "SQL",
+        "sql",
+        FileMatcher {
+            extensions: vec!["sql".to_string()],
+            file_names: Vec::new(),
+        },
+        || tree_sitter_sequel::LANGUAGE.into(),
+        tree_sitter_sequel::HIGHLIGHTS_QUERY,
+        "",
+        "",
+        &[
+            "select_expression",
+            "from_expression",
+            "where_expression",
+            "join_expression",
+            "group_expression",
+        ],
+        &["sql"],
+    )
+}
+
+fn dockerfile_language() -> LanguageDefinition {
+    LanguageDefinition::new(
+        LanguageId::new(23),
+        "Dockerfile",
+        "dockerfile",
+        FileMatcher {
+            extensions: vec!["dockerfile".to_string()],
+            file_names: vec![
+                "Dockerfile".to_string(),
+                "dockerfile".to_string(),
+                "Containerfile".to_string(),
+            ],
+        },
+        tree_sitter_dockerfile_updated::language,
+        include_str!("queries/dockerfile_highlights.scm"),
+        "",
+        "",
+        &["json_array", "json_object"],
+        &["dockerfile", "containerfile"],
+    )
+}
+
+fn markdown_language() -> LanguageDefinition {
+    LanguageDefinition::new(
+        LanguageId::new(24),
+        "Markdown",
+        "markdown",
+        FileMatcher {
+            extensions: vec![
+                "md".to_string(),
+                "markdown".to_string(),
+                "mdown".to_string(),
+            ],
+            file_names: Vec::new(),
+        },
+        || tree_sitter_md::LANGUAGE.into(),
+        include_str!("queries/markdown_highlights.scm"),
+        tree_sitter_md::INJECTION_QUERY_BLOCK,
+        "",
+        &["section", "list", "block_quote", "fenced_code_block"],
+        &["markdown", "md"],
+    )
+}
+
 fn toml_language() -> LanguageDefinition {
     LanguageDefinition::new(
         LanguageId::new(10),
@@ -366,5 +544,93 @@ fn powershell_language() -> LanguageDefinition {
         "",
         &[],
         &["powershell", "pwsh", "ps1"],
+    )
+}
+
+fn hcl_language() -> LanguageDefinition {
+    LanguageDefinition::new(
+        LanguageId::new(18),
+        "Terraform",
+        "terraform",
+        FileMatcher {
+            extensions: vec!["tf".to_string(), "tfvars".to_string(), "hcl".to_string()],
+            file_names: Vec::new(),
+        },
+        || tree_sitter_hcl::LANGUAGE.into(),
+        include_str!("queries/hcl_highlights.scm"),
+        "",
+        "",
+        &["body", "block", "object", "tuple"],
+        &["terraform", "hcl", "tf"],
+    )
+}
+
+fn swift_language() -> LanguageDefinition {
+    LanguageDefinition::new(
+        LanguageId::new(19),
+        "Swift",
+        "swift",
+        FileMatcher {
+            extensions: vec!["swift".to_string()],
+            file_names: Vec::new(),
+        },
+        || tree_sitter_swift::LANGUAGE.into(),
+        tree_sitter_swift::HIGHLIGHTS_QUERY,
+        tree_sitter_swift::INJECTIONS_QUERY,
+        tree_sitter_swift::LOCALS_QUERY,
+        &[
+            "statements",
+            "class_body",
+            "struct_body",
+            "protocol_body",
+            "enum_class_body",
+        ],
+        &["swift"],
+    )
+}
+
+fn kotlin_language() -> LanguageDefinition {
+    LanguageDefinition::new(
+        LanguageId::new(20),
+        "Kotlin",
+        "kotlin",
+        FileMatcher {
+            extensions: vec!["kt".to_string(), "kts".to_string()],
+            file_names: Vec::new(),
+        },
+        || tree_sitter_kotlin_sg::LANGUAGE.into(),
+        tree_sitter_kotlin_sg::HIGHLIGHTS_QUERY,
+        "",
+        "",
+        &[
+            "class_body",
+            "function_body",
+            "control_structure_body",
+            "lambda_literal",
+            "when_entry",
+        ],
+        &["kotlin", "kt", "kts"],
+    )
+}
+
+fn nix_language() -> LanguageDefinition {
+    LanguageDefinition::new(
+        LanguageId::new(21),
+        "Nix",
+        "nix",
+        FileMatcher {
+            extensions: vec!["nix".to_string()],
+            file_names: vec![
+                "default.nix".to_string(),
+                "flake.nix".to_string(),
+                "shell.nix".to_string(),
+            ],
+        },
+        || tree_sitter_nix::LANGUAGE.into(),
+        tree_sitter_nix::HIGHLIGHTS_QUERY,
+        tree_sitter_nix::INJECTIONS_QUERY,
+        "",
+        &["binding_set", "list_expression", "attrset_expression"],
+        &["nix"],
     )
 }
