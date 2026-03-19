@@ -281,6 +281,7 @@ fn agent_message(id: &str, text: &str) -> ThreadItem {
         id: id.to_string(),
         text: text.to_string(),
         phase: None,
+        memory_citation: None,
     }
 }
 
