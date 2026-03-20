@@ -688,7 +688,7 @@ impl DiffViewer {
         }
         if let Some(selected_thread_id) = self.ai_selected_thread_id.as_deref() {
             let visible_row_ids = current_ai_renderable_visible_row_ids(self, selected_thread_id);
-            invalidate_ai_timeline_row_measurements(self, visible_row_ids.as_slice(), &changed_row_ids);
+            reset_ai_timeline_list_measurements(self, visible_row_ids.len());
         }
         cx.notify();
     }

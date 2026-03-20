@@ -5,6 +5,7 @@ mod ai_helper_tests {
     use super::ai_markdown_code_block_text;
     use super::ai_markdown_code_block_text_and_highlights;
     use super::ai_command_execution_display_details;
+    use super::ai_command_execution_terminal_text;
     use super::ai_composer_status_tone;
     use super::ai_collaboration_picker_label;
     use super::ai_file_change_summary;
@@ -20,6 +21,7 @@ mod ai_helper_tests {
     use super::ai_tool_header_label;
     use super::ai_timeline_item_is_renderable;
     use super::ai_truncate_multiline_content;
+    use super::AiCommandExecutionDisplayDetails;
     use crate::app::markdown_links::markdown_inline_text_and_link_ranges;
     use hunk_codex::state::ItemDisplayMetadata;
     use hunk_codex::state::ItemStatus;
@@ -266,6 +268,52 @@ mod ai_helper_tests {
         assert_eq!(details.action_summaries, vec!["Run cargo test".to_string()]);
         assert_eq!(details.exit_code, Some(0));
         assert_eq!(details.duration_ms, Some(1250));
+    }
+
+    #[test]
+    fn command_execution_terminal_text_formats_metadata_and_command_output() {
+        let details = AiCommandExecutionDisplayDetails {
+            command: "cargo test -p hunk-desktop".to_string(),
+            cwd: "/repo".to_string(),
+            process_id: Some("123".to_string()),
+            status: "completed".to_string(),
+            action_summaries: vec!["Run cargo test".to_string()],
+            exit_code: Some(0),
+            duration_ms: Some(1250),
+        };
+
+        let (text, truncated) =
+            ai_command_execution_terminal_text(&details, "line 1\nline 2\n", Some(10));
+
+        assert!(!truncated);
+        assert!(text.contains("# cwd: /repo"));
+        assert!(text.contains("pid: 123"));
+        assert!(text.contains("exit: 0"));
+        assert!(text.contains("duration:"));
+        assert!(text.contains("# Run cargo test"));
+        assert!(text.contains("$ cargo test -p hunk-desktop"));
+        assert!(text.contains("line 1\nline 2"));
+    }
+
+    #[test]
+    fn command_execution_terminal_text_truncates_output_preview() {
+        let details = AiCommandExecutionDisplayDetails {
+            command: "cargo clippy".to_string(),
+            cwd: "/repo".to_string(),
+            process_id: None,
+            status: "completed".to_string(),
+            action_summaries: Vec::new(),
+            exit_code: Some(0),
+            duration_ms: None,
+        };
+
+        let output = "one\ntwo\nthree\nfour\n";
+        let (text, truncated) = ai_command_execution_terminal_text(&details, output, Some(2));
+
+        assert!(truncated);
+        assert!(text.contains("one\ntwo"));
+        assert!(!text.contains("three\nfour"));
+        assert!(text.contains("... output truncated to the first 2 lines ..."));
     }
 
     #[test]

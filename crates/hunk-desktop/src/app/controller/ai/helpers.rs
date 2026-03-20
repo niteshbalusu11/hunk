@@ -627,7 +627,12 @@ fn ai_timeline_row_needs_full_measurement_reset(this: &DiffViewer, row_id: &str)
             .ai_state_snapshot
             .items
             .get(item_key.as_str())
-            .is_some_and(|item| matches!(item.kind.as_str(), "userMessage" | "agentMessage" | "plan")),
+            .is_some_and(|item| {
+                matches!(
+                    item.kind.as_str(),
+                    "userMessage" | "agentMessage" | "plan" | "commandExecution"
+                )
+            }),
         AiTimelineRowSource::Group { group_id } => this
             .ai_timeline_group(group_id.as_str())
             .is_some_and(|group| {

@@ -491,48 +491,6 @@ fn ai_file_change_group_summary(
     (!summary.files.is_empty()).then_some(summary)
 }
 
-fn ai_tool_meta_chip(
-    label: &str,
-    value: String,
-    mono: bool,
-    is_dark: bool,
-    cx: &mut Context<DiffViewer>,
-) -> AnyElement {
-    h_flex()
-        .items_center()
-        .gap_1()
-        .px_1p5()
-        .py_0p5()
-        .rounded(px(6.0))
-        .border_1()
-        .border_color(hunk_opacity(cx.theme().border, is_dark, 0.84, 0.68))
-        .bg(hunk_blend(cx.theme().background, cx.theme().muted, is_dark, 0.10, 0.16))
-        .child(
-            div()
-                .text_xs()
-                .font_semibold()
-                .text_color(cx.theme().muted_foreground)
-                .child(label.to_string()),
-        )
-        .child({
-            let value = if value.trim().is_empty() {
-                "none".to_string()
-            } else {
-                value
-            };
-            let mut element = div()
-                .min_w_0()
-                .text_xs()
-                .text_color(cx.theme().foreground)
-                .child(value);
-            if mono {
-                element = element.font_family(cx.theme().mono_font_family.clone());
-            }
-            element
-        })
-        .into_any_element()
-}
-
 #[allow(clippy::too_many_arguments)]
 fn ai_tool_detail_section(
     this: &DiffViewer,
@@ -550,6 +508,11 @@ fn ai_tool_detail_section(
 ) -> AnyElement {
     let surface_id = surface_id.into();
     let scroll_region_id = format!("{surface_id}-scroll");
+    let line_count = content.lines().count().max(1);
+    let needs_vertical_scroll = max_height.is_some_and(|max_height| {
+        !scroll_x && px((line_count as f32 * 17.0) + 12.0) > max_height
+    });
+
     let container = div()
         .w_full()
         .max_w_full()
@@ -595,28 +558,51 @@ fn ai_tool_detail_section(
             )),
     );
 
-    let content = match (max_height, scroll_x) {
-        (Some(max_height), true) => div()
+    let content = match (max_height, scroll_x, needs_vertical_scroll) {
+        (Some(_), false, false) => text.into_any_element(),
+        (Some(max_height), true, _) => h_flex()
             .id(scroll_region_id.clone())
             .w_full()
             .max_w_full()
             .min_w_0()
             .max_h(max_height)
+            .items_stretch()
             .overflow_scroll()
             .occlude()
-            .child(text)
+            .child(
+                div()
+                    .w_full()
+                    .max_w_full()
+                    .min_w_0()
+                    .min_h_full()
+                    .flex_1()
+                    .child(text),
+            )
             .into_any_element(),
-        (Some(max_height), false) => div()
-            .id(scroll_region_id.clone())
+        (Some(max_height), false, true) => div()
             .w_full()
             .max_w_full()
             .min_w_0()
-            .max_h(max_height)
-            .overflow_y_scroll()
-            .occlude()
-            .child(text)
+            .h(max_height)
+            .child(
+                div()
+                    .id(scroll_region_id.clone())
+                    .size_full()
+                    .overflow_y_scroll()
+                    .overflow_x_hidden()
+                    .occlude()
+                    .child(
+                        div()
+                            .w_full()
+                            .max_w_full()
+                            .min_w_full()
+                            .min_w_0()
+                            .min_h_full()
+                            .child(text),
+                    ),
+            )
             .into_any_element(),
-        (None, true) => div()
+        (None, true, _) => div()
             .id(scroll_region_id)
             .w_full()
             .max_w_full()
@@ -625,7 +611,7 @@ fn ai_tool_detail_section(
             .occlude()
             .child(text)
             .into_any_element(),
-        (None, false) => text.into_any_element(),
+        (None, false, _) => text.into_any_element(),
     };
     let container = container.child(content);
 
@@ -650,6 +636,99 @@ fn ai_tool_detail_section(
         .into_any_element()
 }
 
+const AI_COMMAND_PREVIEW_MAX_OUTPUT_LINES: usize = 40;
+const AI_COMMAND_EXECUTION_CARD_MAX_WIDTH: f32 = 940.0;
+const AI_COMMAND_EXECUTION_TRANSCRIPT_MIN_WIDTH: f32 = 860.0;
+const AI_COMMAND_EXECUTION_MONO_CHAR_WIDTH: f32 = 8.0;
+
+fn ai_command_execution_status_color(
+    details: &AiCommandExecutionDisplayDetails,
+    cx: &mut Context<DiffViewer>,
+) -> Hsla {
+    match details.exit_code {
+        Some(0) => cx.theme().success,
+        Some(_) => cx.theme().danger,
+        None => match details.status.as_str() {
+            "completed" => cx.theme().success,
+            "started" | "running" | "streaming" => cx.theme().accent,
+            _ => cx.theme().muted_foreground,
+        },
+    }
+}
+
+fn ai_command_execution_transcript_width(content: &str) -> gpui::Pixels {
+    let longest_line_chars = content
+        .lines()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0) as f32;
+    let estimated_width =
+        (longest_line_chars * AI_COMMAND_EXECUTION_MONO_CHAR_WIDTH) + 24.0;
+    px(estimated_width.max(AI_COMMAND_EXECUTION_TRANSCRIPT_MIN_WIDTH))
+}
+
+fn ai_command_execution_terminal_text(
+    details: &AiCommandExecutionDisplayDetails,
+    output: &str,
+    max_output_lines: Option<usize>,
+) -> (String, bool) {
+    let mut sections = Vec::<String>::new();
+    sections.push(format!("# cwd: {}", details.cwd));
+
+    let mut meta = Vec::<String>::new();
+    if let Some(process_id) = details.process_id.as_ref() {
+        meta.push(format!("pid: {process_id}"));
+    }
+    if let Some(exit_code) = details.exit_code {
+        meta.push(format!("exit: {exit_code}"));
+    }
+    if let Some(duration) = ai_duration_ms_label(details.duration_ms) {
+        meta.push(format!("duration: {duration}"));
+    }
+    if !meta.is_empty() {
+        sections.push(format!("# {}", meta.join(" | ")));
+    }
+    for summary in &details.action_summaries {
+        sections.push(format!("# {summary}"));
+    }
+
+    if !sections.is_empty() {
+        sections.push(String::new());
+    }
+
+    let mut command_lines = details.command.lines();
+    if let Some(first_line) = command_lines.next() {
+        sections.push(format!("$ {first_line}"));
+        for line in command_lines {
+            sections.push(format!("> {line}"));
+        }
+    }
+
+    let trimmed_output = output.trim_end_matches('\n');
+    if trimmed_output.is_empty() {
+        return (sections.join("\n"), false);
+    }
+
+    sections.push(String::new());
+    let output_lines = trimmed_output.lines().collect::<Vec<_>>();
+    let truncated = max_output_lines.is_some_and(|max_lines| output_lines.len() > max_lines);
+    let preview_lines = output_lines
+        .iter()
+        .take(max_output_lines.unwrap_or(usize::MAX))
+        .copied()
+        .collect::<Vec<_>>();
+    sections.push(preview_lines.join("\n"));
+    if truncated {
+        let visible_line_limit = max_output_lines.unwrap_or(AI_COMMAND_PREVIEW_MAX_OUTPUT_LINES);
+        sections.push(String::new());
+        sections.push(format!(
+            "... output truncated to the first {visible_line_limit} lines ..."
+        ));
+    }
+
+    (sections.join("\n"), truncated)
+}
+
 fn render_ai_command_execution_details(
     this: &DiffViewer,
     view: Entity<DiffViewer>,
@@ -659,107 +738,145 @@ fn render_ai_command_execution_details(
     is_dark: bool,
     cx: &mut Context<DiffViewer>,
 ) -> AnyElement {
-    let mut chips = Vec::new();
-    chips.push(ai_tool_meta_chip("status", details.status.clone(), false, is_dark, cx));
-    chips.push(ai_tool_meta_chip("cwd", details.cwd.clone(), true, is_dark, cx));
-    if let Some(process_id) = details.process_id.as_ref() {
-        chips.push(ai_tool_meta_chip("pid", process_id.clone(), true, is_dark, cx));
-    }
-    if let Some(exit_code) = details.exit_code {
-        chips.push(ai_tool_meta_chip("exit", exit_code.to_string(), true, is_dark, cx));
-    }
-    if let Some(duration) = ai_duration_ms_label(details.duration_ms) {
-        chips.push(ai_tool_meta_chip("duration", duration, false, is_dark, cx));
-    }
+    let terminal_surface_id = ai_timeline_text_surface_id(row_id, "tool-terminal", 0);
+    let (preview_text, _truncated) = ai_command_execution_terminal_text(
+        details,
+        output,
+        Some(AI_COMMAND_PREVIEW_MAX_OUTPUT_LINES),
+    );
+    let (full_text, _) = ai_command_execution_terminal_text(details, output, None);
+    let selection_surfaces = ai_text_selection_surfaces(vec![AiTextSelectionSurfaceSpec::new(
+        terminal_surface_id.clone(),
+        preview_text.clone(),
+    )]);
+    let copy_button_id = format!("ai-copy-command-exec-{}", row_id.replace('\u{1f}', "--"));
+    let status_color = ai_command_execution_status_color(details, cx);
+    let status_text = details.status.replace('_', " ");
+    let transcript_width = ai_command_execution_transcript_width(preview_text.as_str());
 
-    let command_surface_id = ai_timeline_text_surface_id(row_id, "tool-command", 0);
-    let action_surface_id = ai_timeline_text_surface_id(row_id, "tool-actions", 0);
-    let output_surface_id = ai_timeline_text_surface_id(row_id, "tool-output", 0);
-    let mut selection_surfaces = vec![AiTextSelectionSurfaceSpec::new(
-        command_surface_id.clone(),
-        details.command.clone(),
-    )];
-    if !details.action_summaries.is_empty() {
-        selection_surfaces.push(
-            AiTextSelectionSurfaceSpec::new(
-                action_surface_id.clone(),
-                details.action_summaries.join("\n"),
-            )
-            .with_separator_before("\n\n"),
-        );
-    }
-    let trimmed_output = output.trim().to_string();
-    if !trimmed_output.is_empty() {
-        selection_surfaces.push(
-            AiTextSelectionSurfaceSpec::new(output_surface_id.clone(), trimmed_output.clone())
-                .with_separator_before("\n\n"),
-        );
-    }
-    let selection_surfaces = ai_text_selection_surfaces(selection_surfaces);
-
-    let mut sections = vec![ai_tool_detail_section(
-        this,
-        view.clone(),
-        row_id,
-        command_surface_id,
-        selection_surfaces.clone(),
-        "Command",
-        details.command.clone(),
-        true,
-        None,
-        true,
-        is_dark,
-        cx,
-    )];
-    if !details.action_summaries.is_empty() {
-        sections.push(ai_tool_detail_section(
-            this,
-            view.clone(),
-            row_id,
-            action_surface_id,
-            selection_surfaces.clone(),
-            "Actions",
-            details.action_summaries.join("\n"),
-            false,
-            Some(px(140.0)),
-            false,
-            is_dark,
-            cx,
-        ));
-    }
-    if !trimmed_output.is_empty() {
-        sections.push(ai_tool_detail_section(
-            this,
-            view.clone(),
-            row_id,
-            output_surface_id,
-            selection_surfaces.clone(),
-            "Output",
-            trimmed_output,
-            true,
-            Some(px(220.0)),
-            false,
-            is_dark,
-            cx,
-        ));
-    }
-
-    v_flex()
+    div()
         .w_full()
         .min_w_0()
-        .items_stretch()
-        .gap_1p5()
-        .when(!chips.is_empty(), |this| {
-            this.child(
-                h_flex()
-                    .w_full()
-                    .min_w_0()
-                    .gap_1()
-                    .flex_wrap()
-                    .children(chips),
-            )
-        })
-        .children(sections)
+        .max_w(px(AI_COMMAND_EXECUTION_CARD_MAX_WIDTH))
+        .rounded(px(10.0))
+        .border_1()
+        .border_color(hunk_opacity(cx.theme().border, is_dark, 0.88, 0.72))
+        .bg(hunk_blend(
+            cx.theme().background,
+            cx.theme().secondary,
+            is_dark,
+            0.24,
+            0.16,
+        ))
+        .p_2()
+        .child(
+            v_flex()
+                .w_full()
+                .min_w_0()
+                .gap_2()
+                .child(
+                    h_flex()
+                        .w_full()
+                        .min_w_0()
+                        .items_center()
+                        .justify_between()
+                        .gap_2()
+                        .child(
+                            div()
+                                .flex_none()
+                                .whitespace_nowrap()
+                                .text_xs()
+                                .font_semibold()
+                                .child("Shell"),
+                        )
+                        .child(
+                            h_flex()
+                                .flex_none()
+                                .items_center()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .rounded(px(999.0))
+                                        .border_1()
+                                        .border_color(hunk_opacity(status_color, is_dark, 0.84, 0.72))
+                                        .bg(hunk_opacity(status_color, is_dark, 0.12, 0.08))
+                                        .px_1p5()
+                                        .py_0p5()
+                                        .text_xs()
+                                        .text_color(status_color)
+                                        .child(status_text),
+                                )
+                                .child(
+                                    Button::new(copy_button_id)
+                                        .ghost()
+                                        .compact()
+                                        .rounded(px(7.0))
+                                        .icon(Icon::new(IconName::Copy).size(px(12.0)))
+                                        .text_color(cx.theme().muted_foreground)
+                                        .min_w(px(22.0))
+                                        .h(px(20.0))
+                                        .tooltip("Copy command transcript")
+                                        .on_click({
+                                            let view = view.clone();
+                                            move |_, window, cx| {
+                                                view.update(cx, |this, cx| {
+                                                    this.ai_copy_text_action(
+                                                        full_text.clone(),
+                                                        "Copied command transcript.",
+                                                        window,
+                                                        cx,
+                                                    );
+                                                });
+                                            }
+                                        }),
+                                ),
+                        ),
+                )
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .rounded(px(8.0))
+                        .border_1()
+                        .border_color(hunk_opacity(cx.theme().border, is_dark, 0.82, 0.66))
+                        .bg(hunk_blend(
+                            cx.theme().background,
+                            cx.theme().secondary,
+                            is_dark,
+                            0.38,
+                            0.24,
+                        ))
+                        .p_2()
+                        .child(
+                            div()
+                                .w_full()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .overflow_x_scrollbar()
+                                .overflow_y_hidden()
+                                .child(
+                                    div()
+                                        .w(transcript_width)
+                                        .min_w(transcript_width)
+                                        .text_xs()
+                                        .font_family(cx.theme().mono_font_family.clone())
+                                        .text_color(cx.theme().foreground)
+                                        .child(ai_render_selectable_styled_text(
+                                            this,
+                                            view,
+                                            row_id,
+                                            terminal_surface_id,
+                                            selection_surfaces,
+                                            ai_text_link_ranges(Vec::new()),
+                                            StyledText::new(preview_text),
+                                            is_dark,
+                                            cx,
+                                        )),
+                                ),
+                        ),
+                ),
+        )
         .into_any_element()
 }
 

@@ -33,7 +33,12 @@ fn render_ai_tool_item_row(
         );
     }
 
-    let content_text = item.content.trim();
+    let raw_content_text = item.content.as_str();
+    let content_text = if item.kind == "commandExecution" {
+        raw_content_text.trim_end()
+    } else {
+        raw_content_text.trim()
+    };
     let title = ai_tool_header_title(item);
     let compact_summary = ai_tool_compact_summary(item, content_text);
     let summary_uses_mono = item.kind == "commandExecution";
@@ -141,7 +146,7 @@ fn render_ai_tool_item_row(
                 view.clone(),
                 row_id,
                 details,
-                content_text,
+                raw_content_text.trim_end(),
                 is_dark,
                 cx,
             )
