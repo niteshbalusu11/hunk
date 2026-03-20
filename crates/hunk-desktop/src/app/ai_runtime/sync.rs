@@ -128,6 +128,7 @@ impl AiWorkerRuntime {
         self.refresh_models()?;
         self.refresh_experimental_features()?;
         self.refresh_collaboration_modes()?;
+        self.refresh_skills()?;
         Ok(())
     }
 
@@ -187,6 +188,31 @@ impl AiWorkerRuntime {
             }
             Err(CodexIntegrationError::JsonRpcServerError { .. }) => {
                 self.collaboration_modes.clear();
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn refresh_skills(&mut self) -> Result<(), CodexIntegrationError> {
+        match self
+            .service
+            .list_skills(&mut self.session, false, self.request_timeout)
+        {
+            Ok(response) => {
+                let workspace_cwd = std::path::PathBuf::from(self.workspace_key.as_str());
+                self.skills = response
+                    .data
+                    .iter()
+                    .find(|entry| entry.cwd == workspace_cwd)
+                    .or_else(|| response.data.first())
+                    .cloned()
+                    .map(|entry| entry.skills)
+                    .unwrap_or_default();
+                Ok(())
+            }
+            Err(CodexIntegrationError::JsonRpcServerError { .. }) => {
+                self.skills.clear();
                 Ok(())
             }
             Err(error) => Err(error),
@@ -612,6 +638,7 @@ impl AiWorkerRuntime {
                 models: self.models.clone(),
                 experimental_features: self.experimental_features.clone(),
                 collaboration_modes: self.collaboration_modes.clone(),
+                skills: self.skills.clone(),
                 include_hidden_models: self.include_hidden_models,
                 mad_max_mode: self.mad_max_mode,
             })),

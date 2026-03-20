@@ -34,6 +34,7 @@ impl DiffViewer {
             models,
             experimental_features,
             collaboration_modes,
+            skills,
             include_hidden_models,
             mad_max_mode,
         } = snapshot;
@@ -68,6 +69,7 @@ impl DiffViewer {
         self.ai_models = models;
         self.ai_experimental_features = experimental_features;
         self.ai_collaboration_modes = collaboration_modes;
+        self.ai_skills = skills;
         self.ai_include_hidden_models = include_hidden_models;
         self.ai_mad_max_mode = mad_max_mode;
         self.ai_thread_title_refresh_state_by_thread
@@ -194,6 +196,7 @@ impl DiffViewer {
         }
         self.maybe_refresh_selected_thread_metadata(cx);
         self.sync_ai_session_selection_from_state();
+        self.sync_ai_composer_completion_menus(cx);
     }
 
     fn maybe_refresh_selected_thread_metadata(&mut self, cx: &mut Context<Self>) {
@@ -725,6 +728,7 @@ impl DiffViewer {
             models: current_state.models.clone(),
             experimental_features: current_state.experimental_features.clone(),
             collaboration_modes: current_state.collaboration_modes.clone(),
+            skills: Vec::new(),
             include_hidden_models: current_state.include_hidden_models,
             selected_model: current_state.selected_model.clone(),
             selected_effort: current_state.selected_effort.clone(),
