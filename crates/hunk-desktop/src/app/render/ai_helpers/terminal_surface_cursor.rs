@@ -23,15 +23,28 @@ struct AiTerminalCursorRenderContext {
 fn ai_terminal_cell_style(
     cell: &AiTerminalRenderCell,
     column: usize,
+    link_active: bool,
     render: AiTerminalCursorRenderContext,
     cx: &App,
 ) -> (AiTerminalCellStyle, Option<AiTerminalCursorOverlay>) {
+    let link_color = cx.theme().primary;
     let mut style = AiTerminalCellStyle {
         color: ai_terminal_snapshot_color(cell.fg, render.is_dark, cx),
         background: ai_terminal_snapshot_color(cell.bg, render.is_dark, cx),
         underline: None,
     };
     let mut overlay = None;
+
+    if link_active {
+        if style.color == render.default_foreground {
+            style.color = link_color;
+        }
+        style.underline = Some(gpui::UnderlineStyle {
+            thickness: px(1.0),
+            color: Some(link_color),
+            wavy: false,
+        });
+    }
 
     if cell.cursor {
         let cursor_color = ai_terminal_snapshot_color(

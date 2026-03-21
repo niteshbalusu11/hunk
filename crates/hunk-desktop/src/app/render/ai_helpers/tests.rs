@@ -20,6 +20,7 @@ mod ai_helper_tests {
     use super::ai_rate_limit_summary;
     use super::ai_terminal_selection_surfaces;
     use super::ai_terminal_selection_columns;
+    use super::ai_terminal_link_ranges;
     use super::ai_turn_diff_summary;
     use super::ai_tool_header_label;
     use super::ai_timeline_item_is_renderable;
@@ -244,6 +245,7 @@ mod ai_helper_tests {
                     surface_id: "surface-a".into(),
                     text: "hello".into(),
                     column_byte_offsets: vec![0, 1, 2, 3, 4, 5].into(),
+                    link_ranges: Vec::new().into(),
                     background_rects: Vec::<super::AiTerminalBackgroundRect>::new().into(),
                     cursor_overlays: Vec::<super::AiTerminalCursorOverlay>::new().into(),
                     text_runs: Vec::<gpui::TextRun>::new().into(),
@@ -253,6 +255,7 @@ mod ai_helper_tests {
                     surface_id: "surface-b".into(),
                     text: "world".into(),
                     column_byte_offsets: vec![0, 1, 2, 3, 4, 5].into(),
+                    link_ranges: Vec::new().into(),
                     background_rects: Vec::<super::AiTerminalBackgroundRect>::new().into(),
                     cursor_overlays: Vec::<super::AiTerminalCursorOverlay>::new().into(),
                     text_runs: Vec::<gpui::TextRun>::new().into(),
@@ -305,6 +308,18 @@ mod ai_helper_tests {
             Some((0, 3))
         );
         assert_eq!(ai_terminal_selection_columns(&[0, 1, 5, 6], &(5..5)), None);
+    }
+
+    #[test]
+    fn terminal_link_ranges_detect_urls_and_file_style_paths() {
+        let ranges = ai_terminal_link_ranges(
+            "open https://example.com and src/main.rs:12 plus /tmp/log.txt.",
+        );
+
+        assert_eq!(ranges.len(), 3);
+        assert_eq!(ranges[0].raw_target, "https://example.com");
+        assert_eq!(ranges[1].raw_target, "src/main.rs:12");
+        assert_eq!(ranges[2].raw_target, "/tmp/log.txt");
     }
 
     #[test]

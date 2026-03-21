@@ -102,11 +102,12 @@ Implemented today:
 - Each AI thread now owns its own terminal session state instead of sharing a single terminal bucket per workspace.
 - Shell exit now tears down the old PTY runtime immediately, so reopening the terminal always starts a fresh shell instead of getting stuck on a stale "Starting shell..." state.
 - Hidden terminal runtimes and saved per-thread terminal state are now pruned when archived or deleted threads disappear from the visible or background AI workspace model.
+- The VT surface now detects URL and file-style terminal spans, underlines them, shows a link cursor on hover, and reuses the existing Hunk link-opening path on click.
 - Workspace-wide validation already passes for the current slice.
 
 Not implemented yet:
 
-- terminal hyperlink detection and any remaining cursor blink polish
+- any remaining cursor blink polish
 - persisted terminal state across full app relaunch
 
 ## Current Integration Points
