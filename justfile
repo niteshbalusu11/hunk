@@ -35,7 +35,7 @@ flatpak-build:
     ./scripts/build_flatpak.sh
 
 flatpak-build-clean:
-    HUNK_FLATPAK_FORCE_CLEAN=1 HUNK_FLATPAK_PREPARE_VENDOR=1 ./scripts/build_flatpak.sh
+    HUNK_FLATPAK_FORCE_CLEAN=1 HUNK_FLATPAK_PREPARE_VENDOR=1 HUNK_FLATPAK_CLEAN_STATE=1 ./scripts/build_flatpak.sh
 
 flatpak-run:
     ./scripts/run_flatpak.sh

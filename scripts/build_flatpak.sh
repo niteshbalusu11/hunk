@@ -7,8 +7,10 @@ MANIFEST_PATH="$ROOT_DIR/flatpak/$APP_ID.yaml"
 TARGET_DIR="$("$ROOT_DIR/scripts/resolve_cargo_target_dir.sh" "$ROOT_DIR")"
 BUILD_DIR="$TARGET_DIR/flatpak/build"
 REPO_DIR="$TARGET_DIR/flatpak/repo"
-FORCE_CLEAN="${HUNK_FLATPAK_FORCE_CLEAN:-0}"
+STATE_DIR="$TARGET_DIR/flatpak/state"
+FORCE_CLEAN="${HUNK_FLATPAK_FORCE_CLEAN:-1}"
 PREPARE_VENDOR="${HUNK_FLATPAK_PREPARE_VENDOR:-0}"
+CLEAN_STATE="${HUNK_FLATPAK_CLEAN_STATE:-0}"
 
 if ! command -v flatpak-builder >/dev/null 2>&1; then
   echo "error: flatpak-builder is required" >&2
@@ -33,9 +35,15 @@ if [[ ! -f "$ROOT_DIR/flatpak/cargo-config.toml" ]]; then
   exit 1
 fi
 
-mkdir -p "$BUILD_DIR" "$REPO_DIR"
+if [[ "$CLEAN_STATE" == "1" ]]; then
+  rm -rf "$STATE_DIR"
+fi
+
+mkdir -p "$BUILD_DIR" "$REPO_DIR" "$STATE_DIR"
 
 builder_args=(
+  --state-dir="$STATE_DIR"
+  --keep-build-dirs
   --repo="$REPO_DIR"
   --install-deps-from=flathub
 )

@@ -19,7 +19,7 @@ build-options:
     CARGO_HOME: /run/build/hunk-flatpak/cargo
     CARGO_INCREMENTAL: "0"
     CARGO_NET_OFFLINE: "true"
-    CARGO_TARGET_DIR: /run/build/hunk-flatpak/target
+    CARGO_TARGET_DIR: /run/build/hunk/target
     RUSTUP_HOME: /usr/lib/sdk/rust-stable
 modules:
   - name: hunk
