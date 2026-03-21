@@ -656,7 +656,7 @@ impl DiffViewer {
                 this.sync_ai_visible_terminal_input_to_state(cx);
             }
             if should_send_ai_prompt_from_input_event(event) {
-                this.ai_run_terminal_command_action(cx);
+                this.ai_submit_terminal_input_action(cx);
             }
         })
         .detach();

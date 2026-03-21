@@ -127,6 +127,7 @@ enum AiTerminalSessionStatus {
 struct AiTerminalSessionState {
     cwd: Option<PathBuf>,
     transcript: String,
+    screen: Option<Arc<TerminalScreenSnapshot>>,
     last_command: Option<String>,
     status: AiTerminalSessionStatus,
     exit_code: Option<i32>,

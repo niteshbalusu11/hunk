@@ -5,6 +5,16 @@ const AI_TERMINAL_MAX_HEIGHT_PX: f32 = 420.0;
 const AI_TERMINAL_HEIGHT_STEP_PX: f32 = 56.0;
 
 impl DiffViewer {
+    fn focus_ai_terminal_input(&mut self, cx: &mut Context<Self>) {
+        let input_state = self.ai_terminal_input_state.clone();
+        if let Err(error) = Self::update_any_window(cx, move |window, cx| {
+            let focus_handle = gpui::Focusable::focus_handle(input_state.read(cx), cx);
+            focus_handle.focus(window, cx);
+        }) {
+            error!("failed to focus AI terminal input: {error:#}");
+        }
+    }
+
     fn sync_ai_visible_terminal_input_to_state(&mut self, cx: &Context<Self>) {
         self.ai_terminal_input_draft = self.ai_terminal_input_state.read(cx).value().to_string();
     }
@@ -54,8 +64,31 @@ impl DiffViewer {
         cx.notify();
     }
 
+    fn toggle_ai_terminal_drawer(&mut self, cx: &mut Context<Self>) {
+        let next_open = !self.ai_terminal_open;
+        self.ai_terminal_set_open(next_open, cx);
+        if next_open {
+            self.focus_ai_terminal_input(cx);
+        }
+    }
+
+    pub(super) fn ai_toggle_terminal_drawer_shortcut_action(
+        &mut self,
+        _: &AiToggleTerminalDrawer,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.workspace_view_mode != WorkspaceViewMode::Ai {
+            self.activate_ai_workspace(window, cx);
+            self.ai_terminal_set_open(true, cx);
+            self.focus_ai_terminal_input(cx);
+            return;
+        }
+        self.toggle_ai_terminal_drawer(cx);
+    }
+
     pub(super) fn ai_toggle_terminal_drawer_action(&mut self, cx: &mut Context<Self>) {
-        self.ai_terminal_set_open(!self.ai_terminal_open, cx);
+        self.toggle_ai_terminal_drawer(cx);
     }
 
     pub(super) fn ai_increase_terminal_height_action(&mut self, cx: &mut Context<Self>) {
@@ -72,6 +105,9 @@ impl DiffViewer {
 
     pub(super) fn ai_clear_terminal_session_action(&mut self, cx: &mut Context<Self>) {
         self.ai_terminal_session.transcript.clear();
+        if self.ai_terminal_runtime.is_none() {
+            self.ai_terminal_session.screen = None;
+        }
         self.ai_terminal_session.status_message = None;
         self.ai_terminal_session.exit_code = None;
         if self.ai_terminal_runtime.is_none() {
@@ -116,6 +152,42 @@ impl DiffViewer {
         self.ai_run_terminal_command_action(cx);
     }
 
+    pub(super) fn ai_submit_terminal_input_action(&mut self, cx: &mut Context<Self>) {
+        if self.ai_terminal_runtime.is_some() {
+            self.ai_send_terminal_input_action(cx);
+        } else {
+            self.ai_run_terminal_command_action(cx);
+        }
+    }
+
+    pub(super) fn ai_send_terminal_input_action(&mut self, cx: &mut Context<Self>) {
+        self.sync_ai_visible_terminal_input_to_state(cx);
+        let Some(runtime) = self.ai_terminal_runtime.as_ref() else {
+            self.ai_run_terminal_command_action(cx);
+            return;
+        };
+
+        let mut input = self.ai_terminal_input_draft.clone();
+        if input.is_empty() {
+            return;
+        }
+        if !input.ends_with('\n') {
+            input.push('\n');
+        }
+
+        if let Err(error) = runtime.handle.write_input(input.as_bytes()) {
+            self.ai_terminal_session.status_message = Some(error.to_string());
+            self.ai_terminal_session.status = AiTerminalSessionStatus::Failed;
+            cx.notify();
+            return;
+        }
+
+        self.ai_terminal_session.status_message = Some("Sent input to terminal.".to_string());
+        self.ai_terminal_input_draft.clear();
+        self.restore_ai_visible_terminal_input(cx);
+        cx.notify();
+    }
+
     pub(super) fn ai_run_terminal_command_action(&mut self, cx: &mut Context<Self>) {
         self.sync_ai_visible_terminal_input_to_state(cx);
         let command = self.ai_terminal_input_draft.trim().to_string();
@@ -146,6 +218,7 @@ impl DiffViewer {
                 self.ai_terminal_session.last_command = Some(command.clone());
                 self.ai_terminal_session.status = AiTerminalSessionStatus::Running;
                 self.ai_terminal_session.exit_code = None;
+                self.ai_terminal_session.screen = None;
                 self.ai_terminal_session.status_message = Some("Running command...".to_string());
                 append_ai_terminal_transcript(
                     &mut self.ai_terminal_session.transcript,
@@ -165,6 +238,7 @@ impl DiffViewer {
                 self.ai_terminal_session.cwd = Some(cwd);
                 self.ai_terminal_session.status = AiTerminalSessionStatus::Failed;
                 self.ai_terminal_session.exit_code = None;
+                self.ai_terminal_session.screen = None;
                 self.ai_terminal_session.status_message =
                     Some("Failed to start terminal command.".to_string());
                 append_ai_terminal_transcript(
@@ -222,11 +296,14 @@ impl DiffViewer {
     fn apply_ai_terminal_event(&mut self, event: TerminalEvent) {
         match event {
             TerminalEvent::Output(output) => {
-                let sanitized = sanitize_ai_terminal_output(output.as_str());
+                let sanitized = sanitize_ai_terminal_output(output.as_slice());
                 if sanitized.is_empty() {
                     return;
                 }
                 append_ai_terminal_transcript(&mut self.ai_terminal_session.transcript, sanitized);
+            }
+            TerminalEvent::Screen(screen) => {
+                self.ai_terminal_session.screen = Some(screen);
             }
             TerminalEvent::Exit { exit_code } => {
                 let stopped = self.ai_terminal_stop_requested;
@@ -317,8 +394,8 @@ fn drain_ai_terminal_events(
     (events, disconnected)
 }
 
-fn sanitize_ai_terminal_output(output: &str) -> String {
-    let normalized = output.replace("\r\n", "\n").replace('\r', "\n");
+fn sanitize_ai_terminal_output(output: &[u8]) -> String {
+    let normalized = String::from_utf8_lossy(output).replace("\r\n", "\n").replace('\r', "\n");
     strip_ansi_sequences(normalized.as_str())
 }
 
@@ -391,7 +468,7 @@ mod terminal_tests {
 
     #[test]
     fn normalizes_carriage_returns() {
-        let value = sanitize_ai_terminal_output("hello\rworld\r\nnext");
+        let value = sanitize_ai_terminal_output(b"hello\rworld\r\nnext");
         assert_eq!(value, "hello\nworld\nnext");
     }
 }

@@ -226,7 +226,7 @@ impl DiffViewer {
                                                 .bordered(true)
                                                 .focus_bordered(true)
                                                 .w_full()
-                                                .disabled(!state.can_run || state.running),
+                                                .disabled(!state.accepts_input),
                                         ),
                                 )
                                 .child({
@@ -235,11 +235,11 @@ impl DiffViewer {
                                         .compact()
                                         .outline()
                                         .rounded(px(8.0))
-                                        .label("Run")
-                                        .disabled(!state.can_run || state.running)
+                                        .label(state.submit_label)
+                                        .disabled(!state.accepts_input)
                                         .on_click(move |_, _, cx| {
                                             view.update(cx, |this, cx| {
-                                                this.ai_run_terminal_command_action(cx);
+                                                this.ai_submit_terminal_input_action(cx);
                                             });
                                         })
                                 })

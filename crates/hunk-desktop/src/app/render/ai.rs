@@ -4,7 +4,7 @@ const AI_COMPOSER_SURFACE_MAX_WIDTH: f32 = 740.0;
 
 struct AiTerminalPanelState {
     open: bool,
-    can_run: bool,
+    accepts_input: bool,
     cwd_label: String,
     status_label: &'static str,
     status_message: Option<String>,
@@ -13,6 +13,7 @@ struct AiTerminalPanelState {
     has_last_command: bool,
     transcript: String,
     height_px: f32,
+    submit_label: &'static str,
 }
 
 impl DiffViewer {
@@ -178,7 +179,7 @@ impl DiffViewer {
         };
         let terminal_state = AiTerminalPanelState {
             open: self.ai_terminal_open,
-            can_run: self.current_ai_terminal_can_run(),
+            accepts_input: self.current_ai_terminal_can_run() || self.ai_terminal_runtime.is_some(),
             cwd_label: self
                 .ai_terminal_session
                 .cwd
@@ -193,6 +194,11 @@ impl DiffViewer {
             has_last_command: self.ai_terminal_session.last_command.is_some(),
             transcript: self.ai_terminal_session.transcript.clone(),
             height_px: self.ai_terminal_height_px,
+            submit_label: if self.ai_terminal_runtime.is_some() {
+                "Send"
+            } else {
+                "Run"
+            },
         };
 
         let composer_panel =

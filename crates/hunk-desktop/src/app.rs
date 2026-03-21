@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -51,7 +51,8 @@ use hunk_git::history::{
 };
 use hunk_git::worktree::WorkspaceTargetSummary;
 use hunk_terminal::{
-    TerminalEvent, TerminalSessionHandle, TerminalSpawnRequest, spawn_terminal_session,
+    TerminalEvent, TerminalScreenSnapshot, TerminalSessionHandle, TerminalSpawnRequest,
+    spawn_terminal_session,
 };
 
 use ai_composer_completion::{
@@ -177,6 +178,7 @@ actions!(
         SwitchToReviewView,
         SwitchToGitView,
         SwitchToAiView,
+        AiToggleTerminalDrawer,
         AiNewThread,
         AiNewWorktreeThread,
         AiQueuePrompt,
@@ -426,6 +428,12 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
             .switch_to_ai_view
             .iter()
             .map(|shortcut| KeyBinding::new(shortcut.as_str(), SwitchToAiView, None)),
+    );
+    bindings.extend(
+        shortcuts
+            .toggle_ai_terminal_drawer
+            .iter()
+            .map(|shortcut| KeyBinding::new(shortcut.as_str(), AiToggleTerminalDrawer, None)),
     );
     bindings.push(KeyBinding::new("cmd-n", AiNewThread, Some("DiffViewer")));
     bindings.push(KeyBinding::new("ctrl-n", AiNewThread, Some("DiffViewer")));

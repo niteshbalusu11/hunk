@@ -2,7 +2,7 @@
 
 ## Status
 
-- Proposed
+- In progress
 - Owner: Hunk
 - Last Updated: 2026-03-21
 
@@ -23,7 +23,25 @@ The initial release should not aim to be a full editor-grade terminal emulator. 
 - stop and rerun commands quickly
 - keep the command session visible next to the AI timeline
 
-If the product later needs full interactive terminal behavior for TUIs and shell-native editing flows, Hunk can extend the drawer into a real terminal emulator without throwing away the first phase.
+Hunk now has the first implementation slice:
+
+- a native bottom terminal drawer in the AI workspace
+- a PTY-backed runtime in `crates/hunk-terminal`
+- command run, stop, rerun, clear, and per-workspace drawer state
+- cross-platform bottom-panel toggle shortcut aligned with Zed and VS Code
+  - macOS: `cmd-j`
+  - Linux/Windows: `ctrl-j`
+- live PTY input forwarding for already-running sessions
+- transcript-style rendering with bounded output
+
+That slice is useful, but it is not yet a real VT terminal surface. It does not yet behave like Zed or VS Code for:
+
+- interactive shells
+- TUIs such as `vim`, `less`, `top`, or `git add -p`
+- true ANSI/VT screen state
+- cursor-addressed redraws and alternate-screen behavior
+
+The next phase should move Hunk from `PTY + transcript` to `PTY + VT emulator + cell renderer`.
 
 ## Product Decisions (Locked)
 
@@ -33,6 +51,8 @@ If the product later needs full interactive terminal behavior for TUIs and shell
 4. V1 optimizes for build/test/lint and command reruns, not for full TUI compatibility.
 5. Terminal state is scoped to the AI workspace target and should persist alongside existing AI workspace UI state.
 6. The first implementation should avoid copying large chunks of Zed terminal UI code. Reuse architecture and narrow upstream pieces where they are genuinely worth the integration cost.
+7. The next implementation target is a real VT-style terminal surface, not more transcript polish.
+8. Since Hunk is now GPL-compatible for Zed-derived work, selective reuse of Zed terminal code is allowed where it materially reduces risk, but Hunk should still prefer small, understandable integrations over wholesale import.
 
 ## Goals
 
@@ -51,6 +71,28 @@ If the product later needs full interactive terminal behavior for TUIs and shell
 - Shell integration features such as prompt marks or command decorations.
 - Replacing the existing AI timeline command execution cards.
 - Global terminal support outside the AI workspace.
+
+## Current Status
+
+Implemented today:
+
+- `crates/hunk-terminal` exists and owns PTY spawning, process lifecycle, resize hooks, and output streaming.
+- The AI workspace has a native bottom terminal drawer instead of a floating card.
+- Terminal state is captured and restored with AI workspace state.
+- The drawer supports run, stop, rerun, clear, and height adjustment.
+- The drawer supports live PTY input forwarding for running sessions.
+- The drawer can be toggled with `cmd-j` on macOS and `ctrl-j` on Linux/Windows.
+- Output is bounded and rendered in transcript form.
+- Workspace-wide validation already passes for the current slice.
+
+Not implemented yet:
+
+- GPUI cell-grid rendering
+- terminal viewport scrolling over VT state
+- terminal cursor, selection, hyperlink detection, and copy semantics
+- alternate screen and TUI compatibility
+- command-row affordances from the AI timeline
+- persisted terminal state across full app relaunch
 
 ## Current Integration Points
 
@@ -102,31 +144,32 @@ Non-responsibilities in V1:
 ### Recommended Stack
 
 - PTY backend: `portable-pty`
-- Optional VT engine if needed early: `wezterm-term`
+- VT engine for the next phase: `alacritty_terminal`
 
 Why this shape:
 
 - `portable-pty` gives Hunk a clean cross-platform process and resize interface.
-- A PTY-backed drawer is enough for the first workflow target.
-- Hunk should avoid prematurely taking on the complexity of full VT rendering until the product proves it is needed.
+- A PTY-backed drawer was enough for the first workflow target.
+- Zed already proves the `terminal runtime + terminal view` split with `alacritty_terminal`.
+- The next step should now absorb the complexity of full VT rendering rather than polishing the transcript path further.
 
-### V1 Display Model
+### Current Display Model
 
-The first release should support two display tiers:
+The current implementation is:
 
-1. Plain streamed transcript mode
-2. Minimal ANSI handling only if needed for legibility
+1. PTY-backed transcript mode
+2. minimal ANSI stripping for readability
 
-That keeps the rendering surface simple and lets Hunk validate the workflow before committing to the engineering cost of a full emulator.
+This was the correct first slice, but it is not the final architecture.
 
-### Full VT Upgrade Path
+### VT Upgrade Target
 
-If transcript mode proves insufficient, phase 2 can add:
+The target architecture for the next phase is:
 
-- `wezterm-term` or another VT core for escape sequence parsing
-- a cell-grid render surface in GPUI
-- keyboard handling for interactive shell sessions
-- scrollback and selection semantics closer to a real terminal
+1. `portable-pty` for process hosting
+2. `alacritty_terminal` for terminal state and VT parsing
+3. a GPUI terminal surface that renders terminal cells, cursor, and selection from the VT state
+4. keyboard and paste handling that writes directly to the PTY
 
 ## UX Model
 
@@ -188,6 +231,17 @@ Suggested `AiTerminalSessionState` fields:
 
 If app-level persistence is needed across launches, terminal preferences should be persisted through `hunk-domain` the same way other workspace preferences are persisted today.
 
+Current implementation note:
+
+- Hunk currently stores one terminal session state per visible AI workspace, not multiple sessions or tabs.
+- The current `AiTerminalSessionState` is transcript-oriented and will need to evolve into a VT-oriented model with:
+  - terminal size
+  - scrollback buffer
+  - viewport offset
+  - selection state
+  - cursor state
+  - title / mode flags
+
 ## Event Model
 
 `hunk-terminal` should expose a small runtime event stream:
@@ -207,6 +261,15 @@ Desktop actions should remain narrow and explicit:
 - `ai_clear_terminal_session_action`
 - `ai_select_terminal_session_action`
 
+The VT upgrade will need additional actions:
+
+- `ai_terminal_write_input_action`
+- `ai_terminal_paste_action`
+- `ai_terminal_copy_selection_action`
+- `ai_terminal_page_up_action`
+- `ai_terminal_page_down_action`
+- `ai_terminal_scroll_action`
+
 ## Command Routing Rules
 
 - New terminal sessions default to the current AI workspace cwd.
@@ -214,6 +277,11 @@ Desktop actions should remain narrow and explicit:
 - If a new-thread draft is active, terminal defaults should follow the draft workspace target.
 - Switching AI workspaces must not kill hidden terminal sessions unless the user explicitly closes them.
 - Background terminal output should continue flowing while another workspace is visible, following the same high-level rule as hidden AI runtimes.
+
+Current implementation note:
+
+- Hunk does not satisfy this yet. The current implementation stops the running terminal session when the visible AI workspace changes.
+- Keeping background terminal sessions alive should be treated as a follow-up after the VT surface lands or alongside that work if the state model is already being refactored.
 
 ## Relationship To Existing AI Command Execution
 
@@ -373,44 +441,119 @@ Exit criteria:
 
 ### Phase 6: Full VT Decision
 
-This phase is conditional.
+This phase is no longer conditional.
 
-Decision question:
+Decision:
 
-- does the product actually need a real terminal emulator, or is the command drawer enough?
+- Hunk should implement a real VT-style terminal surface.
 
-If yes:
+### Phase 6: VT Runtime Model
 
-- add VT emulation core
-- replace transcript rendering with cell-based terminal rendering
-- add richer input and selection behavior
+Files:
 
-If no:
+- `crates/hunk-terminal/src/lib.rs`
+- new `crates/hunk-terminal/src/vt.rs`
+- new `crates/hunk-terminal/src/session.rs`
 
-- keep the simpler drawer and invest in workflow polish instead
+Changes:
+
+- integrate `alacritty_terminal`
+- replace transcript-only runtime state with a VT session model
+- track rows, cols, cursor state, alternate-screen mode, and scrollback
+- expose structured screen-dirty events instead of only raw text chunks
+- keep PTY input writing and VT parsing behind the same `hunk-terminal` crate boundary
+
+Exit criteria:
+
+- runtime can accept PTY output and maintain a correct VT screen model for shell redraws and cursor movement
+
+### Phase 7: GPUI Terminal Surface
+
+Files:
+
+- `crates/hunk-desktop/src/app/render/ai_helpers/terminal_panel.rs`
+- new `crates/hunk-desktop/src/app/render/ai_helpers/terminal_surface.rs`
+
+Changes:
+
+- replace transcript rendering with a cell-grid render surface
+- render glyphs, colors, cursor, and selection from VT state
+- support viewport scrolling over scrollback
+- keep the terminal as a real bottom pane in the AI layout
+- preserve the `cmd-j` / `ctrl-j` bottom-panel behavior while focus moves into the terminal surface
+
+Exit criteria:
+
+- shell prompts redraw correctly and line editing looks stable
+
+### Phase 8: Input, Clipboard, And Focus
+
+Files:
+
+- `crates/hunk-desktop/src/app/controller/ai/terminal.rs`
+- `crates/hunk-desktop/src/app/render/ai_helpers/terminal_panel.rs`
+
+Changes:
+
+- write keyboard input directly to the PTY
+- support paste and copy
+- route focus cleanly between timeline, composer, and terminal
+- support resize propagation from the drawer height and terminal surface width
+
+Exit criteria:
+
+- user can interact with a live shell inside Hunk without falling back to the transcript command box model
+
+### Phase 9: TUI Compatibility And Polish
+
+Files:
+
+- `crates/hunk-terminal/*`
+- `crates/hunk-desktop/src/app/controller/ai/*`
+- `crates/hunk-desktop/src/app/render/ai_helpers/*`
+
+Changes:
+
+- verify alternate-screen handling
+- add terminal search and selection polish
+- add timeline affordances such as `Run Again In Terminal`
+- optionally add session persistence or multi-session support
+
+Exit criteria:
+
+- common TUIs and shell workflows behave predictably enough that the terminal feels editor-grade
 
 ## Implementation Checklist
 
 ### Foundation
 
-- [ ] Create `crates/hunk-terminal`.
-- [ ] Define terminal session runtime API.
-- [ ] Define terminal event types.
-- [ ] Add bounded buffer policy.
+- [x] Create `crates/hunk-terminal`.
+- [x] Define terminal session runtime API.
+- [x] Define terminal event types.
+- [x] Add bounded buffer policy.
+- [x] Add VT engine integration.
+- [x] Replace transcript-only session state with VT state.
 
 ### AI State
 
-- [ ] Extend `AiWorkspaceState` with terminal fields.
-- [ ] Capture and restore terminal state per workspace.
-- [ ] Add helpers for active terminal cwd resolution.
+- [x] Extend `AiWorkspaceState` with terminal fields.
+- [x] Capture and restore terminal state per workspace.
+- [x] Add helpers for active terminal cwd resolution.
+- [ ] Keep hidden terminal sessions alive across AI workspace switches.
+- [ ] Persist terminal preferences across full app relaunch if desired.
 
 ### UI
 
-- [ ] Add drawer open/close affordance.
-- [ ] Add terminal toolbar and command entry.
-- [ ] Add transcript output rendering.
-- [ ] Add stop, rerun, and clear actions.
-- [ ] Add drawer resize handling.
+- [x] Add drawer open/close affordance.
+- [x] Add terminal toolbar and command entry.
+- [x] Add transcript output rendering.
+- [x] Add stop, rerun, and clear actions.
+- [x] Add drawer height controls.
+- [ ] Replace transcript rendering with a VT cell surface.
+- [x] Add terminal keyboard input routing into the live PTY session.
+- [ ] Replace command-line style input routing with terminal-surface keystroke routing.
+- [ ] Add terminal text selection and copy behavior.
+- [ ] Add proper terminal scrolling and viewport behavior.
 
 ### AI Integration
 
@@ -422,24 +565,26 @@ If no:
 
 - [ ] Add targeted tests for terminal workspace state transitions.
 - [ ] Add targeted tests for output truncation and session lifecycle.
-- [ ] Run final workspace verification once after implementation:
-- [ ] `cargo build --workspace`
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings`
-- [ ] `cargo test --workspace`
+- [x] Run final workspace verification once for the current transcript slice:
+- [x] `cargo build --workspace`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `cargo test --workspace`
+- [ ] Re-run final workspace verification after the VT surface lands.
 
 ## Recommended Order
 
-1. Land runtime foundation first.
-2. Add workspace state integration second.
-3. Add the drawer UI third.
-4. Add timeline affordances fourth.
-5. Decide on full VT emulation only after the drawer is proven useful.
+1. Keep the current PTY drawer as the outer shell.
+2. Land VT runtime integration inside `hunk-terminal`.
+3. Replace transcript rendering with a GPUI terminal surface.
+4. Add keyboard, paste, selection, and scrollback behavior.
+5. Add timeline affordances and optional multi-session polish afterward.
 
 ## Expected Public Interface Changes
 
 - New `hunk-terminal` crate with a small session runtime API.
 - New terminal-related controller actions in `hunk-desktop`.
 - New AI workspace state fields for terminal visibility and sessions.
+- Later: a VT-backed terminal model and GPUI cell renderer.
 
 ## Open Questions
 
