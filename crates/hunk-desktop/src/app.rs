@@ -16,8 +16,8 @@ use gpui::{
     MenuItem, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, OsAction,
     ParentElement as _, PathPromptOptions, Pixels, Point, Render, ScrollHandle, ScrollWheelEvent,
     SharedString, StatefulInteractiveElement as _, Styled as _, SystemMenuType, Task,
-    TitlebarOptions, Window, WindowOptions, actions, anchored, canvas, deferred, div, list, point,
-    prelude::FluentBuilder as _, px,
+    TitlebarOptions, Window, WindowDecorations, WindowOptions, actions, anchored, canvas,
+    deferred, div, list, point, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     ActiveTheme as _, Colorize as _, GlobalState, Root, RopeExt, StyledExt as _, Theme, ThemeMode,
@@ -757,6 +757,11 @@ fn open_main_window(cx: &mut App) {
             title: Some("Hunk".into()),
             ..Default::default()
         }),
+        window_decorations: if cfg!(target_os = "linux") {
+            Some(WindowDecorations::Client)
+        } else {
+            None
+        },
         ..Default::default()
     };
 
