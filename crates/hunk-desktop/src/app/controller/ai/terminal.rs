@@ -221,7 +221,9 @@ impl DiffViewer {
             return self.ai_copy_selected_text(cx);
         }
 
-        if let Some(scroll) = ai_terminal_viewport_scroll_for_keystroke(keystroke) {
+        let terminal_mode = self.ai_terminal_session.screen.as_ref().map(|screen| screen.mode);
+
+        if let Some(scroll) = ai_terminal_viewport_scroll_for_keystroke(keystroke, terminal_mode) {
             return self.ai_scroll_terminal_viewport(scroll, cx);
         }
 
@@ -236,7 +238,7 @@ impl DiffViewer {
             return false;
         }
 
-        let Some(bytes) = ai_terminal_input_bytes_for_keystroke(keystroke) else {
+        let Some(bytes) = ai_terminal_input_bytes_for_keystroke(keystroke, terminal_mode) else {
             return false;
         };
         self.ai_write_terminal_bytes(bytes.as_slice(), cx)
@@ -656,7 +658,14 @@ fn ai_terminal_paste_bytes(text: &str, bracketed: bool) -> Vec<u8> {
     }
 }
 
-fn ai_terminal_viewport_scroll_for_keystroke(keystroke: &gpui::Keystroke) -> Option<TerminalScroll> {
+fn ai_terminal_viewport_scroll_for_keystroke(
+    keystroke: &gpui::Keystroke,
+    mode: Option<hunk_terminal::TerminalModeSnapshot>,
+) -> Option<TerminalScroll> {
+    if mode.is_some_and(|mode| mode.alt_screen) {
+        return None;
+    }
+
     if !keystroke.modifiers.shift
         || keystroke.modifiers.alt
         || keystroke.modifiers.control
@@ -696,10 +705,15 @@ fn ai_terminal_uses_copy_shortcut(keystroke: &gpui::Keystroke) -> bool {
     }
 }
 
-fn ai_terminal_input_bytes_for_keystroke(keystroke: &gpui::Keystroke) -> Option<Vec<u8>> {
+fn ai_terminal_input_bytes_for_keystroke(
+    keystroke: &gpui::Keystroke,
+    mode: Option<hunk_terminal::TerminalModeSnapshot>,
+) -> Option<Vec<u8>> {
     if keystroke.modifiers.platform || keystroke.modifiers.function {
         return None;
     }
+
+    let mode = mode.unwrap_or_default();
 
     match keystroke.key.as_str() {
         "enter" => return Some(vec![b'\r']),
@@ -712,6 +726,80 @@ fn ai_terminal_input_bytes_for_keystroke(keystroke: &gpui::Keystroke) -> Option<
         }
         "backspace" => return Some(vec![0x7f]),
         "escape" => return Some(vec![0x1b]),
+        "home"
+            if keystroke.modifiers.shift
+                && !keystroke.modifiers.control
+                && !keystroke.modifiers.alt
+                && mode.alt_screen =>
+        {
+            return Some(b"\x1b[1;2H".to_vec())
+        }
+        "end"
+            if keystroke.modifiers.shift
+                && !keystroke.modifiers.control
+                && !keystroke.modifiers.alt
+                && mode.alt_screen =>
+        {
+            return Some(b"\x1b[1;2F".to_vec())
+        }
+        "pageup"
+            if keystroke.modifiers.shift
+                && !keystroke.modifiers.control
+                && !keystroke.modifiers.alt
+                && mode.alt_screen =>
+        {
+            return Some(b"\x1b[5;2~".to_vec())
+        }
+        "pagedown"
+            if keystroke.modifiers.shift
+                && !keystroke.modifiers.control
+                && !keystroke.modifiers.alt
+                && mode.alt_screen =>
+        {
+            return Some(b"\x1b[6;2~".to_vec())
+        }
+        "up" if !keystroke.modifiers.control && !keystroke.modifiers.alt && !keystroke.modifiers.shift => {
+            return Some(if mode.app_cursor {
+                b"\x1bOA".to_vec()
+            } else {
+                b"\x1b[A".to_vec()
+            })
+        }
+        "down" if !keystroke.modifiers.control && !keystroke.modifiers.alt && !keystroke.modifiers.shift => {
+            return Some(if mode.app_cursor {
+                b"\x1bOB".to_vec()
+            } else {
+                b"\x1b[B".to_vec()
+            })
+        }
+        "right" if !keystroke.modifiers.control && !keystroke.modifiers.alt && !keystroke.modifiers.shift => {
+            return Some(if mode.app_cursor {
+                b"\x1bOC".to_vec()
+            } else {
+                b"\x1b[C".to_vec()
+            })
+        }
+        "left" if !keystroke.modifiers.control && !keystroke.modifiers.alt && !keystroke.modifiers.shift => {
+            return Some(if mode.app_cursor {
+                b"\x1bOD".to_vec()
+            } else {
+                b"\x1b[D".to_vec()
+            })
+        }
+        "home" if !keystroke.modifiers.control && !keystroke.modifiers.alt && !keystroke.modifiers.shift => {
+            return Some(if mode.app_cursor {
+                b"\x1bOH".to_vec()
+            } else {
+                b"\x1b[H".to_vec()
+            })
+        }
+        "end" if !keystroke.modifiers.control && !keystroke.modifiers.alt && !keystroke.modifiers.shift => {
+            return Some(if mode.app_cursor {
+                b"\x1bOF".to_vec()
+            } else {
+                b"\x1b[F".to_vec()
+            })
+        }
         "up" => return Some(b"\x1b[A".to_vec()),
         "down" => return Some(b"\x1b[B".to_vec()),
         "right" => return Some(b"\x1b[C".to_vec()),
@@ -799,7 +887,7 @@ mod terminal_tests {
         strip_ansi_sequences,
     };
     use gpui::Keystroke;
-    use hunk_terminal::TerminalScroll;
+    use hunk_terminal::{TerminalModeSnapshot, TerminalScroll};
 
     #[test]
     fn strips_basic_ansi_sequences() {
@@ -817,13 +905,15 @@ mod terminal_tests {
     fn terminal_keystroke_translation_handles_enter_and_arrows() {
         assert_eq!(
             ai_terminal_input_bytes_for_keystroke(
-                &Keystroke::parse("enter").expect("valid enter keystroke")
+                &Keystroke::parse("enter").expect("valid enter keystroke"),
+                None,
             ),
             Some(vec![b'\r'])
         );
         assert_eq!(
             ai_terminal_input_bytes_for_keystroke(
-                &Keystroke::parse("up").expect("valid up keystroke")
+                &Keystroke::parse("up").expect("valid up keystroke"),
+                None,
             ),
             Some(b"\x1b[A".to_vec())
         );
@@ -833,15 +923,63 @@ mod terminal_tests {
     fn terminal_keystroke_translation_maps_control_shortcuts() {
         assert_eq!(
             ai_terminal_input_bytes_for_keystroke(
-                &Keystroke::parse("ctrl-c").expect("valid ctrl-c keystroke")
+                &Keystroke::parse("ctrl-c").expect("valid ctrl-c keystroke"),
+                None,
             ),
             Some(vec![0x03])
         );
         assert_eq!(
             ai_terminal_input_bytes_for_keystroke(
-                &Keystroke::parse("ctrl-space").expect("valid ctrl-space keystroke")
+                &Keystroke::parse("ctrl-space").expect("valid ctrl-space keystroke"),
+                None,
             ),
             Some(vec![0x00])
+        );
+    }
+
+    #[test]
+    fn terminal_keystroke_translation_respects_app_cursor_mode() {
+        let mode = TerminalModeSnapshot {
+            app_cursor: true,
+            ..TerminalModeSnapshot::default()
+        };
+
+        assert_eq!(
+            ai_terminal_input_bytes_for_keystroke(
+                &Keystroke::parse("up").expect("valid up keystroke"),
+                Some(mode),
+            ),
+            Some(b"\x1bOA".to_vec())
+        );
+        assert_eq!(
+            ai_terminal_input_bytes_for_keystroke(
+                &Keystroke::parse("home").expect("valid home keystroke"),
+                Some(mode),
+            ),
+            Some(b"\x1bOH".to_vec())
+        );
+    }
+
+    #[test]
+    fn terminal_keystroke_translation_preserves_alt_screen_navigation_input() {
+        let mode = TerminalModeSnapshot {
+            alt_screen: true,
+            ..TerminalModeSnapshot::default()
+        };
+
+        assert_eq!(
+            ai_terminal_input_bytes_for_keystroke(
+                &Keystroke::parse("shift-pageup").expect("valid shift-pageup keystroke"),
+                Some(mode),
+            ),
+            Some(b"\x1b[5;2~".to_vec())
+        );
+        assert_eq!(
+            ai_terminal_input_bytes_for_keystroke(
+                &Keystroke::parse("shift-end").expect("valid shift-end keystroke"),
+                Some(mode),
+            ),
+            Some(b"\x1b[1;2F".to_vec())
         );
     }
 
@@ -881,19 +1019,38 @@ mod terminal_tests {
     fn terminal_viewport_scroll_shortcuts_use_shift_navigation_keys() {
         assert_eq!(
             ai_terminal_viewport_scroll_for_keystroke(
-                &Keystroke::parse("shift-pageup").expect("valid shift-pageup keystroke")
+                &Keystroke::parse("shift-pageup").expect("valid shift-pageup keystroke"),
+                None,
             ),
             Some(TerminalScroll::PageUp)
         );
         assert_eq!(
             ai_terminal_viewport_scroll_for_keystroke(
-                &Keystroke::parse("shift-end").expect("valid shift-end keystroke")
+                &Keystroke::parse("shift-end").expect("valid shift-end keystroke"),
+                None,
             ),
             Some(TerminalScroll::Bottom)
         );
         assert_eq!(
             ai_terminal_viewport_scroll_for_keystroke(
-                &Keystroke::parse("pageup").expect("valid pageup keystroke")
+                &Keystroke::parse("pageup").expect("valid pageup keystroke"),
+                None,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn terminal_viewport_scroll_shortcuts_are_disabled_in_alt_screen() {
+        let mode = TerminalModeSnapshot {
+            alt_screen: true,
+            ..TerminalModeSnapshot::default()
+        };
+
+        assert_eq!(
+            ai_terminal_viewport_scroll_for_keystroke(
+                &Keystroke::parse("shift-pageup").expect("valid shift-pageup keystroke"),
+                Some(mode),
             ),
             None
         );

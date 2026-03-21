@@ -86,12 +86,14 @@ Implemented today:
 - Live terminal sessions can now take direct keyboard input from the terminal surface, including bracketed paste when the shell requests it.
 - VT scrollback now stays interactive after process exit, with mouse-wheel scrolling plus `Shift+PageUp/PageDown/Home/End` viewport controls.
 - The VT surface now supports mouse text selection plus terminal-style copy shortcuts (`cmd-c` on macOS, `ctrl-shift-c` on Linux/Windows) when a terminal selection is active.
+- Terminal key translation is now mode-aware for TUIs, including app-cursor arrow/home/end sequences and alternate-screen `Shift+PageUp/PageDown/Home/End` input.
+- Text selection is now disabled while the terminal is in alternate-screen or mouse-reporting modes so full-screen TUIs are not treated like normal text rows.
 - Workspace-wide validation already passes for the current slice.
 
 Not implemented yet:
 
 - terminal cursor and hyperlink detection polish
-- alternate screen and TUI compatibility
+- full alternate-screen mouse/focus reporting and TUI compatibility
 - command-row affordances from the AI timeline
 - persisted terminal state across full app relaunch
 

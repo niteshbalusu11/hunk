@@ -23,6 +23,7 @@ mod ai_helper_tests {
     use super::ai_tool_header_label;
     use super::ai_timeline_item_is_renderable;
     use super::ai_truncate_multiline_content;
+    use super::ai_terminal_supports_text_selection;
     use super::AiCommandExecutionDisplayDetails;
     use crate::app::markdown_links::markdown_inline_text_and_link_ranges;
     use hunk_terminal::TerminalCellSnapshot;
@@ -254,6 +255,32 @@ mod ai_helper_tests {
         assert_eq!(surfaces[1].separator_before, "\n");
         assert_eq!(surfaces[0].text, "hello");
         assert_eq!(surfaces[1].text, "world");
+    }
+
+    #[test]
+    fn terminal_text_selection_is_disabled_for_alt_screen_and_mouse_modes() {
+        let mut screen = TerminalScreenSnapshot {
+            rows: 1,
+            cols: 1,
+            display_offset: 0,
+            cursor: TerminalCursorSnapshot {
+                line: 0,
+                column: 0,
+                shape: TerminalCursorShapeSnapshot::Block,
+            },
+            mode: TerminalModeSnapshot::default(),
+            damage: TerminalDamageSnapshot::Full,
+            cells: Vec::new(),
+        };
+
+        assert!(ai_terminal_supports_text_selection(&screen));
+
+        screen.mode.alt_screen = true;
+        assert!(!ai_terminal_supports_text_selection(&screen));
+
+        screen.mode.alt_screen = false;
+        screen.mode.mouse_mode = true;
+        assert!(!ai_terminal_supports_text_selection(&screen));
     }
 
     #[test]

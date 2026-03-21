@@ -79,9 +79,11 @@ impl DiffViewer {
     ) -> AnyElement {
         let chrome = hunk_editor_chrome_colors(cx.theme(), is_dark);
         let lines = ai_terminal_renderable_lines(screen, is_dark, cx);
-        let selection_surfaces = ai_terminal_selection_surfaces(lines.as_slice());
-        let link_ranges = ai_text_link_ranges(Vec::new());
-        let view = cx.entity();
+        let selection_enabled = ai_terminal_supports_text_selection(screen);
+        let selection_surfaces =
+            selection_enabled.then(|| ai_terminal_selection_surfaces(lines.as_slice()));
+        let link_ranges = selection_enabled.then(|| ai_text_link_ranges(Vec::new()));
+        let view = selection_enabled.then(|| cx.entity());
 
         v_flex()
             .w_full()
@@ -94,21 +96,42 @@ impl DiffViewer {
                     gpui::StyledText::new(line.text.clone()).with_highlights(line.highlights)
                 };
 
-                ai_render_selectable_styled_text(
-                    self,
-                    view.clone(),
-                    crate::app::AI_TERMINAL_TEXT_SELECTION_ROW_ID,
-                    ai_terminal_text_surface_id(row_index),
-                    selection_surfaces.clone(),
-                    link_ranges.clone(),
-                    styled_text,
-                    is_dark,
-                    cx,
-                )
-                .into_any_element()
+                if let Some(view) = view.as_ref() {
+                    ai_render_selectable_styled_text(
+                        self,
+                        view.clone(),
+                        crate::app::AI_TERMINAL_TEXT_SELECTION_ROW_ID,
+                        ai_terminal_text_surface_id(row_index),
+                        selection_surfaces
+                            .as_ref()
+                            .expect("selection surfaces should exist when selection is enabled")
+                            .clone(),
+                        link_ranges
+                            .as_ref()
+                            .expect("link ranges should exist when selection is enabled")
+                            .clone(),
+                        styled_text,
+                        is_dark,
+                        cx,
+                    )
+                    .into_any_element()
+                } else {
+                    div()
+                        .w_full()
+                        .text_xs()
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .text_color(chrome.foreground)
+                        .whitespace_nowrap()
+                        .child(styled_text)
+                        .into_any_element()
+                }
             }))
             .into_any_element()
     }
+}
+
+fn ai_terminal_supports_text_selection(screen: &TerminalScreenSnapshot) -> bool {
+    !screen.mode.alt_screen && !screen.mode.mouse_mode
 }
 
 fn ai_terminal_selection_surfaces(
