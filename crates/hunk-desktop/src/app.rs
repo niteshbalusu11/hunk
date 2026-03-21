@@ -11,12 +11,12 @@ use codex_app_server_protocol::SkillMetadata;
 use gpui::{
     AnchoredPositionMode, Animation, AnimationExt as _, AnyElement, AnyWindowHandle, App,
     AppContext as _, Bounds, ClipboardItem, Context, Corner, DragMoveEvent, Empty, Entity,
-    EntityId, EntityInputHandler, FocusHandle, Hsla, InteractiveElement as _, IntoElement,
-    IsZero as _, KeyBinding, ListAlignment, ListOffset, ListSizingBehavior, ListState, Menu,
-    MenuItem, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, OsAction,
-    ParentElement as _, PathPromptOptions, Pixels, Point, Render, ScrollHandle, ScrollWheelEvent,
-    SharedString, StatefulInteractiveElement as _, Styled as _, SystemMenuType, Task,
-    TitlebarOptions, Window, WindowOptions, actions, anchored, canvas, deferred, div, list, point,
+    EntityId, EntityInputHandler, FocusHandle, InteractiveElement as _, IntoElement, IsZero as _,
+    KeyBinding, ListAlignment, ListOffset, ListSizingBehavior, ListState, Menu, MenuItem,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, OsAction, ParentElement as _,
+    PathPromptOptions, Pixels, Point, Render, ScrollHandle, ScrollWheelEvent, SharedString,
+    StatefulInteractiveElement as _, Styled as _, SystemMenuType, Task, TitlebarOptions, Window,
+    WindowOptions, actions, anchored, canvas, deferred, div, list, point,
     prelude::FluentBuilder as _, px,
 };
 use gpui_component::{

@@ -4,6 +4,7 @@ mod ai_helper_tests {
     use super::ai_account_summary;
     use super::ai_markdown_code_block_text;
     use super::ai_markdown_code_block_text_and_highlights;
+    use super::ai_terminal_screen_grid;
     use super::ai_command_execution_display_details;
     use super::ai_command_execution_terminal_text;
     use super::ai_composer_status_tone;
@@ -23,6 +24,14 @@ mod ai_helper_tests {
     use super::ai_truncate_multiline_content;
     use super::AiCommandExecutionDisplayDetails;
     use crate::app::markdown_links::markdown_inline_text_and_link_ranges;
+    use hunk_terminal::TerminalCellSnapshot;
+    use hunk_terminal::TerminalColorSnapshot;
+    use hunk_terminal::TerminalCursorShapeSnapshot;
+    use hunk_terminal::TerminalCursorSnapshot;
+    use hunk_terminal::TerminalDamageSnapshot;
+    use hunk_terminal::TerminalModeSnapshot;
+    use hunk_terminal::TerminalNamedColorSnapshot;
+    use hunk_terminal::TerminalScreenSnapshot;
     use hunk_codex::state::ItemDisplayMetadata;
     use hunk_codex::state::ItemStatus;
     use hunk_codex::state::ItemSummary;
@@ -147,6 +156,81 @@ mod ai_helper_tests {
             ai_collaboration_picker_label(AiCollaborationModeSelection::Plan),
             "Plan"
         );
+    }
+
+    #[test]
+    fn terminal_screen_grid_places_cells_and_cursor_in_visible_rows() {
+        let screen = TerminalScreenSnapshot {
+            rows: 2,
+            cols: 4,
+            display_offset: 0,
+            cursor: TerminalCursorSnapshot {
+                line: 1,
+                column: 2,
+                shape: TerminalCursorShapeSnapshot::Block,
+            },
+            mode: TerminalModeSnapshot {
+                show_cursor: true,
+                ..TerminalModeSnapshot::default()
+            },
+            damage: TerminalDamageSnapshot::Full,
+            cells: vec![
+                TerminalCellSnapshot {
+                    line: 0,
+                    column: 0,
+                    character: 'h',
+                    fg: TerminalColorSnapshot::Named(TerminalNamedColorSnapshot::Foreground),
+                    bg: TerminalColorSnapshot::Named(TerminalNamedColorSnapshot::Background),
+                    flags: 0,
+                    zerowidth: Vec::new(),
+                },
+                TerminalCellSnapshot {
+                    line: 1,
+                    column: 1,
+                    character: 'i',
+                    fg: TerminalColorSnapshot::Named(TerminalNamedColorSnapshot::Foreground),
+                    bg: TerminalColorSnapshot::Named(TerminalNamedColorSnapshot::Background),
+                    flags: 0,
+                    zerowidth: Vec::new(),
+                },
+            ],
+        };
+
+        let grid = ai_terminal_screen_grid(&screen);
+        assert_eq!(grid.len(), 2);
+        assert_eq!(grid[0].len(), 4);
+        assert_eq!(grid[0][0].character, 'h');
+        assert_eq!(grid[1][1].character, 'i');
+        assert!(grid[1][2].cursor);
+    }
+
+    #[test]
+    fn terminal_screen_grid_preserves_zero_width_marks() {
+        let screen = TerminalScreenSnapshot {
+            rows: 1,
+            cols: 2,
+            display_offset: 0,
+            cursor: TerminalCursorSnapshot {
+                line: 0,
+                column: 0,
+                shape: TerminalCursorShapeSnapshot::Block,
+            },
+            mode: TerminalModeSnapshot::default(),
+            damage: TerminalDamageSnapshot::Full,
+            cells: vec![TerminalCellSnapshot {
+                line: 0,
+                column: 0,
+                character: 'e',
+                fg: TerminalColorSnapshot::Named(TerminalNamedColorSnapshot::Foreground),
+                bg: TerminalColorSnapshot::Named(TerminalNamedColorSnapshot::Background),
+                flags: 0,
+                zerowidth: vec!['\u{301}'],
+            }],
+        };
+
+        let grid = ai_terminal_screen_grid(&screen);
+        assert_eq!(grid[0][0].character, 'e');
+        assert_eq!(grid[0][0].zerowidth, "\u{301}");
     }
 
     #[test]

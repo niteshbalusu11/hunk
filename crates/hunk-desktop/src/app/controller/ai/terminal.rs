@@ -105,9 +105,7 @@ impl DiffViewer {
 
     pub(super) fn ai_clear_terminal_session_action(&mut self, cx: &mut Context<Self>) {
         self.ai_terminal_session.transcript.clear();
-        if self.ai_terminal_runtime.is_none() {
-            self.ai_terminal_session.screen = None;
-        }
+        self.ai_terminal_session.screen = None;
         self.ai_terminal_session.status_message = None;
         self.ai_terminal_session.exit_code = None;
         if self.ai_terminal_runtime.is_none() {

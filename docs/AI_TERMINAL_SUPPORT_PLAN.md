@@ -82,12 +82,11 @@ Implemented today:
 - The drawer supports run, stop, rerun, clear, and height adjustment.
 - The drawer supports live PTY input forwarding for running sessions.
 - The drawer can be toggled with `cmd-j` on macOS and `ctrl-j` on Linux/Windows.
-- Output is bounded and rendered in transcript form.
+- Output is bounded and now rendered through a VT-backed GPUI cell surface with transcript fallback for empty and failure states.
 - Workspace-wide validation already passes for the current slice.
 
 Not implemented yet:
 
-- GPUI cell-grid rendering
 - terminal viewport scrolling over VT state
 - terminal cursor, selection, hyperlink detection, and copy semantics
 - alternate screen and TUI compatibility
@@ -549,7 +548,7 @@ Exit criteria:
 - [x] Add transcript output rendering.
 - [x] Add stop, rerun, and clear actions.
 - [x] Add drawer height controls.
-- [ ] Replace transcript rendering with a VT cell surface.
+- [x] Replace transcript rendering with a VT cell surface.
 - [x] Add terminal keyboard input routing into the live PTY session.
 - [ ] Replace command-line style input routing with terminal-surface keystroke routing.
 - [ ] Add terminal text selection and copy behavior.

@@ -174,42 +174,7 @@ impl DiffViewer {
                                 ))
                                 .overflow_y_scrollbar()
                                 .p_3()
-                                .child(
-                                    v_flex()
-                                        .w_full()
-                                        .gap_0p5()
-                                        .children(if state.has_transcript {
-                                            state
-                                                .transcript
-                                                .lines()
-                                                .map(|line| {
-                                                    div()
-                                                        .w_full()
-                                                        .text_xs()
-                                                        .font_family(
-                                                            cx.theme().mono_font_family.clone(),
-                                                        )
-                                                        .text_color(cx.theme().foreground)
-                                                        .child(line.to_string())
-                                                        .into_any_element()
-                                                })
-                                                .collect::<Vec<_>>()
-                                        } else {
-                                            vec![
-                                                div()
-                                                    .w_full()
-                                                    .text_xs()
-                                                    .font_family(
-                                                        cx.theme().mono_font_family.clone(),
-                                                    )
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child(
-                                                        "Run a command to start a terminal session.",
-                                                    )
-                                                    .into_any_element(),
-                                            ]
-                                        }),
-                                ),
+                                .child(self.render_ai_terminal_surface(state, is_dark, cx)),
                         )
                         .child(
                             h_flex()
@@ -278,7 +243,7 @@ impl DiffViewer {
                                         .ghost()
                                         .rounded(px(8.0))
                                         .label("Clear")
-                                        .disabled(!state.has_transcript)
+                                        .disabled(!state.has_output)
                                         .on_click(move |_, _, cx| {
                                             view.update(cx, |this, cx| {
                                                 this.ai_clear_terminal_session_action(cx);
