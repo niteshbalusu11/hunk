@@ -264,6 +264,82 @@ pub fn working_copy_context_for_ai(
     }))
 }
 
+pub fn staged_index_context_for_ai(
+    repo_root: &Path,
+    max_files: usize,
+    max_patch_bytes: usize,
+) -> Result<Option<AiWorkingCopyContext>> {
+    let repo = open_repo(repo_root)?;
+    let changes = collect_index_changes_for_ai(&repo)?;
+    if changes.is_empty() {
+        return Ok(None);
+    }
+
+    let limited_files = max_files.max(1);
+    let mut summary_lines = changes
+        .iter()
+        .take(limited_files)
+        .map(|(path, status_code)| format!("{status_code} {path}"))
+        .collect::<Vec<_>>();
+    if changes.len() > limited_files {
+        summary_lines.push(format!(
+            "... {} more file(s)",
+            changes.len() - limited_files
+        ));
+    }
+    let changed_files_summary = summary_lines.join("\n");
+
+    let mut diff_options = git2::DiffOptions::new();
+    diff_options
+        .include_unmodified(false)
+        .ignore_submodules(true);
+
+    let head_tree = current_head_tree(&repo)?;
+    let index = repo.index()?;
+    let mut diff =
+        repo.diff_tree_to_index(head_tree.as_ref(), Some(&index), Some(&mut diff_options))?;
+    diff.find_similar(None)?;
+
+    let capped_bytes = max_patch_bytes.max(1);
+    let mut patch_bytes = Vec::new();
+    let mut truncated = false;
+    let print_result = diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+        if patch_bytes.len() >= capped_bytes {
+            truncated = true;
+            return false;
+        }
+
+        let content = line.content();
+        let remaining = capped_bytes.saturating_sub(patch_bytes.len());
+        if content.len() > remaining {
+            patch_bytes.extend_from_slice(&content[..remaining]);
+            truncated = true;
+            return false;
+        }
+
+        patch_bytes.extend_from_slice(content);
+        true
+    });
+    if let Err(err) = print_result
+        && !(truncated && err.code() == git2::ErrorCode::User)
+    {
+        return Err(err.into());
+    }
+
+    let mut diff_patch = String::from_utf8_lossy(patch_bytes.as_slice()).to_string();
+    if truncated {
+        if !diff_patch.ends_with('\n') {
+            diff_patch.push('\n');
+        }
+        diff_patch.push_str("[truncated]\n");
+    }
+
+    Ok(Some(AiWorkingCopyContext {
+        changed_files_summary,
+        diff_patch,
+    }))
+}
+
 pub fn restore_working_copy_paths(repo_root: &Path, paths: &[String]) -> Result<usize> {
     let selected_paths = normalize_selected_paths(paths)?;
     if selected_paths.is_empty() {
@@ -518,6 +594,28 @@ fn collect_selected_index_paths(
     Ok(reset_paths)
 }
 
+fn collect_index_changes_for_ai(repo: &git2::Repository) -> Result<BTreeMap<String, &'static str>> {
+    let statuses = load_statuses_with_renames(repo)?;
+    let mut changes = BTreeMap::new();
+
+    for entry in statuses.iter() {
+        let status = entry.status();
+        if status.is_conflicted() {
+            return Err(anyhow!("cannot operate on conflicted files"));
+        }
+        if !has_index_changes(status) {
+            continue;
+        }
+
+        let Some(display_path) = status_display_path(&entry) else {
+            continue;
+        };
+        changes.insert(display_path, index_change_status_code(status));
+    }
+
+    Ok(changes)
+}
+
 fn stage_changes(
     repo: &git2::Repository,
     changes: &BTreeMap<String, WorktreeChange>,
@@ -546,6 +644,20 @@ fn worktree_change_status_code(change: WorktreeChange) -> &'static str {
     match change {
         WorktreeChange::AddOrUpdate => "M",
         WorktreeChange::Remove => "D",
+    }
+}
+
+fn index_change_status_code(status: git2::Status) -> &'static str {
+    if status.is_index_new() {
+        "A"
+    } else if status.is_index_deleted() {
+        "D"
+    } else if status.is_index_renamed() {
+        "R"
+    } else if status.is_index_typechange() {
+        "T"
+    } else {
+        "M"
     }
 }
 
