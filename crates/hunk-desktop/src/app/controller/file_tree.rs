@@ -1,5 +1,14 @@
 use std::path::{Component, Path, PathBuf};
 
+fn review_mode_selected_path(
+    selected_path: Option<&str>,
+    review_files: &[ChangedFile],
+) -> Option<String> {
+    selected_path
+        .map(str::to_string)
+        .or_else(|| review_files.first().map(|file| file.path.clone()))
+}
+
 impl DiffViewer {
     fn path_exists_in_primary_checkout(&self, path: &str) -> bool {
         if repo_tree_contains_path(&self.repo_tree.nodes, path) {
@@ -155,17 +164,14 @@ impl DiffViewer {
                 self.clear_editor_state(cx);
             }
         } else if mode == WorkspaceViewMode::Diff {
-            let selected_in_changed_files = self
+            self.selected_path = review_mode_selected_path(
+                self.selected_path.as_deref(),
+                &self.review_files,
+            );
+            self.selected_status = self
                 .selected_path
-                .as_ref()
-                .is_some_and(|selected| self.active_diff_contains_path(selected));
-            if !selected_in_changed_files {
-                self.selected_path = self.active_diff_first_path();
-                self.selected_status = self
-                    .selected_path
-                    .as_deref()
-                    .and_then(|selected| self.status_for_path(selected));
-            }
+                .as_deref()
+                .and_then(|selected| self.status_for_path(selected));
             self.request_repo_tree_reload(cx);
             self.scroll_selected_after_reload = true;
             self.request_selected_diff_reload(cx);

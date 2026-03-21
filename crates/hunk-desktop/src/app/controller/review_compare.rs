@@ -79,6 +79,22 @@ fn review_compare_selection_ids_for_workspace_root(
     ))
 }
 
+fn selected_git_workspace_review_compare_selection_ids(
+    sources: &[ReviewCompareSourceOption],
+    workspace_targets: &[hunk_git::worktree::WorkspaceTargetSummary],
+    workspace_root: Option<&std::path::Path>,
+    default_base_branch_name: Option<&str>,
+) -> Option<(Option<String>, Option<String>)> {
+    let workspace_root = workspace_root?;
+    review_compare_selection_ids_for_workspace_root(
+        sources,
+        workspace_targets,
+        workspace_root,
+        None,
+        default_base_branch_name,
+    )
+}
+
 impl DiffViewer {
     fn subscribe_review_compare_picker_states(&self, cx: &mut Context<Self>) {
         let review_left_picker_state = self.review_left_picker_state.clone();
@@ -206,6 +222,36 @@ impl DiffViewer {
         source_id
             .and_then(|source_id| self.review_compare_source_option(source_id))
             .map(|source| source.detail.clone())
+    }
+
+    fn selected_git_workspace_review_compare_selection(
+        &self,
+    ) -> Option<(Option<String>, Option<String>)> {
+        let default_base_branch_name = self
+            .project_path
+            .as_deref()
+            .and_then(|project_path| resolve_default_base_branch_name(project_path).ok().flatten());
+        selected_git_workspace_review_compare_selection_ids(
+            &self.review_compare_sources,
+            &self.workspace_targets,
+            self.selected_git_workspace_root().as_deref(),
+            default_base_branch_name.as_deref(),
+        )
+    }
+
+    pub(super) fn open_git_workspace_change_in_review(
+        &mut self,
+        path: String,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some((left_source_id, right_source_id)) =
+            self.selected_git_workspace_review_compare_selection()
+        {
+            self.update_review_compare_selection(left_source_id, right_source_id, cx);
+        }
+        self.selected_path = Some(path);
+        self.selected_status = None;
+        self.set_workspace_view_mode(WorkspaceViewMode::Diff, cx);
     }
 
     fn active_diff_files(&self) -> &[ChangedFile] {

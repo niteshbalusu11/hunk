@@ -15,6 +15,13 @@ impl DiffViewer {
         let status_badge_background = hunk_opacity(status_color, is_dark, 0.18, 0.10);
         let status_badge_border = hunk_opacity(status_color, is_dark, 0.62, 0.38);
         let accent_strip = hunk_tone(status_color, is_dark, 0.18, 0.10);
+        let row_hover_bg = hunk_blend(
+            card_surface.background,
+            cx.theme().accent,
+            is_dark,
+            0.14,
+            0.05,
+        );
         let undo_tooltip = if is_tracked {
             "Restore this file to HEAD."
         } else {
@@ -33,7 +40,13 @@ impl DiffViewer {
             hunk_tinted_button(cx.theme(), is_dark, HunkAccentTone::Success)
         } else {
             HunkButtonColors {
-                background: hunk_blend(cx.theme().background, cx.theme().primary, is_dark, 0.12, 0.04),
+                background: hunk_blend(
+                    cx.theme().background,
+                    cx.theme().primary,
+                    is_dark,
+                    0.12,
+                    0.04,
+                ),
                 border: hunk_opacity(cx.theme().primary, is_dark, 0.90, 0.64),
                 text: hunk_tone(cx.theme().primary, is_dark, 0.22, 0.40),
             }
@@ -60,6 +73,16 @@ impl DiffViewer {
             .border_1()
             .border_color(card_surface.border)
             .bg(card_surface.background)
+            .hover(move |style| style.bg(row_hover_bg).cursor_pointer())
+            .on_click({
+                let view = view.clone();
+                let path = path.clone();
+                move |_, _, cx| {
+                    view.update(cx, |this, cx| {
+                        this.open_git_workspace_change_in_review(path.clone(), cx);
+                    });
+                }
+            })
             .child({
                 let view = view.clone();
                 let path = path.clone();
@@ -74,6 +97,7 @@ impl DiffViewer {
                     .tooltip(stage_tooltip)
                     .disabled(self.git_controls_busy())
                     .on_click(move |_, _, cx| {
+                        cx.stop_propagation();
                         view.update(cx, |this, cx| {
                             this.toggle_commit_file_staged(path.clone(), !staged_for_commit, cx);
                         });
@@ -154,7 +178,11 @@ impl DiffViewer {
             .into_any_element()
     }
 
-    fn render_workspace_change_stats(&self, stats: LineStats, cx: &mut Context<Self>) -> AnyElement {
+    fn render_workspace_change_stats(
+        &self,
+        stats: LineStats,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let colors = hunk_line_stats(cx.theme(), cx.theme().mode.is_dark());
 
         h_flex()
