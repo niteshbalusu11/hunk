@@ -64,6 +64,7 @@ impl DiffViewer {
         next_workspace_key: Option<String>,
         cx: &mut Context<Self>,
     ) {
+        let previous_terminal_thread_id = self.current_ai_thread_id();
         if previous_workspace_key == next_workspace_key {
             self.ai_sync_workspace_preferences(cx);
             return;
@@ -87,8 +88,13 @@ impl DiffViewer {
         } else {
             self.clear_ai_state_outside_current_project();
         }
-        self.stop_ai_terminal_runtime("workspace changed");
         self.restore_ai_workspace_state_for_key(next_workspace_key.as_deref());
+        let next_terminal_thread_id = self.current_ai_thread_id();
+        self.ai_handle_terminal_thread_change(
+            previous_terminal_thread_id,
+            next_terminal_thread_id,
+            cx,
+        );
         self.sync_ai_worktree_base_branch_picker_state(cx);
         self.ai_composer_skill_completion_menu = None;
         self.ai_composer_skill_completion_selected_ix = 0;

@@ -134,6 +134,19 @@ struct AiTerminalSessionState {
     status_message: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+struct AiThreadTerminalState {
+    open: bool,
+    follow_output: bool,
+    session: AiTerminalSessionState,
+    pending_input: Option<String>,
+}
+
+struct AiHiddenTerminalRuntimeHandle {
+    runtime: AiTerminalRuntimeHandle,
+    event_task: Task<()>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AiComposerSkillBinding {
     token: String,
@@ -285,7 +298,7 @@ struct AiHiddenRuntimeHandle {
 }
 
 struct AiTerminalRuntimeHandle {
-    workspace_key: String,
+    thread_id: String,
     handle: TerminalSessionHandle,
     generation: usize,
 }

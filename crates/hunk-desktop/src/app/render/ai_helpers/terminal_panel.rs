@@ -28,8 +28,6 @@ impl DiffViewer {
         };
         let shell_colors = hunk_git_workspace(cx.theme(), is_dark).shell;
         let chrome = hunk_editor_chrome_colors(cx.theme(), is_dark);
-        let has_session = state.screen.is_some() || state.has_transcript;
-        let show_inline_prompt = !state.running && state.accepts_input;
         let entity_id = cx.entity_id();
         let status_text = state.status_message.clone().or_else(|| {
             if state.display_offset > 0 {
@@ -278,45 +276,7 @@ impl DiffViewer {
                                 })
                                 .when(!state.surface_focused, |this| this.border_1().border_color(chrome.background))
                                 .child(self.render_ai_terminal_surface(state, is_dark, cx)),
-                        )
-                        .when(show_inline_prompt, |this| {
-                            this.child(
-                                h_flex()
-                                    .w_full()
-                                    .items_center()
-                                    .gap_2()
-                                    .px_3()
-                                    .py_1p5()
-                                    .border_t_1()
-                                    .border_color(hunk_opacity(shell_colors.border, is_dark, 0.92, 0.78))
-                                    .bg(hunk_blend(chrome.background, shell_colors.background, is_dark, 0.08, 0.12))
-                                    .child(
-                                        div()
-                                            .flex_none()
-                                            .text_sm()
-                                            .font_family(cx.theme().mono_font_family.clone())
-                                            .text_color(if has_session {
-                                                cx.theme().muted_foreground
-                                            } else {
-                                                status_color
-                                            })
-                                            .child(if cfg!(target_os = "windows") { ">" } else { "$" }),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .child(
-                                                Input::new(&self.ai_terminal_input_state)
-                                                    .appearance(false)
-                                                    .bordered(false)
-                                                    .focus_bordered(false)
-                                                    .w_full()
-                                                    .disabled(!state.accepts_input),
-                                            ),
-                                    ),
-                            )
-                        }),
+                        ),
                 )
                 .into_any_element(),
         )

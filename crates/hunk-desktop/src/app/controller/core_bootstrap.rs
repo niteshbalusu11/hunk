@@ -465,6 +465,8 @@ impl DiffViewer {
             ai_command_tx: None,
             ai_worker_workspace_key: None,
             ai_draft_workspace_target_id: None,
+            ai_terminal_states_by_thread: BTreeMap::new(),
+            ai_hidden_terminal_runtimes: BTreeMap::new(),
             ai_terminal_open: false,
             ai_terminal_follow_output: true,
             ai_terminal_height_px: 220.0,
@@ -651,17 +653,6 @@ impl DiffViewer {
             }
             if should_send_ai_prompt_from_input_event(event) {
                 this.ai_send_prompt_action_from_keyboard(cx);
-            }
-        })
-        .detach();
-
-        let ai_terminal_state = view.ai_terminal_input_state.clone();
-        cx.subscribe(&ai_terminal_state, |this, _, event, cx| {
-            if matches!(event, InputEvent::Change) {
-                this.sync_ai_visible_terminal_input_to_state(cx);
-            }
-            if should_send_ai_prompt_from_input_event(event) {
-                this.ai_submit_terminal_input_action(cx);
             }
         })
         .detach();

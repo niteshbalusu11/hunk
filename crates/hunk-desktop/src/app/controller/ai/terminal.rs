@@ -33,18 +33,10 @@ impl DiffViewer {
 
     fn defer_ai_terminal_interaction_focus(&self, cx: &mut Context<Self>) {
         let window_handle = self.window_handle;
-        let focus_surface = self.ai_terminal_is_running();
         let terminal_focus_handle = self.ai_terminal_focus_handle.clone();
-        let terminal_input_state = self.ai_terminal_input_state.clone();
         cx.defer(move |cx| {
             let result = cx.update_window(window_handle, |_, window, cx| {
-                if focus_surface {
-                    terminal_focus_handle.focus(window, cx);
-                } else {
-                    terminal_input_state.update(cx, |state, cx| {
-                        state.focus(window, cx);
-                    });
-                }
+                terminal_focus_handle.focus(window, cx);
             });
             if let Err(err) = result
                 && !Self::is_window_not_found_error(&err)
@@ -87,19 +79,109 @@ impl DiffViewer {
         }
     }
 
-    fn ai_terminal_runtime_is_current(&self, workspace_key: &str, generation: usize) -> bool {
-        self.ai_terminal_runtime.as_ref().is_some_and(|runtime| {
-            runtime.workspace_key == workspace_key && runtime.generation == generation
-        })
+    fn ai_capture_visible_terminal_state(&self) -> AiThreadTerminalState {
+        AiThreadTerminalState {
+            open: self.ai_terminal_open,
+            follow_output: self.ai_terminal_follow_output,
+            session: self.ai_terminal_session.clone(),
+            pending_input: self.ai_terminal_pending_input.clone(),
+        }
+    }
+
+    fn ai_apply_visible_terminal_state(&mut self, state: AiThreadTerminalState) {
+        self.ai_terminal_open = state.open;
+        self.ai_terminal_follow_output = state.follow_output;
+        self.ai_terminal_session = state.session;
+        self.ai_terminal_pending_input = state.pending_input;
+        self.ai_terminal_surface_focused = false;
+        self.ai_terminal_grid_size = self
+            .ai_terminal_session
+            .screen
+            .as_ref()
+            .map(|screen| (screen.rows, screen.cols));
+    }
+
+    fn ai_store_visible_terminal_state_for_thread(&mut self, thread_id: Option<&str>) {
+        let Some(thread_id) = thread_id else {
+            return;
+        };
+        self.ai_terminal_states_by_thread
+            .insert(thread_id.to_string(), self.ai_capture_visible_terminal_state());
+    }
+
+    fn ai_restore_visible_terminal_state_for_thread(&mut self, thread_id: Option<&str>) {
+        let state = thread_id
+            .and_then(|thread_id| self.ai_terminal_states_by_thread.get(thread_id).cloned())
+            .unwrap_or_default();
+        self.ai_apply_visible_terminal_state(state);
+    }
+
+    fn ai_park_visible_terminal_runtime_for_thread(&mut self, thread_id: Option<&str>) {
+        let Some(thread_id) = thread_id else {
+            return;
+        };
+        let Some(runtime) = self.ai_terminal_runtime.take() else {
+            return;
+        };
+        let event_task = std::mem::replace(&mut self.ai_terminal_event_task, Task::ready(()));
+        self.ai_hidden_terminal_runtimes.insert(
+            thread_id.to_string(),
+            AiHiddenTerminalRuntimeHandle { runtime, event_task },
+        );
+    }
+
+    fn ai_promote_hidden_terminal_runtime_for_thread(&mut self, thread_id: &str) -> bool {
+        let Some(hidden) = self.ai_hidden_terminal_runtimes.remove(thread_id) else {
+            return false;
+        };
+        self.ai_terminal_runtime = Some(hidden.runtime);
+        self.ai_terminal_event_task = hidden.event_task;
+        true
+    }
+
+    pub(super) fn ai_handle_terminal_thread_change(
+        &mut self,
+        previous_thread_id: Option<String>,
+        next_thread_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if previous_thread_id == next_thread_id {
+            return;
+        }
+
+        self.ai_store_visible_terminal_state_for_thread(previous_thread_id.as_deref());
+        self.ai_park_visible_terminal_runtime_for_thread(previous_thread_id.as_deref());
+        self.ai_restore_visible_terminal_state_for_thread(next_thread_id.as_deref());
+
+        if let Some(next_thread_id) = next_thread_id.as_deref() {
+            if !self.ai_promote_hidden_terminal_runtime_for_thread(next_thread_id)
+                && self.ai_terminal_open
+            {
+                self.ensure_ai_terminal_session(cx);
+            }
+        } else {
+            self.ai_terminal_open = false;
+            self.ai_terminal_surface_focused = false;
+        }
+
+        cx.notify();
+    }
+
+    fn ai_terminal_runtime_is_current(&self, thread_id: &str, generation: usize) -> bool {
+        if self.ai_terminal_runtime.as_ref().is_some_and(|runtime| {
+            runtime.thread_id == thread_id && runtime.generation == generation
+        }) {
+            return true;
+        }
+
+        self.ai_hidden_terminal_runtimes
+            .get(thread_id)
+            .is_some_and(|hidden| hidden.runtime.generation == generation)
     }
 
     fn next_ai_terminal_runtime_generation(&mut self) -> usize {
         self.ai_terminal_runtime_generation = self.ai_terminal_runtime_generation.saturating_add(1);
         self.ai_terminal_runtime_generation
-    }
-
-    pub(crate) fn current_ai_terminal_can_run(&self) -> bool {
-        self.ai_workspace_cwd().is_some()
     }
 
     fn ai_terminal_set_open(&mut self, open: bool, cx: &mut Context<Self>) {
@@ -163,6 +245,9 @@ impl DiffViewer {
     }
 
     fn ensure_ai_terminal_session(&mut self, cx: &mut Context<Self>) {
+        if self.current_ai_thread_id().is_none() {
+            return;
+        }
         if self.ai_terminal_runtime.is_some() || self.ai_terminal_session.screen.is_some() {
             return;
         }
@@ -179,9 +264,20 @@ impl DiffViewer {
         self.ai_terminal_event_task = Task::ready(());
         if let Some(runtime) = self.ai_terminal_runtime.take()
             && self.ai_terminal_is_running()
-            && let Err(error) = runtime.handle.kill()
+                && let Err(error) = runtime.handle.kill()
         {
             error!("failed to stop AI terminal runtime during {reason}: {error:#}");
+        }
+    }
+
+    pub(crate) fn stop_all_ai_terminal_runtimes(&mut self, reason: &str) {
+        self.stop_ai_terminal_runtime(reason);
+        for (thread_id, hidden) in std::mem::take(&mut self.ai_hidden_terminal_runtimes) {
+            if let Err(error) = hidden.runtime.handle.kill() {
+                error!(
+                    "failed to stop hidden AI terminal runtime for thread {thread_id} during {reason}: {error:#}"
+                );
+            }
         }
     }
 
@@ -191,17 +287,7 @@ impl DiffViewer {
             cx.notify();
             return;
         };
-        self.ai_terminal_input_draft = command;
-        self.restore_ai_visible_terminal_input(cx);
-        self.ai_run_terminal_command_action(cx);
-    }
-
-    pub(super) fn ai_submit_terminal_input_action(&mut self, cx: &mut Context<Self>) {
-        if self.ai_terminal_is_running() {
-            self.ai_send_terminal_input_action(cx);
-        } else {
-            self.ai_run_terminal_command_action(cx);
-        }
+        self.ai_run_command_in_terminal(None, command, cx);
     }
 
     pub(super) fn ai_focus_terminal_surface_action(&mut self, cx: &mut Context<Self>) {
@@ -510,58 +596,6 @@ impl DiffViewer {
         self.ai_write_terminal_bytes(bytes.as_slice(), cx)
     }
 
-    pub(super) fn ai_send_terminal_input_action(&mut self, cx: &mut Context<Self>) {
-        self.sync_ai_visible_terminal_input_to_state(cx);
-        if !self.ai_terminal_is_running() {
-            self.ai_run_terminal_command_action(cx);
-            return;
-        }
-        let Some(runtime) = self.ai_terminal_runtime.as_ref() else {
-            return;
-        };
-
-        let mut input = self.ai_terminal_input_draft.clone();
-        if input.is_empty() {
-            return;
-        }
-        if !input.ends_with('\n') {
-            input.push('\n');
-        }
-
-        if let Err(error) = runtime.handle.write_input(input.as_bytes()) {
-            self.ai_terminal_session.status_message = Some(error.to_string());
-            self.ai_terminal_session.status = AiTerminalSessionStatus::Failed;
-            cx.notify();
-            return;
-        }
-
-        self.ai_terminal_session.status_message = None;
-        self.ai_terminal_input_draft.clear();
-        self.restore_ai_visible_terminal_input(cx);
-        cx.notify();
-    }
-
-    pub(super) fn ai_run_terminal_command_action(&mut self, cx: &mut Context<Self>) {
-        self.sync_ai_visible_terminal_input_to_state(cx);
-        let command = self.ai_terminal_input_draft.trim().to_string();
-        if command.is_empty() {
-            self.ai_terminal_session.status_message = Some("Command cannot be empty.".to_string());
-            self.ai_terminal_session.status = AiTerminalSessionStatus::Idle;
-            cx.notify();
-            return;
-        }
-
-        let Some(cwd) = self.ai_workspace_cwd() else {
-            self.ai_terminal_session.status_message =
-                Some("Open a workspace before using the terminal.".to_string());
-            self.ai_terminal_session.status = AiTerminalSessionStatus::Failed;
-            cx.notify();
-            return;
-        };
-
-        self.start_ai_terminal_command_session(cwd, command, cx);
-    }
-
     pub(super) fn ai_run_command_in_terminal(
         &mut self,
         cwd: Option<PathBuf>,
@@ -605,7 +639,9 @@ impl DiffViewer {
     fn start_default_ai_terminal_session(&mut self, cwd: PathBuf, cx: &mut Context<Self>) {
         self.stop_ai_terminal_runtime("starting default terminal shell");
 
-        let workspace_key = cwd.to_string_lossy().to_string();
+        let Some(thread_id) = self.current_ai_thread_id() else {
+            return;
+        };
         let request = TerminalSpawnRequest::shell(cwd.clone());
         match spawn_terminal_session(request) {
             Ok((handle, event_rx)) => {
@@ -622,11 +658,11 @@ impl DiffViewer {
                 self.ai_terminal_session.status_message = None;
                 let generation = self.next_ai_terminal_runtime_generation();
                 self.ai_terminal_runtime = Some(AiTerminalRuntimeHandle {
-                    workspace_key: workspace_key.clone(),
+                    thread_id: thread_id.clone(),
                     handle,
                     generation,
                 });
-                self.start_ai_terminal_event_listener(event_rx, workspace_key, generation, cx);
+                self.start_ai_terminal_event_listener(event_rx, thread_id, generation, cx);
                 self.defer_ai_terminal_interaction_focus(cx);
             }
             Err(error) => {
@@ -644,64 +680,10 @@ impl DiffViewer {
             }
         }
     }
-
-    fn start_ai_terminal_command_session(
-        &mut self,
-        cwd: PathBuf,
-        command: String,
-        cx: &mut Context<Self>,
-    ) {
-        self.stop_ai_terminal_runtime("starting terminal command");
-        self.ai_terminal_pending_input = None;
-
-        let workspace_key = cwd.to_string_lossy().to_string();
-        let request = TerminalSpawnRequest::new(cwd.clone(), command.clone());
-        match spawn_terminal_session(request) {
-            Ok((handle, event_rx)) => {
-                self.ai_terminal_open = true;
-                self.ai_terminal_stop_requested = false;
-                self.ai_terminal_session.cwd = Some(cwd);
-                self.ai_terminal_session.last_command = Some(command.clone());
-                self.ai_terminal_session.status = AiTerminalSessionStatus::Running;
-                self.ai_terminal_session.exit_code = None;
-                self.ai_terminal_session.screen = None;
-                self.ai_terminal_follow_output = true;
-                self.ai_terminal_session.status_message = None;
-                append_ai_terminal_transcript(
-                    &mut self.ai_terminal_session.transcript,
-                    format!("$ {command}\n"),
-                );
-                let generation = self.next_ai_terminal_runtime_generation();
-                self.ai_terminal_runtime = Some(AiTerminalRuntimeHandle {
-                    workspace_key: workspace_key.clone(),
-                    handle,
-                    generation,
-                });
-                self.start_ai_terminal_event_listener(event_rx, workspace_key, generation, cx);
-                self.defer_ai_terminal_interaction_focus(cx);
-                cx.notify();
-            }
-            Err(error) => {
-                self.ai_terminal_open = true;
-                self.ai_terminal_session.cwd = Some(cwd);
-                self.ai_terminal_session.status = AiTerminalSessionStatus::Failed;
-                self.ai_terminal_session.exit_code = None;
-                self.ai_terminal_session.screen = None;
-                self.ai_terminal_session.status_message =
-                    Some("Failed to start terminal command.".to_string());
-                append_ai_terminal_transcript(
-                    &mut self.ai_terminal_session.transcript,
-                    format!("$ {command}\n[terminal error] {error}\n"),
-                );
-                cx.notify();
-            }
-        }
-    }
-
     fn start_ai_terminal_event_listener(
         &mut self,
         event_rx: std::sync::mpsc::Receiver<TerminalEvent>,
-        workspace_key: String,
+        thread_id: String,
         generation: usize,
         cx: &mut Context<Self>,
     ) {
@@ -722,15 +704,25 @@ impl DiffViewer {
                 };
                 let mut listener_is_current = true;
                 this.update(cx, |this, cx| {
-                    if !this.ai_terminal_runtime_is_current(workspace_key.as_str(), generation) {
+                    if !this.ai_terminal_runtime_is_current(thread_id.as_str(), generation) {
                         listener_is_current = false;
                         return;
                     }
                     for event in buffered_events {
-                        this.apply_ai_terminal_event(event, cx);
+                        this.apply_ai_terminal_event_for_thread(thread_id.as_str(), event, cx);
                     }
-                    if event_stream_disconnected && this.ai_terminal_runtime_is_current(workspace_key.as_str(), generation) {
-                        this.ai_terminal_runtime = None;
+                    if event_stream_disconnected
+                        && this.ai_terminal_runtime_is_current(thread_id.as_str(), generation)
+                    {
+                        if this
+                            .ai_terminal_runtime
+                            .as_ref()
+                            .is_some_and(|runtime| runtime.thread_id == thread_id)
+                        {
+                            this.ai_terminal_runtime = None;
+                        } else {
+                            this.ai_hidden_terminal_runtimes.remove(thread_id.as_str());
+                        }
                     }
                     cx.notify();
                 });
@@ -739,6 +731,20 @@ impl DiffViewer {
                 }
             }
         });
+    }
+
+    fn apply_ai_terminal_event_for_thread(
+        &mut self,
+        thread_id: &str,
+        event: TerminalEvent,
+        cx: &mut Context<Self>,
+    ) {
+        if self.current_ai_thread_id().as_deref() == Some(thread_id) {
+            self.apply_ai_terminal_event(event, cx);
+            return;
+        }
+
+        self.apply_hidden_ai_terminal_event_for_thread(thread_id, event);
     }
 
     fn apply_ai_terminal_event(&mut self, event: TerminalEvent, cx: &mut Context<Self>) {
@@ -761,33 +767,14 @@ impl DiffViewer {
             TerminalEvent::Exit { exit_code } => {
                 let stopped = self.ai_terminal_stop_requested;
                 self.ai_terminal_stop_requested = false;
-                self.ai_terminal_session.exit_code = exit_code;
                 if stopped {
                     self.ai_terminal_session.status = AiTerminalSessionStatus::Stopped;
-                    self.ai_terminal_session.status_message = Some("Command stopped.".to_string());
-                    append_ai_terminal_transcript(
-                        &mut self.ai_terminal_session.transcript,
-                        "[stopped]\n".to_string(),
-                    );
                 } else if exit_code == Some(0) {
                     self.ai_terminal_session.status = AiTerminalSessionStatus::Completed;
-                    self.ai_terminal_session.status_message = Some("Command completed.".to_string());
-                    append_ai_terminal_transcript(
-                        &mut self.ai_terminal_session.transcript,
-                        "[exit 0]\n".to_string(),
-                    );
                 } else {
                     self.ai_terminal_session.status = AiTerminalSessionStatus::Failed;
-                    self.ai_terminal_session.status_message = Some(
-                        exit_code
-                            .map(|code| format!("Command failed with exit code {code}."))
-                            .unwrap_or_else(|| "Command failed.".to_string()),
-                    );
-                    append_ai_terminal_transcript(
-                        &mut self.ai_terminal_session.transcript,
-                        format!("[exit {}]\n", exit_code.unwrap_or(-1)),
-                    );
                 }
+                self.ai_close_terminal_after_exit(cx);
             }
             TerminalEvent::Failed(message) => {
                 self.ai_terminal_stop_requested = false;
@@ -825,6 +812,90 @@ impl DiffViewer {
         }
 
         self.ai_terminal_session.status_message = None;
+        cx.notify();
+    }
+
+    fn apply_hidden_ai_terminal_event_for_thread(&mut self, thread_id: &str, event: TerminalEvent) {
+        match event {
+            TerminalEvent::Output(output) => {
+                let sanitized = sanitize_ai_terminal_output(output.as_slice());
+                if sanitized.is_empty() {
+                    return;
+                }
+                let state = self
+                    .ai_terminal_states_by_thread
+                    .entry(thread_id.to_string())
+                    .or_default();
+                append_ai_terminal_transcript(&mut state.session.transcript, sanitized);
+            }
+            TerminalEvent::Screen(screen) => {
+                let state = self
+                    .ai_terminal_states_by_thread
+                    .entry(thread_id.to_string())
+                    .or_default();
+                state.follow_output = screen.display_offset == 0;
+                state.session.screen = Some(screen);
+                state.session.status = AiTerminalSessionStatus::Running;
+                self.flush_hidden_ai_terminal_pending_input(thread_id);
+            }
+            TerminalEvent::Exit { .. } => {
+                self.ai_terminal_states_by_thread.remove(thread_id);
+            }
+            TerminalEvent::Failed(message) => {
+                let state = self
+                    .ai_terminal_states_by_thread
+                    .entry(thread_id.to_string())
+                    .or_default();
+                state.session.status = AiTerminalSessionStatus::Failed;
+                state.session.status_message = Some(message.clone());
+                append_ai_terminal_transcript(
+                    &mut state.session.transcript,
+                    format!("[terminal error] {message}\n"),
+                );
+            }
+        }
+    }
+
+    fn flush_hidden_ai_terminal_pending_input(&mut self, thread_id: &str) {
+        let input = self
+            .ai_terminal_states_by_thread
+            .get_mut(thread_id)
+            .and_then(|state| state.pending_input.take());
+        let Some(mut input) = input else {
+            return;
+        };
+
+        if !input.ends_with('\n') {
+            input.push('\n');
+        }
+
+        let Some(hidden) = self.ai_hidden_terminal_runtimes.get(thread_id) else {
+            self.ai_terminal_states_by_thread
+                .entry(thread_id.to_string())
+                .or_default()
+                .pending_input = Some(input.trim_end_matches('\n').to_string());
+            return;
+        };
+
+        if let Err(error) = hidden.runtime.handle.write_input(input.as_bytes()) {
+            let state = self
+                .ai_terminal_states_by_thread
+                .entry(thread_id.to_string())
+                .or_default();
+            state.pending_input = Some(input.trim_end_matches('\n').to_string());
+            state.session.status = AiTerminalSessionStatus::Failed;
+            state.session.status_message = Some(error.to_string());
+        }
+    }
+
+    fn ai_close_terminal_after_exit(&mut self, cx: &mut Context<Self>) {
+        self.ai_terminal_open = false;
+        self.ai_terminal_surface_focused = false;
+        self.ai_terminal_follow_output = true;
+        self.ai_terminal_pending_input = None;
+        self.ai_terminal_input_draft.clear();
+        self.ai_terminal_session = AiTerminalSessionState::default();
+        self.defer_ai_composer_focus(cx);
         cx.notify();
     }
 }

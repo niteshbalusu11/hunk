@@ -942,6 +942,8 @@ struct DiffViewer {
     ai_command_tx: Option<mpsc::Sender<AiWorkerCommand>>,
     ai_worker_workspace_key: Option<String>,
     ai_draft_workspace_target_id: Option<String>,
+    ai_terminal_states_by_thread: BTreeMap<String, AiThreadTerminalState>,
+    ai_hidden_terminal_runtimes: BTreeMap<String, AiHiddenTerminalRuntimeHandle>,
     ai_terminal_open: bool,
     ai_terminal_follow_output: bool,
     ai_terminal_height_px: f32,
@@ -1103,7 +1105,7 @@ struct DiffViewer {
 impl Drop for DiffViewer {
     fn drop(&mut self) {
         self.files_editor.borrow_mut().shutdown();
-        self.stop_ai_terminal_runtime("dropping app");
+        self.stop_all_ai_terminal_runtimes("dropping app");
         self.shutdown_ai_worker_blocking();
     }
 }

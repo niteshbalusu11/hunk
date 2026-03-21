@@ -128,6 +128,11 @@ impl DiffViewer {
         }) {
             self.ai_pending_thread_start = None;
         }
+        self.ai_handle_terminal_thread_change(
+            previous_selected_thread.clone(),
+            self.ai_selected_thread_id.clone(),
+            cx,
+        );
         if should_scroll_timeline_to_bottom_on_selection_change(
             previous_selected_thread.as_deref(),
             self.ai_selected_thread_id.as_deref(),

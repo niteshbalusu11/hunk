@@ -97,11 +97,15 @@ Implemented today:
 - The terminal pane is now vertically resizable from a drag handle along its top border.
 - The VT surface now resizes the PTY and terminal grid to the actual rendered panel size, which restores correct prompt placement, auto-follow behavior, and scroll reachability for long output.
 - Command execution rows in the AI timeline can now reopen the terminal and rerun that command directly inside the interactive shell pane.
+- The fallback command-launcher input has been removed; the AI terminal is now shell-first and `exit` closes the terminal session instead of dropping into a second text box.
+- Terminal runtimes are now parked by AI thread instead of being killed on thread/workspace switches, so switching between worktree threads restores that thread's live shell.
+- Each AI thread now owns its own terminal session state instead of sharing a single terminal bucket per workspace.
 - Workspace-wide validation already passes for the current slice.
 
 Not implemented yet:
 
 - terminal hyperlink detection and any remaining cursor blink polish
+- cleanup/pruning of hidden terminal runtimes when archived or deleted threads are removed from the session model
 - persisted terminal state across full app relaunch
 
 ## Current Integration Points
@@ -180,6 +184,21 @@ The target architecture for the next phase is:
 2. `alacritty_terminal` for terminal state and VT parsing
 3. a GPUI terminal surface that renders terminal cells, cursor, and selection from the VT state
 4. keyboard and paste handling that writes directly to the PTY
+
+### Terminal Ownership Model
+
+The terminal model is now:
+
+1. one live PTY-backed terminal per AI thread
+2. thread switches park the previous runtime and promote the newly selected thread's runtime
+3. workspace/worktree switches use the same park/promote behavior instead of killing the old terminal
+4. shell exit closes that thread's terminal session
+
+This is intentionally close to editor-style behavior while remaining cross-platform:
+
+- macOS/Linux continue to use the configured `$SHELL` or `/bin/bash`
+- Windows continues to use `%COMSPEC%` or `cmd.exe`
+- all shells still run behind `portable-pty`, so the runtime model is the same across platforms
 
 ## UX Model
 

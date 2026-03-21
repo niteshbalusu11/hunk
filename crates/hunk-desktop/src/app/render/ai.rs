@@ -4,7 +4,6 @@ const AI_COMPOSER_SURFACE_MAX_WIDTH: f32 = 740.0;
 
 struct AiTerminalPanelState {
     open: bool,
-    accepts_input: bool,
     cwd_label: String,
     shell_label: String,
     status_message: Option<String>,
@@ -196,7 +195,6 @@ impl DiffViewer {
         };
         let terminal_state = AiTerminalPanelState {
             open: self.ai_terminal_open,
-            accepts_input: self.current_ai_terminal_can_run() || self.ai_terminal_is_running(),
             cwd_label: self
                 .ai_terminal_session
                 .cwd
