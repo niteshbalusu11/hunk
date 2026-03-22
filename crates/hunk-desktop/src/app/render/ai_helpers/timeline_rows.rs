@@ -737,7 +737,7 @@ fn ai_command_execution_terminal_text(
 }
 
 fn render_ai_command_execution_details(
-    _this: &DiffViewer,
+    this: &DiffViewer,
     view: Entity<DiffViewer>,
     row_id: &str,
     details: &AiCommandExecutionDisplayDetails,

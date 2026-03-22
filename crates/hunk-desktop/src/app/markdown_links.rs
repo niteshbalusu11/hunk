@@ -194,13 +194,13 @@ fn parse_colon_line_suffix(raw_target: &str) -> Option<(&str, usize)> {
 
 fn parse_colon_line_column_suffix(raw_target: &str) -> Option<(&str, usize)> {
     let (path_with_line, column_suffix) = raw_target.rsplit_once(':')?;
-    let column = column_suffix
+    column_suffix
         .trim()
         .parse::<usize>()
         .ok()
         .filter(|column| *column > 0)?;
     let (path, line) = parse_single_colon_line_suffix(path_with_line)?;
-    if column == 0 || path.is_empty() {
+    if path.is_empty() {
         return None;
     }
     Some((path, line))

@@ -4307,6 +4307,7 @@ dependencies = [
  "lsp-types 0.97.0",
  "notify 8.2.0",
  "serde_json",
+ "tempfile",
  "time",
  "toml 0.9.12+spec-1.1.0",
  "tracing",
