@@ -737,7 +737,7 @@ fn ai_command_execution_terminal_text(
 }
 
 fn render_ai_command_execution_details(
-    this: &DiffViewer,
+    _this: &DiffViewer,
     view: Entity<DiffViewer>,
     row_id: &str,
     details: &AiCommandExecutionDisplayDetails,
@@ -761,7 +761,7 @@ fn render_ai_command_execution_details(
     let status_color = ai_command_execution_status_color(details, cx);
     let status_text = details.status.replace('_', " ");
     let transcript_width = ai_command_execution_transcript_width(preview_text.as_str());
-    let command_to_rerun = this.ai_terminal_user_command(details.command.as_str());
+    let command_to_rerun = details.command.trim().to_string();
     let command_cwd = (!details.cwd.trim().is_empty()).then(|| std::path::PathBuf::from(details.cwd.clone()));
 
     div()

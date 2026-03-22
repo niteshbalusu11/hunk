@@ -5,6 +5,8 @@ use hunk_terminal::{
 };
 
 const AI_TERMINAL_FONT_SIZE_PX: f32 = 12.0;
+const AI_TERMINAL_WIDE_CHAR_SPACER_FLAG: u16 = 0b0000_0000_0100_0000;
+const AI_TERMINAL_LEADING_WIDE_CHAR_SPACER_FLAG: u16 = 0b0000_0100_0000_0000;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct AiTerminalCellStyle {
@@ -481,15 +483,6 @@ impl gpui::Element for AiTerminalSurfaceElement {
                     bounds.origin.y + layout.line_height * row_index as f32,
                 );
 
-                ai_terminal_paint_selection(
-                    line,
-                    row_origin,
-                    layout.cell_width,
-                    layout.line_height,
-                    self.selection_background,
-                    window,
-                );
-
                 for background in line.background_rects.iter() {
                     window.paint_quad(fill(
                         gpui::Bounds {
@@ -505,6 +498,15 @@ impl gpui::Element for AiTerminalSurfaceElement {
                         background.color,
                     ));
                 }
+
+                ai_terminal_paint_selection(
+                    line,
+                    row_origin,
+                    layout.cell_width,
+                    layout.line_height,
+                    self.selection_background,
+                    window,
+                );
 
                 let shaped = window.text_system().shape_line(
                     line.text.clone(),
@@ -924,10 +926,13 @@ fn ai_terminal_normalize_link_candidate(
     }
 
     let raw_target = text[range.clone()].to_string();
-    if ai_terminal_is_url_target(raw_target.as_str())
-        || ai_terminal_is_file_target(raw_target.as_str())
-    {
+    if ai_terminal_is_url_target(raw_target.as_str()) {
         return Some((range, raw_target));
+    }
+
+    if let Some(normalized_target) = ai_terminal_normalize_file_target(raw_target.as_str())
+    {
+        return Some((range, normalized_target));
     }
 
     None
@@ -966,6 +971,22 @@ fn ai_terminal_is_file_target(raw_target: &str) -> bool {
                 .rsplit('/')
                 .next()
                 .is_some_and(|segment| segment.contains('.')))
+}
+
+fn ai_terminal_normalize_file_target(raw_target: &str) -> Option<String> {
+    if !ai_terminal_is_file_target(raw_target) {
+        return None;
+    }
+
+    let (path, line) = crate::app::markdown_links::split_markdown_file_target(raw_target);
+    if path.is_empty() {
+        return None;
+    }
+
+    Some(match line {
+        Some(line) => format!("{path}:{line}"),
+        None => path.to_string(),
+    })
 }
 
 fn ai_terminal_is_windows_path(path: &str) -> bool {
@@ -1021,6 +1042,9 @@ fn ai_terminal_screen_grid(screen: &TerminalScreenSnapshot) -> Vec<Vec<AiTermina
         if row_index >= rows || cell.column >= cols {
             continue;
         }
+        if ai_terminal_cell_is_wide_spacer(cell.flags) {
+            continue;
+        }
 
         grid[row_index][cell.column] = AiTerminalRenderCell {
             character: ai_terminal_render_character(cell.character),
@@ -1051,6 +1075,12 @@ fn ai_terminal_render_character(character: char) -> char {
     } else {
         character
     }
+}
+
+fn ai_terminal_cell_is_wide_spacer(flags: u16) -> bool {
+    flags
+        & (AI_TERMINAL_WIDE_CHAR_SPACER_FLAG | AI_TERMINAL_LEADING_WIDE_CHAR_SPACER_FLAG)
+        != 0
 }
 
 fn ai_terminal_snapshot_color(

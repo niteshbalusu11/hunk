@@ -23,6 +23,7 @@ mod ai_helper_tests {
     use super::ai_terminal_selection_surfaces;
     use super::ai_terminal_selection_columns;
     use super::ai_terminal_link_ranges;
+    use super::ai_terminal_normalize_file_target;
     use super::ai_turn_diff_summary;
     use super::ai_tool_header_label;
     use super::ai_timeline_item_is_renderable;
@@ -243,6 +244,60 @@ mod ai_helper_tests {
     }
 
     #[test]
+    fn terminal_screen_grid_skips_wide_character_spacer_cells() {
+        let screen = TerminalScreenSnapshot {
+            rows: 1,
+            cols: 3,
+            display_offset: 0,
+            cursor: TerminalCursorSnapshot {
+                line: 0,
+                column: 2,
+                shape: TerminalCursorShapeSnapshot::Block,
+            },
+            mode: TerminalModeSnapshot {
+                show_cursor: true,
+                ..TerminalModeSnapshot::default()
+            },
+            damage: TerminalDamageSnapshot::Full,
+            cells: vec![
+                TerminalCellSnapshot {
+                    line: 0,
+                    column: 0,
+                    character: '好',
+                    fg: TerminalColorSnapshot::Named(TerminalNamedColorSnapshot::Foreground),
+                    bg: TerminalColorSnapshot::Named(TerminalNamedColorSnapshot::Background),
+                    flags: 0b0000_0000_0010_0000,
+                    zerowidth: Vec::new(),
+                },
+                TerminalCellSnapshot {
+                    line: 0,
+                    column: 1,
+                    character: ' ',
+                    fg: TerminalColorSnapshot::Named(TerminalNamedColorSnapshot::Foreground),
+                    bg: TerminalColorSnapshot::Named(TerminalNamedColorSnapshot::Background),
+                    flags: 0b0000_0000_0100_0000,
+                    zerowidth: Vec::new(),
+                },
+                TerminalCellSnapshot {
+                    line: 0,
+                    column: 2,
+                    character: 'x',
+                    fg: TerminalColorSnapshot::Named(TerminalNamedColorSnapshot::Foreground),
+                    bg: TerminalColorSnapshot::Named(TerminalNamedColorSnapshot::Background),
+                    flags: 0,
+                    zerowidth: Vec::new(),
+                },
+            ],
+        };
+
+        let grid = ai_terminal_screen_grid(&screen);
+        assert_eq!(grid[0][0].character, '好');
+        assert_eq!(grid[0][1].character, ' ');
+        assert_eq!(grid[0][2].character, 'x');
+        assert!(grid[0][2].cursor);
+    }
+
+    #[test]
     fn terminal_selection_surfaces_insert_newline_separators_between_rows() {
         let surfaces = ai_terminal_selection_surfaces(
             &[
@@ -318,13 +373,21 @@ mod ai_helper_tests {
     #[test]
     fn terminal_link_ranges_detect_urls_and_file_style_paths() {
         let ranges = ai_terminal_link_ranges(
-            "open https://example.com and src/main.rs:12 plus /tmp/log.txt.",
+            "open https://example.com and src/main.rs:12:5 plus /tmp/log.txt.",
         );
 
         assert_eq!(ranges.len(), 3);
         assert_eq!(ranges[0].raw_target, "https://example.com");
         assert_eq!(ranges[1].raw_target, "src/main.rs:12");
         assert_eq!(ranges[2].raw_target, "/tmp/log.txt");
+    }
+
+    #[test]
+    fn terminal_normalize_file_target_drops_column_suffixes() {
+        assert_eq!(
+            ai_terminal_normalize_file_target("src/main.rs:12:5"),
+            Some("src/main.rs:12".to_string())
+        );
     }
 
     #[test]

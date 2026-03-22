@@ -2,52 +2,50 @@ const AI_TERMINAL_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(33);
 const AI_TERMINAL_MAX_TRANSCRIPT_BYTES: usize = 256 * 1024;
 const AI_TERMINAL_MIN_HEIGHT_PX: f32 = 140.0;
 const AI_TERMINAL_MAX_HEIGHT_PX: f32 = 520.0;
-const AI_TERMINAL_SHELL_WRAPPER_PREFIXES: &[&str] = &[
-    "/usr/bin/env zsh -lc ",
-    "env zsh -lc ",
-    "/bin/zsh -lc ",
-    "zsh -lc ",
-    "/usr/bin/env bash -lc ",
-    "env bash -lc ",
-    "/bin/bash -lc ",
-    "bash -lc ",
-    "/usr/bin/env sh -lc ",
-    "env sh -lc ",
-    "/bin/sh -lc ",
-    "sh -lc ",
-    "/usr/bin/env bash -c ",
-    "env bash -c ",
-    "/bin/bash -c ",
-    "bash -c ",
-    "/usr/bin/env sh -c ",
-    "env sh -c ",
-    "/bin/sh -c ",
-    "sh -c ",
-    "cmd /D /C ",
-    "cmd /C ",
-    "cmd.exe /D /C ",
-    "cmd.exe /C ",
-    "powershell -Command ",
-    "powershell -command ",
-    "powershell.exe -Command ",
-    "powershell.exe -command ",
-    "pwsh -Command ",
-    "pwsh -command ",
-    "pwsh.exe -Command ",
-    "pwsh.exe -command ",
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AiTerminalShellFamily {
+    Posix,
+    Cmd,
+    PowerShell,
+}
+
+const AI_TERMINAL_SHELL_WRAPPERS: &[(&str, AiTerminalShellFamily)] = &[
+    ("/usr/bin/env zsh -lc ", AiTerminalShellFamily::Posix),
+    ("env zsh -lc ", AiTerminalShellFamily::Posix),
+    ("/bin/zsh -lc ", AiTerminalShellFamily::Posix),
+    ("zsh -lc ", AiTerminalShellFamily::Posix),
+    ("/usr/bin/env bash -lc ", AiTerminalShellFamily::Posix),
+    ("env bash -lc ", AiTerminalShellFamily::Posix),
+    ("/bin/bash -lc ", AiTerminalShellFamily::Posix),
+    ("bash -lc ", AiTerminalShellFamily::Posix),
+    ("/usr/bin/env sh -lc ", AiTerminalShellFamily::Posix),
+    ("env sh -lc ", AiTerminalShellFamily::Posix),
+    ("/bin/sh -lc ", AiTerminalShellFamily::Posix),
+    ("sh -lc ", AiTerminalShellFamily::Posix),
+    ("/usr/bin/env bash -c ", AiTerminalShellFamily::Posix),
+    ("env bash -c ", AiTerminalShellFamily::Posix),
+    ("/bin/bash -c ", AiTerminalShellFamily::Posix),
+    ("bash -c ", AiTerminalShellFamily::Posix),
+    ("/usr/bin/env sh -c ", AiTerminalShellFamily::Posix),
+    ("env sh -c ", AiTerminalShellFamily::Posix),
+    ("/bin/sh -c ", AiTerminalShellFamily::Posix),
+    ("sh -c ", AiTerminalShellFamily::Posix),
+    ("cmd /D /C ", AiTerminalShellFamily::Cmd),
+    ("cmd /C ", AiTerminalShellFamily::Cmd),
+    ("cmd.exe /D /C ", AiTerminalShellFamily::Cmd),
+    ("cmd.exe /C ", AiTerminalShellFamily::Cmd),
+    ("powershell -Command ", AiTerminalShellFamily::PowerShell),
+    ("powershell -command ", AiTerminalShellFamily::PowerShell),
+    ("powershell.exe -Command ", AiTerminalShellFamily::PowerShell),
+    ("powershell.exe -command ", AiTerminalShellFamily::PowerShell),
+    ("pwsh -Command ", AiTerminalShellFamily::PowerShell),
+    ("pwsh -command ", AiTerminalShellFamily::PowerShell),
+    ("pwsh.exe -Command ", AiTerminalShellFamily::PowerShell),
+    ("pwsh.exe -command ", AiTerminalShellFamily::PowerShell),
 ];
 
 impl DiffViewer {
-    pub(crate) fn ai_terminal_user_command(&self, command: &str) -> String {
-        let trimmed = command.trim();
-        let stripped = AI_TERMINAL_SHELL_WRAPPER_PREFIXES
-            .iter()
-            .find_map(|prefix| trimmed.strip_prefix(prefix))
-            .unwrap_or(trimmed)
-            .trim();
-        ai_terminal_strip_matching_outer_quotes(stripped).to_string()
-    }
-
     pub(crate) fn ai_terminal_is_running(&self) -> bool {
         self.ai_terminal_session.status == AiTerminalSessionStatus::Running
     }
@@ -922,7 +920,7 @@ impl DiffViewer {
         command: String,
         cx: &mut Context<Self>,
     ) {
-        let command = self.ai_terminal_user_command(command.as_str());
+        let command = ai_terminal_command_for_shell(command.as_str(), ai_terminal_default_shell_family());
         if command.is_empty() {
             return;
         }
@@ -1256,6 +1254,48 @@ fn ai_terminal_strip_matching_outer_quotes(value: &str) -> &str {
     trimmed
 }
 
+fn ai_terminal_default_shell_family() -> AiTerminalShellFamily {
+    #[cfg(target_os = "windows")]
+    let shell = std::env::var_os("COMSPEC").unwrap_or_else(|| "cmd.exe".into());
+
+    #[cfg(not(target_os = "windows"))]
+    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/bash".into());
+
+    ai_terminal_shell_family_from_program(
+        std::path::Path::new(&shell)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default(),
+    )
+}
+
+fn ai_terminal_shell_family_from_program(program: &str) -> AiTerminalShellFamily {
+    match program.to_ascii_lowercase().as_str() {
+        "cmd" | "cmd.exe" => AiTerminalShellFamily::Cmd,
+        "powershell" | "powershell.exe" | "pwsh" | "pwsh.exe" => {
+            AiTerminalShellFamily::PowerShell
+        }
+        _ => AiTerminalShellFamily::Posix,
+    }
+}
+
+fn ai_terminal_command_for_shell(command: &str, shell_family: AiTerminalShellFamily) -> String {
+    let trimmed = command.trim();
+    let Some((inner, wrapper_family)) = ai_terminal_wrapped_command(trimmed) else {
+        return trimmed.to_string();
+    };
+    if wrapper_family != shell_family {
+        return trimmed.to_string();
+    }
+    ai_terminal_strip_matching_outer_quotes(inner).trim().to_string()
+}
+
+fn ai_terminal_wrapped_command(command: &str) -> Option<(&str, AiTerminalShellFamily)> {
+    AI_TERMINAL_SHELL_WRAPPERS
+        .iter()
+        .find_map(|(prefix, family)| command.strip_prefix(prefix).map(|inner| (inner, *family)))
+}
+
 fn should_bind_visible_terminal_state_to_new_thread(
     previous_thread_id: Option<&str>,
     next_thread_id: Option<&str>,
@@ -1405,7 +1445,8 @@ fn ai_extend_retainable_terminal_thread_ids(
 #[cfg(test)]
 mod terminal_output_tests {
     use super::{
-        ai_retainable_terminal_thread_ids, sanitize_ai_terminal_output, strip_ansi_sequences,
+        ai_retainable_terminal_thread_ids, ai_terminal_command_for_shell,
+        sanitize_ai_terminal_output, strip_ansi_sequences, AiTerminalShellFamily,
     };
     use crate::app::AiWorkspaceState;
     use hunk_codex::state::{AiState, ThreadLifecycleStatus, ThreadSummary};
@@ -1481,5 +1522,23 @@ mod terminal_output_tests {
         assert!(retained.contains("thread-visible"));
         assert!(retained.contains("thread-background"));
         assert!(!retained.contains("thread-archived"));
+    }
+
+    #[test]
+    fn terminal_command_for_shell_unwraps_matching_posix_wrapper() {
+        let command = ai_terminal_command_for_shell(
+            "/bin/zsh -lc 'kill 75768 && sleep 1'",
+            AiTerminalShellFamily::Posix,
+        );
+        assert_eq!(command, "kill 75768 && sleep 1");
+    }
+
+    #[test]
+    fn terminal_command_for_shell_preserves_mismatched_windows_wrapper() {
+        let command = ai_terminal_command_for_shell(
+            "powershell -Command Get-ChildItem",
+            AiTerminalShellFamily::Cmd,
+        );
+        assert_eq!(command, "powershell -Command Get-ChildItem");
     }
 }
