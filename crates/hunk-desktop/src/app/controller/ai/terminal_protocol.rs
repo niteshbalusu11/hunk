@@ -527,6 +527,24 @@ fn ai_terminal_uses_desktop_clipboard_shortcut(keystroke: &gpui::Keystroke) -> b
     }
 }
 
+fn ai_terminal_uses_insert_paste_shortcut(keystroke: &gpui::Keystroke) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = keystroke;
+        false
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        keystroke.modifiers.shift
+            && !keystroke.modifiers.control
+            && !keystroke.modifiers.alt
+            && !keystroke.modifiers.platform
+            && !keystroke.modifiers.function
+            && keystroke.key == "insert"
+    }
+}
+
 #[cfg(test)]
 mod terminal_protocol_tests {
     use super::{
@@ -534,7 +552,8 @@ mod terminal_protocol_tests {
         ai_terminal_grid_point_from_position, ai_terminal_input_bytes_for_keystroke,
         ai_terminal_mouse_button_bytes, ai_terminal_mouse_move_bytes,
         ai_terminal_mouse_scroll_bytes, ai_terminal_paste_bytes, ai_terminal_uses_copy_shortcut,
-        ai_terminal_uses_desktop_clipboard_shortcut, ai_terminal_viewport_scroll_for_keystroke,
+        ai_terminal_uses_desktop_clipboard_shortcut, ai_terminal_uses_insert_paste_shortcut,
+        ai_terminal_viewport_scroll_for_keystroke,
     };
     use gpui::{Keystroke, MouseButton, ScrollDelta, TouchPhase, point, px};
     use hunk_terminal::{
@@ -683,6 +702,26 @@ mod terminal_protocol_tests {
             ));
             assert!(!ai_terminal_uses_desktop_clipboard_shortcut(
                 &Keystroke::parse("ctrl-c").expect("valid ctrl-c keystroke")
+            ));
+        }
+    }
+
+    #[test]
+    fn terminal_insert_paste_shortcut_matches_platform_conventions() {
+        #[cfg(target_os = "macos")]
+        {
+            assert!(!ai_terminal_uses_insert_paste_shortcut(
+                &Keystroke::parse("shift-insert").expect("valid shift-insert keystroke")
+            ));
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            assert!(ai_terminal_uses_insert_paste_shortcut(
+                &Keystroke::parse("shift-insert").expect("valid shift-insert keystroke")
+            ));
+            assert!(!ai_terminal_uses_insert_paste_shortcut(
+                &Keystroke::parse("insert").expect("valid insert keystroke")
             ));
         }
     }

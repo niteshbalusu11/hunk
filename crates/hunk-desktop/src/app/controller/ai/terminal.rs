@@ -2,8 +2,52 @@ const AI_TERMINAL_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(33);
 const AI_TERMINAL_MAX_TRANSCRIPT_BYTES: usize = 256 * 1024;
 const AI_TERMINAL_MIN_HEIGHT_PX: f32 = 140.0;
 const AI_TERMINAL_MAX_HEIGHT_PX: f32 = 520.0;
+const AI_TERMINAL_SHELL_WRAPPER_PREFIXES: &[&str] = &[
+    "/usr/bin/env zsh -lc ",
+    "env zsh -lc ",
+    "/bin/zsh -lc ",
+    "zsh -lc ",
+    "/usr/bin/env bash -lc ",
+    "env bash -lc ",
+    "/bin/bash -lc ",
+    "bash -lc ",
+    "/usr/bin/env sh -lc ",
+    "env sh -lc ",
+    "/bin/sh -lc ",
+    "sh -lc ",
+    "/usr/bin/env bash -c ",
+    "env bash -c ",
+    "/bin/bash -c ",
+    "bash -c ",
+    "/usr/bin/env sh -c ",
+    "env sh -c ",
+    "/bin/sh -c ",
+    "sh -c ",
+    "cmd /D /C ",
+    "cmd /C ",
+    "cmd.exe /D /C ",
+    "cmd.exe /C ",
+    "powershell -Command ",
+    "powershell -command ",
+    "powershell.exe -Command ",
+    "powershell.exe -command ",
+    "pwsh -Command ",
+    "pwsh -command ",
+    "pwsh.exe -Command ",
+    "pwsh.exe -command ",
+];
 
 impl DiffViewer {
+    pub(crate) fn ai_terminal_user_command(&self, command: &str) -> String {
+        let trimmed = command.trim();
+        let stripped = AI_TERMINAL_SHELL_WRAPPER_PREFIXES
+            .iter()
+            .find_map(|prefix| trimmed.strip_prefix(prefix))
+            .unwrap_or(trimmed)
+            .trim();
+        ai_terminal_strip_matching_outer_quotes(stripped).to_string()
+    }
+
     pub(crate) fn ai_terminal_is_running(&self) -> bool {
         self.ai_terminal_session.status == AiTerminalSessionStatus::Running
     }
@@ -383,6 +427,11 @@ impl DiffViewer {
         cx: &mut Context<Self>,
     ) -> bool {
         let mode = self.ai_terminal_session.screen.as_ref().map(|screen| screen.mode);
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        if event.button == MouseButton::Middle && !mode.unwrap_or_default().mouse_mode {
+            return self.ai_paste_terminal_from_primary_selection(cx);
+        }
+
         let point = AiTerminalGridPoint { line, column };
         let Some(bytes) =
             ai_terminal_mouse_button_bytes(point, event.button, event.modifiers, true, mode)
@@ -457,10 +506,102 @@ impl DiffViewer {
             return false;
         }
 
+        if ai_terminal_uses_insert_paste_shortcut(keystroke) {
+            return self.ai_paste_terminal_from_clipboard(cx);
+        }
+
         let Some(bytes) = ai_terminal_input_bytes_for_keystroke(keystroke, terminal_mode) else {
             return false;
         };
         self.ai_write_terminal_bytes(bytes.as_slice(), cx)
+    }
+
+    fn ai_terminal_dispatch_synthesized_keystroke(
+        &mut self,
+        keystroke: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Ok(keystroke) = gpui::Keystroke::parse(keystroke) else {
+            error!("failed to parse synthesized AI terminal keystroke: {keystroke}");
+            return;
+        };
+
+        if self.ai_terminal_surface_key_down(&keystroke, window, cx) {
+            cx.stop_propagation();
+        }
+    }
+
+    pub(super) fn ai_terminal_send_ctrl_c_action(
+        &mut self,
+        _: &AiTerminalSendCtrlC,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.ai_terminal_dispatch_synthesized_keystroke("ctrl-c", window, cx);
+    }
+
+    pub(super) fn ai_terminal_send_ctrl_a_action(
+        &mut self,
+        _: &AiTerminalSendCtrlA,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.ai_terminal_dispatch_synthesized_keystroke("ctrl-a", window, cx);
+    }
+
+    pub(super) fn ai_terminal_send_up_action(
+        &mut self,
+        _: &AiTerminalSendUp,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.ai_terminal_dispatch_synthesized_keystroke("up", window, cx);
+    }
+
+    pub(super) fn ai_terminal_send_down_action(
+        &mut self,
+        _: &AiTerminalSendDown,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.ai_terminal_dispatch_synthesized_keystroke("down", window, cx);
+    }
+
+    pub(super) fn ai_terminal_send_left_action(
+        &mut self,
+        _: &AiTerminalSendLeft,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.ai_terminal_dispatch_synthesized_keystroke("left", window, cx);
+    }
+
+    pub(super) fn ai_terminal_send_right_action(
+        &mut self,
+        _: &AiTerminalSendRight,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.ai_terminal_dispatch_synthesized_keystroke("right", window, cx);
+    }
+
+    pub(super) fn ai_terminal_send_home_action(
+        &mut self,
+        _: &AiTerminalSendHome,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.ai_terminal_dispatch_synthesized_keystroke("home", window, cx);
+    }
+
+    pub(super) fn ai_terminal_send_end_action(
+        &mut self,
+        _: &AiTerminalSendEnd,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.ai_terminal_dispatch_synthesized_keystroke("end", window, cx);
     }
 
     pub(super) fn ai_terminal_surface_scroll_wheel(
@@ -653,12 +794,28 @@ impl DiffViewer {
             return false;
         }
 
+        self.ai_paste_terminal_text(text.as_str(), cx)
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    fn ai_paste_terminal_from_primary_selection(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(text) = cx.read_from_primary().and_then(|item| item.text()) else {
+            return false;
+        };
+        if text.is_empty() {
+            return false;
+        }
+
+        self.ai_paste_terminal_text(text.as_str(), cx)
+    }
+
+    fn ai_paste_terminal_text(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
         let bracketed_paste = self
             .ai_terminal_session
             .screen
             .as_ref()
             .is_some_and(|screen| screen.mode.bracketed_paste);
-        let bytes = ai_terminal_paste_bytes(text.as_str(), bracketed_paste);
+        let bytes = ai_terminal_paste_bytes(text, bracketed_paste);
         self.ai_write_terminal_bytes(bytes.as_slice(), cx)
     }
 
@@ -668,7 +825,7 @@ impl DiffViewer {
         command: String,
         cx: &mut Context<Self>,
     ) {
-        let command = command.trim().to_string();
+        let command = self.ai_terminal_user_command(command.as_str());
         if command.is_empty() {
             return;
         }
@@ -981,6 +1138,19 @@ impl DiffViewer {
         self.defer_ai_composer_focus(cx);
         cx.notify();
     }
+}
+
+fn ai_terminal_strip_matching_outer_quotes(value: &str) -> &str {
+    let trimmed = value.trim();
+    if trimmed.len() >= 2 {
+        let bytes = trimmed.as_bytes();
+        let first = bytes[0];
+        let last = bytes[trimmed.len() - 1];
+        if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
+            return &trimmed[1..trimmed.len() - 1];
+        }
+    }
+    trimmed
 }
 
 fn append_ai_terminal_transcript(buffer: &mut String, text: String) {

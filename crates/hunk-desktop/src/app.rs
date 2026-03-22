@@ -182,6 +182,14 @@ actions!(
         SwitchToGitView,
         SwitchToAiView,
         AiToggleTerminalDrawer,
+        AiTerminalSendCtrlC,
+        AiTerminalSendCtrlA,
+        AiTerminalSendUp,
+        AiTerminalSendDown,
+        AiTerminalSendLeft,
+        AiTerminalSendRight,
+        AiTerminalSendHome,
+        AiTerminalSendEnd,
         AiNewThread,
         AiNewWorktreeThread,
         AiQueuePrompt,
@@ -438,6 +446,42 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
             .iter()
             .map(|shortcut| KeyBinding::new(shortcut.as_str(), AiToggleTerminalDrawer, None)),
     );
+    bindings.push(KeyBinding::new(
+        "ctrl-c",
+        AiTerminalSendCtrlC,
+        Some("AiTerminal"),
+    ));
+    bindings.push(KeyBinding::new(
+        "ctrl-a",
+        AiTerminalSendCtrlA,
+        Some("AiTerminal"),
+    ));
+    bindings.push(KeyBinding::new("up", AiTerminalSendUp, Some("AiTerminal")));
+    bindings.push(KeyBinding::new(
+        "down",
+        AiTerminalSendDown,
+        Some("AiTerminal"),
+    ));
+    bindings.push(KeyBinding::new(
+        "left",
+        AiTerminalSendLeft,
+        Some("AiTerminal"),
+    ));
+    bindings.push(KeyBinding::new(
+        "right",
+        AiTerminalSendRight,
+        Some("AiTerminal"),
+    ));
+    bindings.push(KeyBinding::new(
+        "home",
+        AiTerminalSendHome,
+        Some("AiTerminal"),
+    ));
+    bindings.push(KeyBinding::new(
+        "end",
+        AiTerminalSendEnd,
+        Some("AiTerminal"),
+    ));
     bindings.push(KeyBinding::new("cmd-n", AiNewThread, Some("DiffViewer")));
     bindings.push(KeyBinding::new("ctrl-n", AiNewThread, Some("DiffViewer")));
     bindings.push(KeyBinding::new(

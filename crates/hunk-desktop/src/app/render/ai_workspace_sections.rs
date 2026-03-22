@@ -50,6 +50,51 @@ struct AiWorkspaceContentSections<'a> {
     composer_panel: AnyElement,
 }
 
+fn ai_preferred_shortcut_label(shortcuts: &[String]) -> Option<String> {
+    let preferred = if cfg!(target_os = "macos") {
+        shortcuts
+            .iter()
+            .find(|shortcut| shortcut.to_ascii_lowercase().contains("cmd"))
+    } else {
+        shortcuts
+            .iter()
+            .find(|shortcut| shortcut.to_ascii_lowercase().contains("ctrl"))
+    }
+    .or_else(|| shortcuts.first())?;
+    Some(ai_format_shortcut_label(preferred.as_str()))
+}
+
+fn ai_format_shortcut_label(shortcut: &str) -> String {
+    shortcut
+        .split_whitespace()
+        .map(|stroke| {
+            stroke
+                .split('-')
+                .map(|part| match part.to_ascii_lowercase().as_str() {
+                    "cmd" => "Cmd".to_string(),
+                    "ctrl" => "Ctrl".to_string(),
+                    "alt" => "Alt".to_string(),
+                    "shift" => "Shift".to_string(),
+                    "super" => "Super".to_string(),
+                    "secondary" => "Secondary".to_string(),
+                    "space" => "Space".to_string(),
+                    "enter" => "Enter".to_string(),
+                    "escape" => "Esc".to_string(),
+                    "up" => "Up".to_string(),
+                    "down" => "Down".to_string(),
+                    "left" => "Left".to_string(),
+                    "right" => "Right".to_string(),
+                    "tab" => "Tab".to_string(),
+                    "backspace" => "Backspace".to_string(),
+                    _ => part.to_ascii_uppercase(),
+                })
+                .collect::<Vec<_>>()
+                .join("+")
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 impl DiffViewer {
     fn render_ai_workspace_content(
         &self,
@@ -520,6 +565,25 @@ impl DiffViewer {
                     )
                     .child({
                         let view = view.clone();
+                        let terminal_shortcut = ai_preferred_shortcut_label(
+                            self.config.keyboard_shortcuts.toggle_ai_terminal_drawer.as_slice(),
+                        );
+                        let terminal_tooltip = terminal_shortcut.as_ref().map_or_else(
+                            || {
+                                if self.ai_terminal_open {
+                                    "Hide terminal".to_string()
+                                } else {
+                                    "Show terminal".to_string()
+                                }
+                            },
+                            |shortcut| {
+                                if self.ai_terminal_open {
+                                    format!("Hide terminal ({shortcut})")
+                                } else {
+                                    format!("Show terminal ({shortcut})")
+                                }
+                            },
+                        );
                         Button::new("ai-toggle-terminal")
                             .compact()
                             .outline()
@@ -530,6 +594,7 @@ impl DiffViewer {
                             } else {
                                 "Show Terminal"
                             })
+                            .tooltip(terminal_tooltip)
                             .on_click(move |_, _, cx| {
                                 view.update(cx, |this, cx| {
                                     this.ai_toggle_terminal_drawer_action(cx);

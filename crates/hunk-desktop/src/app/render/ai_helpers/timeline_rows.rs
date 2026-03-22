@@ -754,7 +754,7 @@ fn render_ai_command_execution_details(
     let status_color = ai_command_execution_status_color(details, cx);
     let status_text = details.status.replace('_', " ");
     let transcript_width = ai_command_execution_transcript_width(preview_text.as_str());
-    let command_to_rerun = details.command.clone();
+    let command_to_rerun = this.ai_terminal_user_command(details.command.as_str());
     let command_cwd = (!details.cwd.trim().is_empty()).then(|| std::path::PathBuf::from(details.cwd.clone()));
 
     div()
@@ -815,8 +815,11 @@ fn render_ai_command_execution_details(
                                         .ghost()
                                         .compact()
                                         .rounded(px(7.0))
-                                        .label("Run in terminal")
-                                        .tooltip("Run this command in the AI terminal")
+                                        .icon(Icon::new(IconName::SquareTerminal).size(px(13.0)))
+                                        .text_color(cx.theme().muted_foreground)
+                                        .min_w(px(22.0))
+                                        .h(px(20.0))
+                                        .tooltip("Run in terminal")
                                         .on_click({
                                             let view = view.clone();
                                             move |_, _, cx| {

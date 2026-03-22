@@ -244,6 +244,14 @@ impl DiffViewer {
                                 .bg(chrome.background)
                                 .key_context("AiTerminal")
                                 .track_focus(&self.ai_terminal_focus_handle)
+                                .on_action(cx.listener(Self::ai_terminal_send_ctrl_c_action))
+                                .on_action(cx.listener(Self::ai_terminal_send_ctrl_a_action))
+                                .on_action(cx.listener(Self::ai_terminal_send_up_action))
+                                .on_action(cx.listener(Self::ai_terminal_send_down_action))
+                                .on_action(cx.listener(Self::ai_terminal_send_left_action))
+                                .on_action(cx.listener(Self::ai_terminal_send_right_action))
+                                .on_action(cx.listener(Self::ai_terminal_send_home_action))
+                                .on_action(cx.listener(Self::ai_terminal_send_end_action))
                                 .on_mouse_down(MouseButton::Left, {
                                     let view = view.clone();
                                     move |_, _, cx| {
