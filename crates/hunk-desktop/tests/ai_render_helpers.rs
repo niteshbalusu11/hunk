@@ -4,8 +4,7 @@ mod empty_state;
 mod service_tier;
 
 use empty_state::ai_should_show_no_turns_empty_state;
-use hunk_domain::state::AiServiceTierSelection;
-use service_tier::{ai_service_tier_options, ai_service_tier_picker_label};
+use service_tier::{ai_approval_policy_options, ai_approval_policy_picker_label};
 
 #[test]
 fn no_turns_empty_state_depends_on_visible_rows_after_filtering() {
@@ -15,25 +14,11 @@ fn no_turns_empty_state_depends_on_visible_rows_after_filtering() {
 }
 
 #[test]
-fn service_tier_picker_options_include_flex() {
+fn approval_policy_picker_options_cover_both_modes() {
+    assert_eq!(ai_approval_policy_picker_label(false), "Ask for approvals");
+    assert_eq!(ai_approval_policy_picker_label(true), "Full access");
     assert_eq!(
-        ai_service_tier_picker_label(AiServiceTierSelection::Standard),
-        "Standard"
-    );
-    assert_eq!(
-        ai_service_tier_picker_label(AiServiceTierSelection::Fast),
-        "Fast"
-    );
-    assert_eq!(
-        ai_service_tier_picker_label(AiServiceTierSelection::Flex),
-        "Flex"
-    );
-    assert_eq!(
-        ai_service_tier_options(),
-        &[
-            (AiServiceTierSelection::Standard, "Standard"),
-            (AiServiceTierSelection::Fast, "Fast"),
-            (AiServiceTierSelection::Flex, "Flex"),
-        ]
+        ai_approval_policy_options(),
+        &[(false, "Ask for approvals"), (true, "Full access")]
     );
 }

@@ -7,6 +7,7 @@ struct AiComposerPanelState {
     review_mode_active: bool,
     usage_popover_open: bool,
     current_mode_label: String,
+    fast_mode_enabled: bool,
     selected_thread_mode_for_picker: AiNewThreadStartMode,
     thread_mode_picker_editable: bool,
     session_controls_read_only: bool,
@@ -26,6 +27,35 @@ struct AiComposerCompletionMenuShell<'a> {
     max_width: Pixels,
     max_height: Pixels,
     scroll_handle: &'a ScrollHandle,
+}
+
+fn ai_composer_mode_badge_label(mode: &str) -> String {
+    match mode {
+        "Code" => "💻 Code".to_string(),
+        "Plan" => "🧭 Plan".to_string(),
+        "Review" => "🔎 Review".to_string(),
+        _ => mode.to_string(),
+    }
+}
+
+fn ai_render_composer_status_chip(
+    label: String,
+    border_color: Hsla,
+    background_color: Hsla,
+    text_color: Hsla,
+) -> AnyElement {
+    div()
+        .rounded(px(999.0))
+        .border_1()
+        .border_color(border_color)
+        .bg(background_color)
+        .px_2()
+        .py_0p5()
+        .text_xs()
+        .font_semibold()
+        .text_color(text_color)
+        .child(label)
+        .into_any_element()
 }
 
 impl DiffViewer {
@@ -263,19 +293,22 @@ impl DiffViewer {
                                                 state.session_controls_read_only,
                                                 cx,
                                             ))
-                                            .child(
-                                                div()
-                                                    .rounded(px(999.0))
-                                                    .border_1()
-                                                    .border_color(completion_colors.row_selected_border)
-                                                    .bg(completion_colors.accent_soft_background)
-                                                    .px_2()
-                                                    .py_0p5()
-                                                    .text_xs()
-                                                    .font_semibold()
-                                                    .text_color(completion_colors.accent_text)
-                                                    .child(state.current_mode_label.clone()),
-                                            ),
+                                            .child(ai_render_composer_status_chip(
+                                                ai_composer_mode_badge_label(
+                                                    state.current_mode_label.as_str(),
+                                                ),
+                                                completion_colors.row_selected_border,
+                                                completion_colors.accent_soft_background,
+                                                completion_colors.accent_text,
+                                            ))
+                                            .when(state.fast_mode_enabled, |this| {
+                                                this.child(ai_render_composer_status_chip(
+                                                    "🚀 Fast".to_string(),
+                                                    completion_colors.row_selected_border,
+                                                    completion_colors.accent_soft_background,
+                                                    completion_colors.accent_text,
+                                                ))
+                                            }),
                                     )
                                     .child(
                                         h_flex()
@@ -656,8 +689,10 @@ impl DiffViewer {
             cx,
             menu.items.iter().enumerate().map(|(ix, item)| {
                 let select_view = view.clone();
-                let command_name = item.name.to_string();
+                let command_name = item.item.name.to_string();
+                let disabled = item.disabled_reason.is_some();
                 let selected = ix == selected_ix;
+                let is_active = selected && !disabled;
 
                 h_flex()
                     .id(("ai-composer-slash-command-item", ix))
@@ -669,11 +704,16 @@ impl DiffViewer {
                     .px_2p5()
                     .py_2()
                     .text_sm()
-                    .hover(|style| style.bg(menu_colors.row_hover))
-                    .when(selected, |this| {
+                    .when(!disabled, |this| this.hover(|style| style.bg(menu_colors.row_hover)))
+                    .when(is_active, |this| {
                         this.bg(menu_colors.row_selected)
                             .border_1()
                             .border_color(menu_colors.row_selected_border)
+                    })
+                    .when(selected && disabled, |this| {
+                        this.bg(menu_colors.row_hover)
+                            .border_1()
+                            .border_color(menu_colors.panel.border)
                     })
                     .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                         select_view.update(cx, |this, cx| {
@@ -698,8 +738,12 @@ impl DiffViewer {
                                     .truncate()
                                     .text_sm()
                                     .font_family(mono_font_family.clone())
-                                    .text_color(menu_colors.accent_text)
-                                    .child(format!("/{}", item.name)),
+                                    .text_color(if disabled {
+                                        menu_colors.secondary_text
+                                    } else {
+                                        menu_colors.accent_text
+                                    })
+                                    .child(format!("/{}", item.item.name)),
                             )
                             .child(
                                 div()
@@ -707,12 +751,12 @@ impl DiffViewer {
                                     .min_w_0()
                                     .truncate()
                                     .text_xs()
-                                    .text_color(if selected {
+                                    .text_color(if is_active {
                                         menu_colors.selected_secondary_text
                                     } else {
                                         menu_colors.secondary_text
                                     })
-                                    .child(item.description),
+                                    .child(item.disabled_reason.unwrap_or(item.item.description)),
                             ),
                     )
                     .into_any_element()
@@ -854,7 +898,7 @@ fn ai_composer_status_tone(status: &str) -> Option<AiComposerStatusTone> {
         || lower.contains("starting codex app server")
         || lower.starts_with("attached ")
         || lower.starts_with("submitted user input")
-        || lower.starts_with("mad max mode ")
+        || lower.starts_with("approval policy ")
     {
         return None;
     }
@@ -868,6 +912,7 @@ fn ai_composer_status_tone(status: &str) -> Option<AiComposerStatusTone> {
     }
 
     if lower.contains("cannot")
+        || lower.contains("disabled while a task is in progress")
         || lower.contains("remove attachments")
         || lower.contains("select a thread")
         || lower.contains("open a workspace")

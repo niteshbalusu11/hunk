@@ -1,114 +1,3 @@
-struct AiAccountPanelView<'a> {
-    account: Option<&'a codex_app_server_protocol::Account>,
-    account_loading: bool,
-    requires_openai_auth: bool,
-    pending_chatgpt_login_id: Option<&'a str>,
-    pending_chatgpt_auth_url: Option<&'a str>,
-    rate_limits: Option<&'a codex_app_server_protocol::RateLimitSnapshot>,
-    rate_limits_loading: bool,
-}
-
-fn render_ai_account_panel_for_view(
-    this: &DiffViewer,
-    _: Entity<DiffViewer>,
-    cx: &mut Context<DiffViewer>,
-) -> AnyElement {
-    render_ai_account_panel(
-        AiAccountPanelView {
-            account: this.ai_account.as_ref(),
-            account_loading: this.ai_bootstrap_loading
-                && this.ai_account.is_none()
-                && !this.ai_requires_openai_auth,
-            requires_openai_auth: this.ai_requires_openai_auth,
-            pending_chatgpt_login_id: this.ai_pending_chatgpt_login_id.as_deref(),
-            pending_chatgpt_auth_url: this.ai_pending_chatgpt_auth_url.as_deref(),
-            rate_limits: this.ai_rate_limits.as_ref(),
-            rate_limits_loading: this.ai_bootstrap_loading && this.ai_rate_limits.is_none(),
-        },
-        cx,
-    )
-}
-
-fn render_ai_account_panel(
-    panel: AiAccountPanelView<'_>,
-    cx: &mut Context<DiffViewer>,
-) -> AnyElement {
-    let login_pending = panel.pending_chatgpt_login_id.is_some();
-    let summary = ai_account_summary(
-        panel.account,
-        panel.requires_openai_auth,
-        panel.account_loading,
-    );
-    let (five_hour_rate_limit, weekly_rate_limit) =
-        ai_rate_limit_summary(panel.rate_limits, panel.rate_limits_loading);
-
-    v_flex()
-        .w_full()
-        .min_w_0()
-        .items_end()
-        .gap_0p5()
-        .child(
-            h_flex()
-                .w_full()
-                .min_w_0()
-                .justify_end()
-                .items_center()
-                .gap_2()
-                .flex_wrap()
-                .child(
-                    div()
-                        .text_xs()
-                        .font_semibold()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(summary),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .font_family(cx.theme().mono_font_family.clone())
-                        .text_color(cx.theme().muted_foreground)
-                        .child(five_hour_rate_limit),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .font_family(cx.theme().mono_font_family.clone())
-                        .text_color(cx.theme().muted_foreground)
-                        .child(weekly_rate_limit),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(if panel.account_loading
-                            || panel.rate_limits_loading
-                            || login_pending
-                        {
-                            cx.theme().warning
-                        } else {
-                            cx.theme().muted_foreground
-                        })
-                        .child(if panel.account_loading || panel.rate_limits_loading {
-                            "Loading"
-                        } else if login_pending {
-                            "Login Pending"
-                        } else {
-                            "Ready"
-                        }),
-                ),
-        )
-        .when_some(panel.pending_chatgpt_auth_url, |this, auth_url| {
-            this.child(
-                div()
-                    .text_xs()
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .text_color(cx.theme().muted_foreground)
-                    .whitespace_normal()
-                    .child(auth_url.to_string()),
-            )
-        })
-        .into_any_element()
-}
-
 fn render_ai_account_actions_for_view(
     this: &DiffViewer,
     view: Entity<DiffViewer>,
@@ -120,60 +9,50 @@ fn render_ai_account_actions_for_view(
         .items_center()
         .gap_1()
         .flex_wrap()
-        .child({
-            let view = view.clone();
-            Button::new("ai-account-refresh")
-                .compact()
-                .outline()
-                .with_size(gpui_component::Size::Small)
-                .label("Refresh Account")
-                .on_click(move |_, _, cx| {
-                    view.update(cx, |this, cx| {
-                        this.ai_refresh_account(cx);
-                    });
-                })
+        .when(!login_pending && this.ai_account.is_none(), |this| {
+            this.child({
+                let view = view.clone();
+                Button::new("ai-account-login")
+                    .compact()
+                    .primary()
+                    .with_size(gpui_component::Size::Small)
+                    .label("Login")
+                    .on_click(move |_, _, cx| {
+                        view.update(cx, |this, cx| {
+                            this.ai_start_chatgpt_login_action(cx);
+                        });
+                    })
+            })
         })
-        .child({
-            let view = view.clone();
-            Button::new("ai-account-login")
-                .compact()
-                .primary()
-                .with_size(gpui_component::Size::Small)
-                .label("Login")
-                .disabled(login_pending)
-                .on_click(move |_, _, cx| {
-                    view.update(cx, |this, cx| {
-                        this.ai_start_chatgpt_login_action(cx);
-                    });
-                })
+        .when(login_pending, |this| {
+            this.child({
+                let view = view.clone();
+                Button::new("ai-account-cancel-login")
+                    .compact()
+                    .outline()
+                    .with_size(gpui_component::Size::Small)
+                    .label("Cancel Login")
+                    .on_click(move |_, _, cx| {
+                        view.update(cx, |this, cx| {
+                            this.ai_cancel_chatgpt_login_action(cx);
+                        });
+                    })
+            })
         })
-        .child({
-            let view = view.clone();
-            Button::new("ai-account-cancel-login")
-                .compact()
-                .outline()
-                .with_size(gpui_component::Size::Small)
-                .label("Cancel Login")
-                .disabled(!login_pending)
-                .on_click(move |_, _, cx| {
-                    view.update(cx, |this, cx| {
-                        this.ai_cancel_chatgpt_login_action(cx);
-                    });
-                })
-        })
-        .child({
-            let view = view.clone();
-            Button::new("ai-account-logout")
-                .compact()
-                .outline()
-                .with_size(gpui_component::Size::Small)
-                .label("Logout")
-                .disabled(this.ai_account.is_none())
-                .on_click(move |_, _, cx| {
-                    view.update(cx, |this, cx| {
-                        this.ai_logout_account_action(cx);
-                    });
-                })
+        .when(this.ai_account.is_some(), |this| {
+            this.child({
+                let view = view.clone();
+                Button::new("ai-account-logout")
+                    .compact()
+                    .outline()
+                    .with_size(gpui_component::Size::Small)
+                    .label("Logout")
+                    .on_click(move |_, _, cx| {
+                        view.update(cx, |this, cx| {
+                            this.ai_logout_account_action(cx);
+                        });
+                    })
+            })
         })
         .into_any_element()
 }
@@ -185,7 +64,7 @@ struct AiSessionControlsPanelView<'a> {
     selected_thread_mode: AiNewThreadStartMode,
     thread_mode_editable: bool,
     read_only: bool,
-    selected_service_tier: AiServiceTierSelection,
+    mad_max_mode: bool,
 }
 
 fn render_ai_session_controls_panel_for_view(
@@ -204,7 +83,7 @@ fn render_ai_session_controls_panel_for_view(
             selected_thread_mode,
             thread_mode_editable,
             read_only,
-            selected_service_tier: this.ai_selected_service_tier,
+            mad_max_mode: this.ai_mad_max_mode,
         },
         view,
         cx,
@@ -238,7 +117,7 @@ fn render_ai_session_controls_panel(
         })
         .unwrap_or_default();
     let effort_label = ai_effort_picker_label(panel.selected_effort, selected_model);
-    let service_tier_label = ai_service_tier_picker_label(panel.selected_service_tier);
+    let approval_policy_label = ai_approval_policy_picker_label(panel.mad_max_mode);
     let thread_mode_label = panel.selected_thread_mode.label().to_string();
     let controls_locked_tooltip = "Session settings are locked while the agent is working.";
     let (visible_models, hidden_models): (Vec<_>, Vec<_>) = panel
@@ -375,8 +254,8 @@ fn render_ai_session_controls_panel(
         })
         .child({
             let view = view.clone();
-            let selected_service_tier = panel.selected_service_tier;
-            Button::new("ai-session-service-tier-dropdown")
+            let mad_max_mode = panel.mad_max_mode;
+            Button::new("ai-session-approval-policy-dropdown")
                 .compact()
                 .ghost()
                 .rounded(px(999.0))
@@ -384,20 +263,20 @@ fn render_ai_session_controls_panel(
                 .px_1()
                 .dropdown_caret(true)
                 .disabled(panel.read_only)
-                .label(service_tier_label)
+                .label(approval_policy_label)
                 .when(panel.read_only, |this| this.tooltip(controls_locked_tooltip))
                 .dropdown_menu(move |menu, _, _| {
                     let mut menu = menu;
-                    for (service_tier, label) in ai_service_tier_options() {
+                    for (full_access, label) in ai_approval_policy_options() {
                         menu = menu.item(
                             PopupMenuItem::new(*label)
-                                .checked(selected_service_tier == *service_tier)
+                                .checked(mad_max_mode == *full_access)
                                 .on_click({
                                     let view = view.clone();
-                                    let service_tier = *service_tier;
+                                    let full_access = *full_access;
                                     move |_, _, cx| {
                                         view.update(cx, |this, cx| {
-                                            this.ai_select_service_tier_action(service_tier, cx);
+                                            this.ai_set_mad_max_mode(full_access, cx);
                                         });
                                     }
                                 }),
@@ -482,6 +361,7 @@ fn ai_account_summary(
     }
 }
 
+#[cfg(test)]
 fn ai_rate_limit_summary(
     rate_limits: Option<&codex_app_server_protocol::RateLimitSnapshot>,
     rate_limits_loading: bool,
@@ -538,6 +418,7 @@ fn ai_rate_limit_windows(
     (five_hour, weekly)
 }
 
+#[cfg(test)]
 fn ai_rate_limit_window_summary(
     label: &str,
     window: Option<&codex_app_server_protocol::RateLimitWindow>,
@@ -553,6 +434,7 @@ fn ai_rate_limit_window_summary(
     format!("{label}: {}% used, resets at {resets_at}", window.used_percent)
 }
 
+#[cfg(test)]
 fn ai_format_rate_limit_reset_timestamp(unix_seconds: i64) -> String {
     let Ok(utc_datetime) = time::OffsetDateTime::from_unix_timestamp(unix_seconds) else {
         return unix_seconds.to_string();
@@ -571,6 +453,7 @@ fn ai_format_rate_limit_reset_timestamp(unix_seconds: i64) -> String {
     }
 }
 
+#[cfg(test)]
 fn ai_format_human_datetime(datetime: time::OffsetDateTime) -> String {
     let month = ai_month_short(datetime.month());
     let day = datetime.day();
@@ -606,6 +489,7 @@ fn ai_hour_and_meridiem(hour_24: u8) -> (u8, &'static str) {
     }
 }
 
+#[cfg(test)]
 fn ai_format_utc_offset(offset: time::UtcOffset) -> String {
     let total_seconds = offset.whole_seconds();
     let sign = if total_seconds < 0 { '-' } else { '+' };

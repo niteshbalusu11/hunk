@@ -238,9 +238,6 @@ fn command_can_retry_after_reconnect(command: &AiWorkerCommand) -> bool {
         command,
         AiWorkerCommand::RefreshThreads
             | AiWorkerCommand::RefreshThreadMetadata { .. }
-            | AiWorkerCommand::RefreshAccount
-            | AiWorkerCommand::RefreshRateLimits
-            | AiWorkerCommand::RefreshSessionMetadata
             | AiWorkerCommand::SetIncludeHiddenModels { .. }
             | AiWorkerCommand::SelectThread { .. }
             | AiWorkerCommand::SetMadMaxMode { .. }
@@ -251,9 +248,6 @@ fn command_context_message(command: &AiWorkerCommand) -> &'static str {
     match command {
         AiWorkerCommand::RefreshThreads => "refreshing AI threads",
         AiWorkerCommand::RefreshThreadMetadata { .. } => "refreshing AI thread metadata",
-        AiWorkerCommand::RefreshAccount => "refreshing the AI account state",
-        AiWorkerCommand::RefreshRateLimits => "refreshing AI rate limits",
-        AiWorkerCommand::RefreshSessionMetadata => "refreshing AI session metadata",
         AiWorkerCommand::SetIncludeHiddenModels { .. } => "updating AI model visibility",
         AiWorkerCommand::StartThread { .. } => "starting a new AI thread",
         AiWorkerCommand::SelectThread { .. } => "opening the AI thread",

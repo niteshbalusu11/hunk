@@ -4,6 +4,8 @@ A GPUI based desktop app for fast git diff viewing. In the age of vibe coding, n
 Hunk is a fast diff viewer that is extremely simple written in Rust.
 
 - Production Git behavior should live in `crates/hunk-git`, using `gix` first and narrow `git2` fallbacks only when necessary. Do not shell out to the Git CLI from app code.
+- When fixing a bug or adding a new feature, always switch to plan mode and plan first before writing code.
+- Simplicity first, make every change as simple as possible.
 - Make sure code is scalable.
 - Don't make files over 1000 lines long.
 - When working with frontend, always use colors in theme.rs

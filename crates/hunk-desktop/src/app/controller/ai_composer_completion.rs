@@ -113,7 +113,18 @@ impl DiffViewer {
         let input = self.ai_composer_input_state.read(cx);
         let text = input.value().to_string();
         let cursor = input.cursor();
-        crate::app::ai_composer_commands::slash_command_menu_state(text.as_str(), cursor)
+        crate::app::ai_composer_commands::slash_command_menu_state(
+            text.as_str(),
+            cursor,
+            self.ai_composer_session_settings_locked(),
+        )
+    }
+
+    fn ai_composer_session_settings_locked(&self) -> bool {
+        self.current_ai_thread_id()
+            .as_deref()
+            .and_then(|thread_id| self.current_ai_in_progress_turn_id(thread_id))
+            .is_some()
     }
 
     fn current_ai_composer_skill_completion_candidate(
@@ -456,6 +467,19 @@ impl DiffViewer {
             return false;
         };
 
+        if command.disabled_reason.is_some() {
+            self.set_current_ai_composer_status(format!(
+                "'/{}' is disabled while a task is in progress.",
+                command.item.name
+            ));
+            self.ai_composer_slash_command_dismissed_token =
+                Some(Self::ai_composer_slash_command_menu_token(&menu));
+            self.ai_composer_slash_command_menu = None;
+            self.ai_composer_slash_command_selected_ix = 0;
+            cx.notify();
+            return true;
+        }
+
         let current_text = self.ai_composer_input_state.read(cx).value().to_string();
         let next_prompt = crate::app::ai_composer_commands::prompt_after_accepting_slash_command(
             current_text.as_str(),
@@ -480,7 +504,7 @@ impl DiffViewer {
         self.ai_composer_slash_command_menu = None;
         self.ai_composer_slash_command_selected_ix = 0;
 
-        match command.kind {
+        match command.item.kind {
             crate::app::ai_composer_commands::AiComposerSlashCommandKind::Code => {
                 self.ai_select_collaboration_mode_action(
                     hunk_domain::state::AiCollaborationModeSelection::Default,
@@ -495,6 +519,18 @@ impl DiffViewer {
             }
             crate::app::ai_composer_commands::AiComposerSlashCommandKind::Review => {
                 self.ai_select_review_mode_action(cx);
+            }
+            crate::app::ai_composer_commands::AiComposerSlashCommandKind::FastModeOn => {
+                self.ai_select_service_tier_action(
+                    hunk_domain::state::AiServiceTierSelection::Fast,
+                    cx,
+                );
+            }
+            crate::app::ai_composer_commands::AiComposerSlashCommandKind::FastModeOff => {
+                self.ai_select_service_tier_action(
+                    hunk_domain::state::AiServiceTierSelection::Standard,
+                    cx,
+                );
             }
             crate::app::ai_composer_commands::AiComposerSlashCommandKind::Usage => {
                 self.ai_open_usage_overlay_action(cx);
@@ -586,7 +622,7 @@ impl DiffViewer {
         let Some(menu) = self.ai_composer_slash_command_menu.as_ref() else {
             return;
         };
-        let Some(selected_ix) = menu.items.iter().position(|item| item.name == name) else {
+        let Some(selected_ix) = menu.items.iter().position(|item| item.item.name == name) else {
             return;
         };
         self.ai_composer_slash_command_selected_ix = selected_ix;

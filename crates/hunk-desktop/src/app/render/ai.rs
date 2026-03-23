@@ -190,6 +190,10 @@ impl DiffViewer {
                 self.ai_selected_collaboration_mode,
             )
             .to_string(),
+            fast_mode_enabled: matches!(
+                self.ai_selected_service_tier,
+                hunk_domain::state::AiServiceTierSelection::Fast
+            ),
             selected_thread_mode_for_picker,
             thread_mode_picker_editable,
             session_controls_read_only: composer_interrupt_available,

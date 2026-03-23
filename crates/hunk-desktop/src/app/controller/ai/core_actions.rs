@@ -92,12 +92,6 @@ impl DiffViewer {
         self.send_ai_worker_command(AiWorkerCommand::RefreshThreads, cx);
     }
 
-    pub(super) fn ai_refresh_account(&mut self, cx: &mut Context<Self>) {
-        self.send_ai_worker_command(AiWorkerCommand::RefreshAccount, cx);
-        self.send_ai_worker_command(AiWorkerCommand::RefreshRateLimits, cx);
-        self.send_ai_worker_command(AiWorkerCommand::RefreshSessionMetadata, cx);
-    }
-
     pub(super) fn ai_start_chatgpt_login_action(&mut self, cx: &mut Context<Self>) {
         self.send_ai_worker_command(AiWorkerCommand::StartChatgptLogin, cx);
     }
@@ -544,7 +538,8 @@ impl DiffViewer {
 
     pub(super) fn ai_set_mad_max_mode(&mut self, enabled: bool, cx: &mut Context<Self>) {
         let Some(workspace_key) = self.ai_workspace_key() else {
-            self.ai_status_message = Some("Open a workspace before changing Mad Max mode.".to_string());
+            self.ai_status_message =
+                Some("Open a workspace before changing the approval policy.".to_string());
             cx.notify();
             return;
         };
@@ -554,11 +549,9 @@ impl DiffViewer {
         self.ai_mad_max_mode = enabled;
         self.send_ai_worker_command_if_running(AiWorkerCommand::SetMadMaxMode { enabled }, cx);
         self.ai_status_message = Some(if enabled {
-            "Mad Max mode enabled: approvals are auto-accepted with full sandbox access."
-                .to_string()
+            "Approval policy set to Full access.".to_string()
         } else {
-            "Mad Max mode disabled: command and file approvals require explicit review."
-                .to_string()
+            "Approval policy set to Ask for approvals.".to_string()
         });
         cx.notify();
     }

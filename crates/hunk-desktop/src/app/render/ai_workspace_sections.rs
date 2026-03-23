@@ -95,6 +95,38 @@ fn ai_format_shortcut_label(shortcut: &str) -> String {
         .join(" ")
 }
 
+fn render_ai_header_metric_chip(
+    label: &'static str,
+    value: String,
+    accent: Hsla,
+    is_dark: bool,
+    cx: &mut Context<DiffViewer>,
+) -> AnyElement {
+    h_flex()
+        .items_center()
+        .gap_1p5()
+        .px_2()
+        .py_1()
+        .rounded(px(999.0))
+        .border_1()
+        .border_color(hunk_opacity(accent, is_dark, 0.34, 0.22))
+        .bg(hunk_opacity(accent, is_dark, 0.12, 0.08))
+        .child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(label),
+        )
+        .child(
+            div()
+                .text_xs()
+                .font_semibold()
+                .text_color(accent)
+                .child(value),
+        )
+        .into_any_element()
+}
+
 impl DiffViewer {
     fn render_ai_workspace_content(
         &self,
@@ -209,68 +241,51 @@ impl DiffViewer {
                     .flex_1()
                     .min_w_0()
                     .items_end()
-                    .gap_1()
                     .child(
                         h_flex()
                             .min_w_0()
                             .items_center()
-                            .gap_3()
+                            .gap_2()
                             .flex_wrap()
                             .justify_end()
+                            .child(render_ai_header_metric_chip(
+                                "Branch",
+                                state.active_branch.clone(),
+                                cx.theme().accent,
+                                is_dark,
+                                cx,
+                            ))
+                            .child(render_ai_header_metric_chip(
+                                "Approvals",
+                                state.pending_approval_count.to_string(),
+                                if state.pending_approval_count > 0 {
+                                    cx.theme().warning
+                                } else {
+                                    cx.theme().muted_foreground
+                                },
+                                is_dark,
+                                cx,
+                            ))
+                            .child(render_ai_header_metric_chip(
+                                "Inputs",
+                                state.pending_user_input_count.to_string(),
+                                if state.pending_user_input_count > 0 {
+                                    cx.theme().warning
+                                } else {
+                                    cx.theme().muted_foreground
+                                },
+                                is_dark,
+                                cx,
+                            ))
                             .child(render_ai_account_actions_for_view(self, view.clone(), cx))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(format!("Active branch: {}", state.active_branch)),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(if state.pending_approval_count > 0 {
-                                        cx.theme().warning
-                                    } else {
-                                        cx.theme().muted_foreground
-                                    })
-                                    .child(format!("Approvals: {}", state.pending_approval_count)),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(if state.pending_user_input_count > 0 {
-                                        cx.theme().warning
-                                    } else {
-                                        cx.theme().muted_foreground
-                                    })
-                                    .child(format!("Inputs: {}", state.pending_user_input_count)),
-                            )
-                            .child({
-                                let view = view.clone();
-                                let enable_mad_max = !self.ai_mad_max_mode;
-                                Button::new("ai-toggle-mad-max")
-                                    .compact()
-                                    .outline()
-                                    .with_size(gpui_component::Size::Small)
-                                    .label(if self.ai_mad_max_mode {
-                                        "Mad Max On"
-                                    } else {
-                                        "Mad Max Off"
-                                    })
-                                    .on_click(move |_, _, cx| {
-                                        view.update(cx, |this, cx| {
-                                            this.ai_set_mad_max_mode(enable_mad_max, cx);
-                                        });
-                                    })
-                            })
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_semibold()
-                                    .text_color(state.connection_color)
-                                    .child(state.connection_label),
-                            ),
-                    )
-                    .child(render_ai_account_panel_for_view(self, view.clone(), cx)),
+                            .child(render_ai_header_metric_chip(
+                                "Status",
+                                state.connection_label.to_string(),
+                                state.connection_color,
+                                is_dark,
+                                cx,
+                            )),
+                    ),
             )
             .into_any_element()
     }
@@ -679,7 +694,7 @@ impl DiffViewer {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().danger)
-                                .child("Mad Max auto-approvals enabled"),
+                                .child("Full access enabled"),
                         )
                     }),
             )

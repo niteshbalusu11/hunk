@@ -4,42 +4,64 @@ use crate::app::ActivePrefixedToken;
 
 use super::fuzzy_match::subsequence_match_score;
 
-const AI_COMPOSER_SLASH_COMMANDS: [AiComposerSlashCommandItem; 6] = [
+const AI_SLASH_COMMAND_LOCKED_REASON: &str = "Disabled while a task is in progress.";
+
+const AI_COMPOSER_SLASH_COMMANDS: [AiComposerSlashCommandItem; 8] = [
     AiComposerSlashCommandItem::new(
         AiComposerSlashCommandKind::Code,
         "code",
         "Code",
         "Switch to standard coding mode.",
+        AiComposerSlashCommandAvailability::IdleOnly,
     ),
     AiComposerSlashCommandItem::new(
         AiComposerSlashCommandKind::Plan,
         "plan",
         "Plan",
         "Switch to planning mode before coding.",
+        AiComposerSlashCommandAvailability::IdleOnly,
     ),
     AiComposerSlashCommandItem::new(
         AiComposerSlashCommandKind::Review,
         "review",
         "Review",
         "Switch the composer into diff review mode.",
+        AiComposerSlashCommandAvailability::IdleOnly,
+    ),
+    AiComposerSlashCommandItem::new(
+        AiComposerSlashCommandKind::FastModeOn,
+        "fast-mode-on",
+        "Fast Mode On",
+        "Switch to the Fast service tier for quicker agent responses.",
+        AiComposerSlashCommandAvailability::IdleOnly,
+    ),
+    AiComposerSlashCommandItem::new(
+        AiComposerSlashCommandKind::FastModeOff,
+        "fast-mode-off",
+        "Fast Mode Off",
+        "Switch back to the Standard service tier.",
+        AiComposerSlashCommandAvailability::IdleOnly,
     ),
     AiComposerSlashCommandItem::new(
         AiComposerSlashCommandKind::Usage,
         "usage",
         "Usage",
         "Show remaining 5h and 7d usage limits.",
+        AiComposerSlashCommandAvailability::Always,
     ),
     AiComposerSlashCommandItem::new(
         AiComposerSlashCommandKind::Login,
         "login",
         "Login",
         "Start ChatGPT login for this workspace.",
+        AiComposerSlashCommandAvailability::Always,
     ),
     AiComposerSlashCommandItem::new(
         AiComposerSlashCommandKind::Logout,
         "logout",
         "Logout",
         "Disconnect the current account.",
+        AiComposerSlashCommandAvailability::Always,
     ),
 ];
 
@@ -48,9 +70,17 @@ pub(crate) enum AiComposerSlashCommandKind {
     Code,
     Plan,
     Review,
+    FastModeOn,
+    FastModeOff,
     Usage,
     Login,
     Logout,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AiComposerSlashCommandAvailability {
+    Always,
+    IdleOnly,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +89,13 @@ pub(crate) struct AiComposerSlashCommandItem {
     pub(crate) name: &'static str,
     pub(crate) label: &'static str,
     pub(crate) description: &'static str,
+    pub(crate) availability: AiComposerSlashCommandAvailability,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AiComposerSlashCommandMenuItem {
+    pub(crate) item: AiComposerSlashCommandItem,
+    pub(crate) disabled_reason: Option<&'static str>,
 }
 
 impl AiComposerSlashCommandItem {
@@ -67,12 +104,14 @@ impl AiComposerSlashCommandItem {
         name: &'static str,
         label: &'static str,
         description: &'static str,
+        availability: AiComposerSlashCommandAvailability,
     ) -> Self {
         Self {
             kind,
             name,
             label,
             description,
+            availability,
         }
     }
 }
@@ -81,7 +120,7 @@ impl AiComposerSlashCommandItem {
 pub(crate) struct AiComposerSlashCommandMenuState {
     pub(crate) query: String,
     pub(crate) replace_range: std::ops::Range<usize>,
-    pub(crate) items: Vec<AiComposerSlashCommandItem>,
+    pub(crate) items: Vec<AiComposerSlashCommandMenuItem>,
 }
 
 pub(crate) fn active_slash_command_token(
@@ -131,9 +170,10 @@ pub(crate) fn active_slash_command_token(
 pub(crate) fn slash_command_menu_state(
     text: &str,
     cursor_offset: usize,
+    task_in_progress: bool,
 ) -> Option<AiComposerSlashCommandMenuState> {
     let active_token = active_slash_command_token(text, cursor_offset)?;
-    let items = matched_slash_commands(active_token.query.as_str());
+    let items = matched_slash_commands(active_token.query.as_str(), task_in_progress);
     if items.is_empty() {
         return None;
     }
@@ -170,10 +210,33 @@ pub(crate) fn slash_command_items() -> &'static [AiComposerSlashCommandItem] {
     &AI_COMPOSER_SLASH_COMMANDS
 }
 
-fn matched_slash_commands(query: &str) -> Vec<AiComposerSlashCommandItem> {
+pub(crate) fn slash_command_disabled_reason(
+    item: AiComposerSlashCommandItem,
+    task_in_progress: bool,
+) -> Option<&'static str> {
+    match (item.availability, task_in_progress) {
+        (AiComposerSlashCommandAvailability::Always, _) => None,
+        (AiComposerSlashCommandAvailability::IdleOnly, true) => {
+            Some(AI_SLASH_COMMAND_LOCKED_REASON)
+        }
+        (AiComposerSlashCommandAvailability::IdleOnly, false) => None,
+    }
+}
+
+fn matched_slash_commands(
+    query: &str,
+    task_in_progress: bool,
+) -> Vec<AiComposerSlashCommandMenuItem> {
     let trimmed = query.trim();
     if trimmed.is_empty() {
-        return slash_command_items().to_vec();
+        return slash_command_items()
+            .iter()
+            .copied()
+            .map(|item| AiComposerSlashCommandMenuItem {
+                disabled_reason: slash_command_disabled_reason(item, task_in_progress),
+                item,
+            })
+            .collect();
     }
 
     let normalized_query = trimmed.to_ascii_lowercase();
@@ -214,7 +277,13 @@ fn matched_slash_commands(query: &str) -> Vec<AiComposerSlashCommandItem> {
             .then_with(|| left.0.name.cmp(right.0.name))
     });
 
-    ranked.into_iter().map(|(item, ..)| item).collect()
+    ranked
+        .into_iter()
+        .map(|(item, ..)| AiComposerSlashCommandMenuItem {
+            disabled_reason: slash_command_disabled_reason(item, task_in_progress),
+            item,
+        })
+        .collect()
 }
 
 fn clamp_to_char_boundary(text: &str, cursor_offset: usize) -> usize {
@@ -228,8 +297,9 @@ fn clamp_to_char_boundary(text: &str, cursor_offset: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{
-        AiComposerSlashCommandKind, active_slash_command_token, ai_composer_mode_label,
-        prompt_after_accepting_slash_command, slash_command_menu_state,
+        AiComposerSlashCommandAvailability, AiComposerSlashCommandKind, active_slash_command_token,
+        ai_composer_mode_label, prompt_after_accepting_slash_command,
+        slash_command_disabled_reason, slash_command_items, slash_command_menu_state,
     };
     use crate::app::ActivePrefixedToken;
     use hunk_domain::state::AiCollaborationModeSelection;
@@ -256,11 +326,56 @@ mod tests {
 
     #[test]
     fn slash_command_menu_matches_on_name_and_description() {
-        let menu = slash_command_menu_state("/us", 3).expect("menu should exist");
-        assert_eq!(menu.items[0].kind, AiComposerSlashCommandKind::Usage);
+        let menu = slash_command_menu_state("/us", 3, false).expect("menu should exist");
+        assert_eq!(menu.items[0].item.kind, AiComposerSlashCommandKind::Usage);
 
-        let menu = slash_command_menu_state("/disconnect", 11).expect("menu should exist");
-        assert_eq!(menu.items[0].kind, AiComposerSlashCommandKind::Logout);
+        let menu = slash_command_menu_state("/disconnect", 11, false).expect("menu should exist");
+        assert_eq!(menu.items[0].item.kind, AiComposerSlashCommandKind::Logout);
+
+        let menu = slash_command_menu_state("/fast-mode-o", 12, false).expect("menu should exist");
+        assert_eq!(
+            menu.items[0].item.kind,
+            AiComposerSlashCommandKind::FastModeOn
+        );
+    }
+
+    #[test]
+    fn slash_command_menu_keeps_fast_mode_toggle_variants_distinct() {
+        let menu =
+            slash_command_menu_state("/fast-mode-off", 14, false).expect("menu should exist");
+        assert_eq!(
+            menu.items[0].item.kind,
+            AiComposerSlashCommandKind::FastModeOff
+        );
+    }
+
+    #[test]
+    fn slash_command_menu_marks_idle_only_commands_disabled_during_active_turns() {
+        let menu = slash_command_menu_state("/fast", 5, true).expect("menu should exist");
+        assert_eq!(
+            menu.items[0].disabled_reason,
+            Some("Disabled while a task is in progress.")
+        );
+
+        let usage_item = slash_command_items()
+            .iter()
+            .find(|item| item.kind == AiComposerSlashCommandKind::Usage)
+            .copied()
+            .expect("usage command should exist");
+        assert_eq!(slash_command_disabled_reason(usage_item, true), None);
+    }
+
+    #[test]
+    fn slash_command_items_tag_mutating_commands_as_idle_only() {
+        let fast_mode_on = slash_command_items()
+            .iter()
+            .find(|item| item.kind == AiComposerSlashCommandKind::FastModeOn)
+            .copied()
+            .expect("fast-mode-on should exist");
+        assert_eq!(
+            fast_mode_on.availability,
+            AiComposerSlashCommandAvailability::IdleOnly
+        );
     }
 
     #[test]

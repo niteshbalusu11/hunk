@@ -204,9 +204,6 @@ pub enum AiWorkerCommand {
     RefreshThreadMetadata {
         thread_id: String,
     },
-    RefreshAccount,
-    RefreshRateLimits,
-    RefreshSessionMetadata,
     SetIncludeHiddenModels {
         enabled: bool,
     },
@@ -473,18 +470,6 @@ impl AiWorkerRuntime {
             }
             AiWorkerCommand::RefreshThreadMetadata { thread_id } => {
                 self.refresh_thread_metadata_snapshot(thread_id)?;
-                self.emit_snapshot_after_sync(event_tx)?;
-            }
-            AiWorkerCommand::RefreshAccount => {
-                self.refresh_account_state()?;
-                self.emit_snapshot_after_sync(event_tx)?;
-            }
-            AiWorkerCommand::RefreshRateLimits => {
-                self.refresh_account_rate_limits()?;
-                self.emit_snapshot_after_sync(event_tx)?;
-            }
-            AiWorkerCommand::RefreshSessionMetadata => {
-                self.refresh_session_metadata()?;
                 self.emit_snapshot_after_sync(event_tx)?;
             }
             AiWorkerCommand::SetIncludeHiddenModels { enabled } => {
