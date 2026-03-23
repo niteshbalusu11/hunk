@@ -271,6 +271,45 @@ fn reconcile_ai_queued_messages_after_snapshot_confirms_attachment_messages_with
 }
 
 #[test]
+fn reconcile_ai_queued_messages_after_snapshot_confirms_inline_image_roundtrip() {
+    let mut queued_messages = vec![
+        pending_queued_message_with_image(
+            "thread-a",
+            "check screenshot",
+            "/tmp/screenshot.png",
+            1,
+        ),
+        queued_message("thread-a", "second"),
+    ];
+    let mut state = AiState::default();
+    state.threads.insert(
+        "thread-a".to_string(),
+        queued_thread("thread-a", ThreadLifecycleStatus::Active, 2),
+    );
+    state.items.insert(
+        "thread-a::item-1".to_string(),
+        timeline_tool_item(
+            "item-1",
+            "thread-a",
+            "turn-1",
+            "userMessage",
+            ItemStatus::Completed,
+            "check screenshot\n[image]",
+            "{}",
+            2,
+        ),
+    );
+
+    let restored =
+        reconcile_ai_queued_messages_after_snapshot(&mut queued_messages, &mut BTreeSet::new(), &state);
+
+    assert!(restored.is_empty());
+    assert_eq!(queued_messages.len(), 1);
+    assert_eq!(queued_messages[0].prompt, "second");
+    assert_eq!(queued_messages[0].status, AiQueuedUserMessageStatus::Queued);
+}
+
+#[test]
 fn reconcile_ai_queued_messages_after_snapshot_restores_unconfirmed_pending_messages() {
     let mut queued_messages = vec![pending_queued_message("thread-a", "first", 1)];
     let mut state = AiState::default();

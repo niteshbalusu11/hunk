@@ -436,6 +436,7 @@ impl ThreadService {
         let item_id = item.id().to_string();
         let item_key = item_storage_key(thread_id, turn_id, item_id.as_str());
         let kind = thread_item_kind(item).to_string();
+        let seed_content = thread_item_seed_content(item);
         let should_seed_content = self
             .state
             .items
@@ -460,12 +461,21 @@ impl ThreadService {
             });
         }
 
-        if should_seed_content && let Some(seed_content) = thread_item_seed_content(item) {
+        if should_seed_content && let Some(seed_content) = seed_content.as_ref() {
             self.apply_event(ReducerEvent::ItemDelta {
                 thread_id: thread_id.to_string(),
                 turn_id: turn_id.to_string(),
                 item_id: item_id.clone(),
-                delta: seed_content,
+                delta: seed_content.clone(),
+            });
+        } else if let Some(seed_content) = seed_content.as_ref()
+            && self.should_replace_item_snapshot_content(item, item_key.as_str(), seed_content)
+        {
+            self.apply_event(ReducerEvent::ItemContentSet {
+                thread_id: thread_id.to_string(),
+                turn_id: turn_id.to_string(),
+                item_id: item_id.clone(),
+                content: seed_content.clone(),
             });
         }
 
@@ -629,6 +639,23 @@ impl ThreadService {
         for item_key in item_keys_to_remove {
             self.state.items.remove(item_key.as_str());
         }
+    }
+
+    fn should_replace_item_snapshot_content(
+        &self,
+        item: &ThreadItem,
+        item_key: &str,
+        seed_content: &str,
+    ) -> bool {
+        matches!(item, ThreadItem::UserMessage { .. })
+            && self
+                .state
+                .items
+                .get(item_key)
+                .is_some_and(|existing| {
+                    normalized_item_content(existing.content.as_str())
+                        != normalized_item_content(seed_content)
+                })
     }
 
     fn ensure_thread_in_workspace(&self, thread: &Thread) -> Result<()> {

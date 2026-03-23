@@ -29,10 +29,10 @@ fn ai_queued_message_matching_sequence(
         .items
         .values()
         .filter(|item| {
-            item.thread_id == queued.thread_id
+                item.thread_id == queued.thread_id
                 && item.kind == "userMessage"
                 && ai_user_message_matches_pending_input(
-                    item.content.as_str(),
+                    item,
                     queued.prompt.as_str(),
                     queued.local_images.as_slice(),
                 )

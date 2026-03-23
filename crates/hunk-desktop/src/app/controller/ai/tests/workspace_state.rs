@@ -1200,6 +1200,38 @@
     }
 
     #[test]
+    fn reconcile_ai_pending_steers_matches_attachment_messages_with_inline_image_roundtrip() {
+        let mut pending_steers = vec![AiPendingSteer {
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            prompt: "Check the attached regression".to_string(),
+            local_images: vec![PathBuf::from("/tmp/screenshot.png")],
+            selected_skills: Vec::new(),
+            skill_bindings: Vec::new(),
+            accepted_after_sequence: 5,
+            started_at: Instant::now(),
+        }];
+        let mut state = AiState::default();
+        state.items.insert(
+            "thread-1::turn-1::item-1".to_string(),
+            timeline_tool_item(
+                "item-1",
+                "thread-1",
+                "turn-1",
+                "userMessage",
+                ItemStatus::Completed,
+                "Check the attached regression\n[image]",
+                "{}",
+                6,
+            ),
+        );
+
+        reconcile_ai_pending_steers(&mut pending_steers, &state);
+
+        assert!(pending_steers.is_empty());
+    }
+
+    #[test]
     fn reconcile_ai_pending_steers_blocks_later_match_until_earlier_message_commits() {
         let mut pending_steers = vec![
             AiPendingSteer {

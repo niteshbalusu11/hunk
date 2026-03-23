@@ -1135,6 +1135,45 @@ fn item_completed_snapshot_does_not_duplicate_existing_delta_content() {
 }
 
 #[test]
+fn user_message_completed_snapshot_replaces_text_only_content_with_image_summary() {
+    let server = TestServer::spawn(Scenario::UserMessageCompletedWithImage);
+    let mut session = connect_initialized_session(server.port);
+    let mut service = ThreadService::new(WORKSPACE_CWD.into());
+
+    service
+        .start_thread(&mut session, ThreadStartParams::default(), TIMEOUT)
+        .expect("thread/start should succeed");
+
+    service
+        .start_turn(
+            &mut session,
+            TurnStartParams {
+                thread_id: "thread-user-image".to_string(),
+                input: vec![UserInput::Text {
+                    text: "hello".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..TurnStartParams::default()
+            },
+            TIMEOUT,
+        )
+        .expect("turn/start should succeed");
+
+    assert_eq!(
+        get_item(
+            service.state(),
+            "thread-user-image",
+            "turn-user-image",
+            "item-user-image"
+        )
+        .content,
+        "resume prompt\n[image] resume-screenshot.png"
+    );
+
+    server.join();
+}
+
+#[test]
 fn turn_steer_round_trip_returns_target_turn_id() {
     let server = TestServer::spawn(Scenario::TurnSteerRoundTrip);
     let mut session = connect_initialized_session(server.port);
@@ -1385,6 +1424,7 @@ enum Scenario {
     LoadedReadFork,
     TurnStartStreaming,
     ItemCompletedNoDup,
+    UserMessageCompletedWithImage,
     TurnSteerRoundTrip,
     TurnInterrupt,
     ReviewStartDetached,
@@ -1427,6 +1467,9 @@ impl TestServer {
                 Scenario::LoadedReadFork => run_loaded_read_fork(&mut socket),
                 Scenario::TurnStartStreaming => run_turn_start_streaming(&mut socket),
                 Scenario::ItemCompletedNoDup => run_item_completed_no_dup(&mut socket),
+                Scenario::UserMessageCompletedWithImage => {
+                    run_user_message_completed_with_image(&mut socket)
+                }
                 Scenario::TurnSteerRoundTrip => run_turn_steer_round_trip(&mut socket),
                 Scenario::TurnInterrupt => run_turn_interrupt(&mut socket),
                 Scenario::ReviewStartDetached => run_review_start_detached(&mut socket),
@@ -1825,6 +1868,68 @@ fn run_item_completed_no_dup(socket: &mut WebSocket<TcpStream>) {
         start_turn.id,
         &TurnStartResponse {
             turn: turn("turn-no-dup", TurnStatus::InProgress),
+        },
+    );
+}
+
+fn run_user_message_completed_with_image(socket: &mut WebSocket<TcpStream>) {
+    let start_thread = expect_request(socket, api::method::THREAD_START);
+    send_typed_success_response(
+        socket,
+        start_thread.id,
+        &thread_start_response(thread(
+            "thread-user-image",
+            WORKSPACE_CWD,
+            ThreadStatus::Idle,
+            vec![],
+        )),
+    );
+
+    let start_turn = expect_request(socket, api::method::TURN_START);
+    let text_only_user_message = serde_json::to_value(ThreadItem::UserMessage {
+        id: "item-user-image".to_string(),
+        content: vec![UserInput::Text {
+            text: "resume prompt".to_string(),
+            text_elements: Vec::new(),
+        }],
+    })
+    .expect("user message should serialize");
+    send_notification(
+        socket,
+        "item/started",
+        serde_json::json!({
+            "threadId": "thread-user-image",
+            "turnId": "turn-user-image",
+            "item": text_only_user_message
+        }),
+    );
+    let image_user_message = serde_json::to_value(ThreadItem::UserMessage {
+        id: "item-user-image".to_string(),
+        content: vec![
+            UserInput::Text {
+                text: "resume prompt".to_string(),
+                text_elements: Vec::new(),
+            },
+            UserInput::LocalImage {
+                path: PathBuf::from("/repo-a/screenshots/resume-screenshot.png"),
+            },
+        ],
+    })
+    .expect("image user message should serialize");
+    send_notification(
+        socket,
+        "item/completed",
+        serde_json::json!({
+            "threadId": "thread-user-image",
+            "turnId": "turn-user-image",
+            "item": image_user_message
+        }),
+    );
+    send_typed_success_response(
+        socket,
+        start_turn.id,
+        &TurnStartResponse {
+            turn: turn("turn-user-image", TurnStatus::InProgress),
         },
     );
 }
