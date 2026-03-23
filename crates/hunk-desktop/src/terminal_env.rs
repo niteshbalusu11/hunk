@@ -8,7 +8,9 @@ use std::path::PathBuf;
 #[cfg(not(target_os = "windows"))]
 use std::process::Command;
 
-use anyhow::{Context, Result, bail};
+#[cfg(not(target_os = "windows"))]
+use anyhow::bail;
+use anyhow::{Context, Result};
 use hunk_domain::config::{AppConfig, TerminalConfig, TerminalShell};
 
 pub(crate) const PRINT_TERMINAL_ENV_ARG: &str = "--print-terminal-env-json";
@@ -90,7 +92,7 @@ pub(crate) fn maybe_hydrate_app_environment(config: &AppConfig) -> Result<()> {
     #[cfg(target_os = "windows")]
     {
         let _ = config;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(target_os = "windows"))]

@@ -738,6 +738,14 @@ impl DiffViewer {
         ) {}
     }
 
+    pub(super) fn ai_toggle_thread_bookmark(
+        &mut self,
+        thread_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.ai_toggle_thread_bookmark_action(thread_id, cx);
+    }
+
     pub(super) fn ai_toggle_timeline_row_expansion_action(
         &mut self,
         row_id: String,

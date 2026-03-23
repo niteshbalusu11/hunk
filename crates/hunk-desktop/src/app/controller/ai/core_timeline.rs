@@ -49,7 +49,7 @@ impl DiffViewer {
     }
 
     pub(crate) fn ai_threads_for_current_workspace(&self) -> Vec<ThreadSummary> {
-        sorted_threads(&self.ai_state_snapshot)
+        let threads = sorted_threads(&self.ai_state_snapshot)
             .into_iter()
             .filter(|thread| {
                 thread.status != ThreadLifecycleStatus::Archived
@@ -60,7 +60,12 @@ impl DiffViewer {
                         self.repo_root.as_deref(),
                     )
             })
-            .collect()
+            .collect::<Vec<_>>();
+
+        crate::app::ai_bookmarks::bookmark_first_sorted_threads(
+            threads,
+            &self.state.ai_bookmarked_thread_ids,
+        )
     }
 
     fn ai_state_snapshot_workspace_key(&self) -> Option<String> {
@@ -163,13 +168,17 @@ impl DiffViewer {
 
     pub(super) fn ai_visible_threads(&self) -> Vec<ThreadSummary> {
         let state_snapshot_workspace_key = self.ai_state_snapshot_workspace_key();
-        merged_ai_visible_threads(
+        let threads = merged_ai_visible_threads(
             &self.ai_state_snapshot,
             state_snapshot_workspace_key.as_deref(),
             &self.ai_workspace_states,
             self.workspace_targets.as_slice(),
             self.project_path.as_deref(),
             self.repo_root.as_deref(),
+        );
+        crate::app::ai_bookmarks::bookmark_first_sorted_threads(
+            threads,
+            &self.state.ai_bookmarked_thread_ids,
         )
     }
 

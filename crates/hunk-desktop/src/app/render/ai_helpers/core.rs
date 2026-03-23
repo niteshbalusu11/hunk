@@ -79,6 +79,7 @@ fn render_ai_thread_sidebar_row(
     thread: hunk_codex::state::ThreadSummary,
     workspace_label: String,
     selected_thread_id: Option<&str>,
+    bookmarked: bool,
     view: Entity<DiffViewer>,
     is_dark: bool,
     cx: &mut Context<DiffViewer>,
@@ -133,6 +134,13 @@ fn render_ai_thread_sidebar_row(
         ),
     };
     let activity_label = ai_thread_activity_label(thread.updated_at);
+    let bookmark_button_color = if bookmarked {
+        hunk_opacity(cx.theme().warning, is_dark, 0.92, 0.82)
+    } else if selected {
+        hunk_opacity(cx.theme().foreground, is_dark, 0.70, 0.78)
+    } else {
+        hunk_opacity(cx.theme().muted_foreground, is_dark, 0.60, 0.72)
+    };
     let archive_button_color = if selected {
         hunk_opacity(cx.theme().foreground, is_dark, 0.70, 0.78)
     } else {
@@ -143,7 +151,13 @@ fn render_ai_thread_sidebar_row(
         ThreadLifecycleStatus::Archived | ThreadLifecycleStatus::Closed
     );
     let select_view = view.clone();
+    let bookmark_view = view.clone();
     let archive_view = view.clone();
+    let bookmark_thread_id = thread.id.clone();
+    let bookmark_button_id = format!(
+        "ai-thread-bookmark-{}",
+        bookmark_thread_id.replace('\u{1f}', "--"),
+    );
     let archive_thread_id = thread.id.clone();
     let archive_button_id = format!(
         "ai-thread-archive-{}",
@@ -208,6 +222,39 @@ fn render_ai_thread_sidebar_row(
                         .flex_none()
                         .items_center()
                         .gap_1()
+                        .child(
+                            div()
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                    cx.stop_propagation();
+                                })
+                                .child({
+                                    let view = bookmark_view.clone();
+                                    Button::new(bookmark_button_id)
+                                        .ghost()
+                                        .compact()
+                                        .rounded(px(7.0))
+                                        .icon(
+                                            Icon::new(IconName::Star)
+                                                .size(px(12.0))
+                                                .text_color(bookmark_button_color),
+                                        )
+                                        .min_w(px(22.0))
+                                        .h(px(20.0))
+                                        .tooltip(if bookmarked {
+                                            "Remove bookmark"
+                                        } else {
+                                            "Bookmark thread"
+                                        })
+                                        .on_click(move |_, _, cx| {
+                                            view.update(cx, |this, cx| {
+                                                this.ai_toggle_thread_bookmark(
+                                                    bookmark_thread_id.clone(),
+                                                    cx,
+                                                );
+                                            });
+                                        })
+                                }),
+                        )
                         .when_some(status_indicator, |this, indicator| this.child(indicator))
                         .when(archive_action_available, |this| {
                             this.child(

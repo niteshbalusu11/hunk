@@ -10,6 +10,8 @@ use hunk_codex::state::ThreadSummary;
 use hunk_codex::state::TurnStatus;
 use hunk_domain::state::AppState;
 
+include!("bookmarks.rs");
+
 include!("core_actions.rs");
 
 include!("core_timeline.rs");

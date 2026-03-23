@@ -254,6 +254,7 @@ fn workspace_mad_max_mode_reads_per_workspace_flags() {
         last_project_path: None,
         last_workspace_target_by_repo: Default::default(),
         review_compare_selection_by_repo: Default::default(),
+        ai_bookmarked_thread_ids: Default::default(),
         ai_workspace_mad_max: [
             ("/repo-a".to_string(), false),
             ("/repo-b".to_string(), false),
@@ -296,6 +297,7 @@ fn workspace_include_hidden_models_reads_per_workspace_flags() {
         last_project_path: None,
         last_workspace_target_by_repo: Default::default(),
         review_compare_selection_by_repo: Default::default(),
+        ai_bookmarked_thread_ids: Default::default(),
         ai_workspace_mad_max: Default::default(),
         ai_workspace_include_hidden_models: [
             ("/repo-a".to_string(), true),

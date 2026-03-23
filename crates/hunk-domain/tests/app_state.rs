@@ -17,6 +17,7 @@ fn app_state_defaults_last_project_path_to_none() {
     assert_eq!(state.last_project_path, None);
     assert!(state.last_workspace_target_by_repo.is_empty());
     assert!(state.review_compare_selection_by_repo.is_empty());
+    assert!(state.ai_bookmarked_thread_ids.is_empty());
     assert!(state.ai_workspace_mad_max.is_empty());
     assert!(state.ai_workspace_include_hidden_models.is_empty());
     assert!(state.ai_workspace_session_overrides.is_empty());
@@ -32,6 +33,7 @@ fn app_state_parses_without_last_project_path_field() {
     assert_eq!(state.last_project_path, None);
     assert!(state.last_workspace_target_by_repo.is_empty());
     assert!(state.review_compare_selection_by_repo.is_empty());
+    assert!(state.ai_bookmarked_thread_ids.is_empty());
     assert!(state.ai_workspace_mad_max.is_empty());
     assert!(state.ai_workspace_include_hidden_models.is_empty());
     assert!(state.ai_workspace_session_overrides.is_empty());
@@ -72,6 +74,9 @@ fn app_state_round_trips_last_project_path() {
         )]
         .into_iter()
         .collect(),
+        ai_bookmarked_thread_ids: ["thread-1".to_string(), "thread-2".to_string()]
+            .into_iter()
+            .collect(),
         ai_workspace_mad_max: [("/tmp/hunk-repo".to_string(), true)].into_iter().collect(),
         ai_workspace_include_hidden_models: [("/tmp/hunk-repo".to_string(), true)]
             .into_iter()

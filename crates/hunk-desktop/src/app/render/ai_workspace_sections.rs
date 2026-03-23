@@ -283,10 +283,13 @@ impl DiffViewer {
                                     .children(state.threads.iter().cloned().map(|thread| {
                                         let workspace_label =
                                             self.ai_thread_workspace_label(thread.id.as_str());
+                                        let bookmarked =
+                                            self.ai_thread_is_bookmarked(thread.id.as_str());
                                         render_ai_thread_sidebar_row(
                                             thread,
                                             workspace_label,
                                             state.selected_thread_id.as_deref(),
+                                            bookmarked,
                                             view.clone(),
                                             is_dark,
                                             cx,
