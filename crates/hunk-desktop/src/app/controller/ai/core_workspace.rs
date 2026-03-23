@@ -861,12 +861,12 @@ impl DiffViewer {
                                 &state.state_snapshot,
                                 thread_id.as_str(),
                             ),
-                            AiTurnSessionOverrides {
-                                model: state.selected_model.clone(),
-                                effort: state.selected_effort.clone(),
-                                collaboration_mode: state.selected_collaboration_mode,
-                                service_tier: state.selected_service_tier,
-                            },
+                            resolved_ai_turn_session_overrides(
+                                &self.state,
+                                state.models.as_slice(),
+                                Some(thread_id.as_str()),
+                                Some(workspace_key),
+                            ),
                         )
                     })
                 else {

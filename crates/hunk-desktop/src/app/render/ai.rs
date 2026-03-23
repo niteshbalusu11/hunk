@@ -266,6 +266,11 @@ impl DiffViewer {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let popover_surface = hunk_completion_menu(cx.theme(), is_dark).panel;
+        let account_summary = ai_account_summary(
+            self.ai_account.as_ref(),
+            self.ai_requires_openai_auth,
+            self.ai_bootstrap_loading && self.ai_account.is_none() && !self.ai_requires_openai_auth,
+        );
         let (five_hour_window, weekly_window) = self
             .ai_rate_limits
             .as_ref()
@@ -309,6 +314,15 @@ impl DiffViewer {
                                 });
                             })
                     }),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .whitespace_normal()
+                    .child(account_summary),
             )
             .child(
                 v_flex()
@@ -404,8 +418,10 @@ fn ai_format_rate_limit_reset_compact(unix_seconds: i64) -> String {
         let (hour, meridiem) = ai_hour_and_meridiem(local_datetime.hour());
         format!("{hour}:{minute:02} {meridiem}")
     } else {
+        let minute = local_datetime.minute();
+        let (hour, meridiem) = ai_hour_and_meridiem(local_datetime.hour());
         format!(
-            "{} {}",
+            "{} {}, {hour}:{minute:02} {meridiem}",
             ai_month_short(local_datetime.month()),
             local_datetime.day()
         )

@@ -403,7 +403,12 @@ impl DiffViewer {
                     local_image_paths: queued.local_images.clone(),
                     selected_skills: queued.selected_skills.clone(),
                     skill_bindings: queued.skill_bindings.clone(),
-                    session_overrides: self.current_ai_turn_session_overrides(),
+                    session_overrides: resolved_ai_turn_session_overrides(
+                        &self.state,
+                        self.ai_models.as_slice(),
+                        Some(queued.thread_id.as_str()),
+                        workspace_key,
+                    ),
                 },
                 false,
                 cx,

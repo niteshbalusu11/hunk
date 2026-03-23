@@ -100,7 +100,11 @@ fn parse_ai_user_message_image_summary_line(line: &str) -> Option<AiParsedImageS
     let mut named_images = Vec::new();
     let mut image_count = 0usize;
 
-    for part in image_list.split(',').map(str::trim).filter(|part| !part.is_empty()) {
+    for part in image_list
+        .split(", ")
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
         if let Some(count) = part
             .strip_suffix(" attachments")
             .or_else(|| part.strip_suffix(" attachment"))

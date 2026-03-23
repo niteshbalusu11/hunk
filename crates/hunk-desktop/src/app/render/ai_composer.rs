@@ -59,7 +59,7 @@ impl DiffViewer {
                         this.child(
                             h_flex()
                                 .w_full()
-                                .justify_end()
+                                .justify_center()
                                 .child(self.render_ai_usage_popover_card(view.clone(), is_dark, cx)),
                         )
                     })

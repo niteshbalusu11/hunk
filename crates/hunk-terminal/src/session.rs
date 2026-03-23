@@ -325,18 +325,14 @@ fn shell_command_builder(command: &str, cwd: &Path) -> CommandBuilder {
 
     #[cfg(not(target_os = "windows"))]
     {
-        let interactive_shell =
-            std::env::var_os("SHELL").unwrap_or_else(|| OsString::from("/bin/bash"));
-        let mut builder = if command.trim().is_empty() {
-            CommandBuilder::new(interactive_shell)
-        } else if Path::new("/bin/sh").exists() {
-            CommandBuilder::new("/bin/sh")
-        } else {
-            CommandBuilder::new(OsString::from("/bin/bash"))
-        };
+        let shell = unix_shell_program();
+        let mut builder = CommandBuilder::new(shell.clone());
         if command.trim().is_empty() {
             builder.arg("-i");
         } else {
+            if unix_shell_supports_login_flag(shell.as_os_str()) {
+                builder.arg("-l");
+            }
             builder.arg("-c");
             builder.arg(command);
         }
@@ -356,5 +352,35 @@ fn shell_is_cmd(shell: &std::ffi::OsStr) -> bool {
         .file_name()
         .and_then(|value| value.to_str())
         .map(|value| value.eq_ignore_ascii_case("cmd.exe") || value.eq_ignore_ascii_case("cmd"))
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn unix_shell_program() -> OsString {
+    if let Some(shell) = std::env::var_os("SHELL")
+        .filter(|shell| !shell.is_empty())
+        .filter(|shell| Path::new(shell).exists())
+    {
+        return shell;
+    }
+
+    ["/bin/bash", "/bin/sh"]
+        .into_iter()
+        .find(|path| Path::new(path).exists())
+        .map(OsString::from)
+        .unwrap_or_else(|| OsString::from("/bin/sh"))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn unix_shell_supports_login_flag(shell: &std::ffi::OsStr) -> bool {
+    Path::new(shell)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(|value| {
+            matches!(
+                value,
+                "bash" | "zsh" | "fish" | "ksh" | "mksh" | "nu" | "nushell"
+            )
+        })
         .unwrap_or(false)
 }

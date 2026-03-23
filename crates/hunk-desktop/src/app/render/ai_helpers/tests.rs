@@ -4,6 +4,7 @@ mod ai_helper_tests {
     use super::ai_account_summary;
     use super::ai_markdown_code_block_text;
     use super::ai_markdown_code_block_text_and_highlights;
+    use super::ai_format_rate_limit_reset_compact;
     use super::ai_terminal_screen_grid;
     use super::ai_command_execution_display_details;
     use super::ai_command_execution_terminal_text;
@@ -122,6 +123,14 @@ mod ai_helper_tests {
         let (five_hour, weekly) = ai_rate_limit_summary(Some(&snapshot), false);
         assert!(five_hour.contains("5h: 11% used"));
         assert!(weekly.contains("weekly: 27% used"));
+    }
+
+    #[test]
+    fn compact_rate_limit_reset_includes_time_for_future_dates() {
+        let future = time::OffsetDateTime::now_utc() + time::Duration::days(2);
+        let formatted = ai_format_rate_limit_reset_compact(future.unix_timestamp());
+
+        assert!(formatted.contains(':'));
     }
 
     #[test]

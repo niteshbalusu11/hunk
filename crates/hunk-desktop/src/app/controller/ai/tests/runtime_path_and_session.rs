@@ -517,6 +517,55 @@ fn resolved_ai_thread_session_state_uses_preferred_defaults_without_overrides() 
 }
 
 #[test]
+fn resolved_ai_turn_session_overrides_prefers_queued_thread_session() {
+    let models = vec![
+        ai_model(
+            "gpt-5.4",
+            "GPT-5.4",
+            false,
+            &[ReasoningEffort::Medium, ReasoningEffort::High],
+            ReasoningEffort::Medium,
+        ),
+        ai_model(
+            "gpt-5.3-codex",
+            "GPT-5.3 Codex",
+            true,
+            &[ReasoningEffort::Low, ReasoningEffort::Medium],
+            ReasoningEffort::Medium,
+        ),
+    ];
+    let mut state = AppState::default();
+    state.ai_workspace_session_overrides.insert(
+        "/repo".to_string(),
+        AiThreadSessionState {
+            model: Some("gpt-5.4".to_string()),
+            effort: Some("high".to_string()),
+            collaboration_mode: AiCollaborationModeSelection::Default,
+            service_tier: Some(AiServiceTierSelection::Flex),
+        },
+    );
+    state.ai_thread_session_overrides.insert(
+        "thread-b".to_string(),
+        AiThreadSessionState {
+            model: Some("gpt-5.3-codex".to_string()),
+            effort: Some("medium".to_string()),
+            collaboration_mode: AiCollaborationModeSelection::Plan,
+            service_tier: Some(AiServiceTierSelection::Fast),
+        },
+    );
+
+    assert_eq!(
+        resolved_ai_turn_session_overrides(&state, models.as_slice(), Some("thread-b"), Some("/repo")),
+        AiTurnSessionOverrides {
+            model: Some("gpt-5.3-codex".to_string()),
+            effort: Some("medium".to_string()),
+            collaboration_mode: AiCollaborationModeSelection::Plan,
+            service_tier: AiServiceTierSelection::Fast,
+        },
+    );
+}
+
+#[test]
 fn normalized_ai_session_selection_preserves_server_default_when_unset() {
     let models = vec![ai_model(
         "gpt-5.3-codex",
