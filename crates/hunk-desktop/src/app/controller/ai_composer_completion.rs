@@ -23,6 +23,50 @@ pub(super) fn ai_composer_completion_action_for_keystroke(
     }
 }
 
+fn ai_reset_completion_selection(selected_ix: &mut usize, scroll_handle: &gpui::ScrollHandle) -> bool {
+    let changed = *selected_ix != 0;
+    *selected_ix = 0;
+    scroll_handle.scroll_to_item(0);
+    changed
+}
+
+fn ai_clamp_completion_selection(
+    selected_ix: &mut usize,
+    item_count: usize,
+    scroll_handle: &gpui::ScrollHandle,
+) -> bool {
+    if item_count == 0 {
+        return ai_reset_completion_selection(selected_ix, scroll_handle);
+    }
+
+    let clamped_ix = (*selected_ix).min(item_count.saturating_sub(1));
+    let changed = clamped_ix != *selected_ix;
+    *selected_ix = clamped_ix;
+    scroll_handle.scroll_to_item(*selected_ix);
+    changed
+}
+
+fn ai_select_next_completion_item(
+    selected_ix: &mut usize,
+    item_count: usize,
+    scroll_handle: &gpui::ScrollHandle,
+) {
+    if item_count == 0 {
+        return;
+    }
+
+    *selected_ix = (*selected_ix + 1).min(item_count.saturating_sub(1));
+    scroll_handle.scroll_to_item(*selected_ix);
+}
+
+fn ai_select_previous_completion_item(
+    selected_ix: &mut usize,
+    scroll_handle: &gpui::ScrollHandle,
+) {
+    *selected_ix = selected_ix.saturating_sub(1);
+    scroll_handle.scroll_to_item(*selected_ix);
+}
+
 impl DiffViewer {
     fn ai_composer_completion_menu_token(
         menu: &AiComposerFileCompletionMenuState,
@@ -107,19 +151,20 @@ impl DiffViewer {
             .as_ref()
             .map(Self::ai_composer_completion_menu_token);
         if current_token != next_token {
-            self.ai_composer_file_completion_selected_ix = 0;
+            ai_reset_completion_selection(
+                &mut self.ai_composer_file_completion_selected_ix,
+                &self.ai_composer_file_completion_scroll_handle,
+            );
         }
 
         let mut changed = self.ai_composer_file_completion_menu != next_visible_menu;
         self.ai_composer_file_completion_menu = next_visible_menu;
         if let Some(menu) = self.ai_composer_file_completion_menu.as_ref() {
-            let clamped_ix = self
-                .ai_composer_file_completion_selected_ix
-                .min(menu.items.len().saturating_sub(1));
-            if clamped_ix != self.ai_composer_file_completion_selected_ix {
-                self.ai_composer_file_completion_selected_ix = clamped_ix;
-                changed = true;
-            }
+            changed |= ai_clamp_completion_selection(
+                &mut self.ai_composer_file_completion_selected_ix,
+                menu.items.len(),
+                &self.ai_composer_file_completion_scroll_handle,
+            );
         } else if self.ai_composer_file_completion_selected_ix != 0 {
             self.ai_composer_file_completion_selected_ix = 0;
             changed = true;
@@ -149,19 +194,20 @@ impl DiffViewer {
             .as_ref()
             .map(Self::ai_composer_slash_command_menu_token);
         if current_token != next_token {
-            self.ai_composer_slash_command_selected_ix = 0;
+            ai_reset_completion_selection(
+                &mut self.ai_composer_slash_command_selected_ix,
+                &self.ai_composer_slash_command_scroll_handle,
+            );
         }
 
         let mut changed = self.ai_composer_slash_command_menu != next_visible_menu;
         self.ai_composer_slash_command_menu = next_visible_menu;
         if let Some(menu) = self.ai_composer_slash_command_menu.as_ref() {
-            let clamped_ix = self
-                .ai_composer_slash_command_selected_ix
-                .min(menu.items.len().saturating_sub(1));
-            if clamped_ix != self.ai_composer_slash_command_selected_ix {
-                self.ai_composer_slash_command_selected_ix = clamped_ix;
-                changed = true;
-            }
+            changed |= ai_clamp_completion_selection(
+                &mut self.ai_composer_slash_command_selected_ix,
+                menu.items.len(),
+                &self.ai_composer_slash_command_scroll_handle,
+            );
         } else if self.ai_composer_slash_command_selected_ix != 0 {
             self.ai_composer_slash_command_selected_ix = 0;
             changed = true;
@@ -191,19 +237,20 @@ impl DiffViewer {
             .as_ref()
             .map(Self::ai_composer_skill_completion_menu_token);
         if current_token != next_token {
-            self.ai_composer_skill_completion_selected_ix = 0;
+            ai_reset_completion_selection(
+                &mut self.ai_composer_skill_completion_selected_ix,
+                &self.ai_composer_skill_completion_scroll_handle,
+            );
         }
 
         let mut changed = self.ai_composer_skill_completion_menu != next_visible_menu;
         self.ai_composer_skill_completion_menu = next_visible_menu;
         if let Some(menu) = self.ai_composer_skill_completion_menu.as_ref() {
-            let clamped_ix = self
-                .ai_composer_skill_completion_selected_ix
-                .min(menu.items.len().saturating_sub(1));
-            if clamped_ix != self.ai_composer_skill_completion_selected_ix {
-                self.ai_composer_skill_completion_selected_ix = clamped_ix;
-                changed = true;
-            }
+            changed |= ai_clamp_completion_selection(
+                &mut self.ai_composer_skill_completion_selected_ix,
+                menu.items.len(),
+                &self.ai_composer_skill_completion_scroll_handle,
+            );
         } else if self.ai_composer_skill_completion_selected_ix != 0 {
             self.ai_composer_skill_completion_selected_ix = 0;
             changed = true;
@@ -244,17 +291,20 @@ impl DiffViewer {
             return match action {
                 AiComposerCompletionAction::SelectNext => {
                     if let Some(menu) = self.ai_composer_slash_command_menu.as_ref() {
-                        self.ai_composer_slash_command_selected_ix = (self
-                            .ai_composer_slash_command_selected_ix
-                            + 1)
-                            .min(menu.items.len().saturating_sub(1));
+                        ai_select_next_completion_item(
+                            &mut self.ai_composer_slash_command_selected_ix,
+                            menu.items.len(),
+                            &self.ai_composer_slash_command_scroll_handle,
+                        );
                     }
                     cx.notify();
                     true
                 }
                 AiComposerCompletionAction::SelectPrevious => {
-                    self.ai_composer_slash_command_selected_ix =
-                        self.ai_composer_slash_command_selected_ix.saturating_sub(1);
+                    ai_select_previous_completion_item(
+                        &mut self.ai_composer_slash_command_selected_ix,
+                        &self.ai_composer_slash_command_scroll_handle,
+                    );
                     cx.notify();
                     true
                 }
@@ -272,17 +322,20 @@ impl DiffViewer {
             return match action {
                 AiComposerCompletionAction::SelectNext => {
                     if let Some(menu) = self.ai_composer_skill_completion_menu.as_ref() {
-                        self.ai_composer_skill_completion_selected_ix = (self
-                            .ai_composer_skill_completion_selected_ix
-                            + 1)
-                            .min(menu.items.len().saturating_sub(1));
+                        ai_select_next_completion_item(
+                            &mut self.ai_composer_skill_completion_selected_ix,
+                            menu.items.len(),
+                            &self.ai_composer_skill_completion_scroll_handle,
+                        );
                     }
                     cx.notify();
                     true
                 }
                 AiComposerCompletionAction::SelectPrevious => {
-                    self.ai_composer_skill_completion_selected_ix =
-                        self.ai_composer_skill_completion_selected_ix.saturating_sub(1);
+                    ai_select_previous_completion_item(
+                        &mut self.ai_composer_skill_completion_selected_ix,
+                        &self.ai_composer_skill_completion_scroll_handle,
+                    );
                     cx.notify();
                     true
                 }
@@ -299,18 +352,20 @@ impl DiffViewer {
         match action {
             AiComposerCompletionAction::SelectNext => {
                 if let Some(menu) = self.ai_composer_file_completion_menu.as_ref() {
-                    self.ai_composer_file_completion_selected_ix = (self
-                        .ai_composer_file_completion_selected_ix
-                        + 1)
-                        .min(menu.items.len().saturating_sub(1));
+                    ai_select_next_completion_item(
+                        &mut self.ai_composer_file_completion_selected_ix,
+                        menu.items.len(),
+                        &self.ai_composer_file_completion_scroll_handle,
+                    );
                 }
                 cx.notify();
                 true
             }
             AiComposerCompletionAction::SelectPrevious => {
-                self.ai_composer_file_completion_selected_ix = self
-                    .ai_composer_file_completion_selected_ix
-                    .saturating_sub(1);
+                ai_select_previous_completion_item(
+                    &mut self.ai_composer_file_completion_selected_ix,
+                    &self.ai_composer_file_completion_scroll_handle,
+                );
                 cx.notify();
                 true
             }
