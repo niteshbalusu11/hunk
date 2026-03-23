@@ -950,6 +950,38 @@ fn normalized_thread_session_state(
     })
 }
 
+fn resolved_ai_thread_session_state(
+    state: &AppState,
+    thread_id: Option<&str>,
+    workspace_key: Option<&str>,
+) -> AiThreadSessionState {
+    thread_id
+        .and_then(|thread_id| state.ai_thread_session_overrides.get(thread_id).cloned())
+        .or_else(|| {
+            workspace_key.and_then(|workspace| {
+                state.ai_workspace_session_overrides.get(workspace).cloned()
+            })
+        })
+        .unwrap_or_else(AiThreadSessionState::preferred_defaults)
+}
+
+fn resolved_ai_turn_session_overrides(
+    state: &AppState,
+    models: &[codex_app_server_protocol::Model],
+    thread_id: Option<&str>,
+    workspace_key: Option<&str>,
+) -> AiTurnSessionOverrides {
+    let session = resolved_ai_thread_session_state(state, thread_id, workspace_key);
+    let (model, effort) = normalized_ai_session_selection(models, session.model, session.effort);
+
+    AiTurnSessionOverrides {
+        model,
+        effort,
+        collaboration_mode: session.collaboration_mode,
+        service_tier: session.service_tier.unwrap_or_default(),
+    }
+}
+
 fn normalized_ai_service_tier_selection(
     selection: AiServiceTierSelection,
 ) -> Option<AiServiceTierSelection> {

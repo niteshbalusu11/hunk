@@ -4,12 +4,12 @@ mod ai_helper_tests {
     use super::ai_account_summary;
     use super::ai_markdown_code_block_text;
     use super::ai_markdown_code_block_text_and_highlights;
+    use super::ai_format_rate_limit_reset_compact;
     use super::ai_terminal_screen_grid;
     use super::ai_command_execution_display_details;
     use super::ai_command_execution_terminal_text;
     use super::ai_command_execution_transcript_width;
     use super::ai_composer_status_tone;
-    use super::ai_collaboration_picker_label;
     use super::ai_display_path_parts;
     use super::ai_file_change_summary;
     use super::ai_should_show_no_turns_empty_state;
@@ -49,7 +49,6 @@ mod ai_helper_tests {
     use hunk_codex::state::ThreadLifecycleStatus;
     use hunk_domain::markdown_preview::MarkdownCodeSpan;
     use hunk_domain::markdown_preview::MarkdownCodeTokenKind;
-    use hunk_domain::state::AiCollaborationModeSelection;
     use hunk_domain::markdown_preview::MarkdownPreviewBlock;
 
     fn rate_limit_window(
@@ -127,6 +126,14 @@ mod ai_helper_tests {
     }
 
     #[test]
+    fn compact_rate_limit_reset_includes_time_for_future_dates() {
+        let future = time::OffsetDateTime::now_utc() + time::Duration::days(2);
+        let formatted = ai_format_rate_limit_reset_compact(future.unix_timestamp());
+
+        assert!(formatted.contains(':'));
+    }
+
+    #[test]
     fn truncate_multiline_content_only_marks_overflow_when_needed() {
         let (single, single_truncated) = ai_truncate_multiline_content("line 1\nline 2", 3);
         assert_eq!(single, "line 1\nline 2");
@@ -150,22 +157,6 @@ mod ai_helper_tests {
         assert!(ai_should_show_no_turns_empty_state(0, false));
         assert!(!ai_should_show_no_turns_empty_state(0, true));
         assert!(!ai_should_show_no_turns_empty_state(1, false));
-    }
-
-    #[test]
-    fn collaboration_picker_defaults_to_default_mode() {
-        assert_eq!(
-            ai_collaboration_picker_label(AiCollaborationModeSelection::Default),
-            "Default"
-        );
-    }
-
-    #[test]
-    fn collaboration_picker_uses_plan_label() {
-        assert_eq!(
-            ai_collaboration_picker_label(AiCollaborationModeSelection::Plan),
-            "Plan"
-        );
     }
 
     #[test]

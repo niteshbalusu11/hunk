@@ -28,6 +28,25 @@ fn pending_queued_message(
     }
 }
 
+fn pending_queued_message_with_image(
+    thread_id: &str,
+    prompt: &str,
+    image_path: &str,
+    accepted_after_sequence: u64,
+) -> AiQueuedUserMessage {
+    AiQueuedUserMessage {
+        thread_id: thread_id.to_string(),
+        prompt: prompt.to_string(),
+        local_images: vec![PathBuf::from(image_path)],
+        selected_skills: Vec::new(),
+        skill_bindings: Vec::new(),
+        queued_at: Instant::now(),
+        status: AiQueuedUserMessageStatus::PendingConfirmation {
+            accepted_after_sequence,
+        },
+    }
+}
+
 fn queued_thread(
     thread_id: &str,
     status: ThreadLifecycleStatus,
@@ -198,6 +217,120 @@ fn reconcile_ai_queued_messages_after_snapshot_confirms_pending_messages() {
             "userMessage",
             ItemStatus::Completed,
             "first",
+            "{}",
+            2,
+        ),
+    );
+
+    let restored =
+        reconcile_ai_queued_messages_after_snapshot(&mut queued_messages, &mut BTreeSet::new(), &state);
+
+    assert!(restored.is_empty());
+    assert_eq!(queued_messages.len(), 1);
+    assert_eq!(queued_messages[0].prompt, "second");
+    assert_eq!(queued_messages[0].status, AiQueuedUserMessageStatus::Queued);
+}
+
+#[test]
+fn reconcile_ai_queued_messages_after_snapshot_confirms_attachment_messages_with_trimmed_content() {
+    let mut queued_messages = vec![
+        pending_queued_message_with_image(
+            "thread-a",
+            "check screenshot",
+            "/tmp/screenshot.png",
+            1,
+        ),
+        queued_message("thread-a", "second"),
+    ];
+    let mut state = AiState::default();
+    state.threads.insert(
+        "thread-a".to_string(),
+        queued_thread("thread-a", ThreadLifecycleStatus::Active, 2),
+    );
+    state.items.insert(
+        "thread-a::item-1".to_string(),
+        timeline_tool_item(
+            "item-1",
+            "thread-a",
+            "turn-1",
+            "userMessage",
+            ItemStatus::Completed,
+            "check screenshot\n\n[image] screenshot.png\n",
+            "{}",
+            2,
+        ),
+    );
+
+    let restored =
+        reconcile_ai_queued_messages_after_snapshot(&mut queued_messages, &mut BTreeSet::new(), &state);
+
+    assert!(restored.is_empty());
+    assert_eq!(queued_messages.len(), 1);
+    assert_eq!(queued_messages[0].prompt, "second");
+    assert_eq!(queued_messages[0].status, AiQueuedUserMessageStatus::Queued);
+}
+
+#[test]
+fn reconcile_ai_queued_messages_after_snapshot_preserves_commas_in_image_names() {
+    let mut queued_messages = vec![
+        pending_queued_message_with_image("thread-a", "check screenshot", "/tmp/foo,1.png", 1),
+        queued_message("thread-a", "second"),
+    ];
+    let mut state = AiState::default();
+    state.threads.insert(
+        "thread-a".to_string(),
+        queued_thread("thread-a", ThreadLifecycleStatus::Active, 2),
+    );
+    state.items.insert(
+        "thread-a::item-1".to_string(),
+        timeline_tool_item(
+            "item-1",
+            "thread-a",
+            "turn-1",
+            "userMessage",
+            ItemStatus::Completed,
+            "check screenshot\n[image] foo,1.png",
+            "{}",
+            2,
+        ),
+    );
+
+    let restored = reconcile_ai_queued_messages_after_snapshot(
+        &mut queued_messages,
+        &mut BTreeSet::new(),
+        &state,
+    );
+
+    assert!(restored.is_empty());
+    assert_eq!(queued_messages.len(), 1);
+    assert_eq!(queued_messages[0].prompt, "second");
+}
+
+#[test]
+fn reconcile_ai_queued_messages_after_snapshot_confirms_inline_image_roundtrip() {
+    let mut queued_messages = vec![
+        pending_queued_message_with_image(
+            "thread-a",
+            "check screenshot",
+            "/tmp/screenshot.png",
+            1,
+        ),
+        queued_message("thread-a", "second"),
+    ];
+    let mut state = AiState::default();
+    state.threads.insert(
+        "thread-a".to_string(),
+        queued_thread("thread-a", ThreadLifecycleStatus::Active, 2),
+    );
+    state.items.insert(
+        "thread-a::item-1".to_string(),
+        timeline_tool_item(
+            "item-1",
+            "thread-a",
+            "turn-1",
+            "userMessage",
+            ItemStatus::Completed,
+            "check screenshot\n[image]",
             "{}",
             2,
         ),

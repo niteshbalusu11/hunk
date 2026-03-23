@@ -1,3 +1,4 @@
+#[cfg(test)]
 fn ai_pending_steer_seed_content(prompt: &str, local_images: &[PathBuf]) -> Option<String> {
     let prompt = prompt.trim();
     let images = local_images
@@ -24,6 +25,136 @@ fn ai_pending_steer_seed_content(prompt: &str, local_images: &[PathBuf]) -> Opti
     } else {
         Some(format!("{prompt}\n{image_summary}"))
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AiUserMessageSignature {
+    text: String,
+    named_images: Vec<String>,
+    image_count: usize,
+}
+
+fn ai_user_message_signature_from_prompt_and_images(
+    prompt: &str,
+    local_images: &[PathBuf],
+) -> Option<AiUserMessageSignature> {
+    let text = prompt.replace("\r\n", "\n").trim().to_string();
+    let named_images = local_images
+        .iter()
+        .map(|path| ai_pending_steer_local_image_name(path.as_path()))
+        .collect::<Vec<_>>();
+    let image_count = named_images.len();
+
+    if text.is_empty() && image_count == 0 {
+        return None;
+    }
+
+    Some(AiUserMessageSignature {
+        text,
+        named_images,
+        image_count,
+    })
+}
+
+fn ai_user_message_signature_from_content(content: &str) -> Option<AiUserMessageSignature> {
+    let normalized = content.replace("\r\n", "\n");
+    let trimmed = normalized.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let mut lines = trimmed.lines().collect::<Vec<_>>();
+    let images = lines
+        .last()
+        .and_then(|line| parse_ai_user_message_image_summary_line(line.trim()))
+        .unwrap_or_default();
+    if images.image_count > 0 {
+        lines.pop();
+    }
+
+    let text = lines.join("\n").trim().to_string();
+    Some(AiUserMessageSignature {
+        text,
+        named_images: images.named_images,
+        image_count: images.image_count,
+    })
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct AiParsedImageSummary {
+    named_images: Vec<String>,
+    image_count: usize,
+}
+
+fn parse_ai_user_message_image_summary_line(line: &str) -> Option<AiParsedImageSummary> {
+    if line == "[image]" {
+        return Some(AiParsedImageSummary {
+            named_images: Vec::new(),
+            image_count: 1,
+        });
+    }
+
+    let image_list = line
+        .strip_prefix("[image] ")
+        .or_else(|| line.strip_prefix("[images] "))?;
+    let mut named_images = Vec::new();
+    let mut image_count = 0usize;
+
+    for part in image_list
+        .split(", ")
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
+        if let Some(count) = part
+            .strip_suffix(" attachments")
+            .or_else(|| part.strip_suffix(" attachment"))
+            .and_then(|value| value.trim().parse::<usize>().ok())
+        {
+            image_count = image_count.saturating_add(count);
+            continue;
+        }
+
+        named_images.push(part.to_string());
+        image_count = image_count.saturating_add(1);
+    }
+
+    (image_count > 0).then_some(AiParsedImageSummary {
+        named_images,
+        image_count,
+    })
+}
+
+fn ai_user_message_signature_from_item(
+    item: &hunk_codex::state::ItemSummary,
+) -> Option<AiUserMessageSignature> {
+    ai_user_message_signature_from_content(item.content.as_str())
+}
+
+fn ai_user_message_matches_pending_input(
+    item: &hunk_codex::state::ItemSummary,
+    prompt: &str,
+    local_images: &[PathBuf],
+) -> bool {
+    let Some(expected) = ai_user_message_signature_from_prompt_and_images(prompt, local_images)
+    else {
+        return false;
+    };
+    let Some(actual) = ai_user_message_signature_from_item(item) else {
+        return false;
+    };
+
+    if actual.text != expected.text || actual.image_count != expected.image_count {
+        return false;
+    }
+
+    if expected.image_count == 0 {
+        return true;
+    }
+
+    actual
+        .named_images
+        .iter()
+        .all(|image| expected.named_images.iter().any(|expected| expected == image))
 }
 
 fn ai_pending_steer_row_id(pending: &AiPendingSteer, pending_ix: usize) -> String {
@@ -56,9 +187,6 @@ fn pending_steer_matching_sequence(
     pending: &AiPendingSteer,
     min_sequence: u64,
 ) -> Option<u64> {
-    let expected_content =
-        ai_pending_steer_seed_content(pending.prompt.as_str(), pending.local_images.as_slice())?;
-
     state
         .items
         .values()
@@ -66,7 +194,11 @@ fn pending_steer_matching_sequence(
             item.thread_id == pending.thread_id
                 && item.turn_id == pending.turn_id
                 && item.kind == "userMessage"
-                && item.content == expected_content
+                && ai_user_message_matches_pending_input(
+                    item,
+                    pending.prompt.as_str(),
+                    pending.local_images.as_slice(),
+                )
                 && item.last_sequence > min_sequence
         })
         .map(|item| item.last_sequence)

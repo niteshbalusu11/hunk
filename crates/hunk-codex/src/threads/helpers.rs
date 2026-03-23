@@ -337,30 +337,65 @@ fn user_message_seed_content(content: &[UserInput]) -> Option<String> {
         .filter_map(user_input_text_content)
         .collect::<Vec<_>>()
         .join("");
-    let images = content
+    let named_images = content
         .iter()
         .filter_map(user_input_local_image_name)
         .collect::<Vec<_>>();
+    let anonymous_image_count = content
+        .iter()
+        .filter(|input| matches!(input, UserInput::Image { .. }))
+        .count();
+    let total_image_count = named_images.len() + anonymous_image_count;
 
-    if text.is_empty() && images.is_empty() {
+    if text.is_empty() && total_image_count == 0 {
         return None;
     }
 
-    if images.is_empty() {
+    if total_image_count == 0 {
         return Some(text);
     }
 
-    let image_prefix = if images.len() == 1 {
-        "[image] "
-    } else {
-        "[images] "
-    };
-    let image_summary = format!("{image_prefix}{}", images.join(", "));
+    let image_summary = user_message_image_summary_line(
+        named_images.as_slice(),
+        anonymous_image_count,
+    );
     if text.is_empty() {
         Some(image_summary)
     } else {
         Some(format!("{text}\n{image_summary}"))
     }
+}
+
+fn user_message_image_summary_line(
+    named_images: &[String],
+    anonymous_image_count: usize,
+) -> String {
+    let total_image_count = named_images.len() + anonymous_image_count;
+    let prefix = if total_image_count == 1 {
+        "[image]"
+    } else {
+        "[images]"
+    };
+
+    if anonymous_image_count == 0 {
+        return format!("{prefix} {}", named_images.join(", "));
+    }
+
+    if named_images.is_empty() {
+        return if total_image_count == 1 {
+            prefix.to_string()
+        } else {
+            format!("{prefix} {total_image_count} attachments")
+        };
+    }
+
+    let mut summary_parts = named_images.to_vec();
+    summary_parts.push(if anonymous_image_count == 1 {
+        "1 attachment".to_string()
+    } else {
+        format!("{anonymous_image_count} attachments")
+    });
+    format!("{prefix} {}", summary_parts.join(", "))
 }
 
 fn user_input_text_content(input: &UserInput) -> Option<&str> {
@@ -459,6 +494,27 @@ mod tests {
         assert_eq!(
             thread_item_seed_content(&item).as_deref(),
             Some("Searched 'rain' in https://example.com/weather")
+        );
+    }
+
+    #[test]
+    fn user_message_seed_content_formats_anonymous_image_inputs() {
+        let item = ThreadItem::UserMessage {
+            id: "user-1".to_string(),
+            content: vec![
+                UserInput::Text {
+                    text: "check screenshot".to_string(),
+                    text_elements: Vec::new(),
+                },
+                UserInput::Image {
+                    url: "data:image/png;base64,abc".to_string(),
+                },
+            ],
+        };
+
+        assert_eq!(
+            thread_item_seed_content(&item).as_deref(),
+            Some("check screenshot\n[image]")
         );
     }
 

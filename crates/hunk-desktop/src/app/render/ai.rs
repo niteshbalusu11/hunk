@@ -183,6 +183,13 @@ impl DiffViewer {
             composer_attachment_paths,
             composer_attachment_count,
             model_supports_image_inputs,
+            review_mode_active: self.ai_review_mode_active,
+            usage_popover_open: self.ai_usage_popover_open,
+            current_mode_label: crate::app::ai_composer_commands::ai_composer_mode_label(
+                self.ai_review_mode_active,
+                self.ai_selected_collaboration_mode,
+            )
+            .to_string(),
             selected_thread_mode_for_picker,
             thread_mode_picker_editable,
             session_controls_read_only: composer_interrupt_available,
@@ -250,5 +257,173 @@ impl DiffViewer {
                 this.child(render_ai_git_progress_overlay(&progress, is_dark, cx))
             })
             .into_any_element()
+    }
+
+    fn render_ai_usage_popover_card(
+        &self,
+        view: Entity<Self>,
+        is_dark: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let popover_surface = hunk_completion_menu(cx.theme(), is_dark).panel;
+        let account_summary = ai_account_summary(
+            self.ai_account.as_ref(),
+            self.ai_requires_openai_auth,
+            self.ai_bootstrap_loading && self.ai_account.is_none() && !self.ai_requires_openai_auth,
+        );
+        let (five_hour_window, weekly_window) = self
+            .ai_rate_limits
+            .as_ref()
+            .map(ai_rate_limit_windows)
+            .unwrap_or((None, None));
+
+        v_flex()
+            .id("ai-usage-popover")
+            .w_full()
+            .max_w(px(620.0))
+            .rounded(px(22.0))
+            .border_1()
+            .border_color(popover_surface.border)
+            .bg(popover_surface.background)
+            .shadow_lg()
+            .px_4()
+            .py_3()
+            .gap_3()
+            .child(
+                h_flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .child(
+                        div()
+                            .text_base()
+                            .font_semibold()
+                            .text_color(cx.theme().foreground)
+                            .child("Status"),
+                    )
+                    .child({
+                        let view = view.clone();
+                        Button::new("ai-usage-close")
+                            .compact()
+                            .ghost()
+                            .rounded(px(8.0))
+                            .label("Close")
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.ai_close_usage_overlay_action(cx);
+                                });
+                            })
+                    }),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .whitespace_normal()
+                    .child(account_summary),
+            )
+            .child(
+                v_flex()
+                    .gap_3()
+                    .child(render_ai_usage_row(
+                        "5h limit",
+                        five_hour_window.as_ref(),
+                        is_dark,
+                        cx,
+                    ))
+                    .child(render_ai_usage_row(
+                        "7d limit",
+                        weekly_window.as_ref(),
+                        is_dark,
+                        cx,
+                    )),
+            )
+            .into_any_element()
+    }
+}
+
+fn render_ai_usage_row(
+    label: &str,
+    window: Option<&codex_app_server_protocol::RateLimitWindow>,
+    is_dark: bool,
+    cx: &mut Context<DiffViewer>,
+) -> AnyElement {
+    let used_percent = window.map(|window| window.used_percent.clamp(0, 100) as u8);
+    let remaining_percent = used_percent
+        .map(|used_percent| 100_u8.saturating_sub(used_percent))
+        .unwrap_or(0);
+    let reset_label = window
+        .and_then(|window| window.resets_at)
+        .map(ai_format_rate_limit_reset_compact);
+
+    h_flex()
+        .w_full()
+        .items_center()
+        .gap_4()
+        .child(
+            div()
+                .w(px(96.0))
+                .text_sm()
+                .font_family(cx.theme().mono_font_family.clone())
+                .text_color(cx.theme().muted_foreground)
+                .child(format!("{label}:")),
+        )
+        .child(
+            div()
+                .flex_1()
+                .h(px(20.0))
+                .rounded(px(999.0))
+                .border_1()
+                .border_color(hunk_opacity(cx.theme().border, is_dark, 0.78, 0.62))
+                .bg(hunk_opacity(cx.theme().muted, is_dark, 0.22, 0.40))
+                .child(
+                    div()
+                        .h_full()
+                        .rounded(px(999.0))
+                        .bg(hunk_opacity(cx.theme().foreground, is_dark, 0.96, 0.92))
+                        .w(gpui::relative(remaining_percent as f32 / 100.0)),
+                ),
+        )
+        .child(
+            div()
+                .w(px(190.0))
+                .text_sm()
+                .font_family(cx.theme().mono_font_family.clone())
+                .text_color(cx.theme().foreground)
+                .child(match reset_label {
+                    Some(reset_label) => format!("{remaining_percent}% left (resets {reset_label})"),
+                    None => "Unavailable".to_string(),
+                }),
+        )
+        .into_any_element()
+}
+
+fn ai_format_rate_limit_reset_compact(unix_seconds: i64) -> String {
+    let Ok(utc_datetime) = time::OffsetDateTime::from_unix_timestamp(unix_seconds) else {
+        return unix_seconds.to_string();
+    };
+
+    let local_datetime = time::UtcOffset::current_local_offset()
+        .map(|offset| utc_datetime.to_offset(offset))
+        .unwrap_or(utc_datetime);
+    let now = time::UtcOffset::current_local_offset()
+        .ok()
+        .map(|offset| time::OffsetDateTime::now_utc().to_offset(offset))
+        .unwrap_or_else(time::OffsetDateTime::now_utc);
+
+    if local_datetime.date() == now.date() {
+        let minute = local_datetime.minute();
+        let (hour, meridiem) = ai_hour_and_meridiem(local_datetime.hour());
+        format!("{hour}:{minute:02} {meridiem}")
+    } else {
+        let minute = local_datetime.minute();
+        let (hour, meridiem) = ai_hour_and_meridiem(local_datetime.hour());
+        format!(
+            "{} {}, {hour}:{minute:02} {meridiem}",
+            ai_month_short(local_datetime.month()),
+            local_datetime.day()
+        )
     }
 }

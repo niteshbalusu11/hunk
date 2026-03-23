@@ -4,6 +4,9 @@ struct AiComposerPanelState {
     composer_attachment_paths: Vec<PathBuf>,
     composer_attachment_count: usize,
     model_supports_image_inputs: bool,
+    review_mode_active: bool,
+    usage_popover_open: bool,
+    current_mode_label: String,
     selected_thread_mode_for_picker: AiNewThreadStartMode,
     thread_mode_picker_editable: bool,
     session_controls_read_only: bool,
@@ -13,6 +16,16 @@ struct AiComposerPanelState {
     review_action_blocker: Option<String>,
     composer_drop_border_color: Hsla,
     composer_drop_bg: Hsla,
+}
+
+struct AiComposerCompletionMenuShell<'a> {
+    menu_id: &'static str,
+    scroll_area_id: &'static str,
+    anchor_position: Point<Pixels>,
+    min_width: Pixels,
+    max_width: Pixels,
+    max_height: Pixels,
+    scroll_handle: &'a ScrollHandle,
 }
 
 impl DiffViewer {
@@ -27,6 +40,7 @@ impl DiffViewer {
         let composer_drop_bg = state.composer_drop_bg;
         let footer_group_gap = px(6.0);
         let footer_button_gap = px(2.0);
+        let completion_colors = hunk_completion_menu(cx.theme(), is_dark);
         h_flex()
             .w_full()
             .justify_center()
@@ -40,6 +54,14 @@ impl DiffViewer {
                     .gap_2()
                     .when_some(ai_render_composer_feedback_strip(self, is_dark, cx), |this, strip| {
                         this.child(strip)
+                    })
+                    .when(state.usage_popover_open, |this| {
+                        this.child(
+                            h_flex()
+                                .w_full()
+                                .justify_center()
+                                .child(self.render_ai_usage_popover_card(view.clone(), is_dark, cx)),
+                        )
                     })
                     .child(
                         v_flex()
@@ -171,6 +193,19 @@ impl DiffViewer {
                                         },
                                     )
                                     .when_some(
+                                        self.ai_composer_slash_command_menu.clone(),
+                                        |this, menu| {
+                                            this.child(
+                                                self.render_ai_composer_slash_command_menu(
+                                                    view.clone(),
+                                                    menu,
+                                                    is_dark,
+                                                    cx,
+                                                ),
+                                            )
+                                        },
+                                    )
+                                    .when_some(
                                         self.ai_composer_skill_completion_menu.clone(),
                                         |this, menu| {
                                             this.child(
@@ -227,38 +262,26 @@ impl DiffViewer {
                                                 state.thread_mode_picker_editable,
                                                 state.session_controls_read_only,
                                                 cx,
-                                            )),
+                                            ))
+                                            .child(
+                                                div()
+                                                    .rounded(px(999.0))
+                                                    .border_1()
+                                                    .border_color(completion_colors.row_selected_border)
+                                                    .bg(completion_colors.accent_soft_background)
+                                                    .px_2()
+                                                    .py_0p5()
+                                                    .text_xs()
+                                                    .font_semibold()
+                                                    .text_color(completion_colors.accent_text)
+                                                    .child(state.current_mode_label.clone()),
+                                            ),
                                     )
                                     .child(
                                         h_flex()
                                             .items_center()
                                             .justify_end()
                                             .gap(footer_button_gap)
-                                            .child({
-                                                let view = view.clone();
-                                                let review_action_blocker =
-                                                    state.review_action_blocker.clone();
-                                                let review_action_disabled =
-                                                    review_action_blocker.is_some();
-                                                let review_action_tooltip =
-                                                    review_action_blocker.unwrap_or_else(|| {
-                                                        "Review the current working-copy changes for correctness and regressions.".to_string()
-                                                    });
-                                                Button::new("ai-start-review")
-                                                    .compact()
-                                                    .ghost()
-                                                    .rounded(px(999.0))
-                                                    .with_size(gpui_component::Size::Small)
-                                                    .px_1()
-                                                    .label("Review")
-                                                    .disabled(review_action_disabled)
-                                                    .tooltip(review_action_tooltip)
-                                                    .on_click(move |_, window, cx| {
-                                                        view.update(cx, |this, cx| {
-                                                            this.ai_start_review_action(window, cx);
-                                                        });
-                                                    })
-                                            })
                                             .child({
                                                 let view = view.clone();
                                                 if state.composer_interrupt_available {
@@ -277,17 +300,30 @@ impl DiffViewer {
                                                 } else {
                                                     let composer_send_waiting_on_connection =
                                                         state.composer_send_waiting_on_connection;
+                                                    let review_mode_active =
+                                                        state.review_mode_active;
+                                                    let review_action_tooltip = state
+                                                        .review_action_blocker
+                                                        .clone()
+                                                        .unwrap_or_else(|| {
+                                                            "Review the current working-copy changes for correctness and regressions.".to_string()
+                                                        });
                                                     Button::new("ai-send-prompt")
                                                         .compact()
                                                         .primary()
                                                         .rounded(px(999.0))
                                                         .with_size(gpui_component::Size::Small)
                                                         .icon(Icon::new(IconName::ArrowUp).size(px(16.0)))
-                                                        .tooltip(if composer_send_waiting_on_connection {
-                                                            "Wait for Codex to finish connecting."
-                                                        } else {
-                                                            "Send prompt"
-                                                        })
+                                                        .tooltip(
+                                                            if composer_send_waiting_on_connection {
+                                                                "Wait for Codex to finish connecting."
+                                                                    .to_string()
+                                                            } else if review_mode_active {
+                                                                review_action_tooltip
+                                                            } else {
+                                                                "Send prompt".to_string()
+                                                            },
+                                                        )
                                                         .disabled(composer_send_waiting_on_connection)
                                                         .on_click(move |_, window, cx| {
                                                             view.update(cx, |this, cx| {
@@ -336,6 +372,7 @@ impl DiffViewer {
         is_dark: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let menu_colors = hunk_completion_menu(cx.theme(), is_dark);
         let anchor_range = menu.replace_range.start..menu.replace_range.start.saturating_add(1);
         let Some(anchor_position) = self
             .ai_composer_input_state
@@ -349,149 +386,105 @@ impl DiffViewer {
         let selected_ix = self
             .ai_composer_file_completion_selected_ix
             .min(menu.items.len().saturating_sub(1));
+        let mono_font_family = cx.theme().mono_font_family.clone();
 
-        deferred(
-            anchored()
-                .position_mode(AnchoredPositionMode::Window)
-                .position(anchor_position)
-                .offset(point(
-                    px(0.),
-                    -px(AI_COMPOSER_FILE_COMPLETION_MENU_GAP_Y),
-                ))
-                .anchor(Corner::BottomLeft)
-                .snap_to_window_with_margin(px(8.0))
-                .child(
-                    div()
-                        .id("ai-composer-file-completion-menu")
-                        .min_w(px(280.0))
-                        .max_w(px(420.0))
-                        .max_h(px(260.0))
-                        .overflow_y_scrollbar()
-                        .rounded(px(18.0))
-                        .border_1()
-                        .border_color(hunk_opacity(cx.theme().border, is_dark, 0.78, 0.62))
-                        .bg(cx.theme().popover)
-                        .shadow_lg()
-                        .p_1()
-                        .children(menu.items.iter().enumerate().map(|(ix, path)| {
-                            let select_view = view.clone();
-                            let select_path = path.clone();
-                            let file_name = path.rsplit('/').next().unwrap_or(path.as_str()).to_string();
-                            let dir_prefix = path
-                                .strip_suffix(file_name.as_str())
-                                .unwrap_or_default()
-                                .trim_end_matches('/')
-                                .to_string();
-                            let selected = ix == selected_ix;
+        self.render_ai_composer_completion_menu_shell(
+            AiComposerCompletionMenuShell {
+                menu_id: "ai-composer-file-completion-menu",
+                scroll_area_id: "ai-composer-file-completion-scroll-area",
+                anchor_position,
+                min_width: px(280.0),
+                max_width: px(420.0),
+                max_height: px(260.0),
+                scroll_handle: &self.ai_composer_file_completion_scroll_handle,
+            },
+            is_dark,
+            cx,
+            menu.items.iter().enumerate().map(|(ix, path)| {
+                let select_view = view.clone();
+                let select_path = path.clone();
+                let file_name = path
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(path.as_str())
+                    .to_string();
+                let dir_prefix = path
+                    .strip_suffix(file_name.as_str())
+                    .unwrap_or_default()
+                    .trim_end_matches('/')
+                    .to_string();
+                let selected = ix == selected_ix;
 
-                            h_flex()
-                                .id(("ai-composer-file-completion-item", ix))
-                                .w_full()
-                                .min_w_0()
-                                .items_center()
-                                .gap_2()
-                                .rounded(px(12.0))
-                                .px_2()
-                                .py_1p5()
-                                .text_sm()
-                                .hover(|style| {
-                                    style.bg(hunk_opacity(
-                                        cx.theme().accent,
-                                        is_dark,
-                                        0.22,
-                                        0.14,
-                                    ))
-                                })
-                                .when(selected, |this| {
-                                    this.bg(hunk_opacity(
-                                        cx.theme().accent,
-                                        is_dark,
-                                        0.28,
-                                        0.18,
-                                    ))
-                                    .border_1()
-                                    .border_color(hunk_opacity(
-                                        cx.theme().accent,
-                                        is_dark,
-                                        0.68,
-                                        0.58,
-                                    ))
-                                })
-                                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                                    select_view.update(cx, |this, cx| {
-                                        this.ai_accept_composer_file_completion_path(
-                                            select_path.clone(),
-                                            window,
-                                            cx,
-                                        );
-                                    });
-                                    cx.stop_propagation();
-                                })
-                                .child(
-                                    Icon::new(IconName::File)
-                                        .size(px(12.0))
-                                        .text_color(if selected {
-                                            cx.theme().accent
-                                        } else {
-                                            hunk_opacity(
-                                                cx.theme().muted_foreground,
-                                                is_dark,
-                                                0.86,
-                                                0.96,
-                                            )
-                                        }),
-                                )
-                                .child(
-                                    v_flex()
+                h_flex()
+                    .id(("ai-composer-file-completion-item", ix))
+                    .w_full()
+                    .min_w_0()
+                    .items_center()
+                    .gap_2()
+                    .rounded(px(12.0))
+                    .px_2()
+                    .py_1p5()
+                    .text_sm()
+                    .hover(|style| style.bg(menu_colors.row_hover))
+                    .when(selected, |this| {
+                        this.bg(menu_colors.row_selected)
+                            .border_1()
+                            .border_color(menu_colors.row_selected_border)
+                    })
+                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                        select_view.update(cx, |this, cx| {
+                            this.ai_accept_composer_file_completion_path(
+                                select_path.clone(),
+                                window,
+                                cx,
+                            );
+                        });
+                        cx.stop_propagation();
+                    })
+                    .child(
+                        Icon::new(IconName::File)
+                            .size(px(12.0))
+                            .text_color(if selected {
+                                menu_colors.accent_text
+                            } else {
+                                menu_colors.secondary_text
+                            }),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .w_full()
+                            .min_w_0()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .w_full()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_color(menu_colors.primary_text)
+                                    .font_family(mono_font_family.clone())
+                                    .child(file_name),
+                            )
+                            .when(!dir_prefix.is_empty(), |this| {
+                                this.child(
+                                    div()
+                                        .w_full()
                                         .min_w_0()
-                                        .gap_0p5()
-                                        .child(
-                                            div()
-                                                .min_w_0()
-                                                .truncate()
-                                                .text_color(if selected {
-                                                    cx.theme().foreground
-                                                } else {
-                                                    hunk_opacity(
-                                                        cx.theme().foreground,
-                                                        is_dark,
-                                                        0.96,
-                                                        0.98,
-                                                    )
-                                                })
-                                                .font_family(cx.theme().mono_font_family.clone())
-                                                .child(file_name),
-                                        )
-                                        .when(!dir_prefix.is_empty(), |this| {
-                                            this.child(
-                                                div()
-                                                    .min_w_0()
-                                                    .truncate()
-                                                    .text_xs()
-                                                    .font_family(cx.theme().mono_font_family.clone())
-                                                    .text_color(if selected {
-                                                        hunk_opacity(
-                                                            cx.theme().accent,
-                                                            is_dark,
-                                                            0.94,
-                                                            0.90,
-                                                        )
-                                                    } else {
-                                                        hunk_opacity(
-                                                            cx.theme().muted_foreground,
-                                                            is_dark,
-                                                            0.82,
-                                                            0.94,
-                                                        )
-                                                    })
-                                                    .child(dir_prefix),
-                                            )
-                                        }),
+                                        .truncate()
+                                        .text_xs()
+                                        .font_family(mono_font_family.clone())
+                                        .text_color(if selected {
+                                            menu_colors.selected_secondary_text
+                                        } else {
+                                            menu_colors.secondary_text
+                                        })
+                                        .child(dir_prefix),
                                 )
-                        })),
-                ),
-            )
-            .into_any_element()
+                            }),
+                    )
+                    .into_any_element()
+            }),
+        )
     }
 
     fn render_ai_composer_skill_completion_menu(
@@ -501,6 +494,7 @@ impl DiffViewer {
         is_dark: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let menu_colors = hunk_completion_menu(cx.theme(), is_dark);
         let anchor_range = menu.replace_range.start..menu.replace_range.start.saturating_add(1);
         let Some(anchor_position) = self
             .ai_composer_input_state
@@ -514,149 +508,283 @@ impl DiffViewer {
         let selected_ix = self
             .ai_composer_skill_completion_selected_ix
             .min(menu.items.len().saturating_sub(1));
+        let mono_font_family = cx.theme().mono_font_family.clone();
+
+        self.render_ai_composer_completion_menu_shell(
+            AiComposerCompletionMenuShell {
+                menu_id: "ai-composer-skill-completion-menu",
+                scroll_area_id: "ai-composer-skill-completion-scroll-area",
+                anchor_position,
+                min_width: px(320.0),
+                max_width: px(460.0),
+                max_height: px(280.0),
+                scroll_handle: &self.ai_composer_skill_completion_scroll_handle,
+            },
+            is_dark,
+            cx,
+            menu.items.iter().enumerate().map(|(ix, item)| {
+                let select_view = view.clone();
+                let select_name = item.name.clone();
+                let selected = ix == selected_ix;
+                let title = item
+                    .display_name
+                    .as_deref()
+                    .unwrap_or(item.name.as_str());
+                let show_name = item.display_name.as_deref() != Some(item.name.as_str());
+
+                h_flex()
+                    .id(("ai-composer-skill-completion-item", ix))
+                    .w_full()
+                    .min_w_0()
+                    .items_center()
+                    .gap_2()
+                    .rounded(px(12.0))
+                    .px_2()
+                    .py_1p5()
+                    .text_sm()
+                    .hover(|style| style.bg(menu_colors.row_hover))
+                    .when(selected, |this| {
+                        this.bg(menu_colors.row_selected)
+                            .border_1()
+                            .border_color(menu_colors.row_selected_border)
+                    })
+                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                        select_view.update(cx, |this, cx| {
+                            this.ai_accept_composer_skill_completion_name(
+                                select_name.clone(),
+                                window,
+                                cx,
+                            );
+                        });
+                        cx.stop_propagation();
+                    })
+                    .child(
+                        Icon::new(IconName::Settings)
+                            .size(px(12.0))
+                            .mt_0p5()
+                            .text_color(if selected {
+                                menu_colors.accent_text
+                            } else {
+                                menu_colors.secondary_text
+                            }),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .w_full()
+                            .min_w_0()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .w_full()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_color(menu_colors.primary_text)
+                                    .child(title.to_string()),
+                            )
+                            .when(show_name, |this| {
+                                this.child(
+                                    div()
+                                        .w_full()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_xs()
+                                        .font_family(mono_font_family.clone())
+                                        .text_color(if selected {
+                                            menu_colors.selected_secondary_text
+                                        } else {
+                                            menu_colors.secondary_text
+                                        })
+                                        .child(format!("${}", item.name)),
+                                )
+                            })
+                            .when_some(item.description.clone(), |this, description| {
+                                this.child(
+                                    div()
+                                        .w_full()
+                                        .min_w_0()
+                                        .text_xs()
+                                        .whitespace_normal()
+                                        .text_color(if selected {
+                                            menu_colors.selected_secondary_text
+                                        } else {
+                                            menu_colors.secondary_text
+                                        })
+                                        .child(description),
+                                )
+                            }),
+                    )
+                    .into_any_element()
+            }),
+        )
+    }
+
+    fn render_ai_composer_slash_command_menu(
+        &self,
+        view: Entity<Self>,
+        menu: crate::app::AiComposerSlashCommandMenuState,
+        is_dark: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let menu_colors = hunk_completion_menu(cx.theme(), is_dark);
+        let anchor_range = menu.replace_range.start..menu.replace_range.start.saturating_add(1);
+        let Some(anchor_position) = self
+            .ai_composer_input_state
+            .read(cx)
+            .offset_range_bounds(&anchor_range)
+            .map(|bounds| point(bounds.left(), bounds.top()))
+        else {
+            return div().into_any_element();
+        };
+
+        let selected_ix = self
+            .ai_composer_slash_command_selected_ix
+            .min(menu.items.len().saturating_sub(1));
+        let mono_font_family = cx.theme().mono_font_family.clone();
+
+        self.render_ai_composer_completion_menu_shell(
+            AiComposerCompletionMenuShell {
+                menu_id: "ai-composer-slash-command-menu",
+                scroll_area_id: "ai-composer-slash-command-scroll-area",
+                anchor_position,
+                min_width: px(320.0),
+                max_width: px(460.0),
+                max_height: px(280.0),
+                scroll_handle: &self.ai_composer_slash_command_scroll_handle,
+            },
+            is_dark,
+            cx,
+            menu.items.iter().enumerate().map(|(ix, item)| {
+                let select_view = view.clone();
+                let command_name = item.name.to_string();
+                let selected = ix == selected_ix;
+
+                h_flex()
+                    .id(("ai-composer-slash-command-item", ix))
+                    .w_full()
+                    .min_w_0()
+                    .items_center()
+                    .gap_2()
+                    .rounded(px(12.0))
+                    .px_2p5()
+                    .py_2()
+                    .text_sm()
+                    .hover(|style| style.bg(menu_colors.row_hover))
+                    .when(selected, |this| {
+                        this.bg(menu_colors.row_selected)
+                            .border_1()
+                            .border_color(menu_colors.row_selected_border)
+                    })
+                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                        select_view.update(cx, |this, cx| {
+                            this.ai_accept_composer_slash_command_name(
+                                command_name.clone(),
+                                window,
+                                cx,
+                            );
+                        });
+                        cx.stop_propagation();
+                    })
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .w_full()
+                            .min_w_0()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .w_full()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_sm()
+                                    .font_family(mono_font_family.clone())
+                                    .text_color(menu_colors.accent_text)
+                                    .child(format!("/{}", item.name)),
+                            )
+                            .child(
+                                div()
+                                    .w_full()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(if selected {
+                                        menu_colors.selected_secondary_text
+                                    } else {
+                                        menu_colors.secondary_text
+                                    })
+                                    .child(item.description),
+                            ),
+                    )
+                    .into_any_element()
+            }),
+        )
+    }
+
+    fn render_ai_composer_completion_menu_shell<I>(
+        &self,
+        shell: AiComposerCompletionMenuShell<'_>,
+        is_dark: bool,
+        cx: &mut Context<Self>,
+        rows: I,
+    ) -> AnyElement
+    where
+        I: IntoIterator<Item = AnyElement>,
+    {
+        let menu_colors = hunk_completion_menu(cx.theme(), is_dark);
 
         deferred(
             anchored()
                 .position_mode(AnchoredPositionMode::Window)
-                .position(anchor_position)
-                .offset(point(
-                    px(0.),
-                    -px(AI_COMPOSER_FILE_COMPLETION_MENU_GAP_Y),
-                ))
+                .position(shell.anchor_position)
+                .offset(point(px(0.), -px(AI_COMPOSER_FILE_COMPLETION_MENU_GAP_Y)))
                 .anchor(Corner::BottomLeft)
                 .snap_to_window_with_margin(px(8.0))
                 .child(
                     div()
-                        .id("ai-composer-skill-completion-menu")
-                        .min_w(px(320.0))
-                        .max_w(px(460.0))
-                        .max_h(px(280.0))
-                        .overflow_y_scrollbar()
+                        .id(shell.menu_id)
+                        .min_w(shell.min_width)
+                        .max_w(shell.max_width)
+                        .relative()
                         .rounded(px(18.0))
                         .border_1()
-                        .border_color(hunk_opacity(cx.theme().border, is_dark, 0.78, 0.62))
-                        .bg(cx.theme().popover)
+                        .border_color(menu_colors.panel.border)
+                        .bg(menu_colors.panel.background)
+                        .overflow_hidden()
                         .shadow_lg()
-                        .p_1()
-                        .children(menu.items.iter().enumerate().map(|(ix, item)| {
-                            let select_view = view.clone();
-                            let select_name = item.name.clone();
-                            let selected = ix == selected_ix;
-                            let title = item.display_name.as_deref().unwrap_or(item.name.as_str());
-                            let show_name = item.display_name.as_deref() != Some(item.name.as_str());
-
-                            h_flex()
-                                .id(("ai-composer-skill-completion-item", ix))
-                                .w_full()
-                                .min_w_0()
-                                .items_center()
-                                .gap_2()
-                                .rounded(px(12.0))
-                                .px_2()
-                                .py_1p5()
-                                .text_sm()
-                                .hover(|style| {
-                                    style.bg(hunk_opacity(
-                                        cx.theme().accent,
-                                        is_dark,
-                                        0.22,
-                                        0.14,
-                                    ))
-                                })
-                                .when(selected, |this| {
-                                    this.bg(hunk_opacity(
-                                        cx.theme().accent,
-                                        is_dark,
-                                        0.28,
-                                        0.18,
-                                    ))
-                                    .border_1()
-                                    .border_color(hunk_opacity(
-                                        cx.theme().accent,
-                                        is_dark,
-                                        0.68,
-                                        0.58,
-                                    ))
-                                })
-                                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                                    select_view.update(cx, |this, cx| {
-                                        this.ai_accept_composer_skill_completion_name(
-                                            select_name.clone(),
-                                            window,
-                                            cx,
-                                        );
-                                    });
-                                    cx.stop_propagation();
-                                })
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                            cx.stop_propagation();
+                        })
+                        .on_mouse_down(MouseButton::Middle, |_, _, cx| {
+                            cx.stop_propagation();
+                        })
+                        .on_mouse_down(MouseButton::Right, |_, _, cx| {
+                            cx.stop_propagation();
+                        })
+                        .on_scroll_wheel(|_, _, cx| {
+                            cx.stop_propagation();
+                        })
+                        .child(
+                            div()
+                                .id(shell.scroll_area_id)
+                                .max_h(shell.max_height)
+                                .track_scroll(shell.scroll_handle)
+                                .overflow_y_scroll()
+                                .children(rows.into_iter().map(|row| {
+                                    div().w_full().px_1().pr_3().child(row).into_any_element()
+                                })),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .right_0()
+                                .bottom_0()
+                                .w(px(12.0))
                                 .child(
-                                    Icon::new(IconName::Settings)
-                                        .size(px(12.0))
-                                        .mt_0p5()
-                                        .text_color(if selected {
-                                            cx.theme().accent
-                                        } else {
-                                            hunk_opacity(
-                                                cx.theme().muted_foreground,
-                                                is_dark,
-                                                0.86,
-                                                0.96,
-                                            )
-                                        }),
-                                )
-                                .child(
-                                    v_flex()
-                                        .min_w_0()
-                                        .gap_0p5()
-                                        .child(
-                                            div()
-                                                .min_w_0()
-                                                .truncate()
-                                                .text_color(if selected {
-                                                    cx.theme().foreground
-                                                } else {
-                                                    hunk_opacity(
-                                                        cx.theme().foreground,
-                                                        is_dark,
-                                                        0.96,
-                                                        0.98,
-                                                    )
-                                                })
-                                                .child(title.to_string()),
-                                        )
-                                        .when(show_name, |this| {
-                                            this.child(
-                                                div()
-                                                    .min_w_0()
-                                                    .truncate()
-                                                    .text_xs()
-                                                    .font_family(cx.theme().mono_font_family.clone())
-                                                    .text_color(hunk_opacity(
-                                                        cx.theme().muted_foreground,
-                                                        is_dark,
-                                                        0.90,
-                                                        0.94,
-                                                    ))
-                                                    .child(format!("${}", item.name)),
-                                            )
-                                        })
-                                        .when_some(item.description.clone(), |this, description| {
-                                            this.child(
-                                                div()
-                                                    .min_w_0()
-                                                    .text_xs()
-                                                    .whitespace_normal()
-                                                    .text_color(hunk_opacity(
-                                                        cx.theme().muted_foreground,
-                                                        is_dark,
-                                                        0.92,
-                                                        0.96,
-                                                    ))
-                                                    .child(description),
-                                            )
-                                        }),
-                                )
-                                .into_any_element()
-                        })),
+                                    Scrollbar::vertical(shell.scroll_handle)
+                                        .scrollbar_show(ScrollbarShow::Always),
+                                ),
+                        ),
                 ),
         )
         .into_any_element()

@@ -50,6 +50,8 @@ mod ai_tests {
     #[cfg(target_os = "windows")]
     use super::resolve_windows_command_path_from_env;
     use super::resolve_workspace_codex_executable_from_exe;
+    use super::resolved_ai_turn_session_overrides;
+    use super::resolved_ai_thread_session_state;
     use super::resolved_ai_thread_mode_picker_state;
     use super::resolved_ai_workspace_cwd;
     use super::review_compare_selection_ids_for_workspace_root;
@@ -77,6 +79,7 @@ mod ai_tests {
     use super::AiComposerShortcut;
     use crate::app::ai_composer_completion::merge_rebased_ai_composer_skill_bindings;
     use crate::app::ai_runtime::AiConnectionState;
+    use crate::app::AiTurnSessionOverrides;
     use crate::app::ai_runtime::AiPendingUserInputQuestion;
     use crate::app::ai_runtime::AiPendingUserInputQuestionOption;
     use crate::app::ai_runtime::AiPendingUserInputRequest;

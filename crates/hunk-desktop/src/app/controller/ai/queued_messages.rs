@@ -25,16 +25,17 @@ fn ai_queued_message_matching_sequence(
     queued: &AiQueuedUserMessage,
     min_sequence: u64,
 ) -> Option<u64> {
-    let expected_content =
-        ai_pending_steer_seed_content(queued.prompt.as_str(), queued.local_images.as_slice())?;
-
     state
         .items
         .values()
         .filter(|item| {
-            item.thread_id == queued.thread_id
+                item.thread_id == queued.thread_id
                 && item.kind == "userMessage"
-                && item.content == expected_content
+                && ai_user_message_matches_pending_input(
+                    item,
+                    queued.prompt.as_str(),
+                    queued.local_images.as_slice(),
+                )
                 && item.last_sequence > min_sequence
         })
         .map(|item| item.last_sequence)
@@ -402,7 +403,12 @@ impl DiffViewer {
                     local_image_paths: queued.local_images.clone(),
                     selected_skills: queued.selected_skills.clone(),
                     skill_bindings: queued.skill_bindings.clone(),
-                    session_overrides: self.current_ai_turn_session_overrides(),
+                    session_overrides: resolved_ai_turn_session_overrides(
+                        &self.state,
+                        self.ai_models.as_slice(),
+                        Some(queued.thread_id.as_str()),
+                        workspace_key,
+                    ),
                 },
                 false,
                 cx,

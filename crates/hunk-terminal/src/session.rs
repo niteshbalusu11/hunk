@@ -21,6 +21,7 @@ pub struct TerminalSpawnRequest {
     pub command: String,
     pub rows: u16,
     pub cols: u16,
+    shell_program_override: Option<OsString>,
 }
 
 impl TerminalSpawnRequest {
@@ -30,11 +31,17 @@ impl TerminalSpawnRequest {
             command,
             rows: 24,
             cols: 120,
+            shell_program_override: None,
         }
     }
 
     pub fn shell(cwd: PathBuf) -> Self {
         Self::new(cwd, String::new())
+    }
+
+    pub fn with_shell_program(mut self, shell_program: impl Into<OsString>) -> Self {
+        self.shell_program_override = Some(shell_program.into());
+        self
     }
 }
 
@@ -98,7 +105,11 @@ pub fn spawn_terminal_session(
         })
         .context("open pseudoterminal")?;
 
-    let mut command = shell_command_builder(request.command.as_str(), request.cwd.as_path());
+    let mut command = shell_command_builder(
+        request.command.as_str(),
+        request.cwd.as_path(),
+        request.shell_program_override.as_deref(),
+    );
     command.cwd(request.cwd.as_os_str());
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
@@ -295,10 +306,16 @@ fn terminal_cursor_position_response(screen: &TerminalScreenSnapshot) -> Vec<u8>
     format!("\x1b[{row};{column}R").into_bytes()
 }
 
-fn shell_command_builder(command: &str, cwd: &Path) -> CommandBuilder {
+fn shell_command_builder(
+    command: &str,
+    cwd: &Path,
+    shell_program_override: Option<&std::ffi::OsStr>,
+) -> CommandBuilder {
     #[cfg(target_os = "windows")]
     {
-        let shell = windows_shell_program();
+        let shell = shell_program_override
+            .map(OsString::from)
+            .unwrap_or_else(windows_shell_program);
         let is_cmd = shell_is_cmd(shell.as_os_str());
         let mut builder = CommandBuilder::new(shell);
         if is_cmd && std::env::var_os("PROMPT").is_none() {
@@ -325,12 +342,17 @@ fn shell_command_builder(command: &str, cwd: &Path) -> CommandBuilder {
 
     #[cfg(not(target_os = "windows"))]
     {
-        let shell = std::env::var_os("SHELL").unwrap_or_else(|| OsString::from("/bin/bash"));
-        let mut builder = CommandBuilder::new(shell);
+        let shell = shell_program_override
+            .map(OsString::from)
+            .unwrap_or_else(unix_shell_program);
+        let mut builder = CommandBuilder::new(shell.clone());
         if command.trim().is_empty() {
             builder.arg("-i");
         } else {
-            builder.arg("-lc");
+            if unix_shell_supports_login_flag(shell.as_os_str()) {
+                builder.arg("-l");
+            }
+            builder.arg("-c");
             builder.arg(command);
         }
         builder.cwd(cwd.as_os_str());
@@ -349,5 +371,35 @@ fn shell_is_cmd(shell: &std::ffi::OsStr) -> bool {
         .file_name()
         .and_then(|value| value.to_str())
         .map(|value| value.eq_ignore_ascii_case("cmd.exe") || value.eq_ignore_ascii_case("cmd"))
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn unix_shell_program() -> OsString {
+    if let Some(shell) = std::env::var_os("SHELL")
+        .filter(|shell| !shell.is_empty())
+        .filter(|shell| Path::new(shell).exists())
+    {
+        return shell;
+    }
+
+    ["/bin/bash", "/bin/sh"]
+        .into_iter()
+        .find(|path| Path::new(path).exists())
+        .map(OsString::from)
+        .unwrap_or_else(|| OsString::from("/bin/sh"))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn unix_shell_supports_login_flag(shell: &std::ffi::OsStr) -> bool {
+    Path::new(shell)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(|value| {
+            matches!(
+                value,
+                "bash" | "zsh" | "fish" | "ksh" | "mksh" | "nu" | "nushell"
+            )
+        })
         .unwrap_or(false)
 }

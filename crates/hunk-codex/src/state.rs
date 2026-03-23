@@ -127,6 +127,12 @@ pub enum ReducerEvent {
         turn_id: String,
         item_id: String,
     },
+    ItemContentSet {
+        thread_id: String,
+        turn_id: String,
+        item_id: String,
+        content: String,
+    },
     ItemDisplayMetadataUpdated {
         thread_id: String,
         turn_id: String,
@@ -400,6 +406,30 @@ impl AiState {
                 item.thread_id = thread_id;
                 item.turn_id = turn_id;
                 item.status = ItemStatus::Completed;
+                item.last_sequence = sequence;
+                ApplyOutcome::Applied
+            }
+            ReducerEvent::ItemContentSet {
+                thread_id,
+                turn_id,
+                item_id,
+                content,
+            } => {
+                let item = self.ensure_item_summary(
+                    thread_id.as_str(),
+                    turn_id.as_str(),
+                    item_id.as_str(),
+                    "unknown",
+                    ItemStatus::Started,
+                );
+
+                if sequence < item.last_sequence {
+                    return ApplyOutcome::Stale;
+                }
+
+                item.thread_id = thread_id;
+                item.turn_id = turn_id;
+                item.content = content;
                 item.last_sequence = sequence;
                 ApplyOutcome::Applied
             }
