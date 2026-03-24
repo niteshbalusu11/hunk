@@ -49,7 +49,7 @@ fn validate_keyboard_shortcuts(shortcuts: &KeyboardShortcuts) -> Result<(), Stri
     validate_shortcut_list("Switch to Review View", &shortcuts.switch_to_review_view)?;
     validate_shortcut_list("Switch to Git View", &shortcuts.switch_to_git_view)?;
     validate_shortcut_list("Switch to AI View", &shortcuts.switch_to_ai_view)?;
-    validate_shortcut_list("Toggle AI Terminal", &shortcuts.toggle_ai_terminal_drawer)?;
+    validate_shortcut_list("Toggle Terminal", &shortcuts.toggle_ai_terminal_drawer)?;
     validate_shortcut_list("Open Project", &shortcuts.open_project)?;
     validate_shortcut_list("Save Current File", &shortcuts.save_current_file)?;
     validate_shortcut_list("Next Editor Tab", &shortcuts.next_editor_tab)?;

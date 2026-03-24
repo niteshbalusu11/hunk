@@ -6,11 +6,13 @@ const AI_USAGE_ROW_LABEL_WIDTH: f32 = 68.0;
 const AI_USAGE_ROW_BAR_HEIGHT: f32 = 14.0;
 const AI_USAGE_ROW_DETAILS_WIDTH: f32 = 134.0;
 
-struct AiTerminalPanelState {
+struct TerminalPanelState {
+    kind: WorkspaceTerminalKind,
     open: bool,
     cwd_label: String,
     shell_label: String,
     status_message: Option<String>,
+    status: AiTerminalSessionStatus,
     running: bool,
     surface_focused: bool,
     screen: Option<Arc<TerminalScreenSnapshot>>,
@@ -190,7 +192,8 @@ impl DiffViewer {
             composer_drop_border_color,
             composer_drop_bg,
         };
-        let terminal_state = AiTerminalPanelState {
+        let terminal_state = TerminalPanelState {
+            kind: WorkspaceTerminalKind::Ai,
             open: self.ai_terminal_open,
             cwd_label: self
                 .ai_terminal_session
@@ -201,6 +204,7 @@ impl DiffViewer {
                 .unwrap_or_else(|| "No workspace selected".to_string()),
             shell_label: ai_terminal_shell_label(&self.config),
             status_message: self.ai_terminal_session.status_message.clone(),
+            status: self.ai_terminal_session.status,
             running: self.ai_terminal_is_running(),
             surface_focused: self.ai_terminal_surface_focused,
             screen: self.ai_terminal_session.screen.clone(),
@@ -221,7 +225,7 @@ impl DiffViewer {
         let composer_panel =
             self.render_ai_composer_panel(view.clone(), &composer_state, is_dark, cx);
         let terminal_panel = self
-            .render_ai_terminal_panel(view.clone(), &terminal_state, is_dark, cx)
+            .render_workspace_terminal_panel(view.clone(), &terminal_state, is_dark, cx)
             .filter(|_| terminal_state.open);
         let workspace = self.render_ai_workspace_content(
             view,

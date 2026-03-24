@@ -473,6 +473,27 @@ impl DiffViewer {
             ai_terminal_cursor_output_generation: 0,
             ai_terminal_runtime_generation: 0,
             ai_terminal_stop_requested: false,
+            files_terminal_open: false,
+            files_terminal_follow_output: true,
+            files_terminal_height_px: 220.0,
+            files_terminal_session: AiTerminalSessionState::default(),
+            files_terminal_focus_handle: cx.focus_handle(),
+            files_terminal_restore_target: FilesTerminalRestoreTarget::default(),
+            files_terminal_surface_focused: false,
+            files_terminal_cursor_blink_visible: true,
+            files_terminal_cursor_blink_active: false,
+            files_terminal_cursor_output_suppressed: false,
+            files_terminal_panel_bounds: None,
+            files_terminal_grid_size: None,
+            files_terminal_pending_input: None,
+            files_terminal_event_task: Task::ready(()),
+            files_terminal_cursor_blink_task: Task::ready(()),
+            files_terminal_cursor_output_task: Task::ready(()),
+            files_terminal_runtime: None,
+            files_terminal_cursor_blink_generation: 0,
+            files_terminal_cursor_output_generation: 0,
+            files_terminal_runtime_generation: 0,
+            files_terminal_stop_requested: false,
             repo_file_search_provider,
             repo_file_search_reload_task: Task::ready(()),
             repo_file_search_loading: false,
@@ -671,6 +692,16 @@ impl DiffViewer {
         .detach();
         cx.on_focus_out(&ai_terminal_focus_handle, window, |this, _, _, cx| {
             this.ai_terminal_surface_focus_out(cx);
+        })
+        .detach();
+
+        let files_terminal_focus_handle = view.files_terminal_focus_handle.clone();
+        cx.on_focus_in(&files_terminal_focus_handle, window, |this, _, cx| {
+            this.files_terminal_surface_focus_in(cx);
+        })
+        .detach();
+        cx.on_focus_out(&files_terminal_focus_handle, window, |this, _, _, cx| {
+            this.files_terminal_surface_focus_out(cx);
         })
         .detach();
 

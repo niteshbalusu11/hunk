@@ -217,6 +217,19 @@ enum AiTerminalSessionStatus {
     Stopped,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorkspaceTerminalKind {
+    Ai,
+    Files,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum FilesTerminalRestoreTarget {
+    Editor,
+    #[default]
+    WorkspaceRoot,
+}
+
 #[derive(Debug, Clone, Default)]
 struct AiTerminalSessionState {
     cwd: Option<PathBuf>,
@@ -395,6 +408,11 @@ struct AiHiddenRuntimeHandle {
 
 struct AiTerminalRuntimeHandle {
     thread_id: String,
+    handle: TerminalSessionHandle,
+    generation: usize,
+}
+
+struct FilesTerminalRuntimeHandle {
     handle: TerminalSessionHandle,
     generation: usize,
 }

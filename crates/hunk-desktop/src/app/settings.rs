@@ -200,8 +200,8 @@ impl SettingsShortcutInputs {
             },
             SettingsShortcutRow {
                 id: "toggle-ai-terminal-drawer",
-                label: "Toggle AI Terminal",
-                hint: "Opens or closes the AI bottom terminal panel.",
+                label: "Toggle Terminal",
+                hint: "Opens or closes the terminal in AI and Files views.",
                 input_state: self.toggle_ai_terminal_drawer.clone(),
             },
             SettingsShortcutRow {

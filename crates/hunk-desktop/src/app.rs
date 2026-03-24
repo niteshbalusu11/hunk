@@ -63,6 +63,7 @@ use hunk_terminal::{
 };
 
 const AI_TERMINAL_TEXT_SELECTION_ROW_ID: &str = "ai-terminal";
+const FILES_TERMINAL_TEXT_SELECTION_ROW_ID: &str = "files-terminal";
 
 use ai_composer_commands::AiComposerSlashCommandMenuState;
 use ai_composer_completion::{
@@ -477,6 +478,13 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
             shortcut.as_str(),
             AiToggleTerminalDrawer,
             Some(WorkspaceViewMode::Ai.shortcut_context()),
+        )
+    }));
+    bindings.extend(shortcuts.toggle_ai_terminal_drawer.iter().map(|shortcut| {
+        KeyBinding::new(
+            shortcut.as_str(),
+            AiToggleTerminalDrawer,
+            Some(WorkspaceViewMode::Files.shortcut_context()),
         )
     }));
     bindings.push(KeyBinding::new(
@@ -1092,6 +1100,27 @@ struct DiffViewer {
     ai_terminal_cursor_output_generation: usize,
     ai_terminal_runtime_generation: usize,
     ai_terminal_stop_requested: bool,
+    files_terminal_open: bool,
+    files_terminal_follow_output: bool,
+    files_terminal_height_px: f32,
+    files_terminal_session: AiTerminalSessionState,
+    files_terminal_focus_handle: FocusHandle,
+    files_terminal_restore_target: FilesTerminalRestoreTarget,
+    files_terminal_surface_focused: bool,
+    files_terminal_cursor_blink_visible: bool,
+    files_terminal_cursor_blink_active: bool,
+    files_terminal_cursor_output_suppressed: bool,
+    files_terminal_panel_bounds: Option<Bounds<Pixels>>,
+    files_terminal_grid_size: Option<(u16, u16)>,
+    files_terminal_pending_input: Option<String>,
+    files_terminal_event_task: Task<()>,
+    files_terminal_cursor_blink_task: Task<()>,
+    files_terminal_cursor_output_task: Task<()>,
+    files_terminal_runtime: Option<FilesTerminalRuntimeHandle>,
+    files_terminal_cursor_blink_generation: usize,
+    files_terminal_cursor_output_generation: usize,
+    files_terminal_runtime_generation: usize,
+    files_terminal_stop_requested: bool,
     repo_file_search_provider: Rc<RepoFileSearchProvider>,
     repo_file_search_reload_task: Task<()>,
     repo_file_search_loading: bool,
@@ -1257,6 +1286,7 @@ impl Drop for DiffViewer {
         }
         self.files_editor.borrow_mut().shutdown();
         self.stop_all_ai_terminal_runtimes("dropping app");
+        self.stop_files_terminal_runtime("dropping app");
         self.shutdown_ai_worker_blocking();
     }
 }

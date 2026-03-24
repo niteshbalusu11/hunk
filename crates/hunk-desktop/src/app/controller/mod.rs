@@ -62,6 +62,7 @@ include!("workspace_mode.rs");
 include!("ai.rs");
 include!("ai_composer_completion.rs");
 include!("ai_git_ops.rs");
+include!("file_terminal.rs");
 include!("file_tree.rs");
 include!("file_tree_fs.rs");
 include!("file_quick_open.rs");

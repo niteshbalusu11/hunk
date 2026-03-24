@@ -163,6 +163,27 @@ impl DiffViewer {
                 active_branch
             )
         };
+        let active_terminal_kind = self.active_workspace_terminal_kind();
+        let terminal_open = active_terminal_kind.is_some_and(|kind| self.workspace_terminal_open(kind));
+        let terminal_shortcut = ai_preferred_shortcut_label(
+            self.config.keyboard_shortcuts.toggle_ai_terminal_drawer.as_slice(),
+        );
+        let terminal_tooltip = terminal_shortcut.as_ref().map_or_else(
+            || {
+                if terminal_open {
+                    "Hide terminal".to_string()
+                } else {
+                    "Show terminal".to_string()
+                }
+            },
+            |shortcut| {
+                if terminal_open {
+                    format!("Hide terminal ({shortcut})")
+                } else {
+                    format!("Show terminal ({shortcut})")
+                }
+            },
+        );
 
         h_flex()
             .w_full()
@@ -317,10 +338,43 @@ impl DiffViewer {
                     ),
             )
             .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(footer_summary),
+                h_flex()
+                    .items_center()
+                    .gap_2()
+                    .when_some(active_terminal_kind, |this, kind| {
+                        this.child({
+                            let view = view.clone();
+                            let mut button = Button::new("footer-toggle-terminal")
+                                .compact()
+                                .rounded(px(7.0))
+                                .icon(Icon::new(IconName::SquareTerminal).size(px(14.0)))
+                                .min_w(px(30.0))
+                                .h(px(28.0))
+                                .tooltip(terminal_tooltip.clone())
+                                .on_click(move |_, window, cx| {
+                                    view.update(cx, |this, cx| match kind {
+                                        WorkspaceTerminalKind::Ai => {
+                                            this.ai_toggle_terminal_drawer_action(cx);
+                                        }
+                                        WorkspaceTerminalKind::Files => {
+                                            this.files_toggle_terminal_drawer_action(window, cx);
+                                        }
+                                    });
+                                });
+                            if terminal_open {
+                                button = button.primary();
+                            } else {
+                                button = button.outline();
+                            }
+                            button.into_any_element()
+                        })
+                    })
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(footer_summary),
+                    ),
             )
             .into_any_element()
     }

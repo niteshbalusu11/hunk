@@ -60,6 +60,7 @@ struct AiTerminalSurfacePaintOptions {
 #[derive(Clone)]
 struct AiTerminalSurfaceElement {
     element_id: gpui::ElementId,
+    kind: WorkspaceTerminalKind,
     view: Entity<DiffViewer>,
     screen: Arc<TerminalScreenSnapshot>,
     lines: Arc<[AiTerminalPaintLine]>,
@@ -84,14 +85,14 @@ struct AiTerminalHit {
 }
 
 impl DiffViewer {
-    fn render_ai_terminal_surface(
+    fn render_workspace_terminal_surface(
         &self,
-        state: &AiTerminalPanelState,
+        state: &TerminalPanelState,
         is_dark: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if let Some(screen) = state.screen.as_ref() {
-            return self.render_ai_terminal_vt_surface(screen, is_dark, cx);
+            return self.render_workspace_terminal_vt_surface(state.kind, screen, is_dark, cx);
         }
 
         if state.has_transcript {
@@ -126,8 +127,9 @@ impl DiffViewer {
             .into_any_element()
     }
 
-    fn render_ai_terminal_vt_surface(
+    fn render_workspace_terminal_vt_surface(
         &self,
+        kind: WorkspaceTerminalKind,
         screen: &Arc<TerminalScreenSnapshot>,
         is_dark: bool,
         cx: &mut Context<Self>,
@@ -135,13 +137,14 @@ impl DiffViewer {
         let selection_enabled = ai_terminal_supports_text_selection(screen);
         let text_style = ai_terminal_surface_text_style(is_dark, cx);
         let paint = AiTerminalSurfacePaintOptions {
-            surface_focused: self.ai_terminal_surface_focused,
-            cursor_blink_visible: self.ai_terminal_cursor_blink_visible,
-            cursor_output_suppressed: self.ai_terminal_cursor_output_suppressed,
+            surface_focused: self.workspace_terminal_surface_focused(kind),
+            cursor_blink_visible: self.workspace_terminal_cursor_blink_visible(kind),
+            cursor_output_suppressed: self.workspace_terminal_cursor_output_suppressed(kind),
             is_dark,
         };
         let lines = ai_terminal_paint_lines(
             self,
+            kind,
             screen,
             &text_style,
             paint,
@@ -150,7 +153,11 @@ impl DiffViewer {
         let selection_surfaces = ai_terminal_selection_surfaces(lines.as_slice());
 
         AiTerminalSurfaceElement {
-            element_id: "ai-terminal-surface".into(),
+            element_id: match kind {
+                WorkspaceTerminalKind::Ai => "ai-terminal-surface".into(),
+                WorkspaceTerminalKind::Files => "files-terminal-surface".into(),
+            },
+            kind,
             view: cx.entity(),
             screen: screen.clone(),
             lines: lines.into(),
@@ -217,7 +224,10 @@ impl gpui::Element for AiTerminalSurfaceElement {
         let rows = ((bounds.size.height / line_height).floor() as u16).max(1);
         let cols = ((bounds.size.width / cell_width).floor() as u16).max(1);
         self.view.update(cx, |this, cx| {
-            this.ai_resize_terminal_surface(rows, cols, cx);
+            match self.kind {
+                WorkspaceTerminalKind::Ai => this.ai_resize_terminal_surface(rows, cols, cx),
+                WorkspaceTerminalKind::Files => this.files_resize_terminal_surface(rows, cols, cx),
+            }
         });
 
         AiTerminalSurfaceLayout {
@@ -246,6 +256,7 @@ impl gpui::Element for AiTerminalSurfaceElement {
         let surfaces_for_mouse = self.selection_surfaces.clone();
         let view = self.view.clone();
         let screen = self.screen.clone();
+        let kind = self.kind;
         let cell_width = layout.cell_width;
         let line_height = layout.line_height;
         let bounds_origin = bounds.origin;
@@ -267,7 +278,14 @@ impl gpui::Element for AiTerminalSurfaceElement {
                 line_height,
             );
             let handled = view.update(cx, |this, cx| {
-                this.ai_terminal_surface_mouse_down(event, line, column, cx)
+                match kind {
+                    WorkspaceTerminalKind::Ai => {
+                        this.ai_terminal_surface_mouse_down(event, line, column, cx)
+                    }
+                    WorkspaceTerminalKind::Files => {
+                        this.files_terminal_surface_mouse_down(event, line, column, cx)
+                    }
+                }
             });
             if handled {
                 cx.stop_propagation();
@@ -296,7 +314,15 @@ impl gpui::Element for AiTerminalSurfaceElement {
                 this.ai_set_pressed_markdown_link(pressed_link.clone());
                 if selection_enabled {
                     this.ai_begin_text_selection(
-                        crate::app::AI_TERMINAL_TEXT_SELECTION_ROW_ID.to_string(),
+                        match kind {
+                            WorkspaceTerminalKind::Ai => {
+                                crate::app::AI_TERMINAL_TEXT_SELECTION_ROW_ID
+                            }
+                            WorkspaceTerminalKind::Files => {
+                                crate::app::FILES_TERMINAL_TEXT_SELECTION_ROW_ID
+                            }
+                        }
+                        .to_string(),
                         surfaces_for_mouse.clone(),
                         hit.surface_id.as_str(),
                         hit.index,
@@ -331,7 +357,14 @@ impl gpui::Element for AiTerminalSurfaceElement {
                 line_height,
             );
             let handled = view.update(cx, |this, cx| {
-                this.ai_terminal_surface_mouse_move(event, line, column, cx)
+                match kind {
+                    WorkspaceTerminalKind::Ai => {
+                        this.ai_terminal_surface_mouse_move(event, line, column, cx)
+                    }
+                    WorkspaceTerminalKind::Files => {
+                        this.files_terminal_surface_mouse_move(event, line, column, cx)
+                    }
+                }
             });
             if handled {
                 cx.stop_propagation();
@@ -344,7 +377,13 @@ impl gpui::Element for AiTerminalSurfaceElement {
 
             let dragging_terminal_selection = view.read(cx).ai_text_selection.as_ref().is_some_and(
                 |selection| {
-                    selection.row_id == crate::app::AI_TERMINAL_TEXT_SELECTION_ROW_ID
+                    selection.row_id
+                        == match kind {
+                            WorkspaceTerminalKind::Ai => crate::app::AI_TERMINAL_TEXT_SELECTION_ROW_ID,
+                            WorkspaceTerminalKind::Files => {
+                                crate::app::FILES_TERMINAL_TEXT_SELECTION_ROW_ID
+                            }
+                        }
                         && selection.dragging
                 },
             );
@@ -396,7 +435,14 @@ impl gpui::Element for AiTerminalSurfaceElement {
                 line_height,
             );
             let handled = view.update(cx, |this, cx| {
-                this.ai_terminal_surface_mouse_up(event, line, column, cx)
+                match kind {
+                    WorkspaceTerminalKind::Ai => {
+                        this.ai_terminal_surface_mouse_up(event, line, column, cx)
+                    }
+                    WorkspaceTerminalKind::Files => {
+                        this.files_terminal_surface_mouse_up(event, line, column, cx)
+                    }
+                }
             });
             if handled {
                 cx.stop_propagation();
@@ -449,7 +495,14 @@ impl gpui::Element for AiTerminalSurfaceElement {
                 line_height,
             );
             let handled = view.update(cx, |this, cx| {
-                this.ai_terminal_surface_scroll_wheel(event, line, column, cx)
+                match kind {
+                    WorkspaceTerminalKind::Ai => {
+                        this.ai_terminal_surface_scroll_wheel(event, line, column, cx)
+                    }
+                    WorkspaceTerminalKind::Files => {
+                        this.files_terminal_surface_scroll_wheel(event, line, column, cx)
+                    }
+                }
             });
             if handled {
                 cx.stop_propagation();
@@ -552,6 +605,7 @@ fn ai_terminal_surface_text_style(is_dark: bool, cx: &App) -> gpui::TextStyle {
 
 fn ai_terminal_paint_lines(
     this: &DiffViewer,
+    kind: WorkspaceTerminalKind,
     screen: &TerminalScreenSnapshot,
     text_style: &gpui::TextStyle,
     paint: AiTerminalSurfacePaintOptions,
@@ -587,20 +641,21 @@ fn ai_terminal_paint_lines(
         .into_iter()
         .enumerate()
         .map(|(row_index, row)| {
-            ai_terminal_paint_line(this, row_index, &row, text_style, cursor_render, cx)
+            ai_terminal_paint_line(this, kind, row_index, &row, text_style, cursor_render, cx)
         })
         .collect()
 }
 
 fn ai_terminal_paint_line(
     this: &DiffViewer,
+    kind: WorkspaceTerminalKind,
     row_index: usize,
     row: &[AiTerminalRenderCell],
     text_style: &gpui::TextStyle,
     cursor_render: AiTerminalCursorRenderContext,
     cx: &App,
 ) -> AiTerminalPaintLine {
-    let surface_id = ai_terminal_text_surface_id(row_index);
+    let surface_id = ai_terminal_text_surface_id(kind, row_index);
     let mut text = String::with_capacity(row.len());
     let mut column_byte_offsets = Vec::with_capacity(row.len() + 1);
     column_byte_offsets.push(0);
@@ -745,11 +800,12 @@ fn ai_terminal_selection_surfaces(
     )
 }
 
-fn ai_terminal_text_surface_id(row_index: usize) -> String {
-    format!(
-        "{}\u{1f}row\u{1f}{row_index}",
-        crate::app::AI_TERMINAL_TEXT_SELECTION_ROW_ID
-    )
+fn ai_terminal_text_surface_id(kind: WorkspaceTerminalKind, row_index: usize) -> String {
+    let row_id = match kind {
+        WorkspaceTerminalKind::Ai => crate::app::AI_TERMINAL_TEXT_SELECTION_ROW_ID,
+        WorkspaceTerminalKind::Files => crate::app::FILES_TERMINAL_TEXT_SELECTION_ROW_ID,
+    };
+    format!("{row_id}\u{1f}row\u{1f}{row_index}")
 }
 
 fn ai_terminal_hit_test(

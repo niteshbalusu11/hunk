@@ -288,6 +288,12 @@ impl DiffViewer {
         if self.workspace_view_mode == WorkspaceViewMode::Ai && self.ai_copy_selected_text(cx) {
             return;
         }
+        if self.workspace_view_mode == WorkspaceViewMode::Files
+            && self.files_terminal_selection_active()
+            && self.ai_copy_selected_text(cx)
+        {
+            return;
+        }
         if self.workspace_view_mode != WorkspaceViewMode::Diff {
             return;
         }
@@ -304,6 +310,12 @@ impl DiffViewer {
         cx: &mut Context<Self>,
     ) {
         if self.workspace_view_mode == WorkspaceViewMode::Ai && self.ai_select_all_text(cx) {
+            return;
+        }
+        if self.workspace_view_mode == WorkspaceViewMode::Files
+            && self.files_terminal_selection_active()
+            && self.ai_select_all_text(cx)
+        {
             return;
         }
         if self.workspace_view_mode != WorkspaceViewMode::Diff {

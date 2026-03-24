@@ -500,45 +500,6 @@ impl DiffViewer {
                     )
                     .child({
                         let view = view.clone();
-                        let terminal_shortcut = ai_preferred_shortcut_label(
-                            self.config.keyboard_shortcuts.toggle_ai_terminal_drawer.as_slice(),
-                        );
-                        let terminal_tooltip = terminal_shortcut.as_ref().map_or_else(
-                            || {
-                                if self.ai_terminal_open {
-                                    "Hide terminal".to_string()
-                                } else {
-                                    "Show terminal".to_string()
-                                }
-                            },
-                            |shortcut| {
-                                if self.ai_terminal_open {
-                                    format!("Hide terminal ({shortcut})")
-                                } else {
-                                    format!("Show terminal ({shortcut})")
-                                }
-                            },
-                        );
-                        Button::new("ai-toggle-terminal")
-                            .compact()
-                            .outline()
-                            .with_size(gpui_component::Size::Small)
-                            .rounded(px(8.0))
-                            .label(if self.ai_terminal_open {
-                                "Hide Terminal"
-                            } else {
-                                "Show Terminal"
-                            })
-                            .tooltip(terminal_tooltip)
-                            .on_click(move |_, _, cx| {
-                                view.update(cx, |this, cx| {
-                                    this.ai_toggle_terminal_drawer_action(cx);
-                                });
-                            })
-                            .into_any_element()
-                    })
-                    .child({
-                        let view = view.clone();
                         let push_label = format!("Commit and Push to {}", state.active_branch);
                         let publish_tooltip = state.ai_publish_blocker.clone().unwrap_or_else(|| {
                             match state.selected_thread_start_mode {

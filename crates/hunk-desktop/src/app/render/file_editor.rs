@@ -361,22 +361,61 @@ impl DiffViewer {
     }
 
     fn render_file_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let view = cx.entity();
+        let is_dark = cx.theme().mode.is_dark();
         let Some(file_path) = self.editor_path.clone() else {
+            let terminal_state = TerminalPanelState {
+                kind: WorkspaceTerminalKind::Files,
+                open: self.files_terminal_open,
+                cwd_label: self
+                    .files_terminal_session
+                    .cwd
+                    .clone()
+                    .or_else(|| self.repo_root.clone())
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "No repository selected".to_string()),
+                shell_label: ai_terminal_shell_label(&self.config),
+                status_message: self.files_terminal_session.status_message.clone(),
+                status: self.files_terminal_session.status,
+                running: self.files_terminal_is_running(),
+                surface_focused: self.files_terminal_surface_focused,
+                screen: self.files_terminal_session.screen.clone(),
+                display_offset: self
+                    .files_terminal_session
+                    .screen
+                    .as_ref()
+                    .map(|screen| screen.display_offset)
+                    .unwrap_or(0),
+                has_transcript: !self.files_terminal_session.transcript.trim().is_empty(),
+                has_output: self.files_terminal_session.screen.is_some()
+                    || !self.files_terminal_session.transcript.trim().is_empty(),
+                has_last_command: self.files_terminal_session.last_command.is_some(),
+                transcript: self.files_terminal_session.transcript.clone(),
+                height_px: self.files_terminal_height_px,
+            };
             return v_flex()
                 .size_full()
-                .items_center()
-                .justify_center()
                 .child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Select a file from Files tree to edit it."),
+                    v_flex()
+                        .flex_1()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("Select a file from Files tree to edit it."),
+                        ),
                 )
+                .when(terminal_state.open, |this| {
+                    this.child(
+                        self.render_workspace_terminal_panel(view.clone(), &terminal_state, is_dark, cx)
+                            .unwrap_or_else(|| div().into_any_element()),
+                    )
+                })
                 .into_any_element();
         };
 
-        let view = cx.entity();
-        let is_dark = cx.theme().mode.is_dark();
         let editor_chrome = crate::app::theme::hunk_editor_chrome_colors(cx.theme(), is_dark);
         let editor_font_size = cx.theme().mono_font_size * 1.2;
         let is_markdown_file = is_markdown_path(file_path.as_str());
@@ -449,6 +488,35 @@ impl DiffViewer {
             self.render_markdown_preview(is_dark, cx)
         } else {
             self.render_file_editor_surface(window, editor_font_size, is_dark, cx)
+        };
+        let terminal_state = TerminalPanelState {
+            kind: WorkspaceTerminalKind::Files,
+            open: self.files_terminal_open,
+            cwd_label: self
+                .files_terminal_session
+                .cwd
+                .clone()
+                .or_else(|| self.repo_root.clone())
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "No repository selected".to_string()),
+            shell_label: ai_terminal_shell_label(&self.config),
+            status_message: self.files_terminal_session.status_message.clone(),
+            status: self.files_terminal_session.status,
+            running: self.files_terminal_is_running(),
+            surface_focused: self.files_terminal_surface_focused,
+            screen: self.files_terminal_session.screen.clone(),
+            display_offset: self
+                .files_terminal_session
+                .screen
+                .as_ref()
+                .map(|screen| screen.display_offset)
+                .unwrap_or(0),
+            has_transcript: !self.files_terminal_session.transcript.trim().is_empty(),
+            has_output: self.files_terminal_session.screen.is_some()
+                || !self.files_terminal_session.transcript.trim().is_empty(),
+            has_last_command: self.files_terminal_session.last_command.is_some(),
+            transcript: self.files_terminal_session.transcript.clone(),
+            height_px: self.files_terminal_height_px,
         };
 
         v_flex()
@@ -661,6 +729,12 @@ impl DiffViewer {
                 ))
             })
             .child(editor_content)
+            .when(terminal_state.open, |this| {
+                this.child(
+                    self.render_workspace_terminal_panel(view.clone(), &terminal_state, is_dark, cx)
+                        .unwrap_or_else(|| div().into_any_element()),
+                )
+            })
             .into_any_element()
     }
 

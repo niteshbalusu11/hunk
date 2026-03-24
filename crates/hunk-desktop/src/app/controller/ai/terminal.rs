@@ -46,6 +46,51 @@ const AI_TERMINAL_SHELL_WRAPPERS: &[(&str, AiTerminalShellFamily)] = &[
 ];
 
 impl DiffViewer {
+    pub(crate) fn workspace_terminal_surface_focused(
+        &self,
+        kind: WorkspaceTerminalKind,
+    ) -> bool {
+        match kind {
+            WorkspaceTerminalKind::Ai => self.ai_terminal_surface_focused,
+            WorkspaceTerminalKind::Files => self.files_terminal_surface_focused,
+        }
+    }
+
+    pub(crate) fn workspace_terminal_cursor_blink_visible(
+        &self,
+        kind: WorkspaceTerminalKind,
+    ) -> bool {
+        match kind {
+            WorkspaceTerminalKind::Ai => self.ai_terminal_cursor_blink_visible,
+            WorkspaceTerminalKind::Files => self.files_terminal_cursor_blink_visible,
+        }
+    }
+
+    pub(crate) fn workspace_terminal_cursor_output_suppressed(
+        &self,
+        kind: WorkspaceTerminalKind,
+    ) -> bool {
+        match kind {
+            WorkspaceTerminalKind::Ai => self.ai_terminal_cursor_output_suppressed,
+            WorkspaceTerminalKind::Files => self.files_terminal_cursor_output_suppressed,
+        }
+    }
+
+    pub(crate) fn workspace_terminal_open(&self, kind: WorkspaceTerminalKind) -> bool {
+        match kind {
+            WorkspaceTerminalKind::Ai => self.ai_terminal_open,
+            WorkspaceTerminalKind::Files => self.files_terminal_open,
+        }
+    }
+
+    pub(crate) fn active_workspace_terminal_kind(&self) -> Option<WorkspaceTerminalKind> {
+        match self.workspace_view_mode {
+            WorkspaceViewMode::Ai => Some(WorkspaceTerminalKind::Ai),
+            WorkspaceViewMode::Files => Some(WorkspaceTerminalKind::Files),
+            _ => None,
+        }
+    }
+
     pub(crate) fn ai_terminal_is_running(&self) -> bool {
         self.ai_terminal_session.status == AiTerminalSessionStatus::Running
     }
@@ -355,13 +400,14 @@ impl DiffViewer {
     pub(super) fn ai_toggle_terminal_drawer_shortcut_action(
         &mut self,
         _: &AiToggleTerminalDrawer,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.workspace_view_mode != WorkspaceViewMode::Ai {
-            return;
+        match self.workspace_view_mode {
+            WorkspaceViewMode::Ai => self.toggle_ai_terminal_drawer(cx),
+            WorkspaceViewMode::Files => self.toggle_files_terminal_drawer(Some(window), cx),
+            _ => {}
         }
-        self.toggle_ai_terminal_drawer(cx);
     }
 
     pub(super) fn ai_toggle_terminal_drawer_action(&mut self, cx: &mut Context<Self>) {
