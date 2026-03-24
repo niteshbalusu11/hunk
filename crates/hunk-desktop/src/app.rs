@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use std::path::PathBuf;
@@ -125,6 +126,8 @@ const DIFF_SPLIT_MIN_CODE_WIDTH: f32 = 120.0;
 const DIFF_SPLIT_HANDLE_WIDTH: f32 = 1.0;
 const DIFF_SPLIT_HANDLE_HIT_WIDTH: f32 = 10.0;
 const FILE_EDITOR_MAX_BYTES: usize = 2_400_000;
+const FILE_EDITOR_TAB_LIMIT: usize = 8;
+pub(crate) const FILES_WORKSPACE_RAIL_HEIGHT: f32 = 32.0;
 const MARKDOWN_PREVIEW_DEBOUNCE: Duration = Duration::from_millis(200);
 const DIFF_SEGMENT_PREFETCH_RADIUS_ROWS: usize = 120;
 const DIFF_SEGMENT_PREFETCH_STEP_ROWS: usize = 24;
@@ -234,6 +237,9 @@ actions!(
         FilesEditorSelectToNextWordEnd,
         FilesEditorPageUp,
         FilesEditorPageDown,
+        NextEditorTab,
+        PreviousEditorTab,
+        CloseEditorTab,
         SaveCurrentFile,
         OpenSettings,
         QuitApp,
@@ -775,6 +781,27 @@ fn bind_keyboard_shortcuts(cx: &mut App, shortcuts: &KeyboardShortcuts) {
             Some(WorkspaceViewMode::Files.shortcut_context()),
         )
     }));
+    bindings.extend(shortcuts.next_editor_tab.iter().map(|shortcut| {
+        KeyBinding::new(
+            shortcut.as_str(),
+            NextEditorTab,
+            Some(WorkspaceViewMode::Files.shortcut_context()),
+        )
+    }));
+    bindings.extend(shortcuts.previous_editor_tab.iter().map(|shortcut| {
+        KeyBinding::new(
+            shortcut.as_str(),
+            PreviousEditorTab,
+            Some(WorkspaceViewMode::Files.shortcut_context()),
+        )
+    }));
+    bindings.extend(shortcuts.close_editor_tab.iter().map(|shortcut| {
+        KeyBinding::new(
+            shortcut.as_str(),
+            CloseEditorTab,
+            Some(WorkspaceViewMode::Files.shortcut_context()),
+        )
+    }));
     bindings.extend(
         shortcuts
             .open_settings
@@ -1193,8 +1220,13 @@ struct DiffViewer {
     repo_tree: RepoTreeState,
     repo_tree_inline_edit: Option<RepoTreeInlineEditState>,
     repo_tree_context_menu: Option<RepoTreeContextMenuState>,
+    file_editor_tabs: Vec<FileEditorTab>,
+    active_file_editor_tab_id: Option<usize>,
+    next_file_editor_tab_id: usize,
+    file_editor_tab_scroll_handle: ScrollHandle,
     files_editor: native_files_editor::SharedFilesEditor,
     editor_search_input_state: Entity<InputState>,
+    editor_replace_input_state: Entity<InputState>,
     file_quick_open_input_state: Entity<InputState>,
     file_quick_open_visible: bool,
     file_quick_open_matches: Vec<String>,
@@ -1219,6 +1251,10 @@ struct DiffViewer {
 
 impl Drop for DiffViewer {
     fn drop(&mut self) {
+        self.sync_active_file_editor_tab_state();
+        for tab in &self.file_editor_tabs {
+            tab.files_editor.borrow_mut().shutdown();
+        }
         self.files_editor.borrow_mut().shutdown();
         self.stop_all_ai_terminal_runtimes("dropping app");
         self.shutdown_ai_worker_blocking();

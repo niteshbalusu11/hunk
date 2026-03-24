@@ -395,6 +395,79 @@ impl FilesEditor {
             .selection_changed
     }
 
+    pub(crate) fn replace_selected_search_match(&mut self, replacement: &str) -> bool {
+        let Some(query) = self.search_query.clone() else {
+            return false;
+        };
+        if self.active_path.is_none() {
+            return false;
+        }
+
+        let snapshot = self.editor.buffer().snapshot();
+        let matches = snapshot.find_all(query.as_str());
+        if matches.is_empty() {
+            return false;
+        }
+
+        let selection = self.editor.selection().range();
+        let Ok(selection_start) = snapshot.position_to_byte(selection.start) else {
+            return false;
+        };
+        let Ok(selection_end) = snapshot.position_to_byte(selection.end) else {
+            return false;
+        };
+
+        let target = matches
+            .iter()
+            .find(|found| {
+                found.byte_range.start == selection_start && found.byte_range.end == selection_end
+            })
+            .or_else(|| {
+                matches
+                    .iter()
+                    .find(|found| found.byte_range.start >= selection_end)
+            })
+            .or_else(|| matches.first());
+        let Some(target) = target else {
+            return false;
+        };
+
+        let Ok(start) = snapshot.byte_to_position(target.byte_range.start) else {
+            return false;
+        };
+        let Ok(end) = snapshot.byte_to_position(target.byte_range.end) else {
+            return false;
+        };
+
+        self.editor
+            .apply(EditorCommand::SetSelection(Selection::new(start, end)));
+        let output =
+            self.apply_editor_command(EditorCommand::ReplaceSelection(replacement.to_string()));
+        self.editor
+            .apply(EditorCommand::SetSearchQuery(self.search_query.clone()));
+        output.document_changed
+    }
+
+    pub(crate) fn replace_all_search_matches(&mut self, replacement: &str) -> bool {
+        let Some(query) = self.search_query.clone() else {
+            return false;
+        };
+        if self.active_path.is_none() {
+            return false;
+        }
+
+        let current_text = self.editor.buffer().text();
+        if query.is_empty() || !current_text.contains(query.as_str()) {
+            return false;
+        }
+
+        let next_text = current_text.replace(query.as_str(), replacement);
+        let output = self.apply_editor_command(EditorCommand::ReplaceAll(next_text));
+        self.editor
+            .apply(EditorCommand::SetSearchQuery(self.search_query.clone()));
+        output.document_changed
+    }
+
     pub(crate) fn toggle_fold_at_line(&mut self, line: usize) -> bool {
         if self
             .editor

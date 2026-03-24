@@ -92,6 +92,9 @@ pub struct KeyboardShortcuts {
     pub toggle_ai_terminal_drawer: Vec<String>,
     pub open_project: Vec<String>,
     pub save_current_file: Vec<String>,
+    pub next_editor_tab: Vec<String>,
+    pub previous_editor_tab: Vec<String>,
+    pub close_editor_tab: Vec<String>,
     pub open_settings: Vec<String>,
     pub quit_app: Vec<String>,
     pub repo_tree_new_file: Vec<String>,
@@ -121,11 +124,43 @@ impl Default for KeyboardShortcuts {
             toggle_ai_terminal_drawer: vec!["cmd-j".into(), "ctrl-j".into()],
             open_project: vec!["cmd-shift-o".into(), "ctrl-shift-o".into()],
             save_current_file: vec!["cmd-s".into(), "ctrl-s".into()],
+            next_editor_tab: if cfg!(target_os = "macos") {
+                vec!["cmd-}".into()]
+            } else {
+                vec!["ctrl-shift-]".into()]
+            },
+            previous_editor_tab: if cfg!(target_os = "macos") {
+                vec!["cmd-{".into()]
+            } else {
+                vec!["ctrl-shift-[".into()]
+            },
+            close_editor_tab: if cfg!(target_os = "macos") {
+                vec!["cmd-w".into()]
+            } else {
+                vec!["ctrl-w".into()]
+            },
             open_settings: vec!["cmd-,".into(), "ctrl-,".into()],
             quit_app: vec!["cmd-q".into()],
             repo_tree_new_file: vec!["%".into()],
             repo_tree_new_folder: vec!["d".into()],
             repo_tree_rename_file: vec!["shift-r".into()],
+        }
+    }
+}
+
+impl KeyboardShortcuts {
+    fn normalize_files_tab_shortcuts(&mut self) {
+        if cfg!(target_os = "macos") {
+            if self.next_editor_tab.len() == 1
+                && self.next_editor_tab.first().map(String::as_str) == Some("cmd-shift-]")
+            {
+                self.next_editor_tab = vec!["cmd-}".into()];
+            }
+            if self.previous_editor_tab.len() == 1
+                && self.previous_editor_tab.first().map(String::as_str) == Some("cmd-shift-[")
+            {
+                self.previous_editor_tab = vec!["cmd-{".into()];
+            }
         }
     }
 }
@@ -145,7 +180,7 @@ pub struct AppConfig {
 
 impl Default for AppConfig {
     fn default() -> Self {
-        Self {
+        let mut config = Self {
             theme: ThemePreference::System,
             reduce_motion: false,
             show_fps_counter: true,
@@ -153,7 +188,9 @@ impl Default for AppConfig {
             keyboard_shortcuts: KeyboardShortcuts::default(),
             review_provider_mappings: Vec::new(),
             auto_refresh_interval_ms: default_auto_refresh_interval_ms(),
-        }
+        };
+        config.keyboard_shortcuts.normalize_files_tab_shortcuts();
+        config
     }
 }
 
@@ -181,12 +218,14 @@ impl ConfigStore {
 
         let raw = fs::read_to_string(&self.path)
             .with_context(|| format!("failed to read config file at {}", self.path.display()))?;
-        toml::from_str::<AppConfig>(&raw).with_context(|| {
+        let mut config = toml::from_str::<AppConfig>(&raw).with_context(|| {
             format!(
                 "failed to parse TOML config file at {}",
                 self.path.display()
             )
-        })
+        })?;
+        config.keyboard_shortcuts.normalize_files_tab_shortcuts();
+        Ok(config)
     }
 
     pub fn save(&self, config: &AppConfig) -> Result<()> {

@@ -1352,12 +1352,6 @@ impl DiffViewer {
             return;
         }
 
-        if self.editor_path.as_deref() == Some(file_path.as_str())
-            && self.prevent_unsaved_editor_discard(Some(file_path.as_str()), cx)
-        {
-            return;
-        }
-
         if self.git_controls_busy() {
             return;
         }
@@ -1367,6 +1361,12 @@ impl DiffViewer {
             cx.notify();
             return;
         };
+
+        if self.prevent_file_editor_tab_discard_for_path(file_path.as_str(), "restoring", cx) {
+            return;
+        }
+
+        self.close_file_editor_tabs_for_path(file_path.as_str());
 
         let epoch = self.begin_git_action("Undo file changes", cx);
         let started_at = Instant::now();

@@ -55,13 +55,6 @@ impl DiffViewer {
         cx: &mut Context<Self>,
     ) -> bool {
         let path = link.normalized_path;
-        let editor_already_open = self.editor_path.as_deref() == Some(path.as_str())
-            && !self.editor_loading
-            && self.editor_error.is_none();
-        if !editor_already_open && self.prevent_unsaved_editor_discard(Some(path.as_str()), cx) {
-            return false;
-        }
-
         if let Some(window) = window {
             self.focus_handle.focus(window, cx);
         }
@@ -75,10 +68,7 @@ impl DiffViewer {
 
         self.selected_path = Some(path.clone());
         self.selected_status = self.status_for_path(path.as_str());
-
-        if !editor_already_open {
-            self.request_file_editor_reload(path.clone(), cx);
-        }
+        self.request_file_editor_reload(path.clone(), cx);
 
         if let Some(_line) = link.line {
             // Preserve parsed anchors for future line-jump support.

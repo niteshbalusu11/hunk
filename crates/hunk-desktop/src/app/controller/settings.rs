@@ -52,6 +52,9 @@ fn validate_keyboard_shortcuts(shortcuts: &KeyboardShortcuts) -> Result<(), Stri
     validate_shortcut_list("Toggle AI Terminal", &shortcuts.toggle_ai_terminal_drawer)?;
     validate_shortcut_list("Open Project", &shortcuts.open_project)?;
     validate_shortcut_list("Save Current File", &shortcuts.save_current_file)?;
+    validate_shortcut_list("Next Editor Tab", &shortcuts.next_editor_tab)?;
+    validate_shortcut_list("Previous Editor Tab", &shortcuts.previous_editor_tab)?;
+    validate_shortcut_list("Close Editor Tab", &shortcuts.close_editor_tab)?;
     validate_shortcut_list("Open Settings", &shortcuts.open_settings)?;
     validate_shortcut_list("Quit App", &shortcuts.quit_app)?;
     validate_shortcut_list("Tree: New File", &shortcuts.repo_tree_new_file)?;
@@ -197,6 +200,24 @@ impl DiffViewer {
             save_current_file: settings_shortcut_input(
                 &self.config.keyboard_shortcuts.save_current_file,
                 "Comma-separated shortcuts, e.g. cmd-s, ctrl-s",
+                window,
+                cx,
+            ),
+            next_editor_tab: settings_shortcut_input(
+                &self.config.keyboard_shortcuts.next_editor_tab,
+                "Comma-separated shortcuts, e.g. cmd-}, ctrl-shift-]",
+                window,
+                cx,
+            ),
+            previous_editor_tab: settings_shortcut_input(
+                &self.config.keyboard_shortcuts.previous_editor_tab,
+                "Comma-separated shortcuts, e.g. cmd-{, ctrl-shift-[",
+                window,
+                cx,
+            ),
+            close_editor_tab: settings_shortcut_input(
+                &self.config.keyboard_shortcuts.close_editor_tab,
+                "Comma-separated shortcuts, e.g. cmd-w, ctrl-w",
                 window,
                 cx,
             ),
@@ -448,6 +469,12 @@ impl DiffViewer {
                     &settings.shortcuts.save_current_file,
                     cx,
                 ),
+                next_editor_tab: read_shortcut_input(&settings.shortcuts.next_editor_tab, cx),
+                previous_editor_tab: read_shortcut_input(
+                    &settings.shortcuts.previous_editor_tab,
+                    cx,
+                ),
+                close_editor_tab: read_shortcut_input(&settings.shortcuts.close_editor_tab, cx),
                 open_settings: read_shortcut_input(&settings.shortcuts.open_settings, cx),
                 quit_app: read_shortcut_input(&settings.shortcuts.quit_app, cx),
                 repo_tree_new_file: read_shortcut_input(
