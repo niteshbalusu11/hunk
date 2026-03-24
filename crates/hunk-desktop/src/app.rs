@@ -1110,6 +1110,8 @@ struct DiffViewer {
     ai_terminal_cursor_output_generation: usize,
     ai_terminal_runtime_generation: usize,
     ai_terminal_stop_requested: bool,
+    files_terminal_states_by_project: BTreeMap<String, FilesProjectTerminalState>,
+    files_hidden_terminal_runtimes: BTreeMap<String, FilesHiddenTerminalRuntimeHandle>,
     files_terminal_open: bool,
     files_terminal_follow_output: bool,
     files_terminal_height_px: f32,
@@ -1297,7 +1299,7 @@ impl Drop for DiffViewer {
         }
         self.files_editor.borrow_mut().shutdown();
         self.stop_all_ai_terminal_runtimes("dropping app");
-        self.stop_files_terminal_runtime("dropping app");
+        self.stop_all_files_terminal_runtimes("dropping app");
         self.shutdown_ai_worker_blocking();
     }
 }

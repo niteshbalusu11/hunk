@@ -477,6 +477,8 @@ impl DiffViewer {
             ai_terminal_cursor_output_generation: 0,
             ai_terminal_runtime_generation: 0,
             ai_terminal_stop_requested: false,
+            files_terminal_states_by_project: BTreeMap::new(),
+            files_hidden_terminal_runtimes: BTreeMap::new(),
             files_terminal_open: false,
             files_terminal_follow_output: true,
             files_terminal_height_px: 220.0,

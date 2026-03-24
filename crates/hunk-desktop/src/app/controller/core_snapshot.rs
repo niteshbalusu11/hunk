@@ -4,6 +4,7 @@ impl DiffViewer {
     }
 
     fn activate_workspace_project_root(&mut self, project_root: PathBuf, cx: &mut Context<Self>) {
+        let previous_files_terminal_project_key = self.current_files_terminal_owner_key();
         let previous_ai_workspace_key = self.ai_workspace_key();
         self.sync_ai_visible_composer_prompt_to_draft(cx);
         self.project_path = Some(project_root.clone());
@@ -12,7 +13,9 @@ impl DiffViewer {
         self.active_workspace_target_id = None;
         self.set_active_workspace_project_path(Some(project_root));
         self.sync_project_picker_state(cx);
+        self.hydrate_workflow_cache_if_available(cx);
         self.restore_active_workspace_target_root_from_state(cx);
+        self.files_handle_project_change(previous_files_terminal_project_key, cx);
         self.ai_handle_workspace_change(previous_ai_workspace_key, cx);
         self.git_status_message = None;
         self.repo_discovery_failed = false;
@@ -31,6 +34,8 @@ impl DiffViewer {
         clear_active_project_cache: bool,
         cx: &mut Context<Self>,
     ) {
+        self.stop_all_files_terminal_runtimes("resetting to empty workspace");
+        self.files_terminal_states_by_project.clear();
         self.cancel_line_stats_refresh();
         self.cancel_patch_reload();
         self.pending_dirty_paths.clear();
@@ -112,6 +117,13 @@ impl DiffViewer {
             self.persist_state();
         }
         self.clear_recent_commits_cache();
+        self.files_terminal_open = false;
+        self.files_terminal_follow_output = true;
+        self.files_terminal_session = AiTerminalSessionState::default();
+        self.files_terminal_restore_target = FilesTerminalRestoreTarget::default();
+        self.files_terminal_surface_focused = false;
+        self.files_terminal_pending_input = None;
+        self.files_terminal_grid_size = None;
         self.ai_worktree_base_branch_name = None;
         self.sync_branch_picker_state(cx);
         self.sync_ai_worktree_base_branch_picker_state(cx);

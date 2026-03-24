@@ -249,6 +249,15 @@ struct AiThreadTerminalState {
     pending_input: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+struct FilesProjectTerminalState {
+    open: bool,
+    follow_output: bool,
+    session: AiTerminalSessionState,
+    pending_input: Option<String>,
+    restore_target: FilesTerminalRestoreTarget,
+}
+
 struct AiHiddenTerminalRuntimeHandle {
     runtime: AiTerminalRuntimeHandle,
     event_task: Task<()>,
@@ -425,8 +434,14 @@ struct AiTerminalRuntimeHandle {
 }
 
 struct FilesTerminalRuntimeHandle {
+    project_key: String,
     handle: TerminalSessionHandle,
     generation: usize,
+}
+
+struct FilesHiddenTerminalRuntimeHandle {
+    runtime: FilesTerminalRuntimeHandle,
+    event_task: Task<()>,
 }
 
 #[derive(Debug, Clone, Default)]
