@@ -392,7 +392,7 @@ impl DiffViewer {
                     this.repo_root = None;
                     this.workspace_targets.clear();
                     this.active_workspace_target_id = None;
-                    this.set_last_project_path(Some(selected_path));
+                    this.set_active_workspace_project_path(Some(selected_path));
                     this.restore_active_workspace_target_root_from_state(cx);
                     this.ai_handle_workspace_change(previous_ai_workspace_key, cx);
                     this.git_status_message = None;
@@ -535,7 +535,7 @@ impl DiffViewer {
         let previous_ai_workspace_key = self.ai_workspace_key();
         self.sync_ai_visible_composer_prompt_to_draft(cx);
         self.project_path = Some(primary_root.clone());
-        self.set_last_project_path(self.project_path.clone());
+        self.set_active_workspace_project_path(self.project_path.clone());
         self.repo_root = Some(primary_root.clone());
         self.branches = branches;
         self.working_copy_commit_id = Some(working_copy_commit_id);
@@ -735,8 +735,13 @@ impl DiffViewer {
         self.repo_tree.changed_only = false;
         self.clear_full_repo_tree_cache();
         self.clear_editor_state(cx);
-        if self.state.git_workflow_cache.is_some() {
-            self.state.git_workflow_cache = None;
+        if let Some(cache_key) = self.current_workspace_project_key()
+            && self
+                .state
+                .git_workflow_cache_by_repo
+                .remove(cache_key.as_str())
+                .is_some()
+        {
             self.persist_state();
         }
         self.clear_recent_commits_cache();

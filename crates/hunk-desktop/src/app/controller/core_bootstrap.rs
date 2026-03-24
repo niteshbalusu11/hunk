@@ -44,15 +44,6 @@ impl DiffViewer {
         }
     }
 
-    fn load_legacy_last_project_path(config_store: &ConfigStore) -> Option<PathBuf> {
-        let raw = std::fs::read_to_string(config_store.path()).ok()?;
-        let value = raw.parse::<toml::Value>().ok()?;
-        value
-            .get("last_project_path")
-            .and_then(toml::Value::as_str)
-            .map(PathBuf::from)
-    }
-
     fn apply_theme_preference(&self, window: &mut Window, cx: &mut Context<Self>) {
         let mode = match self.config.theme {
             ThemePreference::System => ThemeMode::from(window.appearance()),
@@ -88,13 +79,35 @@ impl DiffViewer {
         }
     }
 
-    fn set_last_project_path(&mut self, project_path: Option<PathBuf>) {
-        if self.state.last_project_path == project_path {
-            return;
+    fn set_active_workspace_project_path(&mut self, project_path: Option<PathBuf>) {
+        let previous_paths = self.state.workspace_project_paths.clone();
+        let previous_active = self.state.active_workspace_project_path.clone();
+
+        if let Some(project_path) = project_path.as_ref()
+            && !self
+                .state
+                .workspace_project_paths
+                .iter()
+                .any(|path| path == project_path)
+        {
+            self.state.workspace_project_paths.push(project_path.clone());
         }
 
-        self.state.last_project_path = project_path;
+        self.state.active_workspace_project_path = project_path;
+        self.state.normalize_workspace_state();
+        if self.state.workspace_project_paths == previous_paths
+            && self.state.active_workspace_project_path == previous_active
+        {
+            return;
+        }
         self.persist_state();
+    }
+
+    fn current_workspace_project_key(&self) -> Option<String> {
+        self.project_path
+            .as_ref()
+            .or(self.repo_root.as_ref())
+            .map(|path| path.to_string_lossy().to_string())
     }
 
     fn workflow_cache_unix_time() -> i64 {
@@ -118,7 +131,16 @@ impl DiffViewer {
     }
 
     fn hydrate_workflow_cache_if_available(&mut self, cx: &mut Context<Self>) {
-        let Some(cache) = self.state.git_workflow_cache.clone() else {
+        let Some(expected_root) = self
+            .project_path
+            .clone()
+            .or_else(|| self.state.active_project_path().cloned())
+        else {
+            return;
+        };
+        let cache_key = expected_root.to_string_lossy().to_string();
+        let Some(cache) = self.state.git_workflow_cache_by_repo.get(cache_key.as_str()).cloned()
+        else {
             return;
         };
         let Some(root) = cache.root.clone() else {
@@ -126,13 +148,6 @@ impl DiffViewer {
         };
         let cached_project_root =
             hunk_git::worktree::primary_repo_root(root.as_path()).unwrap_or_else(|_| root.clone());
-        let Some(expected_root) = self
-            .project_path
-            .clone()
-            .or_else(|| self.state.last_project_path.clone())
-        else {
-            return;
-        };
         if cached_project_root != expected_root {
             return;
         }
@@ -211,6 +226,9 @@ impl DiffViewer {
         let Some(root) = self.repo_root.clone() else {
             return;
         };
+        let Some(cache_key) = self.current_workspace_project_key() else {
+            return;
+        };
 
         let mut cache = CachedWorkflowState {
             root: Some(root),
@@ -245,7 +263,7 @@ impl DiffViewer {
             cached_unix_time: 0,
         };
 
-        if let Some(previous) = self.state.git_workflow_cache.as_ref() {
+        if let Some(previous) = self.state.git_workflow_cache_by_repo.get(cache_key.as_str()) {
             let mut previous_without_time = previous.clone();
             previous_without_time.cached_unix_time = 0;
             if previous_without_time == cache {
@@ -254,7 +272,9 @@ impl DiffViewer {
         }
 
         cache.cached_unix_time = Self::workflow_cache_unix_time();
-        self.state.git_workflow_cache = Some(cache);
+        self.state
+            .git_workflow_cache_by_repo
+            .insert(cache_key, cache);
         self.persist_state();
     }
 
@@ -270,22 +290,9 @@ impl DiffViewer {
         let (state_store, mut state) = Self::load_app_state();
         let preferred_ai_session = hunk_domain::state::AiThreadSessionState::preferred_defaults();
         let database_store = Self::load_database_store();
-        if state.last_project_path.is_none()
-            && let Some(config_store) = config_store.as_ref()
-            && let Some(last_project_path) = Self::load_legacy_last_project_path(config_store)
-        {
-            state.last_project_path = Some(last_project_path);
-            if let Some(state_store) = state_store.as_ref()
-                && let Err(err) = state_store.save(&state)
-            {
-                error!(
-                    "failed to migrate app state to {}: {err:#}",
-                    state_store.path().display()
-                );
-            }
-        }
-        let last_project_path = state.last_project_path.clone();
-        let initial_ai_workspace_key = last_project_path
+        state.normalize_workspace_state();
+        let initial_project_path = state.active_project_path().cloned();
+        let initial_ai_workspace_key = initial_project_path
             .as_ref()
             .map(|path| path.to_string_lossy().to_string());
         let initial_ai_mad_max_mode = initial_ai_workspace_key
@@ -369,7 +376,7 @@ impl DiffViewer {
             active_comment_editor_row: None,
             comment_input_state,
             comment_status_message: None,
-            project_path: last_project_path,
+            project_path: initial_project_path,
             repo_root: None,
             workspace_targets: Vec::new(),
             active_workspace_target_id: None,

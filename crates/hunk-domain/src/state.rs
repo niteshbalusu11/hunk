@@ -118,7 +118,8 @@ pub struct ReviewCompareSelectionState {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppState {
-    pub last_project_path: Option<PathBuf>,
+    pub workspace_project_paths: Vec<PathBuf>,
+    pub active_workspace_project_path: Option<PathBuf>,
     pub last_workspace_target_by_repo: BTreeMap<String, String>,
     pub review_compare_selection_by_repo: BTreeMap<String, ReviewCompareSelectionState>,
     pub ai_bookmarked_thread_ids: BTreeSet<String>,
@@ -126,8 +127,42 @@ pub struct AppState {
     pub ai_workspace_include_hidden_models: BTreeMap<String, bool>,
     pub ai_workspace_session_overrides: BTreeMap<String, AiThreadSessionState>,
     pub ai_thread_session_overrides: BTreeMap<String, AiThreadSessionState>,
-    pub git_workflow_cache: Option<CachedWorkflowState>,
-    pub git_recent_commits_cache: Option<CachedRecentCommitsState>,
+    pub git_workflow_cache_by_repo: BTreeMap<String, CachedWorkflowState>,
+    pub git_recent_commits_cache_by_repo: BTreeMap<String, CachedRecentCommitsState>,
+}
+
+impl AppState {
+    pub fn normalize_workspace_state(&mut self) {
+        let mut seen_paths = BTreeSet::new();
+        let mut normalized_paths = Vec::with_capacity(self.workspace_project_paths.len() + 1);
+
+        for path in &self.workspace_project_paths {
+            if seen_paths.insert(path.clone()) {
+                normalized_paths.push(path.clone());
+            }
+        }
+
+        let preferred_active_path = self
+            .active_workspace_project_path
+            .clone();
+
+        if let Some(active_path) = preferred_active_path.as_ref()
+            && seen_paths.insert(active_path.clone())
+        {
+            normalized_paths.push(active_path.clone());
+        }
+
+        let resolved_active_path = preferred_active_path
+            .filter(|active_path| normalized_paths.iter().any(|path| path == active_path))
+            .or_else(|| normalized_paths.first().cloned());
+
+        self.workspace_project_paths = normalized_paths;
+        self.active_workspace_project_path = resolved_active_path.clone();
+    }
+
+    pub fn active_project_path(&self) -> Option<&PathBuf> {
+        self.active_workspace_project_path.as_ref()
+    }
 }
 
 #[derive(Debug, Clone)]
