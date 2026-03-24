@@ -437,6 +437,26 @@ fn markdown_edits_keep_native_editor_layout_and_syntax_caches_consistent() {
     );
 }
 
+#[test]
+fn wrapped_markdown_rows_preserve_text_around_inline_code() {
+    let mut editor = FilesEditor::new();
+    let path = PathBuf::from("README.md");
+    let line = "The immediate problem is not the PTY or VT surface. Hunk already has a PTY-backed terminal surface in `crates/hunk-terminal`. The compatibility gap is in:";
+    editor
+        .open_document(path.as_path(), format!("{line}\n").as_str())
+        .expect("document should open");
+
+    let snapshot = editor.display_snapshot_for_test(40, 20);
+    let rejoined = snapshot
+        .visible_rows
+        .iter()
+        .filter(|row| row.source_line == 0)
+        .map(|row| row.text.as_str())
+        .collect::<String>();
+
+    assert_eq!(rejoined, line);
+}
+
 fn primary_shortcut_keystroke(key: &str) -> Keystroke {
     let shortcut = if cfg!(target_os = "macos") {
         format!("cmd-{key}")
