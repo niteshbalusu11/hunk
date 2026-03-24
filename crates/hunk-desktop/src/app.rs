@@ -104,6 +104,9 @@ use refresh_policy::{
     should_scroll_selected_after_reload,
 };
 use repo_file_search::RepoFileSearchProvider;
+use project_picker::{
+    ProjectPickerDelegate, build_project_picker_delegate, project_picker_selected_index,
+};
 use review_compare_picker::{
     ReviewComparePickerDelegate, ReviewCompareSourceOption, build_review_compare_picker_delegate,
 };
@@ -155,6 +158,7 @@ mod ai_thread_flow;
 mod branch_activation;
 mod branch_picker;
 mod fuzzy_match;
+mod project_picker;
 mod refresh_policy;
 mod review_compare_picker;
 mod workspace_target_picker;
@@ -213,6 +217,7 @@ actions!(
         AiEditLastQueuedPrompt,
         AiInterruptSelectedTurn,
         OpenProject,
+        RemoveProject,
         QuickOpenFile,
         FilesEditorCopy,
         FilesEditorCut,
@@ -289,6 +294,7 @@ fn build_application_menus() -> Vec<Menu> {
                 name: "File".into(),
                 items: vec![
                     MenuItem::action("Open Project...", OpenProject),
+                    MenuItem::action("Close Project", RemoveProject),
                     MenuItem::action("Quick Open...", QuickOpenFile),
                     MenuItem::action("Save File", SaveCurrentFile),
                     MenuItem::separator(),
@@ -309,6 +315,7 @@ fn build_application_menus() -> Vec<Menu> {
                 name: "File".into(),
                 items: vec![
                     MenuItem::action("Open Project...", OpenProject),
+                    MenuItem::action("Close Project", RemoveProject),
                     MenuItem::action("Quick Open...", QuickOpenFile),
                     MenuItem::action("Save File", SaveCurrentFile),
                     MenuItem::action("Settings...", OpenSettings),
@@ -1150,6 +1157,7 @@ struct DiffViewer {
     ai_composer_status_generation_by_key: BTreeMap<AiComposerStatusKey, usize>,
     files: Vec<ChangedFile>,
     file_status_by_path: BTreeMap<String, FileStatus>,
+    project_picker_state: Entity<SelectState<ProjectPickerDelegate>>,
     workspace_target_picker_state: Entity<SelectState<WorkspaceTargetPickerDelegate>>,
     review_left_picker_state: Entity<SelectState<ReviewComparePickerDelegate>>,
     review_right_picker_state: Entity<SelectState<ReviewComparePickerDelegate>>,

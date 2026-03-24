@@ -8,6 +8,50 @@ impl DiffViewer {
         self.open_project_picker(cx);
     }
 
+    pub(super) fn remove_project_action(
+        &mut self,
+        _: &RemoveProject,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(active_project_path) = self
+            .project_path
+            .clone()
+            .or_else(|| self.state.active_project_path().cloned())
+        else {
+            self.git_status_message = Some("No project is open.".to_string());
+            cx.notify();
+            return;
+        };
+
+        let was_active_project = self.project_path.as_deref() == Some(active_project_path.as_path());
+        if !self
+            .state
+            .remove_workspace_project(active_project_path.as_path())
+        {
+            self.git_status_message = Some("Project is not part of the workspace.".to_string());
+            cx.notify();
+            return;
+        }
+        self.persist_state();
+        self.sync_project_picker_state(cx);
+
+        let next_active_project = self.state.active_project_path().cloned();
+        if was_active_project {
+            if let Some(next_active_project) = next_active_project {
+                self.activate_workspace_project_root(next_active_project, cx);
+            } else {
+                self.reset_to_empty_workspace_state(false, cx);
+                self.git_status_message = Some("Removed the last project from the workspace.".to_string());
+                cx.notify();
+            }
+            return;
+        }
+
+        self.git_status_message = Some("Removed project from the workspace.".to_string());
+        cx.notify();
+    }
+
     pub(super) fn status_for_path(&self, path: &str) -> Option<FileStatus> {
         if self.workspace_view_mode == WorkspaceViewMode::Diff {
             self.review_file_status_by_path.get(path).copied()
