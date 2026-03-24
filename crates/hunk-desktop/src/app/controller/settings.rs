@@ -205,13 +205,13 @@ impl DiffViewer {
             ),
             next_editor_tab: settings_shortcut_input(
                 &self.config.keyboard_shortcuts.next_editor_tab,
-                "Comma-separated shortcuts, e.g. ctrl-tab",
+                "Comma-separated shortcuts, e.g. cmd-}, ctrl-shift-]",
                 window,
                 cx,
             ),
             previous_editor_tab: settings_shortcut_input(
                 &self.config.keyboard_shortcuts.previous_editor_tab,
-                "Comma-separated shortcuts, e.g. ctrl-shift-tab",
+                "Comma-separated shortcuts, e.g. cmd-{, ctrl-shift-[",
                 window,
                 cx,
             ),

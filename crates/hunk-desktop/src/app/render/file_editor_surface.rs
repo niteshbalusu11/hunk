@@ -16,7 +16,7 @@ impl DiffViewer {
         let editor_chrome = hunk_editor_chrome_colors(cx.theme(), is_dark);
         let text_style = TextStyle {
             color: editor_chrome.foreground,
-            font_family: preferred_files_editor_font_family().into(),
+            font_family: cx.theme().mono_font_family.clone(),
             font_size: editor_font_size.into(),
             line_height: relative(1.45),
             ..Default::default()

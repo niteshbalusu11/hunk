@@ -126,7 +126,7 @@ const DIFF_SPLIT_MIN_CODE_WIDTH: f32 = 120.0;
 const DIFF_SPLIT_HANDLE_WIDTH: f32 = 1.0;
 const DIFF_SPLIT_HANDLE_HIT_WIDTH: f32 = 10.0;
 const FILE_EDITOR_MAX_BYTES: usize = 2_400_000;
-const FILE_EDITOR_TAB_LIMIT: usize = 6;
+const FILE_EDITOR_TAB_LIMIT: usize = 8;
 const MARKDOWN_PREVIEW_DEBOUNCE: Duration = Duration::from_millis(200);
 const DIFF_SEGMENT_PREFETCH_RADIUS_ROWS: usize = 120;
 const DIFF_SEGMENT_PREFETCH_STEP_ROWS: usize = 24;
@@ -266,14 +266,6 @@ fn preferred_mono_font_family() -> &'static str {
         "Consolas"
     } else {
         "DejaVu Sans Mono"
-    }
-}
-
-fn preferred_files_editor_font_family() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "Monaco"
-    } else {
-        preferred_mono_font_family()
     }
 }
 

@@ -462,14 +462,14 @@ impl DiffViewer {
             .child(
                 h_flex()
                     .w_full()
+                    .h(px(34.0))
                     .items_center()
                     .justify_between()
                     .gap_2()
                     .px_3()
-                    .py_1()
                     .border_b_1()
                     .border_color(hunk_opacity(cx.theme().border, is_dark, 0.86, 0.72))
-                    .bg(editor_chrome.background)
+                    .bg(cx.theme().tab_bar)
                     .child(
                         h_flex()
                             .flex_1()
@@ -521,7 +521,6 @@ impl DiffViewer {
                                     .compact()
                                     .rounded(px(7.0))
                                     .icon(Icon::new(IconName::Search).size(px(12.0)))
-                                    .label(if self.editor_search_visible { "Find" } else { "Search" })
                                     .tooltip(if self.editor_search_visible {
                                         "Hide find and replace"
                                     } else {
@@ -544,7 +543,8 @@ impl DiffViewer {
                                 let mut button = Button::new("editor-wrap-toggle")
                                     .compact()
                                     .rounded(px(7.0))
-                                    .label("Wrap")
+                                    .icon(Icon::new(IconName::ALargeSmall).size(px(12.0)))
+                                    .tooltip("Toggle soft wrap")
                                     .on_click(move |_, _, cx| {
                                         view.update(cx, |this, cx| {
                                             if this.files_editor.borrow_mut().toggle_soft_wrap() {
@@ -564,7 +564,8 @@ impl DiffViewer {
                                 let mut button = Button::new("editor-whitespace-toggle")
                                     .compact()
                                     .rounded(px(7.0))
-                                    .label("Invisibles")
+                                    .icon(Icon::new(IconName::Eye).size(px(12.0)))
+                                    .tooltip("Toggle invisible characters")
                                     .on_click(move |_, _, cx| {
                                         view.update(cx, |this, cx| {
                                             if this.files_editor.borrow_mut().toggle_show_whitespace()
@@ -586,7 +587,8 @@ impl DiffViewer {
                                     .outline()
                                     .compact()
                                     .rounded(px(7.0))
-                                    .label("Reload")
+                                    .icon(Icon::new(HunkIconName::RotateCcw).size(px(12.0)))
+                                    .tooltip("Reload file")
                                     .disabled(reload_disabled)
                                     .on_click(move |_, _, cx| {
                                         view.update(cx, |this, cx| {
