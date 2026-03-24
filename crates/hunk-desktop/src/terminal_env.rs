@@ -5,6 +5,7 @@ use std::io::IsTerminal as _;
 use std::path::Path;
 #[cfg(target_os = "windows")]
 use std::path::PathBuf;
+#[cfg(not(target_os = "windows"))]
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
@@ -33,6 +34,7 @@ impl ResolvedTerminalShell {
         self.program.as_os_str()
     }
 
+    #[cfg(not(target_os = "windows"))]
     pub(crate) fn family(&self) -> TerminalShellFamily {
         self.family
     }
@@ -66,6 +68,7 @@ impl ResolvedTerminalShell {
         }
     }
 
+    #[cfg(not(target_os = "windows"))]
     fn supports_environment_capture(&self) -> bool {
         !self.custom_args
     }
@@ -150,6 +153,7 @@ pub(crate) fn terminal_shell_label(config: &TerminalConfig) -> String {
     resolve_terminal_shell(config).label().to_string()
 }
 
+#[cfg(not(target_os = "windows"))]
 pub(crate) fn capture_shell_environment(
     shell: &ResolvedTerminalShell,
     cwd: &Path,
@@ -372,11 +376,13 @@ fn unix_fallback_shells() -> [&'static str; 3] {
     ["/bin/bash", "/bin/zsh", "/bin/sh"]
 }
 
+#[cfg(not(target_os = "windows"))]
 fn quote_posix(value: &OsStr) -> String {
     let value = value.to_string_lossy();
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
+#[cfg(not(target_os = "windows"))]
 fn quote_powershell(value: &OsStr) -> String {
     let value = value.to_string_lossy();
     format!("'{}'", value.replace('\'', "''"))
