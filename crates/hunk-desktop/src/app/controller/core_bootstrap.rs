@@ -495,6 +495,8 @@ impl DiffViewer {
             ai_usage_popover_open: false,
             ai_composer_drafts: BTreeMap::new(),
             ai_composer_status_by_draft: BTreeMap::new(),
+            ai_composer_status_generation: 0,
+            ai_composer_status_generation_by_key: BTreeMap::new(),
             files: Vec::new(),
             file_status_by_path: BTreeMap::new(),
             workspace_target_picker_state,

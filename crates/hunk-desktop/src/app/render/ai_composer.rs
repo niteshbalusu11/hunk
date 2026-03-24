@@ -899,12 +899,6 @@ struct AiComposerActivityDisplay {
     animation_key: String,
 }
 
-#[derive(Clone, Copy)]
-enum AiComposerStatusTone {
-    Danger,
-    Warning,
-}
-
 fn ai_render_composer_feedback_strip(
     this: &DiffViewer,
     is_dark: bool,
@@ -918,44 +912,6 @@ fn ai_render_composer_feedback_strip(
 
     ai_current_composer_activity(this)
         .map(|activity| ai_render_composer_activity_strip(this, &activity, is_dark, cx))
-}
-
-fn ai_composer_status_tone(status: &str) -> Option<AiComposerStatusTone> {
-    let lower = status.to_ascii_lowercase();
-    if lower.contains("connected over websocket")
-        || lower.contains("starting codex app server")
-        || lower.starts_with("attached ")
-        || lower.starts_with("submitted user input")
-        || lower.starts_with("approval policy ")
-    {
-        return None;
-    }
-
-    if lower.contains("interrupt")
-        || lower.contains("failed")
-        || lower.contains("disconnected")
-        || lower.contains("error")
-    {
-        return Some(AiComposerStatusTone::Danger);
-    }
-
-    if lower.contains("cannot")
-        || lower.contains("disabled while a task is in progress")
-        || lower.contains("remove attachments")
-        || lower.contains("select a thread")
-        || lower.contains("open a workspace")
-        || lower.contains("no in-progress")
-        || lower.contains("no supported")
-        || lower.contains("unsupported")
-        || lower.contains("skipped")
-        || lower.contains("already attached")
-        || lower.contains("no files were supported")
-        || lower.contains("user input request no longer exists")
-    {
-        return Some(AiComposerStatusTone::Warning);
-    }
-
-    None
 }
 
 fn ai_render_composer_status_strip(

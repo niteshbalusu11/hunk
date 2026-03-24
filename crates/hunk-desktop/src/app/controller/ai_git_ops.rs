@@ -411,6 +411,8 @@ impl DiffViewer {
                 let thread_key = AiComposerDraftKey::Thread(thread_id.clone());
                 self.ai_composer_drafts.remove(&thread_key);
                 self.ai_composer_status_by_draft.remove(&thread_key);
+                self.ai_composer_status_generation_by_key
+                    .remove(&AiComposerStatusKey::Draft(thread_key));
                 self.state.ai_thread_session_overrides.remove(thread_id);
                 self.ai_review_mode_thread_ids.remove(thread_id);
             }
@@ -419,6 +421,8 @@ impl DiffViewer {
         let workspace_draft_key = AiComposerDraftKey::Workspace(workspace_key.to_string());
         self.ai_composer_drafts.remove(&workspace_draft_key);
         self.ai_composer_status_by_draft.remove(&workspace_draft_key);
+        self.ai_composer_status_generation_by_key
+            .remove(&AiComposerStatusKey::Draft(workspace_draft_key));
 
         let mut state_changed = false;
         state_changed |= self.state.ai_workspace_mad_max.remove(workspace_key).is_some();

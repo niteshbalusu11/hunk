@@ -44,8 +44,8 @@ const AI_COMPOSER_SLASH_COMMANDS: [AiComposerSlashCommandItem; 8] = [
     ),
     AiComposerSlashCommandItem::new(
         AiComposerSlashCommandKind::Usage,
-        "usage",
-        "Usage",
+        "status",
+        "Status",
         "Show remaining 5h and 7d usage limits.",
         AiComposerSlashCommandAvailability::Always,
     ),
@@ -326,7 +326,7 @@ mod tests {
 
     #[test]
     fn slash_command_menu_matches_on_name_and_description() {
-        let menu = slash_command_menu_state("/us", 3, false).expect("menu should exist");
+        let menu = slash_command_menu_state("/st", 3, false).expect("menu should exist");
         assert_eq!(menu.items[0].item.kind, AiComposerSlashCommandKind::Usage);
 
         let menu = slash_command_menu_state("/disconnect", 11, false).expect("menu should exist");

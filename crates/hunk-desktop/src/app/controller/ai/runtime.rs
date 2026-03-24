@@ -316,13 +316,14 @@ impl DiffViewer {
             self.ai_skills.as_slice(),
         );
         if prompt.is_empty() && local_image_paths.is_empty() {
-            self.set_current_ai_composer_status("Prompt cannot be empty.");
+            self.set_current_ai_composer_status("Prompt cannot be empty.", cx);
             cx.notify();
             return None;
         }
         if !local_image_paths.is_empty() && !self.current_ai_model_supports_image_inputs() {
             self.set_current_ai_composer_status(
                 "Selected model does not support image attachments. Remove attachments or switch models.",
+                cx,
             );
             cx.notify();
             return None;
@@ -356,6 +357,7 @@ impl DiffViewer {
         {
             self.set_current_ai_composer_status(
                 "Cannot send until Codex finishes connecting.",
+                cx,
             );
             cx.notify();
             return false;
@@ -417,13 +419,13 @@ impl DiffViewer {
         cx: &mut Context<Self>,
     ) -> bool {
         if self.git_controls_busy() {
-            self.set_current_ai_composer_status("Wait for the active workspace action to finish.");
+            self.set_current_ai_composer_status("Wait for the active workspace action to finish.", cx);
             cx.notify();
             return false;
         }
 
         let Some(repo_root) = self.ai_draft_workspace_root() else {
-            self.set_current_ai_composer_status("Open a workspace before starting an AI thread.");
+            self.set_current_ai_composer_status("Open a workspace before starting an AI thread.", cx);
             cx.notify();
             return false;
         };
@@ -524,7 +526,7 @@ impl DiffViewer {
                             } else {
                                 let fallback_message =
                                     "Workspace prepared, but failed to start thread.".to_string();
-                                this.set_current_ai_composer_status(fallback_message);
+                                this.set_current_ai_composer_status(fallback_message, cx);
                                 this.restore_ai_new_thread_draft_after_failure(cx);
                             }
                         }
@@ -544,6 +546,7 @@ impl DiffViewer {
                             );
                             this.set_current_ai_composer_status(
                                 format!("Failed to prepare workspace: {summary}"),
+                                cx,
                             );
                             this.restore_ai_new_thread_draft_after_failure(cx);
                         }

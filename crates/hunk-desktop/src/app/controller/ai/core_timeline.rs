@@ -509,7 +509,7 @@ impl DiffViewer {
         cx: &mut Context<Self>,
     ) {
         let Some(request) = self.ai_pending_user_input_request(request_id.as_str()) else {
-            self.set_current_ai_composer_status("User input request no longer exists.");
+            self.set_current_ai_composer_status("User input request no longer exists.", cx);
             cx.notify();
             return;
         };
@@ -542,6 +542,7 @@ impl DiffViewer {
             self.set_ai_composer_status_for_target(
                 Some(AiComposerDraftKey::Thread(request_thread_id)),
                 format!("Submitted user input for request {request_id}."),
+                cx,
             );
             cx.notify();
         }

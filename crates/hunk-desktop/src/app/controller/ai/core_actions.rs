@@ -120,6 +120,8 @@ impl DiffViewer {
             self.ai_composer_drafts
                 .insert(workspace_key.clone(), Default::default());
             self.ai_composer_status_by_draft.remove(&workspace_key);
+            self.ai_composer_status_generation_by_key
+                .remove(&AiComposerStatusKey::Draft(workspace_key));
         }
         self.ai_handle_workspace_change_to(previous_workspace_key, next_workspace_key, cx);
         self.ai_new_thread_start_mode = draft_start_mode;
@@ -368,7 +370,7 @@ impl DiffViewer {
                         this.update(cx, |this, cx| {
                             this.set_current_ai_composer_status(format!(
                                 "Failed to open image picker: {err:#}"
-                            ));
+                            ), cx);
                             cx.notify();
                         });
                     }
@@ -383,7 +385,7 @@ impl DiffViewer {
                     if let Some(message) =
                         ai_attachment_status_message(selected_count, added)
                     {
-                        this.set_current_ai_composer_status(message);
+                        this.set_current_ai_composer_status(message, cx);
                     }
                     cx.notify();
                 });
@@ -420,6 +422,7 @@ impl DiffViewer {
         if !self.current_ai_model_supports_image_inputs() {
             self.set_current_ai_composer_status(
                 "Selected model does not support image attachments. Remove attachments or switch models.",
+                cx,
             );
             cx.notify();
             return;
@@ -428,7 +431,7 @@ impl DiffViewer {
         let dropped_count = dropped_paths.len();
         let added = self.ai_add_composer_local_images(dropped_paths);
         if let Some(message) = ai_attachment_status_message(dropped_count, added) {
-            self.set_current_ai_composer_status(message);
+            self.set_current_ai_composer_status(message, cx);
         }
         self.focus_ai_composer_input(window, cx);
         cx.notify();
@@ -447,13 +450,13 @@ impl DiffViewer {
 
     fn start_current_ai_review(&mut self, cx: &mut Context<Self>) -> bool {
         if let Some(reason) = self.ai_review_blocker() {
-            self.set_current_ai_composer_status(reason);
+            self.set_current_ai_composer_status(reason, cx);
             cx.notify();
             return false;
         }
 
         let Some(thread_id) = self.current_ai_thread_id() else {
-            self.set_current_ai_composer_status("Select a thread before starting review.");
+            self.set_current_ai_composer_status("Select a thread before starting review.", cx);
             cx.notify();
             return false;
         };
@@ -490,13 +493,13 @@ impl DiffViewer {
 
     pub(super) fn ai_interrupt_turn_action(&mut self, cx: &mut Context<Self>) {
         let Some(thread_id) = self.current_ai_thread_id() else {
-            self.set_current_ai_composer_status("Select a thread before interrupting a turn.");
+            self.set_current_ai_composer_status("Select a thread before interrupting a turn.", cx);
             cx.notify();
             return;
         };
 
         let Some(turn_id) = self.current_ai_in_progress_turn_id(thread_id.as_str()) else {
-            self.set_current_ai_composer_status("No in-progress turn to interrupt.");
+            self.set_current_ai_composer_status("No in-progress turn to interrupt.", cx);
             cx.notify();
             return;
         };
@@ -510,7 +513,7 @@ impl DiffViewer {
         ) {
             self.ai_interrupt_restore_queued_thread_ids
                 .insert(thread_id);
-            self.set_current_ai_composer_status("Interrupted");
+            self.set_current_ai_composer_status("Interrupted", cx);
             cx.notify();
         }
     }
@@ -616,7 +619,10 @@ impl DiffViewer {
 
     pub(super) fn ai_select_review_mode_action(&mut self, cx: &mut Context<Self>) {
         let Some(thread_id) = self.current_ai_thread_id() else {
-            self.set_current_ai_composer_status("Select a thread before switching to review mode.");
+            self.set_current_ai_composer_status(
+                "Select a thread before switching to review mode.",
+                cx,
+            );
             cx.notify();
             return;
         };
@@ -665,7 +671,7 @@ impl DiffViewer {
                 AiApprovalDecision::Accept => "Approval accepted.".to_string(),
                 AiApprovalDecision::Decline => "Approval declined.".to_string(),
             };
-            self.set_ai_composer_status_for_target(status_target, message);
+            self.set_ai_composer_status_for_target(status_target, message, cx);
             cx.notify();
         }
     }

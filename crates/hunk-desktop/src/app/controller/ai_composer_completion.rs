@@ -471,7 +471,7 @@ impl DiffViewer {
             self.set_current_ai_composer_status(format!(
                 "'/{}' is disabled while a task is in progress.",
                 command.item.name
-            ));
+            ), cx);
             self.ai_composer_slash_command_dismissed_token =
                 Some(Self::ai_composer_slash_command_menu_token(&menu));
             self.ai_composer_slash_command_menu = None;

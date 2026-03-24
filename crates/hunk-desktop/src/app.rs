@@ -138,6 +138,7 @@ const AI_TIMELINE_DEFAULT_VISIBLE_TURNS: usize = 80;
 const AI_TIMELINE_TURN_PAGE_SIZE: usize = 80;
 const AI_THREAD_TITLE_REFRESH_MAX_ATTEMPTS: u8 = 20;
 const AI_THREAD_TITLE_REFRESH_RETRY_INTERVAL: Duration = Duration::from_secs(1);
+const AI_COMPOSER_STATUS_AUTO_DISMISS_DELAY: Duration = Duration::from_secs(5);
 
 mod ai_composer_commands;
 mod ai_composer_completion;
@@ -1053,6 +1054,8 @@ struct DiffViewer {
     ai_usage_popover_open: bool,
     ai_composer_drafts: BTreeMap<AiComposerDraftKey, AiComposerDraft>,
     ai_composer_status_by_draft: BTreeMap<AiComposerDraftKey, String>,
+    ai_composer_status_generation: usize,
+    ai_composer_status_generation_by_key: BTreeMap<AiComposerStatusKey, usize>,
     files: Vec<ChangedFile>,
     file_status_by_path: BTreeMap<String, FileStatus>,
     workspace_target_picker_state: Entity<SelectState<WorkspaceTargetPickerDelegate>>,
