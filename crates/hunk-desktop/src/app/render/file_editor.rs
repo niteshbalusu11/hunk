@@ -5,6 +5,379 @@ struct MarkdownInlineRenderStyle {
 }
 
 impl DiffViewer {
+    fn file_editor_tab_title(&self, path: &str) -> String {
+        std::path::Path::new(path)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| path.to_string())
+    }
+
+    fn file_editor_tab_detail(&self, path: &str) -> Option<String> {
+        let title = self.file_editor_tab_title(path);
+        let duplicate_titles = self
+            .file_editor_tabs
+            .iter()
+            .filter(|tab| self.file_editor_tab_title(tab.path.as_str()) == title)
+            .count();
+        if duplicate_titles < 2 {
+            return None;
+        }
+
+        std::path::Path::new(path)
+            .parent()
+            .and_then(|parent| parent.to_str())
+            .filter(|parent| !parent.is_empty() && *parent != ".")
+            .map(ToOwned::to_owned)
+    }
+
+    fn render_file_editor_tab_bar(
+        &self,
+        view: Entity<Self>,
+        editor_chrome: HunkEditorChromeColors,
+        is_dark: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if self.file_editor_tabs.is_empty() {
+            return div().into_any_element();
+        }
+
+        let divider_color = hunk_opacity(cx.theme().border, is_dark, 0.86, 0.72);
+
+        div()
+            .w_full()
+            .border_b_1()
+            .border_color(divider_color)
+            .bg(hunk_blend(
+                editor_chrome.background,
+                cx.theme().sidebar,
+                is_dark,
+                0.18,
+                0.16,
+            ))
+            .child(
+                div()
+                    .id("file-editor-tab-scroll-area")
+                    .w_full()
+                    .track_scroll(&self.file_editor_tab_scroll_handle)
+                    .overflow_x_scroll()
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .items_end()
+                            .px_2()
+                            .pt_2()
+                            .gap_1()
+                            .children(self.file_editor_tabs.iter().map(|tab| {
+                                let activate_view = view.clone();
+                                let tab_id = tab.id;
+                                let path = tab.path.clone();
+                                let status = self
+                                    .status_for_path(path.as_str())
+                                    .unwrap_or(FileStatus::Unknown);
+                                let is_active = self.active_file_editor_tab_id == Some(tab_id);
+                                let title = self.file_editor_tab_title(path.as_str());
+                                let detail = self.file_editor_tab_detail(path.as_str());
+                                let title_color = if is_active {
+                                    editor_chrome.foreground
+                                } else {
+                                    hunk_blend(
+                                        editor_chrome.foreground,
+                                        editor_chrome.line_number,
+                                        is_dark,
+                                        0.84,
+                                        0.78,
+                                    )
+                                };
+                                let background = if is_active {
+                                    hunk_blend(
+                                        editor_chrome.background,
+                                        cx.theme().accent,
+                                        is_dark,
+                                        0.20,
+                                        0.09,
+                                    )
+                                } else {
+                                    hunk_blend(
+                                        editor_chrome.background,
+                                        cx.theme().muted,
+                                        is_dark,
+                                        0.12,
+                                        0.18,
+                                    )
+                                };
+                                let border = if is_active {
+                                    hunk_opacity(cx.theme().accent, is_dark, 0.74, 0.52)
+                                } else {
+                                    divider_color
+                                };
+                                let is_dirty =
+                                    if is_active { self.editor_dirty } else { tab.dirty };
+                                let is_loading =
+                                    if is_active { self.editor_loading } else { tab.loading };
+                                let has_error = if is_active {
+                                    self.editor_error.is_some()
+                                } else {
+                                    tab.error.is_some()
+                                };
+
+                                div()
+                                    .id(("file-editor-tab", tab_id))
+                                    .flex_none()
+                                    .min_w(px(170.0))
+                                    .max_w(px(280.0))
+                                    .h(px(42.0))
+                                    .px_2()
+                                    .gap_2()
+                                    .items_center()
+                                    .rounded(px(10.0))
+                                    .border_1()
+                                    .border_color(border)
+                                    .bg(background)
+                                    .cursor_pointer()
+                                    .when(!is_active, |this| {
+                                        this.hover(|style| {
+                                            style.bg(hunk_blend(
+                                                editor_chrome.background,
+                                                cx.theme().accent,
+                                                is_dark,
+                                                0.14,
+                                                0.06,
+                                            ))
+                                        })
+                                    })
+                                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                                        activate_view.update(cx, |this, cx| {
+                                            let _ = this.open_file_in_files_workspace(
+                                                path.clone(),
+                                                status,
+                                                window,
+                                                cx,
+                                            );
+                                        });
+                                    })
+                                    .child(
+                                        div()
+                                            .flex_none()
+                                            .child(
+                                                if has_error {
+                                                    Icon::new(IconName::TriangleAlert)
+                                                        .size(px(12.0))
+                                                        .text_color(cx.theme().danger)
+                                                        .into_any_element()
+                                                } else if is_loading {
+                                                    Icon::new(IconName::LoaderCircle)
+                                                        .size(px(12.0))
+                                                        .text_color(cx.theme().warning)
+                                                        .into_any_element()
+                                                } else if is_dirty {
+                                                    div()
+                                                        .size(px(8.0))
+                                                        .rounded_full()
+                                                        .bg(cx.theme().warning)
+                                                        .into_any_element()
+                                                } else {
+                                                    Icon::new(IconName::File)
+                                                        .size(px(12.0))
+                                                        .text_color(editor_chrome.line_number)
+                                                        .into_any_element()
+                                                },
+                                            ),
+                                    )
+                                    .child(
+                                        v_flex()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .gap_0()
+                                            .child(
+                                                div()
+                                                    .truncate()
+                                                    .text_xs()
+                                                    .font_semibold()
+                                                    .text_color(title_color)
+                                                    .child(title),
+                                            )
+                                            .when_some(detail, |this, detail| {
+                                                this.child(
+                                                    div()
+                                                        .truncate()
+                                                        .text_xs()
+                                                        .font_family(
+                                                            cx.theme().mono_font_family.clone(),
+                                                        )
+                                                        .text_color(editor_chrome.line_number)
+                                                        .child(detail),
+                                                )
+                                            }),
+                                    )
+                                    .child({
+                                        let close_view = view.clone();
+                                        Button::new(("file-editor-tab-close", tab_id))
+                                            .ghost()
+                                            .compact()
+                                            .rounded(px(999.0))
+                                            .with_size(gpui_component::Size::Small)
+                                            .icon(Icon::new(IconName::Close).size(px(12.0)))
+                                            .tooltip("Close tab")
+                                            .on_click(move |_, window, cx| {
+                                                cx.stop_propagation();
+                                                close_view.update(cx, |this, cx| {
+                                                    this.close_file_editor_tab_by_id(
+                                                        tab_id, window, cx,
+                                                    );
+                                                });
+                                            })
+                                    })
+                                    .into_any_element()
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_file_editor_search_bar(
+        &self,
+        view: Entity<Self>,
+        editor_chrome: HunkEditorChromeColors,
+        is_dark: bool,
+        search_match_count: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let search_surface = hunk_input_surface(cx.theme(), is_dark);
+        let search_count_label = match search_match_count {
+            0 => "No matches".to_string(),
+            1 => "1 match".to_string(),
+            count => format!("{count} matches"),
+        };
+
+        h_flex()
+            .w_full()
+            .items_center()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .border_b_1()
+            .border_color(hunk_opacity(cx.theme().border, is_dark, 0.82, 0.70))
+            .bg(hunk_blend(
+                editor_chrome.background,
+                cx.theme().muted,
+                is_dark,
+                0.10,
+                0.18,
+            ))
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        Input::new(&self.editor_search_input_state)
+                            .flex_1()
+                            .h(px(32.0))
+                            .rounded(px(8.0))
+                            .border_1()
+                            .border_color(search_surface.border)
+                            .bg(search_surface.background),
+                    )
+                    .child(
+                        div()
+                            .min_w(px(72.0))
+                            .text_xs()
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .text_color(editor_chrome.line_number)
+                            .child(search_count_label),
+                    )
+                    .child({
+                        let view = view.clone();
+                        Button::new("editor-search-prev")
+                            .outline()
+                            .compact()
+                            .rounded(px(7.0))
+                            .icon(Icon::new(IconName::ChevronUp).size(px(12.0)))
+                            .tooltip("Previous match")
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.navigate_editor_search(false, cx);
+                                });
+                            })
+                    })
+                    .child({
+                        let view = view.clone();
+                        Button::new("editor-search-next")
+                            .outline()
+                            .compact()
+                            .rounded(px(7.0))
+                            .icon(Icon::new(IconName::ChevronDown).size(px(12.0)))
+                            .tooltip("Next match")
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.navigate_editor_search(true, cx);
+                                });
+                            })
+                    }),
+            )
+            .child(
+                h_flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        Input::new(&self.editor_replace_input_state)
+                            .w(px(220.0))
+                            .h(px(32.0))
+                            .rounded(px(8.0))
+                            .border_1()
+                            .border_color(search_surface.border)
+                            .bg(search_surface.background),
+                    )
+                    .child({
+                        let view = view.clone();
+                        Button::new("editor-search-replace")
+                            .outline()
+                            .compact()
+                            .rounded(px(7.0))
+                            .icon(Icon::new(IconName::Replace).size(px(12.0)))
+                            .label("Replace")
+                            .tooltip("Replace current match")
+                            .on_click(move |_, window, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.replace_current_editor_search_match(Some(window), cx);
+                                });
+                            })
+                    })
+                    .child({
+                        let view = view.clone();
+                        Button::new("editor-search-replace-all")
+                            .outline()
+                            .compact()
+                            .rounded(px(7.0))
+                            .label("Replace All")
+                            .tooltip("Replace all matches in the active file")
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.replace_all_editor_search_matches(cx);
+                                });
+                            })
+                    })
+                    .child({
+                        let view = view.clone();
+                        Button::new("editor-search-close")
+                            .ghost()
+                            .compact()
+                            .rounded(px(7.0))
+                            .icon(Icon::new(IconName::Close).size(px(12.0)))
+                            .tooltip("Close find and replace")
+                            .on_click(move |_, window, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.toggle_editor_search(false, window, cx);
+                                });
+                            })
+                    }),
+            )
+            .into_any_element()
+    }
+
     fn markdown_inline_render_style(
         &self,
         base_color: Hsla,
@@ -17,36 +390,6 @@ impl DiffViewer {
     }
 
     fn render_file_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        if self.editor_loading {
-            return v_flex()
-                .size_full()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Loading file editor..."),
-                )
-                .into_any_element();
-        }
-
-        if let Some(error) = self.editor_error.as_ref() {
-            return v_flex()
-                .size_full()
-                .items_center()
-                .justify_center()
-                .p_6()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().danger)
-                        .whitespace_normal()
-                        .child(error.clone()),
-                )
-                .into_any_element();
-        }
-
         let Some(file_path) = self.editor_path.clone() else {
             return v_flex()
                 .size_full()
@@ -104,20 +447,47 @@ impl DiffViewer {
             .as_ref()
             .map(|status| status.position.clone())
             .unwrap_or_else(|| "Ln 1  Col 1".to_string());
-        let search_count_label = if self.editor_search_visible {
-            match search_match_count {
-                0 => "No matches".to_string(),
-                1 => "1 match".to_string(),
-                count => format!("{count} matches"),
-            }
-        } else {
-            String::new()
-        };
-        let search_surface = hunk_input_surface(cx.theme(), is_dark);
         let meta_label = format!("{position_label}  {selection_label}");
+        let editor_content = if self.editor_loading {
+            v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Loading file editor..."),
+                )
+                .into_any_element()
+        } else if let Some(error) = self.editor_error.as_ref() {
+            v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .p_6()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().danger)
+                        .whitespace_normal()
+                        .child(error.clone()),
+                )
+                .into_any_element()
+        } else if preview_active {
+            self.render_markdown_preview(is_dark, cx)
+        } else {
+            self.render_file_editor_surface(window, editor_font_size, is_dark, cx)
+        };
 
         v_flex()
             .size_full()
+            .child(self.render_file_editor_tab_bar(
+                view.clone(),
+                editor_chrome,
+                is_dark,
+                cx,
+            ))
             .child(
                 h_flex()
                     .w_full()
@@ -174,63 +544,17 @@ impl DiffViewer {
                         h_flex()
                             .items_center()
                             .gap_1p5()
-                            .when(self.editor_search_visible, |this| {
-                                this.child(
-                                    h_flex()
-                                        .items_center()
-                                        .gap_1()
-                                        .child(
-                                            Input::new(&self.editor_search_input_state)
-                                                .w(px(190.0))
-                                                .h(px(30.0))
-                                                .rounded(px(7.0))
-                                                .border_1()
-                                                .border_color(search_surface.border)
-                                                .bg(search_surface.background),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_xs()
-                                                .text_color(editor_chrome.line_number)
-                                                .child(search_count_label.clone()),
-                                        )
-                                        .child({
-                                            let view = view.clone();
-                                            Button::new("editor-search-prev")
-                                                .outline()
-                                                .compact()
-                                                .rounded(px(7.0))
-                                                .label("Prev")
-                                                .on_click(move |_, _, cx| {
-                                                    view.update(cx, |this, cx| {
-                                                        this.navigate_editor_search(false, cx);
-                                                    });
-                                                })
-                                        })
-                                        .child({
-                                            let view = view.clone();
-                                            Button::new("editor-search-next")
-                                                .outline()
-                                                .compact()
-                                                .rounded(px(7.0))
-                                                .label("Next")
-                                                .on_click(move |_, _, cx| {
-                                                    view.update(cx, |this, cx| {
-                                                        this.navigate_editor_search(true, cx);
-                                                    });
-                                                })
-                                        }),
-                                )
-                            })
                             .child({
                                 let view = view.clone();
                                 let mut button = Button::new("editor-search-toggle")
                                     .compact()
                                     .rounded(px(7.0))
-                                    .label(if self.editor_search_visible {
-                                        "Done"
+                                    .icon(Icon::new(IconName::Search).size(px(12.0)))
+                                    .label(if self.editor_search_visible { "Find" } else { "Search" })
+                                    .tooltip(if self.editor_search_visible {
+                                        "Hide find and replace"
                                     } else {
-                                        "Search"
+                                        "Show find and replace"
                                     })
                                     .on_click(move |_, window, cx| {
                                         view.update(cx, |this, cx| {
@@ -330,7 +654,15 @@ impl DiffViewer {
                                 let mut button = Button::new("editor-save")
                                     .compact()
                                     .rounded(px(7.0))
-                                    .label("Save")
+                                    .icon(Icon::new(HunkIconName::Save).size(px(12.0)))
+                                    .tooltip(if self.editor_save_loading {
+                                        "Saving file"
+                                    } else if self.editor_dirty {
+                                        "Save file"
+                                    } else {
+                                        "File is saved"
+                                    })
+                                    .loading(self.editor_save_loading)
                                     .disabled(save_disabled)
                                     .on_click(move |_, window, cx| {
                                         view.update(cx, |this, cx| {
@@ -346,11 +678,16 @@ impl DiffViewer {
                             }),
                     ),
             )
-            .child(if preview_active {
-                self.render_markdown_preview(is_dark, cx)
-            } else {
-                self.render_file_editor_surface(window, editor_font_size, is_dark, cx)
+            .when(self.editor_search_visible, |this| {
+                this.child(self.render_file_editor_search_bar(
+                    view.clone(),
+                    editor_chrome,
+                    is_dark,
+                    search_match_count,
+                    cx,
+                ))
             })
+            .child(editor_content)
             .into_any_element()
     }
 

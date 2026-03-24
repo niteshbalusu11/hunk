@@ -130,14 +130,25 @@ impl DiffViewer {
                 self.request_repo_tree_reload(cx);
             }
 
-            let target_path = self.editor_path.clone().or_else(|| self.selected_path.clone()).or_else(|| {
-                self.files
-                    .iter()
-                    .find(|file| file.status != FileStatus::Deleted)
-                    .map(|file| file.path.clone())
-            });
+            let target_path = self
+                .editor_path
+                .clone()
+                .or_else(|| self.selected_path.clone())
+                .or_else(|| self.file_editor_tabs.first().map(|tab| tab.path.clone()))
+                .or_else(|| {
+                    self.files
+                        .iter()
+                        .find(|file| file.status != FileStatus::Deleted)
+                        .map(|file| file.path.clone())
+                });
             let target_path = target_path
                 .filter(|path| self.path_exists_in_primary_checkout(path.as_str()))
+                .or_else(|| {
+                    self.file_editor_tabs
+                        .iter()
+                        .map(|tab| tab.path.clone())
+                        .find(|path| self.path_exists_in_primary_checkout(path.as_str()))
+                })
                 .or_else(|| {
                     self.files
                         .iter()
@@ -148,23 +159,10 @@ impl DiffViewer {
                         .map(|file| file.path.clone())
                 });
             if let Some(path) = target_path {
-                let editor_already_open = self.editor_path.as_deref() == Some(path.as_str())
-                    && !self.editor_loading
-                    && self.editor_error.is_none();
-                if !editor_already_open
-                    && self.prevent_unsaved_editor_discard(Some(path.as_str()), cx)
-                {
-                    return;
-                }
                 self.selected_path = Some(path.clone());
                 self.selected_status = self.status_for_path(path.as_str());
-                if !editor_already_open {
-                    self.request_file_editor_reload(path, cx);
-                }
+                self.request_file_editor_reload(path, cx);
             } else {
-                if self.prevent_unsaved_editor_discard(None, cx) {
-                    return;
-                }
                 self.selected_path = None;
                 self.selected_status = None;
                 self.clear_editor_state(cx);
@@ -202,8 +200,11 @@ impl DiffViewer {
     pub(super) fn select_repo_tree_file(&mut self, path: String, cx: &mut Context<Self>) {
         self.repo_tree_context_menu = None;
         if self.workspace_view_mode == WorkspaceViewMode::Files
-            && self.prevent_unsaved_editor_discard(Some(path.as_str()), cx)
         {
+            self.request_file_editor_reload(path.clone(), cx);
+            self.selected_path = Some(path.clone());
+            self.selected_status = self.status_for_path(path.as_str());
+            cx.notify();
             return;
         }
 
@@ -324,10 +325,6 @@ impl DiffViewer {
         if !self.ensure_repo_tree_manageable(cx) {
             return;
         }
-        if self.prevent_unsaved_editor_discard(None, cx) {
-            return;
-        }
-
         let Some(repo_root) = self.repo_root.clone() else {
             return;
         };
@@ -338,9 +335,7 @@ impl DiffViewer {
                     self.selected_path = None;
                     self.selected_status = None;
                 }
-                if self.editor_path.as_deref() == Some(path) {
-                    self.clear_editor_state(cx);
-                }
+                self.close_file_editor_tabs_for_path(path);
                 self.refresh_after_repo_tree_fs_mutation(cx);
                 self.git_status_message = Some(format!("Deleted {path}"));
             }
@@ -625,10 +620,6 @@ impl DiffViewer {
         if source_path == destination_path {
             anyhow::bail!("File name is unchanged.");
         }
-        if self.prevent_unsaved_editor_discard(Some(destination_path.as_str()), cx) {
-            anyhow::bail!("Save current changes before renaming a file.");
-        }
-
         fs_rename_repo_tree_file(&repo_root, source_path, destination_path.as_str())?;
         self.expand_repo_tree_ancestors(destination_path.as_str());
 
@@ -636,7 +627,8 @@ impl DiffViewer {
             self.selected_path = Some(destination_path.clone());
             self.selected_status = None;
         }
-        if self.editor_path.as_deref() == Some(source_path) {
+        self.sync_file_editor_tab_path(source_path, destination_path.as_str());
+        if self.editor_path.as_deref() == Some(destination_path.as_str()) {
             self.request_file_editor_reload(destination_path.clone(), cx);
         }
 

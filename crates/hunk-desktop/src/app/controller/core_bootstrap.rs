@@ -347,6 +347,8 @@ impl DiffViewer {
         });
         let editor_search_input_state =
             cx.new(|cx| InputState::new(window, cx).placeholder("Find in file"));
+        let editor_replace_input_state =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Replace in file"));
         let in_app_menu_bar = (!cfg!(target_os = "macos")).then(|| AppMenuBar::new(cx));
 
         let mut view = Self {
@@ -599,8 +601,13 @@ impl DiffViewer {
             repo_tree: RepoTreeState::new(),
             repo_tree_inline_edit: None,
             repo_tree_context_menu: None,
+            file_editor_tabs: Vec::new(),
+            active_file_editor_tab_id: None,
+            next_file_editor_tab_id: 1,
+            file_editor_tab_scroll_handle: ScrollHandle::default(),
             files_editor,
             editor_search_input_state,
+            editor_replace_input_state,
             file_quick_open_input_state,
             file_quick_open_visible: false,
             file_quick_open_matches: Vec::new(),
@@ -687,6 +694,18 @@ impl DiffViewer {
                     .select_next_search_match(!secondary)
             {
                 cx.notify();
+            }
+        })
+        .detach();
+
+        let editor_replace_state = view.editor_replace_input_state.clone();
+        cx.subscribe(&editor_replace_state, |this, _, event, cx| {
+            if let InputEvent::PressEnter { secondary } = event {
+                if *secondary {
+                    this.replace_all_editor_search_matches(cx);
+                } else {
+                    this.replace_current_editor_search_match(None, cx);
+                }
             }
         })
         .detach();

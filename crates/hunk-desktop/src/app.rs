@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::cell::RefCell;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -1193,8 +1194,13 @@ struct DiffViewer {
     repo_tree: RepoTreeState,
     repo_tree_inline_edit: Option<RepoTreeInlineEditState>,
     repo_tree_context_menu: Option<RepoTreeContextMenuState>,
+    file_editor_tabs: Vec<FileEditorTab>,
+    active_file_editor_tab_id: Option<usize>,
+    next_file_editor_tab_id: usize,
+    file_editor_tab_scroll_handle: ScrollHandle,
     files_editor: native_files_editor::SharedFilesEditor,
     editor_search_input_state: Entity<InputState>,
+    editor_replace_input_state: Entity<InputState>,
     file_quick_open_input_state: Entity<InputState>,
     file_quick_open_visible: bool,
     file_quick_open_matches: Vec<String>,
@@ -1219,6 +1225,10 @@ struct DiffViewer {
 
 impl Drop for DiffViewer {
     fn drop(&mut self) {
+        self.sync_active_file_editor_tab_state();
+        for tab in &self.file_editor_tabs {
+            tab.files_editor.borrow_mut().shutdown();
+        }
         self.files_editor.borrow_mut().shutdown();
         self.stop_all_ai_terminal_runtimes("dropping app");
         self.shutdown_ai_worker_blocking();
