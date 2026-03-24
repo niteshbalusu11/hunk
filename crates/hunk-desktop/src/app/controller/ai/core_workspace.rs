@@ -121,22 +121,9 @@ impl DiffViewer {
     }
 
     pub(crate) fn ai_show_worktree_base_branch_picker(&self) -> bool {
-        if !self.ai_new_thread_draft_active
-            || self.ai_pending_new_thread_selection
-            || self.ai_new_thread_start_mode != AiNewThreadStartMode::Worktree
-        {
-            return false;
-        }
-
-        let Some(draft_root) = self.ai_draft_workspace_root() else {
-            return false;
-        };
-        let Some(non_ai_project_root) = self.primary_repo_root() else {
-            return false;
-        };
-        hunk_git::worktree::primary_repo_root(draft_root.as_path())
-            .ok()
-            .is_some_and(|draft_project_root| draft_project_root == non_ai_project_root)
+        self.ai_new_thread_draft_active
+            && !self.ai_pending_new_thread_selection
+            && self.ai_new_thread_start_mode == AiNewThreadStartMode::Worktree
     }
 
     fn ai_workspace_key_for_draft(&self) -> Option<String> {

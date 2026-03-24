@@ -251,6 +251,7 @@ fn workspace_mad_max_mode_defaults_to_true_when_missing() {
 #[test]
 fn workspace_mad_max_mode_reads_per_workspace_flags() {
     let state = AppState {
+        legacy_last_project_path: None,
         workspace_project_paths: Default::default(),
         active_workspace_project_path: None,
         last_workspace_target_by_repo: Default::default(),
@@ -295,6 +296,7 @@ fn workspace_include_hidden_models_defaults_to_true_when_missing() {
 #[test]
 fn workspace_include_hidden_models_reads_per_workspace_flags() {
     let state = AppState {
+        legacy_last_project_path: None,
         workspace_project_paths: Default::default(),
         active_workspace_project_path: None,
         last_workspace_target_by_repo: Default::default(),

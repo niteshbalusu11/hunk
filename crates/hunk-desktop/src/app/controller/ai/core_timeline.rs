@@ -40,6 +40,24 @@ impl DiffViewer {
     }
 
     pub(super) fn ai_open_review_tab(&mut self, cx: &mut Context<Self>) {
+        if let Some(selected_thread_id) = self.ai_selected_thread_id.clone() {
+            if let Some(project_root) = self.ai_thread_project_root(selected_thread_id.as_str())
+                && self.project_path.as_ref() != Some(&project_root)
+            {
+                self.activate_workspace_project_root(project_root, cx);
+            }
+            if let Some(workspace_root) = self.ai_thread_workspace_root(selected_thread_id.as_str())
+                && let Some(target_id) = self
+                    .workspace_targets
+                    .iter()
+                    .find(|target| target.root == workspace_root)
+                    .map(|target| target.id.clone())
+                && self.active_workspace_target_id.as_deref() != Some(target_id.as_str())
+            {
+                self.activate_workspace_target(target_id, cx);
+            }
+        }
+
         if let Some((left_source_id, right_source_id)) =
             self.ai_selected_thread_review_compare_selection()
         {

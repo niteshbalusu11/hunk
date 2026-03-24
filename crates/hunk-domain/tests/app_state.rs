@@ -45,6 +45,26 @@ fn app_state_parses_without_workspace_fields() {
 }
 
 #[test]
+fn app_state_migrates_legacy_last_project_path_into_workspace_state() {
+    let raw = r#"
+last_project_path = "/tmp/hunk-repo"
+"#;
+    let mut state: AppState = toml::from_str(raw).expect("legacy state should parse");
+
+    state.normalize_workspace_state();
+
+    assert_eq!(
+        state.workspace_project_paths,
+        vec![PathBuf::from("/tmp/hunk-repo")]
+    );
+    assert_eq!(
+        state.active_workspace_project_path,
+        Some(PathBuf::from("/tmp/hunk-repo"))
+    );
+    assert_eq!(state.legacy_last_project_path, None);
+}
+
+#[test]
 fn ai_thread_session_state_preferred_defaults_pin_model_and_effort() {
     let defaults = AiThreadSessionState::preferred_defaults();
 
@@ -60,6 +80,7 @@ fn ai_thread_session_state_preferred_defaults_pin_model_and_effort() {
 #[test]
 fn app_state_round_trips_workspace_fields() {
     let state = AppState {
+        legacy_last_project_path: None,
         workspace_project_paths: vec![
             PathBuf::from("/tmp/hunk-repo"),
             PathBuf::from("/tmp/hunk-repo-b"),

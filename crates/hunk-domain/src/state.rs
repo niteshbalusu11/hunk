@@ -118,6 +118,8 @@ pub struct ReviewCompareSelectionState {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppState {
+    #[serde(alias = "last_project_path", skip_serializing)]
+    pub legacy_last_project_path: Option<PathBuf>,
     pub workspace_project_paths: Vec<PathBuf>,
     pub active_workspace_project_path: Option<PathBuf>,
     pub last_workspace_target_by_repo: BTreeMap<String, String>,
@@ -192,7 +194,10 @@ impl AppState {
             }
         }
 
-        let preferred_active_path = self.active_workspace_project_path.clone();
+        let preferred_active_path = self
+            .active_workspace_project_path
+            .clone()
+            .or_else(|| self.legacy_last_project_path.clone());
 
         if let Some(active_path) = preferred_active_path.as_ref()
             && seen_paths.insert(active_path.clone())
@@ -206,6 +211,7 @@ impl AppState {
 
         self.workspace_project_paths = normalized_paths;
         self.active_workspace_project_path = resolved_active_path.clone();
+        self.legacy_last_project_path = None;
     }
 
     pub fn active_project_path(&self) -> Option<&PathBuf> {
