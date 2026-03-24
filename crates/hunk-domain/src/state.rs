@@ -132,6 +132,57 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub fn contains_workspace_project(&self, project_path: &Path) -> bool {
+        self.workspace_project_paths
+            .iter()
+            .any(|path| path.as_path() == project_path)
+    }
+
+    pub fn activate_workspace_project(&mut self, project_path: PathBuf) -> bool {
+        let previous_paths = self.workspace_project_paths.clone();
+        let previous_active = self.active_workspace_project_path.clone();
+
+        if !self.contains_workspace_project(project_path.as_path()) {
+            self.workspace_project_paths.push(project_path.clone());
+        }
+        self.active_workspace_project_path = Some(project_path);
+        self.normalize_workspace_state();
+
+        self.workspace_project_paths != previous_paths
+            || self.active_workspace_project_path != previous_active
+    }
+
+    pub fn remove_workspace_project(&mut self, project_path: &Path) -> bool {
+        let Some(removal_index) = self
+            .workspace_project_paths
+            .iter()
+            .position(|path| path.as_path() == project_path)
+        else {
+            return false;
+        };
+
+        let previous_paths = self.workspace_project_paths.clone();
+        let previous_active = self.active_workspace_project_path.clone();
+        let was_active =
+            self.active_workspace_project_path.as_deref() == Some(project_path);
+
+        self.workspace_project_paths.remove(removal_index);
+        if was_active {
+            self.active_workspace_project_path =
+                if removal_index < self.workspace_project_paths.len() {
+                    Some(self.workspace_project_paths[removal_index].clone())
+                } else if removal_index > 0 {
+                    Some(self.workspace_project_paths[removal_index - 1].clone())
+                } else {
+                    None
+                };
+        }
+        self.normalize_workspace_state();
+
+        self.workspace_project_paths != previous_paths
+            || self.active_workspace_project_path != previous_active
+    }
+
     pub fn normalize_workspace_state(&mut self) {
         let mut seen_paths = BTreeSet::new();
         let mut normalized_paths = Vec::with_capacity(self.workspace_project_paths.len() + 1);

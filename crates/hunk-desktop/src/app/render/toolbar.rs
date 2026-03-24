@@ -53,18 +53,29 @@ impl DiffViewer {
                     .child(
                         h_flex()
                             .items_center()
-                            .px_2()
+                            .px_1()
                             .py_0p5()
                             .rounded_md()
                             .bg(brand_colors.background)
                             .border_1()
                             .border_color(brand_colors.border)
                             .child(
-                                div()
-                                    .text_sm()
-                                    .font_semibold()
-                                    .text_color(cx.theme().foreground)
-                                    .child(project_label),
+                                Select::new(&self.project_picker_state)
+                                    .with_size(gpui_component::Size::Small)
+                                    .placeholder(project_label)
+                                    .search_placeholder("Find a project")
+                                    .rounded(px(8.0))
+                                    .bg(brand_colors.background)
+                                    .border_color(brand_colors.border)
+                                    .disabled(self.state.workspace_project_paths.is_empty())
+                                    .empty(
+                                        h_flex()
+                                            .h(px(72.0))
+                                            .justify_center()
+                                            .text_sm()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child("No projects in this workspace."),
+                                    ),
                             ),
                     )
                     .child(

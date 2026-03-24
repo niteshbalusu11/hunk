@@ -80,24 +80,16 @@ impl DiffViewer {
     }
 
     fn set_active_workspace_project_path(&mut self, project_path: Option<PathBuf>) {
-        let previous_paths = self.state.workspace_project_paths.clone();
-        let previous_active = self.state.active_workspace_project_path.clone();
-
-        if let Some(project_path) = project_path.as_ref()
-            && !self
-                .state
-                .workspace_project_paths
-                .iter()
-                .any(|path| path == project_path)
-        {
-            self.state.workspace_project_paths.push(project_path.clone());
-        }
-
-        self.state.active_workspace_project_path = project_path;
-        self.state.normalize_workspace_state();
-        if self.state.workspace_project_paths == previous_paths
-            && self.state.active_workspace_project_path == previous_active
-        {
+        let changed = match project_path {
+            Some(project_path) => self.state.activate_workspace_project(project_path),
+            None => {
+                let previous_active = self.state.active_workspace_project_path.clone();
+                self.state.active_workspace_project_path = None;
+                self.state.normalize_workspace_state();
+                self.state.active_workspace_project_path != previous_active
+            }
+        };
+        if !changed {
             return;
         }
         self.persist_state();
@@ -310,6 +302,9 @@ impl DiffViewer {
         });
         let ai_worktree_base_branch_picker_state = cx.new(|cx| {
             SelectState::new(BranchPickerDelegate::default(), None, window, cx).searchable(true)
+        });
+        let project_picker_state = cx.new(|cx| {
+            SelectState::new(ProjectPickerDelegate::default(), None, window, cx).searchable(true)
         });
         let workspace_target_picker_state = cx.new(|cx| {
             SelectState::new(WorkspaceTargetPickerDelegate::default(), None, window, cx)
@@ -529,6 +524,7 @@ impl DiffViewer {
             ai_composer_status_generation_by_key: BTreeMap::new(),
             files: Vec::new(),
             file_status_by_path: BTreeMap::new(),
+            project_picker_state,
             workspace_target_picker_state,
             review_left_picker_state,
             review_right_picker_state,
@@ -809,6 +805,23 @@ impl DiffViewer {
         )
         .detach();
 
+        let project_picker_state = view.project_picker_state.clone();
+        cx.subscribe(
+            &project_picker_state,
+            |this, _, event: &SelectEvent<ProjectPickerDelegate>, cx| {
+                let SelectEvent::Confirm(project_path) = event;
+                let Some(project_path) = project_path.clone() else {
+                    return;
+                };
+                let project_path = PathBuf::from(project_path);
+                if this.project_path.as_ref() == Some(&project_path) {
+                    return;
+                }
+                this.activate_workspace_project_root(project_path, cx);
+            },
+        )
+        .detach();
+
         let workspace_target_picker_state = view.workspace_target_picker_state.clone();
         cx.subscribe(
             &workspace_target_picker_state,
@@ -830,6 +843,7 @@ impl DiffViewer {
 
         view.update_branch_picker_state(window, cx);
         view.update_ai_worktree_base_branch_picker_state(window, cx);
+        view.update_project_picker_state(window, cx);
         view.update_workspace_target_picker_state(window, cx);
         view.update_review_compare_picker_states(window, cx);
         view.apply_theme_preference(window, cx);

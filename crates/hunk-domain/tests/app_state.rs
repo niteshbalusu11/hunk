@@ -232,3 +232,121 @@ fn normalize_workspace_state_promotes_active_project_into_membership() {
         Some(PathBuf::from("/tmp/hunk-repo-b"))
     );
 }
+
+#[test]
+fn activate_workspace_project_appends_and_selects_project() {
+    let mut state = AppState {
+        workspace_project_paths: vec![PathBuf::from("/tmp/hunk-repo-a")],
+        active_workspace_project_path: Some(PathBuf::from("/tmp/hunk-repo-a")),
+        ..AppState::default()
+    };
+
+    let changed = state.activate_workspace_project(PathBuf::from("/tmp/hunk-repo-b"));
+
+    assert!(changed);
+    assert_eq!(
+        state.workspace_project_paths,
+        vec![
+            PathBuf::from("/tmp/hunk-repo-a"),
+            PathBuf::from("/tmp/hunk-repo-b"),
+        ]
+    );
+    assert_eq!(
+        state.active_workspace_project_path,
+        Some(PathBuf::from("/tmp/hunk-repo-b"))
+    );
+}
+
+#[test]
+fn activate_workspace_project_selects_existing_without_duplication() {
+    let mut state = AppState {
+        workspace_project_paths: vec![
+            PathBuf::from("/tmp/hunk-repo-a"),
+            PathBuf::from("/tmp/hunk-repo-b"),
+        ],
+        active_workspace_project_path: Some(PathBuf::from("/tmp/hunk-repo-a")),
+        ..AppState::default()
+    };
+
+    let changed = state.activate_workspace_project(PathBuf::from("/tmp/hunk-repo-b"));
+
+    assert!(changed);
+    assert_eq!(
+        state.workspace_project_paths,
+        vec![
+            PathBuf::from("/tmp/hunk-repo-a"),
+            PathBuf::from("/tmp/hunk-repo-b"),
+        ]
+    );
+    assert_eq!(
+        state.active_workspace_project_path,
+        Some(PathBuf::from("/tmp/hunk-repo-b"))
+    );
+}
+
+#[test]
+fn remove_workspace_project_selects_next_project_when_active_removed() {
+    let mut state = AppState {
+        workspace_project_paths: vec![
+            PathBuf::from("/tmp/hunk-repo-a"),
+            PathBuf::from("/tmp/hunk-repo-b"),
+            PathBuf::from("/tmp/hunk-repo-c"),
+        ],
+        active_workspace_project_path: Some(PathBuf::from("/tmp/hunk-repo-b")),
+        ..AppState::default()
+    };
+
+    let changed = state.remove_workspace_project(PathBuf::from("/tmp/hunk-repo-b").as_path());
+
+    assert!(changed);
+    assert_eq!(
+        state.workspace_project_paths,
+        vec![
+            PathBuf::from("/tmp/hunk-repo-a"),
+            PathBuf::from("/tmp/hunk-repo-c"),
+        ]
+    );
+    assert_eq!(
+        state.active_workspace_project_path,
+        Some(PathBuf::from("/tmp/hunk-repo-c"))
+    );
+}
+
+#[test]
+fn remove_workspace_project_selects_previous_when_last_active_removed() {
+    let mut state = AppState {
+        workspace_project_paths: vec![
+            PathBuf::from("/tmp/hunk-repo-a"),
+            PathBuf::from("/tmp/hunk-repo-b"),
+        ],
+        active_workspace_project_path: Some(PathBuf::from("/tmp/hunk-repo-b")),
+        ..AppState::default()
+    };
+
+    let changed = state.remove_workspace_project(PathBuf::from("/tmp/hunk-repo-b").as_path());
+
+    assert!(changed);
+    assert_eq!(
+        state.workspace_project_paths,
+        vec![PathBuf::from("/tmp/hunk-repo-a")]
+    );
+    assert_eq!(
+        state.active_workspace_project_path,
+        Some(PathBuf::from("/tmp/hunk-repo-a"))
+    );
+}
+
+#[test]
+fn remove_workspace_project_clears_active_when_last_project_removed() {
+    let mut state = AppState {
+        workspace_project_paths: vec![PathBuf::from("/tmp/hunk-repo-a")],
+        active_workspace_project_path: Some(PathBuf::from("/tmp/hunk-repo-a")),
+        ..AppState::default()
+    };
+
+    let changed = state.remove_workspace_project(PathBuf::from("/tmp/hunk-repo-a").as_path());
+
+    assert!(changed);
+    assert!(state.workspace_project_paths.is_empty());
+    assert_eq!(state.active_workspace_project_path, None);
+}
