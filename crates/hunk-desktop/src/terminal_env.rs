@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
+#[cfg(not(target_os = "windows"))]
 use std::io::IsTerminal as _;
 use std::path::Path;
+#[cfg(target_os = "windows")]
+use std::path::PathBuf;
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
@@ -52,7 +55,13 @@ impl ResolvedTerminalShell {
                 args.push(OsString::from("-i"));
                 args
             }
-            TerminalShellFamily::PowerShell => vec![OsString::from("-NoLogo")],
+            TerminalShellFamily::PowerShell => {
+                let mut args = vec![OsString::from("-NoLogo")];
+                if !inherit_login_environment {
+                    args.push(OsString::from("-NoProfile"));
+                }
+                args
+            }
             TerminalShellFamily::Cmd => Vec::new(),
         }
     }
@@ -252,7 +261,7 @@ fn shell_family_from_program(program: &OsStr) -> TerminalShellFamily {
 fn system_shell_program() -> OsString {
     windows_preferred_shells()
         .into_iter()
-        .find(|candidate| candidate.exists())
+        .next()
         .map(|candidate| candidate.into_os_string())
         .or_else(|| find_program_on_windows_path("pwsh.exe"))
         .or_else(|| find_program_on_windows_path("powershell.exe"))
@@ -261,8 +270,6 @@ fn system_shell_program() -> OsString {
 
 #[cfg(target_os = "windows")]
 fn windows_preferred_shells() -> Vec<PathBuf> {
-    use std::path::PathBuf;
-
     let mut candidates = Vec::new();
 
     for base in [
@@ -353,11 +360,16 @@ fn system_shell_program() -> OsString {
         return shell;
     }
 
-    ["/bin/zsh", "/bin/bash", "/bin/sh"]
+    unix_fallback_shells()
         .into_iter()
         .find(|candidate| Path::new(candidate).exists())
         .map(OsString::from)
         .unwrap_or_else(|| OsString::from("/bin/sh"))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn unix_fallback_shells() -> [&'static str; 3] {
+    ["/bin/bash", "/bin/zsh", "/bin/sh"]
 }
 
 fn quote_posix(value: &OsStr) -> String {
@@ -406,6 +418,27 @@ mod tests {
             resolved.interactive_shell_args(true),
             vec![OsString::from("-NoLogo")]
         );
+    }
+
+    #[test]
+    fn powershell_interactive_args_honor_profile_opt_out() {
+        let resolved = build_resolved_terminal_shell(OsString::from("pwsh.exe"), Vec::new(), false);
+
+        assert_eq!(
+            resolved.interactive_shell_args(true),
+            vec![OsString::from("-NoLogo")]
+        );
+        assert_eq!(
+            resolved.interactive_shell_args(false),
+            vec![OsString::from("-NoLogo"), OsString::from("-NoProfile")]
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn unix_fallback_shells_keep_bash_ahead_of_zsh() {
+        assert_eq!(super::unix_fallback_shells()[0], "/bin/bash");
+        assert_eq!(super::unix_fallback_shells()[1], "/bin/zsh");
     }
 
     #[test]
