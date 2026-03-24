@@ -149,10 +149,21 @@ fn ai_workspace_project_root_for_thread_root(
     thread_workspace_root: &std::path::Path,
     workspace_project_roots: &[std::path::PathBuf],
 ) -> Option<std::path::PathBuf> {
-    let thread_primary_root = ai_workspace_project_root_identity(thread_workspace_root)?;
+    if let Some(thread_primary_root) = ai_workspace_project_root_identity(thread_workspace_root)
+        && let Some(project_root) = workspace_project_roots
+            .iter()
+            .find(|project_root| project_root.as_path() == thread_primary_root.as_path())
+    {
+        return Some(project_root.clone());
+    }
+
     workspace_project_roots
         .iter()
-        .find(|project_root| project_root.as_path() == thread_primary_root.as_path())
+        .filter(|project_root| {
+            thread_workspace_root == project_root.as_path()
+                || thread_workspace_root.starts_with(project_root.as_path())
+        })
+        .max_by_key(|project_root| project_root.components().count())
         .cloned()
 }
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-- Proposed
+- Completed
 - Owner: Hunk
 - Last Updated: 2026-03-24
 
@@ -400,31 +400,31 @@ Mitigation:
 
 ## Phase 1: Workspace State Foundation
 
-- [ ] Add persisted workspace project membership and active-project state to `crates/hunk-domain/src/state.rs`.
-- [ ] Add migration from legacy `last_project_path` into the new workspace state.
-- [ ] Decide and implement the exact serialized representation for ordered project membership.
-- [ ] Convert singleton workflow/recent-commit caches into project-aware caches.
-- [ ] Add desktop-local project descriptor types for active/inactive project metadata.
-- [ ] Add tests for:
+- [x] Add persisted workspace project membership and active-project state to `crates/hunk-domain/src/state.rs`.
+- [x] Add migration from legacy `last_project_path` into the new workspace state.
+- [x] Decide and implement the exact serialized representation for ordered project membership.
+- [x] Convert singleton workflow/recent-commit caches into project-aware caches.
+- [x] Add desktop-local project descriptor types for active/inactive project metadata.
+- [x] Add tests for:
   - workspace-state round-tripping
   - legacy migration
   - project-order persistence
   - active-project persistence
   - per-project map key stability
-- [ ] Deep review of the state model before landing later phases.
+- [x] Deep review of the state model before landing later phases.
 
 ## Phase 2: Project Identity and Add/Remove Flows
 
-- [ ] Add a canonical project-resolution helper that normalizes any selected path to primary Git repo root.
-- [ ] Update `open_project_picker` so `Open Project...` adds and activates a project instead of replacing all state.
-- [ ] Add a single controller path for:
+- [x] Add a canonical project-resolution helper that normalizes any selected path to primary Git repo root.
+- [x] Update `open_project_picker` so `Open Project...` adds and activates a project instead of replacing all state.
+- [x] Add a single controller path for:
   - add project
   - activate project
   - remove project
-- [ ] Add safe duplicate handling when the same repo is selected twice through different paths.
-- [ ] Define active-project fallback selection after removal.
-- [ ] Preserve all removal semantics as non-destructive workspace-membership updates only.
-- [ ] Add tests for:
+- [x] Add safe duplicate handling when the same repo is selected twice through different paths.
+- [x] Define active-project fallback selection after removal.
+- [x] Preserve all removal semantics as non-destructive workspace-membership updates only.
+- [x] Add tests for:
   - add repo root
   - add nested folder in repo
   - add linked worktree path
@@ -435,8 +435,8 @@ Mitigation:
 
 ## Phase 3: Active Project Rebinding
 
-- [ ] Introduce a centralized `switch_active_project(...)` flow inside desktop controllers.
-- [ ] Rebind all active project fields on switch:
+- [x] Introduce a centralized `switch_active_project(...)` flow inside desktop controllers.
+- [x] Rebind all active project fields on switch:
   - `project_path`
   - `repo_root`
   - `workspace_targets`
@@ -446,10 +446,10 @@ Mitigation:
   - repo tree state
   - file-search state
   - open file/editor selection
-- [ ] Ensure active repo watch teardown/restart happens only through the switch flow.
-- [ ] Hydrate from project-local cache before cold refresh when possible.
-- [ ] Keep inactive projects out of hot-path watch/refresh loops.
-- [ ] Add tests for:
+- [x] Ensure active repo watch teardown/restart happens only through the switch flow.
+- [x] Hydrate from project-local cache before cold refresh when possible.
+- [x] Keep inactive projects out of hot-path watch/refresh loops.
+- [x] Add tests for:
   - cache hydration on project switch
   - repo watcher rebinding
   - tree/editor reset correctness
@@ -458,65 +458,65 @@ Mitigation:
 
 ## Phase 4: Toolbar Project Picker and Menu Integration
 
-- [ ] Add a project picker delegate/component modeled after `workspace_target_picker`.
-- [ ] Add toolbar UI for the active project picker.
-- [ ] Add project remove action in the picker UI.
-- [ ] Update application menus:
+- [x] Add a project picker delegate/component modeled after `workspace_target_picker`.
+- [x] Add toolbar UI for the active project picker.
+- [x] Add project remove action in the picker UI.
+- [x] Update application menus:
   - keep `Open Project...`
   - add `Remove Project` for the active project
-- [ ] Update empty/open-project states to use the same additive project-open flow.
-- [ ] Ensure the toolbar reflects active-project display name and repo path consistently after switching.
-- [ ] Add tests for picker search, selection, and remove actions.
+- [x] Update empty/open-project states to use the same additive project-open flow.
+- [x] Ensure the toolbar reflects active-project display name and repo path consistently after switching.
+- [x] Add tests for picker search, selection, and remove actions.
 
 ## Phase 5: Files View Project Switching
 
-- [ ] Rebind repo tree to the active project only.
-- [ ] Rebind quick open to the active project only.
-- [ ] Rebind file editor state safely on project switch.
-- [ ] Decide whether editor tabs are cleared on project switch or persisted per project.
-- [ ] Rebind files terminal cwd to the active project.
-- [ ] Ensure file-creation, rename, and delete actions remain scoped to the active project root.
-- [ ] Add tests for:
+- [x] Rebind repo tree to the active project only.
+- [x] Rebind quick open to the active project only.
+- [x] Rebind file editor state safely on project switch.
+- [x] Decide whether editor tabs are cleared on project switch or persisted per project.
+- [x] Rebind files terminal cwd to the active project.
+- [x] Ensure file-creation, rename, and delete actions remain scoped to the active project root.
+- [x] Add tests for:
   - quick open searches only active project files
   - file actions operate in the correct project
   - editor selection and tabs after project switch
 
 ## Phase 6: Git View Project-Local Worktree Preservation
 
-- [ ] Keep existing workspace-target picker project-local to the active project.
-- [ ] Restore per-project active workspace-target persistence on project switch.
-- [ ] Ensure all existing Git actions continue to operate on the selected workspace target inside the active project.
-- [ ] Validate that project switching does not leak one project's target catalog into another's UI.
-- [ ] Add tests for:
+- [x] Keep existing workspace-target picker project-local to the active project.
+- [x] Restore per-project active workspace-target persistence on project switch.
+- [x] Ensure all existing Git actions continue to operate on the selected workspace target inside the active project.
+- [x] Validate that project switching does not leak one project's target catalog into another's UI.
+- [x] Add tests for:
   - workspace target restoration per project
   - Git action scoping after project switch
   - branch/worktree selection isolation across projects
 
 ## Phase 7: Review View Project Isolation
 
-- [ ] Keep Review compare sources project-local.
-- [ ] Restore compare selections from per-project persisted state.
-- [ ] Ensure project switch recomputes compare sources from the active project's workspace targets and branches only.
-- [ ] Preserve existing worktree-aware Review behavior inside each project.
-- [ ] Add tests for:
+- [x] Keep Review compare sources project-local.
+- [x] Restore compare selections from per-project persisted state.
+- [x] Ensure project switch recomputes compare sources from the active project's workspace targets and branches only.
+- [x] Preserve existing worktree-aware Review behavior inside each project.
+- [x] Add tests for:
   - compare-selection persistence per project
   - compare-source isolation between projects
   - correct defaults after switching projects
 
 ## Phase 8: AI Project Sections
 
-- [ ] Replace the flat AI thread sidebar rendering with project sections.
-- [ ] Group threads by primary repo root, not exact cwd.
-- [ ] Sort sections with active project first, then stable deterministic order.
-- [ ] Cap visible threads per project section to 5.
-- [ ] Add `Show more` / `Show less` state per section.
-- [ ] Keep existing thread sort order inside each section.
-- [ ] Selecting a thread from another project section must:
+- [x] Replace the flat AI thread sidebar rendering with project sections.
+- [x] Group threads by primary repo root, not exact cwd.
+- [x] Sort sections with active project first, then stable deterministic order.
+- [x] Cap visible threads per project section to 5.
+- [x] Add `Show more` / `Show less` state per section.
+- [x] Keep existing thread sort order inside each section.
+- [x] Selecting a thread from another project section must:
   - activate that project
   - preserve thread cwd/worktree binding
   - update visible runtime state correctly
-- [ ] Ensure new AI drafts bind to the active project's current workspace target.
-- [ ] Add tests for:
+- [x] Ensure new AI drafts bind to the active project's current workspace target.
+- [x] Add tests for:
   - section grouping by project
   - worktree thread grouping under parent project
   - section capping
@@ -525,30 +525,30 @@ Mitigation:
 
 ## Phase 9: AI Catalog Refresh Across Workspace Projects
 
-- [ ] Extend AI catalog refresh input roots from active-project-only assumptions to all workspace projects and their workspace targets.
-- [ ] Keep refresh lightweight and catalog-only for inactive projects.
-- [ ] Prune AI project state when a project is removed from the workspace.
-- [ ] Make sure hidden runtimes and background thread state still behave correctly if the associated project is removed or re-added.
-- [ ] Add tests for:
+- [x] Extend AI catalog refresh input roots from active-project-only assumptions to all workspace projects and their workspace targets.
+- [x] Keep refresh lightweight and catalog-only for inactive projects.
+- [x] Prune AI project state when a project is removed from the workspace.
+- [x] Make sure hidden runtimes and background thread state still behave correctly if the associated project is removed or re-added.
+- [x] Add tests for:
   - catalog loading across multiple projects
   - pruning removed-project state
   - preserving active-project AI state on unrelated project removal
 
 ## Phase 10: Final Cleanup and Validation
 
-- [ ] Audit all `project_path` / `repo_root` assumptions in desktop controllers and renderers.
-- [ ] Remove dead single-project persistence code once migration is stable.
-- [ ] Normalize naming so "project", "workspace", and "workspace target" are not conflated in code or UI.
-- [ ] Update relevant docs to explain:
+- [x] Audit all `project_path` / `repo_root` assumptions in desktop controllers and renderers.
+- [x] Remove dead single-project persistence code once migration is stable.
+- [x] Normalize naming so "project", "workspace", and "workspace target" are not conflated in code or UI.
+- [x] Update relevant docs to explain:
   - workspace membership
   - project switching
   - AI section behavior
   - non-destructive project removal
-- [ ] Run final validation once at the end:
-- [ ] `./scripts/run_with_macos_sdk_env.sh cargo build --workspace`
-- [ ] `./scripts/run_with_macos_sdk_env.sh cargo clippy --workspace --all-targets -- -D warnings`
-- [ ] `./scripts/run_with_macos_sdk_env.sh cargo test --workspace`
-- [ ] Use `./scripts/resolve_cargo_target_dir.sh` or existing `just` recipes so all commands write to `target-shared`.
+- [x] Run final validation once at the end:
+- [x] `./scripts/run_with_macos_sdk_env.sh cargo build --workspace`
+- [x] `./scripts/run_with_macos_sdk_env.sh cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `./scripts/run_with_macos_sdk_env.sh cargo test --workspace`
+- [x] Use `./scripts/resolve_cargo_target_dir.sh` or existing `just` recipes so all commands write to `target-shared`.
 
 ## File and Module Impact
 
