@@ -1,6 +1,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AiGitProgressAction {
     CommitAndPush,
+    WorkspaceCommitAndPush,
     OpenPr,
     DeleteWorktree,
 }
@@ -8,7 +9,7 @@ pub(crate) enum AiGitProgressAction {
 impl AiGitProgressAction {
     pub(crate) const fn title(self) -> &'static str {
         match self {
-            Self::CommitAndPush => "Commit and Push",
+            Self::CommitAndPush | Self::WorkspaceCommitAndPush => "Commit and Push",
             Self::OpenPr => "Open PR",
             Self::DeleteWorktree => "Delete Worktree",
         }
@@ -17,6 +18,9 @@ impl AiGitProgressAction {
     pub(crate) const fn summary(self) -> &'static str {
         match self {
             Self::CommitAndPush => "Publishing the current AI thread to the active branch.",
+            Self::WorkspaceCommitAndPush => {
+                "Staging changed files, generating a commit message, creating a commit, and pushing the active branch."
+            }
             Self::OpenPr => "Publishing changes and opening the review in your browser.",
             Self::DeleteWorktree => {
                 "Archiving the thread, removing the managed worktree checkout, and cleaning up its AI state."
@@ -27,6 +31,7 @@ impl AiGitProgressAction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AiGitProgressStep {
+    StagingFiles,
     GeneratingBranchName,
     CreatingReviewBranch,
     GeneratingCommitMessage,
@@ -41,6 +46,7 @@ pub(crate) enum AiGitProgressStep {
 impl AiGitProgressStep {
     pub(crate) const fn label(self) -> &'static str {
         match self {
+            Self::StagingFiles => "Staging files...",
             Self::GeneratingBranchName => "Generating review branch name...",
             Self::CreatingReviewBranch => "Creating review branch...",
             Self::GeneratingCommitMessage => "Generating commit message...",
@@ -88,6 +94,15 @@ impl AiGitProgressState {
 
 pub(crate) fn ai_commit_and_push_progress_steps() -> Vec<AiGitProgressStep> {
     vec![
+        AiGitProgressStep::GeneratingCommitMessage,
+        AiGitProgressStep::CreatingCommit,
+        AiGitProgressStep::PushingBranch,
+    ]
+}
+
+pub(crate) fn workspace_commit_and_push_progress_steps() -> Vec<AiGitProgressStep> {
+    vec![
+        AiGitProgressStep::StagingFiles,
         AiGitProgressStep::GeneratingCommitMessage,
         AiGitProgressStep::CreatingCommit,
         AiGitProgressStep::PushingBranch,

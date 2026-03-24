@@ -109,6 +109,9 @@ impl DiffViewer {
             .when(show_loading_overlay, |this| {
                 this.child(render_git_workspace_loading_overlay(is_dark, cx))
             })
+            .when_some(self.ai_git_progress.clone(), |this, progress| {
+                this.child(render_ai_git_progress_overlay(&progress, is_dark, cx))
+            })
             .into_any_element()
     }
 

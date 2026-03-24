@@ -705,6 +705,14 @@ impl DiffViewer {
         let branch_name = self.git_workspace.branch_name.clone();
         let codex_executable = Self::resolve_codex_executable_path();
         let epoch = self.begin_git_action("Commit and Push", cx);
+        self.begin_ai_git_progress(
+            epoch,
+            AiGitProgressAction::WorkspaceCommitAndPush,
+            crate::app::ai_git_progress::workspace_commit_and_push_progress_steps(),
+            AiGitProgressStep::StagingFiles,
+            Some(format!("Files: {}", changed_paths.len())),
+            cx,
+        );
 
         self.spawn_ai_git_action_with_progress(
             epoch,
