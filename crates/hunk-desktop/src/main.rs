@@ -65,6 +65,7 @@ fn run_app() -> Result<()> {
         .without_time()
         .init();
 
+    log_linux_compositor_selection();
     install_process_signal_cleanup()?;
 
     app::run()
@@ -89,3 +90,23 @@ fn install_process_signal_cleanup() -> Result<()> {
     })
     .context("failed to install process signal cleanup handler")
 }
+
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+fn log_linux_compositor_selection() {
+    let has_wayland_display = std::env::var_os("WAYLAND_DISPLAY")
+        .as_ref()
+        .is_some_and(|display| !display.is_empty());
+    let has_x11_display = std::env::var_os("DISPLAY")
+        .as_ref()
+        .is_some_and(|display| !display.is_empty());
+
+    tracing::info!(
+        compositor = gpui::guess_compositor(),
+        has_wayland_display,
+        has_x11_display,
+        "delegating Linux compositor selection to GPUI"
+    );
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+fn log_linux_compositor_selection() {}
