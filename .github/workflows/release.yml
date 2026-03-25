@@ -128,8 +128,8 @@ jobs:
           if-no-files-found: error
 
   linux:
-    name: Linux x86_64 AppImage, DEB, RPM
-    runs-on: ubuntu-24.04
+    name: Linux x86_64 Tarball, DEB, RPM
+    runs-on: ubuntu-22.04
     timeout-minutes: 60
 
     steps:
@@ -192,17 +192,10 @@ jobs:
         shell: bash
 
       - name: Package Linux release artifacts
-        run: ./scripts/package_linux_release.sh --formats appimage,tarball,deb,rpm
+        run: ./scripts/package_linux_release_zed_like.sh --formats tarball,deb,rpm
         shell: bash
 
-      - name: Upload Linux AppImage release artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: hunk-linux-x86_64-appimage
-          path: ${{ env.CARGO_TARGET_DIR }}/dist/Hunk-${{ env.HUNK_RELEASE_VERSION }}-linux-x86_64.AppImage
-          if-no-files-found: error
-
-      - name: Upload Linux tarball fallback release artifact
+      - name: Upload Linux tarball release artifact
         uses: actions/upload-artifact@v7
         with:
           name: hunk-linux-x86_64-tarball
