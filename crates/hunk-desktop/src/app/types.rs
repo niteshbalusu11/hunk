@@ -367,14 +367,6 @@ impl AiPerfDurationStats {
         self.total_us = self.total_us.saturating_add(micros);
         self.max_us = self.max_us.max(micros);
     }
-
-    fn average_us(self) -> u64 {
-        if self.count == 0 {
-            0
-        } else {
-            self.total_us / u64::from(self.count)
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -397,12 +389,7 @@ enum AiPerfSidebarRowKind {
 #[derive(Debug, Clone, Default)]
 struct AiPerfWindow {
     app_render: AiPerfDurationStats,
-    toolbar_render: AiPerfDurationStats,
-    toolbar_prep: AiPerfDurationStats,
-    toolbar_left_render: AiPerfDurationStats,
-    toolbar_right_render: AiPerfDurationStats,
     footer_render: AiPerfDurationStats,
-    root_render: AiPerfDurationStats,
     visible_frame_build: AiPerfDurationStats,
     visible_frame_cache_hits: u32,
     visible_frame_invalidations: u32,
@@ -445,17 +432,10 @@ struct AiPerfWindow {
     markdown_render_char_count_total: u64,
 }
 
-#[derive(Debug, Clone, Default)]
-struct AiPerfReport {
-    elapsed_ms: u64,
-    window: AiPerfWindow,
-}
-
 #[derive(Debug, Clone)]
 struct AiPerfMetrics {
     window_started_at: Instant,
     window: AiPerfWindow,
-    last_report: AiPerfReport,
 }
 
 impl Default for AiPerfMetrics {
@@ -463,7 +443,6 @@ impl Default for AiPerfMetrics {
         Self {
             window_started_at: Instant::now(),
             window: AiPerfWindow::default(),
-            last_report: AiPerfReport::default(),
         }
     }
 }
