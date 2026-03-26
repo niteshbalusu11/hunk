@@ -748,7 +748,7 @@ fn workspace_codex_resolution_prefers_repo_asset_for_cargo_targets() {
         .expect("clock should be monotonic")
         .as_nanos();
     let root = std::env::temp_dir().join(format!("hunk-codex-workspace-runtime-{unique}"));
-    let exe_path = root.join("target-shared").join("debug").join("hunk");
+    let exe_path = root.join("target").join("debug").join("hunk");
     std::fs::create_dir_all(
         exe_path
             .parent()
@@ -784,7 +784,7 @@ fn workspace_codex_resolution_ignores_packaged_bundle_paths() {
         .as_nanos();
     let root = std::env::temp_dir().join(format!("hunk-codex-bundle-runtime-{unique}"));
     let exe_path = root
-        .join("target-shared")
+        .join("target")
         .join("packager")
         .join("Hunk.app")
         .join("Contents")

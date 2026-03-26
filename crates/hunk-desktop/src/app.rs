@@ -159,6 +159,7 @@ mod ai_bookmarks;
 mod ai_composer_commands;
 mod ai_composer_completion;
 mod ai_paths;
+mod ai_thread_catalog_scheduler;
 mod ai_thread_flow;
 mod branch_activation;
 mod branch_picker;

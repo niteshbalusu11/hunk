@@ -231,7 +231,7 @@ fn cargo_target_root_candidates(current_exe: &std::path::Path) -> Vec<std::path:
     current_exe
         .ancestors()
         .filter_map(|ancestor| match ancestor.file_name().and_then(|name| name.to_str()) {
-            Some("target" | "target-shared")
+            Some("target")
                 if current_exe_parent
                     .and_then(|parent| parent.file_name())
                     .and_then(|name| name.to_str())

@@ -1,5 +1,6 @@
 use crate::app::ai_runtime::AiWorkspaceThreadCatalog;
-use crate::app::ai_runtime::load_ai_workspace_thread_catalogs;
+use crate::app::ai_runtime::load_ai_workspace_thread_catalog;
+use crate::app::ai_thread_catalog_scheduler::AiWorkspaceCatalogLoadScheduler;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct AiWorkspaceCatalogInputs {
@@ -8,6 +9,8 @@ struct AiWorkspaceCatalogInputs {
 }
 
 impl DiffViewer {
+    const AI_THREAD_CATALOG_MAX_CONCURRENT_LOADS: usize = 4;
+
     pub(super) fn refresh_ai_repo_thread_catalog(&mut self, cx: &mut Context<Self>) {
         let visible_workspace_key = self.ai_workspace_key();
         let refresh_epoch = self.next_ai_thread_catalog_refresh_epoch();
@@ -34,73 +37,136 @@ impl DiffViewer {
 
         let visible_workspace_key_for_task = visible_workspace_key.clone();
         self.ai_thread_catalog_task = cx.spawn(async move |this, cx| {
-            let result = cx.background_executor().spawn(async move {
-                let catalog_inputs = collect_ai_workspace_catalog_inputs(
+            let catalog_inputs = cx.background_executor().spawn(async move {
+                collect_ai_workspace_catalog_inputs(
                     workspace_project_paths.as_slice(),
                     active_project_path.as_deref(),
                     active_workspace_targets.as_slice(),
                     visible_workspace_key_for_task.as_deref(),
-                );
-                if catalog_inputs.workspace_roots.is_empty() {
-                    return Ok((catalog_inputs, Vec::new()));
-                }
-                let Some(codex_home) = codex_home else {
-                    return Ok((catalog_inputs, Vec::new()));
-                };
-                let Some(codex_executable) = codex_executable else {
-                    return Ok((catalog_inputs, Vec::new()));
-                };
-
-                let catalogs = load_ai_workspace_thread_catalogs(
-                    catalog_inputs.workspace_roots.clone(),
-                    codex_executable,
-                    codex_home,
-                )?;
-                Ok((catalog_inputs, catalogs))
+                )
             });
-            let result: Result<
-                (AiWorkspaceCatalogInputs, Vec<AiWorkspaceThreadCatalog>),
-                hunk_codex::errors::CodexIntegrationError,
-            > = result.await;
+            let catalog_inputs = catalog_inputs.await;
 
+            let refresh_still_valid = std::rc::Rc::new(std::cell::Cell::new(true));
             if let Some(this) = this.upgrade() {
+                let expected_workspace_project_paths = expected_workspace_project_paths.clone();
+                let expected_active_workspace_keys = expected_active_workspace_keys.clone();
+                let visible_workspace_key = visible_workspace_key.clone();
+                let known_workspace_keys = catalog_inputs.known_workspace_keys.clone();
+                let refresh_still_valid_flag = refresh_still_valid.clone();
                 this.update(cx, move |this, cx| {
-                    if this.ai_thread_catalog_refresh_epoch != refresh_epoch {
-                        return;
-                    }
-                    if ai_workspace_project_roots(
-                        this.state.workspace_project_paths.as_slice(),
-                        this.project_path.as_deref(),
-                        this.repo_root.as_deref(),
-                    ) != expected_workspace_project_paths
-                    {
-                        return;
-                    }
-                    if ai_known_workspace_keys(this.workspace_targets.as_slice())
-                        != expected_active_workspace_keys
-                    {
-                        return;
-                    }
-                    if this.ai_workspace_key() != visible_workspace_key
-                    {
+                    if !this.ai_thread_catalog_refresh_still_valid(
+                        refresh_epoch,
+                        expected_workspace_project_paths.as_slice(),
+                        &expected_active_workspace_keys,
+                        visible_workspace_key.as_deref(),
+                    ) {
+                        refresh_still_valid_flag.set(false);
                         return;
                     }
 
-                    match result {
-                        Ok((catalog_inputs, catalogs)) => {
-                            this.prune_ai_workspace_states_for_thread_catalog(
-                                &catalog_inputs.known_workspace_keys,
+                    if this.prune_ai_workspace_states_for_thread_catalog(
+                        &known_workspace_keys,
+                        visible_workspace_key.as_deref(),
+                        cx,
+                    ) {
+                        this.invalidate_ai_visible_frame_state_with_reason("catalog");
+                        this.rebuild_ai_thread_sidebar_state();
+                    }
+                    cx.notify();
+                });
+            } else {
+                return;
+            }
+
+            if !refresh_still_valid.get() {
+                return;
+            }
+
+            if catalog_inputs.workspace_roots.is_empty() {
+                return;
+            }
+            let Some(codex_home) = codex_home else {
+                return;
+            };
+            let Some(codex_executable) = codex_executable else {
+                return;
+            };
+
+            let (result_tx, mut result_rx) =
+                mpsc::unbounded::<AiWorkspaceThreadCatalogLoadResult>();
+            let mut load_scheduler = AiWorkspaceCatalogLoadScheduler::new(
+                catalog_inputs.workspace_roots,
+                Self::AI_THREAD_CATALOG_MAX_CONCURRENT_LOADS,
+            );
+            let background_executor = cx.background_executor().clone();
+            let spawn_catalog_load = |workspace_root: std::path::PathBuf| {
+                let result_tx = result_tx.clone();
+                let codex_executable = codex_executable.clone();
+                let codex_home = codex_home.clone();
+                background_executor
+                    .clone()
+                    .spawn(async move {
+                        let workspace_key = workspace_root.to_string_lossy().to_string();
+                        let result = load_ai_workspace_thread_catalog(
+                            workspace_root,
+                            codex_executable,
+                            codex_home,
+                        );
+                        let _ = result_tx.unbounded_send(AiWorkspaceThreadCatalogLoadResult {
+                            workspace_key,
+                            result,
+                        });
+                    })
+                    .detach();
+            };
+
+            for workspace_root in load_scheduler.start_ready_loads() {
+                spawn_catalog_load(workspace_root);
+            }
+
+            while load_scheduler.has_in_flight_loads() {
+                let Some(load_result) = result_rx.next().await else {
+                    break;
+                };
+
+                for workspace_root in load_scheduler.finish_one_and_start_ready_loads() {
+                    spawn_catalog_load(workspace_root);
+                }
+
+                let Some(this) = this.upgrade() else {
+                    return;
+                };
+                let expected_workspace_project_paths = expected_workspace_project_paths.clone();
+                let expected_active_workspace_keys = expected_active_workspace_keys.clone();
+                let visible_workspace_key = visible_workspace_key.clone();
+                this.update(cx, move |this, cx| {
+                    if !this.ai_thread_catalog_refresh_still_valid(
+                        refresh_epoch,
+                        expected_workspace_project_paths.as_slice(),
+                        &expected_active_workspace_keys,
+                        visible_workspace_key.as_deref(),
+                    ) {
+                        return;
+                    }
+
+                    match load_result.result {
+                        Ok(Some(catalog)) => {
+                            if this.apply_ai_repo_thread_catalog(
+                                catalog,
                                 visible_workspace_key.as_deref(),
-                                cx,
-                            );
-                            this.apply_ai_repo_thread_catalogs(
-                                catalogs,
-                                visible_workspace_key.as_deref(),
-                            );
+                            ) {
+                                this.invalidate_ai_visible_frame_state_with_reason("catalog");
+                                this.rebuild_ai_thread_sidebar_state();
+                            }
                             cx.notify();
                         }
+                        Ok(None) => {}
                         Err(error) => {
-                            debug!("failed to refresh workspace-wide AI thread catalog: {error:#}");
+                            debug!(
+                                "failed to refresh AI thread catalog for {}: {error:#}",
+                                load_result.workspace_key
+                            );
                         }
                     }
                 });
@@ -120,32 +186,56 @@ impl DiffViewer {
         self.ai_thread_catalog_task = Task::ready(());
     }
 
-    fn apply_ai_repo_thread_catalogs(
-        &mut self,
-        catalogs: Vec<AiWorkspaceThreadCatalog>,
+    fn ai_thread_catalog_refresh_still_valid(
+        &self,
+        refresh_epoch: usize,
+        expected_workspace_project_paths: &[std::path::PathBuf],
+        expected_active_workspace_keys: &std::collections::BTreeSet<String>,
         visible_workspace_key: Option<&str>,
-    ) {
-        for catalog in catalogs {
-            if visible_workspace_key == Some(catalog.workspace_key.as_str()) {
-                continue;
-            }
-            if self
-                .ai_hidden_runtimes
-                .contains_key(catalog.workspace_key.as_str())
-            {
-                continue;
-            }
-
-            let workspace_key = catalog.workspace_key.clone();
-            let mut state = self
-                .ai_workspace_states
-                .remove(workspace_key.as_str())
-                .unwrap_or_else(|| {
-                    self.default_ai_workspace_state_for_workspace_key(Some(workspace_key.as_str()))
-                });
-            apply_ai_thread_catalog_to_workspace_state(&mut state, catalog);
-            self.ai_workspace_states.insert(workspace_key, state);
+    ) -> bool {
+        if self.ai_thread_catalog_refresh_epoch != refresh_epoch {
+            return false;
         }
+        if ai_workspace_project_roots(
+            self.state.workspace_project_paths.as_slice(),
+            self.project_path.as_deref(),
+            self.repo_root.as_deref(),
+        ) != expected_workspace_project_paths
+        {
+            return false;
+        }
+        if ai_known_workspace_keys(self.workspace_targets.as_slice()) != *expected_active_workspace_keys
+        {
+            return false;
+        }
+        self.ai_workspace_key().as_deref() == visible_workspace_key
+    }
+
+    fn apply_ai_repo_thread_catalog(
+        &mut self,
+        catalog: AiWorkspaceThreadCatalog,
+        visible_workspace_key: Option<&str>,
+    ) -> bool {
+        if visible_workspace_key == Some(catalog.workspace_key.as_str()) {
+            return false;
+        }
+        if self
+            .ai_hidden_runtimes
+            .contains_key(catalog.workspace_key.as_str())
+        {
+            return false;
+        }
+
+        let workspace_key = catalog.workspace_key.clone();
+        let mut state = self
+            .ai_workspace_states
+            .remove(workspace_key.as_str())
+            .unwrap_or_else(|| {
+                self.default_ai_workspace_state_for_workspace_key(Some(workspace_key.as_str()))
+            });
+        apply_ai_thread_catalog_to_workspace_state(&mut state, catalog);
+        self.ai_workspace_states.insert(workspace_key, state);
+        true
     }
 
     fn prune_ai_workspace_states_for_thread_catalog(
@@ -153,7 +243,7 @@ impl DiffViewer {
         known_workspace_keys: &std::collections::BTreeSet<String>,
         visible_workspace_key: Option<&str>,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let removable_workspace_keys = self
             .ai_workspace_states
             .keys()
@@ -164,11 +254,22 @@ impl DiffViewer {
             .cloned()
             .collect::<Vec<_>>();
 
+        if removable_workspace_keys.is_empty() {
+            return false;
+        }
+
         for workspace_key in removable_workspace_keys {
             self.shutdown_ai_runtime_for_workspace_blocking(workspace_key.as_str());
             self.ai_forget_deleted_workspace_state(workspace_key.as_str(), cx);
         }
+        true
     }
+}
+
+#[derive(Debug)]
+struct AiWorkspaceThreadCatalogLoadResult {
+    workspace_key: String,
+    result: Result<Option<AiWorkspaceThreadCatalog>, hunk_codex::errors::CodexIntegrationError>,
 }
 
 fn ai_known_workspace_keys(

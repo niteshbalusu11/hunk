@@ -457,10 +457,10 @@ fn load_visible_repo_file_paths_skips_nested_repo_contents() -> Result<()> {
 #[test]
 fn workflow_snapshot_skips_nested_repo_contents_inside_ignored_directories() -> Result<()> {
     let fixture = TempGitRepo::new()?;
-    fixture.write_file(".gitignore", "target-shared/\n")?;
+    fixture.write_file(".gitignore", "target/\n")?;
     fixture.commit_all("initial")?;
 
-    let nested_root = fixture.root().join("target-shared/cache/repo");
+    let nested_root = fixture.root().join("target/cache/repo");
     fs::create_dir_all(nested_root.join("src"))?;
     let nested_repo = Repository::init(nested_root.as_path())?;
     drop(nested_repo);
@@ -471,12 +471,12 @@ fn workflow_snapshot_skips_nested_repo_contents_inside_ignored_directories() -> 
 
     assert!(workflow.files.is_empty());
     assert!(entries.iter().any(|entry| {
-        entry.path == "target-shared" && entry.kind == RepoTreeEntryKind::Directory && entry.ignored
+        entry.path == "target" && entry.kind == RepoTreeEntryKind::Directory && entry.ignored
     }));
     assert!(
         entries
             .iter()
-            .all(|entry| !entry.path.starts_with("target-shared/cache"))
+            .all(|entry| !entry.path.starts_with("target/cache"))
     );
 
     Ok(())

@@ -5,13 +5,13 @@ pub struct AiWorkspaceThreadCatalog {
     pub active_thread_id: Option<String>,
 }
 
-pub fn load_ai_workspace_thread_catalogs(
-    workspace_roots: Vec<PathBuf>,
+pub fn load_ai_workspace_thread_catalog(
+    workspace_root: PathBuf,
     codex_executable: PathBuf,
     codex_home: PathBuf,
-) -> Result<Vec<AiWorkspaceThreadCatalog>, CodexIntegrationError> {
-    if workspace_roots.is_empty() {
-        return Ok(Vec::new());
+) -> Result<Option<AiWorkspaceThreadCatalog>, CodexIntegrationError> {
+    if !workspace_root_exists_for_catalog(workspace_root.as_path()) {
+        return Ok(None);
     }
 
     std::fs::create_dir_all(&codex_home).map_err(CodexIntegrationError::HostProcessIo)?;
@@ -19,13 +19,13 @@ pub fn load_ai_workspace_thread_catalogs(
     let mut last_retryable_error = None;
     for _attempt in 0..HOST_BOOTSTRAP_MAX_ATTEMPTS {
         let port = allocate_loopback_port();
-        match load_ai_workspace_thread_catalogs_on_port(
-            workspace_roots.as_slice(),
+        match load_ai_workspace_thread_catalog_on_port(
+            workspace_root.as_path(),
             codex_executable.as_path(),
             codex_home.as_path(),
             port,
         ) {
-            Ok(catalogs) => return Ok(catalogs),
+            Ok(catalog) => return Ok(catalog),
             Err(error) if should_retry_bootstrap_with_new_port(&error) => {
                 last_retryable_error = Some(error);
             }
@@ -139,19 +139,15 @@ fn workspace_thread_is_archived(service: &ThreadService, thread_id: &str) -> boo
         .is_some_and(|thread| thread.status == ThreadLifecycleStatus::Archived)
 }
 
-fn load_ai_workspace_thread_catalogs_on_port(
-    workspace_roots: &[PathBuf],
+fn load_ai_workspace_thread_catalog_on_port(
+    workspace_root: &std::path::Path,
     codex_executable: &std::path::Path,
     codex_home: &std::path::Path,
     port: u16,
-) -> Result<Vec<AiWorkspaceThreadCatalog>, CodexIntegrationError> {
-    let host_working_directory = workspace_roots
-        .first()
-        .cloned()
-        .expect("workspace roots should be present");
+) -> Result<Option<AiWorkspaceThreadCatalog>, CodexIntegrationError> {
     let host_config = HostConfig::codex_app_server(
         codex_executable.to_path_buf(),
-        shared_ai_host_working_directory(host_working_directory.as_path()),
+        shared_ai_host_working_directory(workspace_root),
         codex_home.to_path_buf(),
         port,
     );
@@ -161,39 +157,25 @@ fn load_ai_workspace_thread_catalogs_on_port(
         let endpoint = WebSocketEndpoint::loopback(host.port());
         let mut session = JsonRpcSession::connect(&endpoint)?;
         session.initialize(InitializeOptions::default(), DEFAULT_REQUEST_TIMEOUT)?;
-        let mut catalogs = Vec::with_capacity(workspace_roots.len());
-        for workspace_root in workspace_roots {
-            if !workspace_root_exists_for_catalog(workspace_root.as_path()) {
-                continue;
-            }
-            let mut service = ThreadService::new(workspace_root.clone());
-            let response = match service.list_threads(
-                &mut session,
-                None,
-                Some(200),
-                DEFAULT_REQUEST_TIMEOUT,
-            ) {
-                Ok(response) => response,
-                Err(_) => continue,
-            };
-            let workspace_key = workspace_root.to_string_lossy().to_string();
 
-            if service.active_thread_for_workspace().is_none()
-                && let Some(first_thread) = response.data.first()
-            {
-                service
-                    .state_mut()
-                    .set_active_thread_for_cwd(workspace_key.clone(), first_thread.id.clone());
-            }
+        let workspace_root = workspace_root.to_path_buf();
+        let mut service = ThreadService::new(workspace_root.clone());
+        let response = service.list_threads(&mut session, None, Some(200), DEFAULT_REQUEST_TIMEOUT)?;
+        let workspace_key = workspace_root.to_string_lossy().to_string();
 
-            catalogs.push(AiWorkspaceThreadCatalog {
-                workspace_key,
-                state_snapshot: service.state().clone(),
-                active_thread_id: service.active_thread_for_workspace().map(ToOwned::to_owned),
-            });
+        if service.active_thread_for_workspace().is_none()
+            && let Some(first_thread) = response.data.first()
+        {
+            service
+                .state_mut()
+                .set_active_thread_for_cwd(workspace_key.clone(), first_thread.id.clone());
         }
 
-        Ok(catalogs)
+        Ok(Some(AiWorkspaceThreadCatalog {
+            workspace_key,
+            state_snapshot: service.state().clone(),
+            active_thread_id: service.active_thread_for_workspace().map(ToOwned::to_owned),
+        }))
     })()
 }
 

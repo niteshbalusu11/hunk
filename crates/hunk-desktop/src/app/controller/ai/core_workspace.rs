@@ -1248,20 +1248,20 @@ fn cached_workspace_branch_name_for_root(
     workspace_root: &std::path::Path,
     workflow_cache_by_repo: &std::collections::BTreeMap<String, CachedWorkflowState>,
 ) -> Option<String> {
-    let project_root = hunk_git::worktree::primary_repo_root(workspace_root).ok()?;
-    let project_key = project_root.to_string_lossy().to_string();
-    let workflow = workflow_cache_by_repo.get(project_key.as_str())?;
-
-    workflow
-        .branches
-        .iter()
-        .find(|branch| branch.attached_workspace_target_root.as_deref() == Some(workspace_root))
-        .map(|branch| branch.name.clone())
-        .or_else(|| {
-            (workspace_root == project_root.as_path())
-                .then(|| workflow.branch_name.trim())
-                .filter(|branch_name| !branch_name.is_empty())
-                .map(str::to_string)
+    workflow_cache_by_repo.iter().find_map(|(project_key, workflow)| {
+        workflow
+            .branches
+            .iter()
+            .find(|branch| branch.attached_workspace_target_root.as_deref() == Some(workspace_root))
+            .map(|branch| branch.name.clone())
+            .or_else(|| {
+                let is_primary_root = workflow.root.as_deref() == Some(workspace_root)
+                    || std::path::Path::new(project_key.as_str()) == workspace_root;
+                is_primary_root
+                    .then(|| workflow.branch_name.trim())
+                    .filter(|branch_name| !branch_name.is_empty())
+                    .map(str::to_string)
+            })
         })
 }
 
