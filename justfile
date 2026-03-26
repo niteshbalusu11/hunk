@@ -51,22 +51,19 @@ package-macos-release:
     ./scripts/package_macos_release.sh
 
 package-linux-release:
-    ./scripts/package_linux_release.sh
-
-package-linux-appimage-release:
-    ./scripts/package_linux_release.sh --formats appimage,tarball
+    ./scripts/package_linux_release_zed_like.sh --formats tarball,deb,rpm
 
 package-linux-deb-release:
-    ./scripts/package_linux_release.sh --formats deb
+    ./scripts/package_linux_release_zed_like.sh --formats deb
 
 package-linux-rpm-release:
-    ./scripts/package_linux_release.sh --formats rpm
+    ./scripts/package_linux_release_zed_like.sh --formats rpm
 
 install-linux-packaging-deps-ubuntu:
     ./scripts/install_linux_packaging_deps_ubuntu.sh
 
 install-linux-deb-local:
-    sudo apt-get install -y "$(./scripts/package_linux_release.sh --formats deb | tail -n 1)"
+    sudo apt-get install -y "$(./scripts/package_linux_release_zed_like.sh --formats deb | tail -n 1)"
 
 smoke-test-linux-deb:
     ./scripts/smoke_test_linux_system_package.sh deb

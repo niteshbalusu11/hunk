@@ -25,12 +25,6 @@ DIST_DIR="$TARGET_DIR/dist"
 ARCH_LABEL=""
 PACKAGE_DIR=""
 ARCHIVE_PATH=""
-APPIMAGE_PATH=""
-APPDIR_PATH=""
-APP_DESKTOP_ENTRY_PATH=""
-APP_ICON_PATH=""
-APPDIR_REAL_BINARY_PATH=""
-APPDIR_LAUNCHER_PATH=""
 SYSTEM_INSTALL_ROOT=""
 SYSTEM_BIN_DIR=""
 SYSTEM_LIB_DIR=""
@@ -56,26 +50,12 @@ RPM_VERSION=""
 RPM_PATH=""
 BINARY_SOURCE_PATH=""
 REAL_BINARY_NAME="hunk_desktop_bin"
-LAUNCHER_SOURCE_PATH="$ROOT_DIR/scripts/linux_gui_binary_launcher.sh"
 LINUX_ICON_SOURCE_PATH="$ROOT_DIR/assets/icons/hunk_linux_512.png"
 PACKAGED_BINARY_PATH=""
 PACKAGED_LAUNCHER_PATH=""
 PACKAGE_LIB_DIR=""
 CODEX_SOURCE_PATH=""
 PACKAGED_CODEX_PATH=""
-APPIMAGE_TOOL_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/hunk-appimage-tools"
-APPIMAGE_APPRUN_PATH="$APPIMAGE_TOOL_CACHE_DIR/AppRun-x86_64"
-APPIMAGE_PLUGIN_PATH="$APPIMAGE_TOOL_CACHE_DIR/linuxdeploy-plugin-appimage.AppImage"
-APPIMAGE_TOOL_EXTRACT_DIR=""
-APPIMAGE_TOOL_PATH=""
-EXTRA_LINUX_RUNTIME_LIBS=(
-  "libX11.so.6"
-  "libEGL.so.1"
-  "libvulkan.so.1"
-  "libwayland-client.so.0"
-  "libwayland-cursor.so.0"
-  "libwayland-egl.so.1"
-)
 
 linux_target_arch() {
   printf '%s\n' "${TARGET_TRIPLE%%-*}"
@@ -151,12 +131,6 @@ init_linux_release_paths() {
   ARCH_LABEL="$(linux_dist_arch_label)"
   PACKAGE_DIR="$WORK_DIR/tarball/${PRODUCT_NAME}-${VERSION_LABEL}-linux-$ARCH_LABEL"
   ARCHIVE_PATH="$DIST_DIR/${PRODUCT_NAME}-${VERSION_LABEL}-linux-$ARCH_LABEL.tar.gz"
-  APPIMAGE_PATH="$DIST_DIR/${PRODUCT_NAME}-${VERSION_LABEL}-linux-$ARCH_LABEL.AppImage"
-  APPDIR_PATH="$WORK_DIR/appimage/${PRODUCT_NAME}.AppDir"
-  APP_DESKTOP_ENTRY_PATH="$APPDIR_PATH/usr/share/applications/hunk_desktop.desktop"
-  APP_ICON_PATH="$APPDIR_PATH/usr/share/icons/hicolor/512x512/apps/hunk_desktop.png"
-  APPDIR_REAL_BINARY_PATH="$APPDIR_PATH/usr/bin/$REAL_BINARY_NAME"
-  APPDIR_LAUNCHER_PATH="$APPDIR_PATH/usr/bin/hunk_desktop"
   SYSTEM_INSTALL_ROOT="$WORK_DIR/system-root"
   SYSTEM_BIN_DIR="$SYSTEM_INSTALL_ROOT/usr/bin"
   SYSTEM_LIB_DIR="$SYSTEM_INSTALL_ROOT/usr/lib/$PACKAGE_NAME"
@@ -186,99 +160,12 @@ init_linux_release_paths() {
   PACKAGE_LIB_DIR="$PACKAGE_DIR/lib"
   CODEX_SOURCE_PATH="$TARGET_DIR/$TARGET_TRIPLE/release/codex-runtime/linux/codex"
   PACKAGED_CODEX_PATH="$PACKAGE_DIR/codex-runtime/linux/codex"
-  APPIMAGE_TOOL_EXTRACT_DIR="$WORK_DIR/appimage/tooling"
-  APPIMAGE_TOOL_PATH="$APPIMAGE_TOOL_EXTRACT_DIR/squashfs-root/usr/bin/appimagetool"
 }
 
 require_linux_tool() {
   local tool_name="$1"
   if ! command -v "$tool_name" >/dev/null 2>&1; then
     echo "error: required Linux packaging tool '$tool_name' is not installed" >&2
-    exit 1
-  fi
-}
-
-find_linux_library_path_by_name() {
-  local library_name="$1"
-  local search_path_var
-
-  for search_path_var in "${LD_LIBRARY_PATH:-}" "${LIBRARY_PATH:-}"; do
-    [[ -n "$search_path_var" ]] || continue
-
-    local search_dir
-    while IFS= read -r search_dir; do
-      [[ -n "$search_dir" && -d "$search_dir" ]] || continue
-
-      local candidate_path="$search_dir/$library_name"
-      if [[ -f "$candidate_path" ]]; then
-        printf '%s\n' "$candidate_path"
-        return 0
-      fi
-    done < <(tr ':' '\n' <<<"$search_path_var")
-  done
-
-  if command -v ldconfig >/dev/null 2>&1; then
-    local ldconfig_path
-    ldconfig_path="$(
-      ldconfig -p 2>/dev/null \
-        | awk -v name="$library_name" '$1 == name { print $NF; exit }'
-    )"
-    if [[ -n "$ldconfig_path" && -f "$ldconfig_path" ]]; then
-      printf '%s\n' "$ldconfig_path"
-      return 0
-    fi
-  fi
-
-  local search_root
-  for search_root in /lib /usr/lib /usr/lib64 /usr/local/lib /nix/store; do
-    [[ -d "$search_root" ]] || continue
-    local match
-    match="$(find "$search_root" -path "*/$library_name" -type f 2>/dev/null | head -n 1)"
-    if [[ -n "$match" ]]; then
-      printf '%s\n' "$match"
-      return 0
-    fi
-  done
-
-  return 1
-}
-
-download_cached_appimage_tool() {
-  local url="$1"
-  local destination="$2"
-  local tmp_path
-
-  mkdir -p "$(dirname "$destination")"
-  tmp_path="$(mktemp "${destination}.XXXXXX")"
-  curl --fail --location --retry 3 --retry-delay 1 --output "$tmp_path" "$url"
-  chmod 755 "$tmp_path"
-  mv "$tmp_path" "$destination"
-}
-
-ensure_appimage_tooling() {
-  if [[ ! -f "$APPIMAGE_APPRUN_PATH" ]]; then
-    echo "Downloading AppRun helper..." >&2
-    download_cached_appimage_tool \
-      "https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64" \
-      "$APPIMAGE_APPRUN_PATH"
-  fi
-
-  if [[ ! -f "$APPIMAGE_PLUGIN_PATH" ]]; then
-    echo "Downloading appimagetool bundle..." >&2
-    download_cached_appimage_tool \
-      "https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage" \
-      "$APPIMAGE_PLUGIN_PATH"
-  fi
-
-  rm -rf "$APPIMAGE_TOOL_EXTRACT_DIR"
-  mkdir -p "$APPIMAGE_TOOL_EXTRACT_DIR"
-  (
-    cd "$APPIMAGE_TOOL_EXTRACT_DIR"
-    "$APPIMAGE_PLUGIN_PATH" --appimage-extract >/dev/null
-  )
-
-  if [[ ! -x "$APPIMAGE_TOOL_PATH" ]]; then
-    echo "error: expected appimagetool at $APPIMAGE_TOOL_PATH" >&2
     exit 1
   fi
 }
@@ -368,28 +255,6 @@ bundle_linux_runtime_dependencies() {
   done
 }
 
-bundle_linux_extra_runtime_libraries() {
-  local destination_dir="$1"
-  local library_name
-
-  for library_name in "${EXTRA_LINUX_RUNTIME_LIBS[@]}"; do
-    if [[ -f "$destination_dir/$library_name" ]]; then
-      continue
-    fi
-
-    local source_path
-    source_path="$(find_linux_library_path_by_name "$library_name" || true)"
-    if [[ -z "$source_path" ]]; then
-      echo "warning: optional Linux runtime library '$library_name' was not found on this host" >&2
-      continue
-    fi
-
-    echo "Bundling extra Linux runtime library $library_name from $source_path" >&2
-    cp -L "$source_path" "$destination_dir/$library_name"
-    chmod 755 "$destination_dir/$library_name"
-    bundle_linux_runtime_dependencies "$source_path" "$destination_dir"
-  done
-}
 patch_linux_runtime_paths() {
   local binary_path="$1"
   local libs_dir="$2"
@@ -430,72 +295,6 @@ prepare_linux_release_build_inputs() {
     export CARGO_TARGET_DIR="$TARGET_DIR"
     "$ROOT_DIR/scripts/build_linux.sh" --target "$TARGET_TRIPLE"
   )
-}
-
-prepare_linux_release_bundle() {
-  prepare_linux_release_build_inputs
-
-  rm -rf "$PACKAGE_DIR"
-  mkdir -p "$PACKAGE_DIR/codex-runtime/linux" "$PACKAGE_LIB_DIR" "$DIST_DIR"
-
-  cp "$BINARY_SOURCE_PATH" "$PACKAGED_BINARY_PATH"
-  cp "$LAUNCHER_SOURCE_PATH" "$PACKAGED_LAUNCHER_PATH"
-  cp "$CODEX_SOURCE_PATH" "$PACKAGED_CODEX_PATH"
-  chmod +x "$PACKAGED_BINARY_PATH" "$PACKAGED_LAUNCHER_PATH" "$PACKAGED_CODEX_PATH"
-
-  echo "Bundling Linux shared libraries into release bundle..." >&2
-  bundle_linux_runtime_dependencies "$BINARY_SOURCE_PATH" "$PACKAGE_LIB_DIR"
-  bundle_linux_extra_runtime_libraries "$PACKAGE_LIB_DIR"
-  patch_linux_runtime_paths "$PACKAGED_BINARY_PATH" "$PACKAGE_LIB_DIR" '$ORIGIN/lib'
-  validate_linux_runtime_bundle "$PACKAGED_BINARY_PATH" "$PACKAGE_LIB_DIR"
-  "$ROOT_DIR/scripts/validate_release_bundle_layout.sh" linux-package "$PACKAGE_DIR"
-}
-
-create_linux_appdir() {
-  rm -rf "$APPDIR_PATH"
-  mkdir -p "$APPDIR_PATH/usr/bin"
-  mkdir -p "$APPDIR_PATH/usr/lib"
-  mkdir -p "$APPDIR_PATH/usr/share/applications"
-  mkdir -p "$APPDIR_PATH/usr/share/icons/hicolor/512x512/apps"
-  mkdir -p "$APPDIR_PATH/usr/lib/hunk_desktop/codex-runtime/linux"
-
-  cp "$APPIMAGE_APPRUN_PATH" "$APPDIR_PATH/AppRun"
-  cp "$PACKAGED_BINARY_PATH" "$APPDIR_REAL_BINARY_PATH"
-  cp "$PACKAGED_LAUNCHER_PATH" "$APPDIR_LAUNCHER_PATH"
-  cp -R "$PACKAGE_LIB_DIR/." "$APPDIR_PATH/usr/lib/"
-  cp "$PACKAGED_CODEX_PATH" "$APPDIR_PATH/usr/lib/hunk_desktop/codex-runtime/linux/codex"
-  chmod +x "$APPDIR_PATH/AppRun" "$APPDIR_REAL_BINARY_PATH" "$APPDIR_LAUNCHER_PATH" \
-    "$APPDIR_PATH/usr/lib/hunk_desktop/codex-runtime/linux/codex"
-
-  patch_linux_runtime_paths "$APPDIR_REAL_BINARY_PATH" "$APPDIR_PATH/usr/lib" '$ORIGIN/../lib'
-  validate_linux_runtime_bundle "$APPDIR_REAL_BINARY_PATH" "$APPDIR_PATH/usr/lib"
-  "$ROOT_DIR/scripts/validate_release_bundle_layout.sh" linux-appdir "$APPDIR_PATH"
-
-  cat >"$APP_DESKTOP_ENTRY_PATH" <<'EOF'
-[Desktop Entry]
-Categories=Development;
-Comment=Very fast git diff viewer and codex orchestrator.
-Exec=hunk_desktop
-Icon=hunk_desktop
-Name=Hunk
-StartupNotify=true
-StartupWMClass=hunk_desktop
-Terminal=false
-Type=Application
-EOF
-
-  cp "$LINUX_ICON_SOURCE_PATH" "$APP_ICON_PATH"
-  cp "$LINUX_ICON_SOURCE_PATH" "$APPDIR_PATH/.DirIcon"
-  cp "$LINUX_ICON_SOURCE_PATH" "$APPDIR_PATH/hunk_desktop.png"
-  ln -sf "usr/share/applications/hunk_desktop.desktop" "$APPDIR_PATH/hunk_desktop.desktop"
-}
-
-build_linux_appimage() {
-  ensure_appimage_tooling
-  create_linux_appdir
-
-  ARCH=x86_64 "$APPIMAGE_TOOL_PATH" "$APPDIR_PATH" "$APPIMAGE_PATH"
-  chmod +x "$APPIMAGE_PATH"
 }
 
 write_linux_system_wrapper() {

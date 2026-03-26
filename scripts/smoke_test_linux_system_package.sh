@@ -99,7 +99,7 @@ case "$format" in
     package_path="${package_path:-$DEB_PATH}"
     if [[ ! -f "$package_path" ]]; then
       echo "error: Debian package not found at $package_path" >&2
-      echo "hint: run ./scripts/package_linux_release.sh --formats deb first" >&2
+      echo "hint: run ./scripts/package_linux_release_zed_like.sh --formats deb first" >&2
       exit 1
     fi
     run_deb_smoke_test "$package_path" "$runner"
@@ -108,7 +108,7 @@ case "$format" in
     package_path="${package_path:-$RPM_PATH}"
     if [[ ! -f "$package_path" ]]; then
       echo "error: RPM package not found at $package_path" >&2
-      echo "hint: run ./scripts/package_linux_release.sh --formats rpm first" >&2
+      echo "hint: run ./scripts/package_linux_release_zed_like.sh --formats rpm first" >&2
       exit 1
     fi
     run_rpm_smoke_test "$package_path" "$runner"

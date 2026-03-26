@@ -6,7 +6,7 @@ usage() {
 Validate packaged release bundle layouts.
 
 Usage:
-  ./scripts/validate_release_bundle_layout.sh <macos-app|linux-package|linux-appdir|linux-install-root> <path>
+  ./scripts/validate_release_bundle_layout.sh <macos-app|linux-package|linux-install-root> <path>
 EOF
 }
 
@@ -63,19 +63,6 @@ validate_linux_package() {
   forbid_helix_paths "$package_path"
 }
 
-validate_linux_appdir() {
-  local appdir_path="$1"
-
-  require_executable "$appdir_path/AppRun" "AppImage AppRun launcher"
-  require_executable "$appdir_path/usr/bin/hunk_desktop_bin" "AppImage binary"
-  require_executable "$appdir_path/usr/bin/hunk_desktop" "AppImage launcher"
-  require_executable \
-    "$appdir_path/usr/lib/hunk_desktop/codex-runtime/linux/codex" \
-    "AppImage bundled Codex runtime"
-  require_path "$appdir_path/usr/lib" "AppImage shared library directory"
-  forbid_helix_paths "$appdir_path"
-}
-
 validate_linux_install_root() {
   local install_root="$1"
 
@@ -107,9 +94,6 @@ case "$mode" in
     ;;
   linux-package)
     validate_linux_package "$bundle_path"
-    ;;
-  linux-appdir)
-    validate_linux_appdir "$bundle_path"
     ;;
   linux-install-root)
     validate_linux_install_root "$bundle_path"
