@@ -1345,6 +1345,7 @@ struct DiffViewer {
     repo_tree: RepoTreeState,
     repo_tree_inline_edit: Option<RepoTreeInlineEditState>,
     repo_tree_context_menu: Option<RepoTreeContextMenuState>,
+    workspace_text_context_menu: Option<WorkspaceTextContextMenuState>,
     file_editor_tabs: Vec<FileEditorTab>,
     active_file_editor_tab_id: Option<usize>,
     next_file_editor_tab_id: usize,

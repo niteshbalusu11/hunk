@@ -763,7 +763,10 @@ impl DiffViewer {
         let rendered_blocks = self
             .editor_markdown_preview_blocks
             .iter()
-            .map(|block| self.render_markdown_preview_block(view.clone(), block, is_dark, cx))
+            .enumerate()
+            .map(|(block_ix, block)| {
+                self.render_markdown_preview_block(view.clone(), block_ix, block, is_dark, cx)
+            })
             .collect::<Vec<_>>();
         let mut preview = div().flex_1().size_full().min_h_0().p_2().child(
             div()
@@ -793,11 +796,12 @@ impl DiffViewer {
     fn render_markdown_preview_block(
         &self,
         view: Entity<Self>,
+        block_ix: usize,
         block: &MarkdownPreviewBlock,
         is_dark: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        match block {
+        let element = match block {
             MarkdownPreviewBlock::Heading { level, spans } => {
                 let heading = match level {
                     1 | 2 => self.render_markdown_inline_spans(
@@ -960,6 +964,106 @@ impl DiffViewer {
                 .w_full()
                 .bg(hunk_opacity(cx.theme().border, is_dark, 0.8, 0.95))
                 .into_any_element(),
+        };
+
+        self.wrap_markdown_preview_block_context_menu(view, block_ix, block, element, cx)
+    }
+
+    fn wrap_markdown_preview_block_context_menu(
+        &self,
+        view: Entity<Self>,
+        block_ix: usize,
+        block: &MarkdownPreviewBlock,
+        element: AnyElement,
+        _cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(selection_surfaces) = self.markdown_preview_block_selection_surfaces(block_ix, block)
+        else {
+            return element;
+        };
+        let row_id = format!("editor-markdown-preview-block-{block_ix}");
+        div()
+            .w_full()
+            .on_mouse_down(MouseButton::Right, {
+                let row_id = row_id.clone();
+                let selection_surfaces = selection_surfaces.clone();
+                move |event, window, cx| {
+                    view.update(cx, |this, cx| {
+                        this.focus_handle.focus(window, cx);
+                        if !this.ai_select_all_text_for_surfaces(
+                            row_id.as_str(),
+                            selection_surfaces.clone(),
+                            cx,
+                        ) {
+                            return;
+                        }
+                        this.open_workspace_text_context_menu(
+                            WorkspaceTextContextMenuTarget::SelectableText(
+                                SelectableTextContextMenuTarget {
+                                    row_id: row_id.clone(),
+                                    selection_surfaces: selection_surfaces.clone(),
+                                    can_copy: true,
+                                    can_select_all: true,
+                                    link_target: None,
+                                },
+                            ),
+                            event.position,
+                            cx,
+                        );
+                    });
+                    cx.stop_propagation();
+                }
+            })
+            .child(element)
+            .into_any_element()
+    }
+
+    fn markdown_preview_block_selection_surfaces(
+        &self,
+        block_ix: usize,
+        block: &MarkdownPreviewBlock,
+    ) -> Option<Arc<[AiTextSelectionSurfaceSpec]>> {
+        let mut surfaces = Vec::new();
+        match block {
+            MarkdownPreviewBlock::Heading { spans, .. }
+            | MarkdownPreviewBlock::Paragraph(spans)
+            | MarkdownPreviewBlock::UnorderedListItem(spans)
+            | MarkdownPreviewBlock::BlockQuote(spans) => {
+                let text = markdown_inline_spans_plain_text(spans.as_slice());
+                if !text.is_empty() {
+                    surfaces.push(AiTextSelectionSurfaceSpec::new(
+                        format!("markdown-preview-block-{block_ix}-0"),
+                        text,
+                    ));
+                }
+            }
+            MarkdownPreviewBlock::OrderedListItem { number, spans } => {
+                let text = format!("{number}. {}", markdown_inline_spans_plain_text(spans.as_slice()));
+                surfaces.push(AiTextSelectionSurfaceSpec::new(
+                    format!("markdown-preview-block-{block_ix}-0"),
+                    text,
+                ));
+            }
+            MarkdownPreviewBlock::CodeBlock { lines, .. } => {
+                for (line_ix, spans) in lines.iter().enumerate() {
+                    let surface = AiTextSelectionSurfaceSpec::new(
+                        format!("markdown-preview-block-{block_ix}-{line_ix}"),
+                        markdown_code_line_plain_text(spans.as_slice()),
+                    );
+                    surfaces.push(if line_ix == 0 {
+                        surface
+                    } else {
+                        surface.with_separator_before("\n")
+                    });
+                }
+            }
+            MarkdownPreviewBlock::ThematicBreak => {}
+        }
+
+        if surfaces.is_empty() {
+            None
+        } else {
+            Some(Arc::from(surfaces))
         }
     }
 
@@ -1054,6 +1158,23 @@ impl DiffViewer {
         element.into_any_element()
     }
 
+}
+
+fn markdown_inline_spans_plain_text(spans: &[MarkdownInlineSpan]) -> String {
+    let mut text = String::new();
+    for span in spans {
+        if span.style.hard_break {
+            text.push('\n');
+        }
+        text.push_str(span.text.as_str());
+    }
+    text
+}
+
+fn markdown_code_line_plain_text(
+    spans: &[hunk_domain::markdown_preview::MarkdownCodeSpan],
+) -> String {
+    spans.iter().map(|span| span.text.as_str()).collect()
 }
 
 fn is_desktop_clipboard_shortcut(keystroke: &gpui::Keystroke) -> bool {

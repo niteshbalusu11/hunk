@@ -48,6 +48,20 @@ impl DiffViewer {
             .and_then(|selection| selection.range_for_surface(surface_id))
     }
 
+    pub(super) fn ai_text_selection_contains_surface_index(
+        &self,
+        row_id: &str,
+        surface_id: &str,
+        index: usize,
+    ) -> bool {
+        self.ai_text_selection.as_ref().is_some_and(|selection| {
+            selection.row_id == row_id
+                && selection
+                    .range_for_surface(surface_id)
+                    .is_some_and(|range| range.start <= index && index < range.end)
+        })
+    }
+
     pub(super) fn ai_begin_text_selection(
         &mut self,
         row_id: String,
@@ -64,6 +78,28 @@ impl DiffViewer {
             surface_id,
             index,
         ));
+        self.ai_sync_primary_text_selection(cx);
+        cx.notify();
+    }
+
+    pub(super) fn ai_place_text_selection_caret(
+        &mut self,
+        row_id: String,
+        selection_surfaces: std::sync::Arc<[AiTextSelectionSurfaceSpec]>,
+        surface_id: &str,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.focus_handle.focus(window, cx);
+        let mut selection = AiTextSelection::new(
+            row_id,
+            selection_surfaces.as_ref(),
+            surface_id,
+            index,
+        );
+        selection.dragging = false;
+        self.ai_text_selection = Some(selection);
         self.ai_sync_primary_text_selection(cx);
         cx.notify();
     }
@@ -145,6 +181,35 @@ impl DiffViewer {
         self.ai_sync_primary_text_selection(cx);
         cx.notify();
         true
+    }
+
+    pub(super) fn ai_select_all_text_for_surfaces(
+        &mut self,
+        row_id: &str,
+        selection_surfaces: std::sync::Arc<[AiTextSelectionSurfaceSpec]>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if selection_surfaces.is_empty() {
+            return false;
+        }
+
+        let should_replace = self.ai_text_selection.as_ref().is_none_or(|selection| {
+            selection.row_id != row_id
+        });
+        if should_replace {
+            let first_surface = &selection_surfaces[0];
+            let mut selection = AiTextSelection::new(
+                row_id.to_string(),
+                selection_surfaces.as_ref(),
+                first_surface.surface_id.as_str(),
+                0,
+            );
+            selection.dragging = false;
+            selection.select_all();
+            self.ai_text_selection = Some(selection);
+        }
+
+        self.ai_select_all_text(cx)
     }
 
     pub(super) fn ai_copy_message_action(

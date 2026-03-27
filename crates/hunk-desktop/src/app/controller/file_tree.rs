@@ -110,6 +110,7 @@ impl DiffViewer {
         }
 
         self.workspace_view_mode = mode;
+        self.workspace_text_context_menu = None;
         if mode != WorkspaceViewMode::Diff {
             self.comments_preview_open = false;
         }

@@ -463,6 +463,9 @@ impl Render for DiffViewer {
             .when(self.settings_draft.is_some(), |this| {
                 this.child(self.render_settings_popup(cx))
             })
+            .when_some(self.render_workspace_text_context_menu(cx), |this, menu| {
+                this.child(menu)
+            })
             .children(Root::render_dialog_layer(window, cx))
             .children(Root::render_notification_layer(window, cx))
             .into_any_element();

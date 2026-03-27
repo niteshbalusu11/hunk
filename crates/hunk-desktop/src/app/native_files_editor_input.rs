@@ -8,7 +8,8 @@ use super::paint::{
     current_line_text, last_position, raw_column_for_display, uses_primary_shortcut,
 };
 use super::{
-    EditorLayout, FilesEditor, PointerSelectionMode, PointerSelectionState, ScrollDirection,
+    EditorLayout, FilesEditor, FilesEditorSecondaryClickTarget, PointerSelectionMode,
+    PointerSelectionState, ScrollDirection,
 };
 
 impl FilesEditor {
@@ -307,6 +308,10 @@ impl FilesEditor {
             .selection_changed
     }
 
+    pub(crate) fn select_all_action(&mut self) -> bool {
+        self.select_all()
+    }
+
     fn insert_key_char(&mut self, keystroke: &Keystroke) -> bool {
         if keystroke.modifiers.control || keystroke.modifiers.platform {
             return false;
@@ -424,6 +429,25 @@ impl FilesEditor {
         self.pointer_selection.take().is_some()
     }
 
+    pub(crate) fn prepare_context_menu_target(
+        &mut self,
+        position: Point<Pixels>,
+        layout: &EditorLayout,
+    ) -> Option<FilesEditorSecondaryClickTarget> {
+        let target = self.position_for_point(position, layout)?;
+        if !self.selection_contains_position(target) {
+            self.pointer_selection = None;
+            self.editor
+                .apply(EditorCommand::SetSelection(Selection::caret(target)));
+        }
+        Some(FilesEditorSecondaryClickTarget {
+            can_cut: self.active_path.is_some() && self.has_selection(),
+            can_copy: self.has_selection(),
+            can_paste: self.active_path.is_some(),
+            can_select_all: self.active_path.is_some(),
+        })
+    }
+
     fn position_for_point(
         &self,
         position: Point<Pixels>,
@@ -455,6 +479,19 @@ impl FilesEditor {
     fn word_selection(&self, position: TextPosition) -> Selection {
         let snapshot = self.editor.buffer().snapshot();
         word_selection_for_position(&snapshot, position)
+    }
+
+    fn has_selection(&self) -> bool {
+        !self.editor.selection().range().is_empty()
+    }
+
+    fn selection_contains_position(&self, position: TextPosition) -> bool {
+        let selection = self.editor.selection();
+        if selection.is_caret() {
+            return false;
+        }
+        let range = selection.range();
+        range.start <= position && position < range.end
     }
 
     #[cfg(test)]

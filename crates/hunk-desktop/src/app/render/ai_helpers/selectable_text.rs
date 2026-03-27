@@ -132,10 +132,13 @@ impl gpui::Element for AiSelectableStyledText {
         let surface_id = self.surface_id.clone();
         let row_id = self.row_id.clone();
         let hitbox_for_mouse_down = hitbox.clone();
+        let hitbox_for_secondary_mouse_down = hitbox.clone();
         let hitbox_for_mouse_move = hitbox.clone();
         let hitbox_for_mouse_up = hitbox.clone();
         let selection_surfaces = self.selection_surfaces.clone();
+        let selection_surfaces_for_secondary = self.selection_surfaces.clone();
         let link_ranges_for_mouse_down = self.link_ranges.clone();
+        let link_ranges_for_secondary = self.link_ranges.clone();
         let link_ranges_for_mouse_up = self.link_ranges.clone();
 
         window.on_mouse_event(move |event: &gpui::MouseDownEvent, phase, window, cx| {
@@ -169,6 +172,65 @@ impl gpui::Element for AiSelectableStyledText {
                     cx,
                 );
             });
+        });
+
+        let text_layout = self.text.layout().clone();
+        let view = self.view.clone();
+        let surface_id = self.surface_id.clone();
+        let row_id = self.row_id.clone();
+        window.on_mouse_event(move |event: &gpui::MouseDownEvent, phase, window, cx| {
+            if phase != gpui::DispatchPhase::Bubble
+                || event.button != MouseButton::Right
+                || !hitbox_for_secondary_mouse_down.is_hovered(window)
+            {
+                return;
+            }
+
+            let index = match text_layout.index_for_position(event.position) {
+                Ok(index) | Err(index) => index,
+            };
+            let link_target = link_ranges_for_secondary
+                .iter()
+                .find(|range| range.range.contains(&index))
+                .map(|range| range.raw_target.clone());
+            view.update(cx, |this, cx| {
+                if !this.ai_text_selection_contains_surface_index(
+                    row_id.as_str(),
+                    surface_id.as_str(),
+                    index,
+                ) {
+                    this.ai_place_text_selection_caret(
+                        row_id.clone(),
+                        selection_surfaces_for_secondary.clone(),
+                        surface_id.as_str(),
+                        index,
+                        window,
+                        cx,
+                    );
+                } else {
+                    this.focus_handle.focus(window, cx);
+                }
+                let can_copy = this
+                    .ai_text_selection
+                    .as_ref()
+                    .filter(|selection| selection.row_id == row_id)
+                    .and_then(AiTextSelection::selected_text)
+                    .is_some();
+                this.open_workspace_text_context_menu(
+                    WorkspaceTextContextMenuTarget::SelectableText(
+                        SelectableTextContextMenuTarget {
+                            row_id: row_id.clone(),
+                            selection_surfaces: selection_surfaces_for_secondary.clone(),
+                            can_copy,
+                            can_select_all: !selection_surfaces_for_secondary.is_empty(),
+                            link_target: link_target.clone(),
+                        },
+                    ),
+                    event.position,
+                    cx,
+                );
+            });
+            cx.stop_propagation();
         });
 
         let text_layout = self.text.layout().clone();

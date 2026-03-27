@@ -42,6 +42,16 @@ pub(crate) enum ScrollDirection {
 }
 
 pub(crate) type SharedFilesEditor = Rc<RefCell<FilesEditor>>;
+type FilesEditorSecondaryClickHandler =
+    Rc<dyn Fn(FilesEditorSecondaryClickTarget, Point<Pixels>, &mut Window, &mut App)>;
+
+#[derive(Clone, Copy)]
+pub(crate) struct FilesEditorSecondaryClickTarget {
+    pub(crate) can_cut: bool,
+    pub(crate) can_copy: bool,
+    pub(crate) can_paste: bool,
+    pub(crate) can_select_all: bool,
+}
 
 #[derive(Clone)]
 pub(crate) struct FilesEditorStatusSnapshot {
@@ -72,6 +82,7 @@ pub(crate) struct FilesEditor {
 #[derive(Clone)]
 pub(crate) struct FilesEditorElement {
     state: SharedFilesEditor,
+    on_secondary_mouse_down: FilesEditorSecondaryClickHandler,
     is_focused: bool,
     style: TextStyle,
     palette: FilesEditorPalette,

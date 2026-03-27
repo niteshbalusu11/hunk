@@ -23,6 +23,26 @@ impl DiffViewer {
         };
         let editor_element = crate::app::native_files_editor::FilesEditorElement::new(
             self.files_editor.clone(),
+            {
+                let view = view.clone();
+                move |target, position, window, cx| {
+                    view.update(cx, |this, cx| {
+                        this.files_editor_focus_handle.focus(window, cx);
+                        this.open_workspace_text_context_menu(
+                            WorkspaceTextContextMenuTarget::FilesEditor(
+                                FilesEditorContextMenuTarget {
+                                    can_cut: target.can_cut,
+                                    can_copy: target.can_copy,
+                                    can_paste: target.can_paste,
+                                    can_select_all: target.can_select_all,
+                                },
+                            ),
+                            position,
+                            cx,
+                        );
+                    });
+                }
+            },
             is_editor_focused,
             text_style,
             crate::app::native_files_editor::FilesEditorPalette {

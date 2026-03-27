@@ -249,18 +249,28 @@ impl gpui::Element for AiTerminalSurfaceElement {
         cx: &mut App,
     ) {
         let hitbox_for_mouse_down = layout.hitbox.clone();
+        let hitbox_for_secondary_mouse_down = layout.hitbox.clone();
         let hitbox_for_mouse_move = layout.hitbox.clone();
         let hitbox_for_mouse_up = layout.hitbox.clone();
         let hitbox_for_scroll = layout.hitbox.clone();
         let lines_for_mouse = self.lines.clone();
+        let lines_for_secondary = self.lines.clone();
         let surfaces_for_mouse = self.selection_surfaces.clone();
+        let surfaces_for_secondary = self.selection_surfaces.clone();
         let view = self.view.clone();
+        let view_for_secondary = self.view.clone();
         let screen = self.screen.clone();
+        let screen_for_secondary = self.screen.clone();
         let kind = self.kind;
+        let secondary_kind = self.kind;
         let cell_width = layout.cell_width;
+        let secondary_cell_width = layout.cell_width;
         let line_height = layout.line_height;
+        let secondary_line_height = layout.line_height;
         let bounds_origin = bounds.origin;
+        let secondary_bounds_origin = bounds.origin;
         let selection_enabled = self.selection_enabled;
+        let selection_enabled_for_secondary = self.selection_enabled;
 
         window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
             if phase != gpui::DispatchPhase::Bubble
@@ -331,6 +341,91 @@ impl gpui::Element for AiTerminalSurfaceElement {
                     );
                 }
             });
+        });
+
+        window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+            if phase != gpui::DispatchPhase::Bubble
+                || event.button != MouseButton::Right
+                || !hitbox_for_secondary_mouse_down.is_hovered(window)
+            {
+                return;
+            }
+
+            let (line, column) = ai_terminal_surface_grid_point_from_position(
+                screen_for_secondary.as_ref(),
+                secondary_bounds_origin,
+                event.position,
+                secondary_cell_width,
+                secondary_line_height,
+            );
+            let handled = view_for_secondary.update(cx, |this, cx| match secondary_kind {
+                WorkspaceTerminalKind::Ai => {
+                    this.ai_terminal_surface_mouse_down(event, line, column, cx)
+                }
+                WorkspaceTerminalKind::Files => {
+                    this.files_terminal_surface_mouse_down(event, line, column, cx)
+                }
+            });
+            if handled {
+                cx.stop_propagation();
+                return;
+            }
+
+            let hit = ai_terminal_hit_test(
+                lines_for_secondary.as_ref(),
+                secondary_bounds_origin,
+                event.position,
+                secondary_cell_width,
+                secondary_line_height,
+            );
+            view_for_secondary.update(cx, |this, cx| {
+                if selection_enabled_for_secondary
+                    && let Some(hit) = hit.as_ref()
+                {
+                    let row_id = match secondary_kind {
+                        WorkspaceTerminalKind::Ai => crate::app::AI_TERMINAL_TEXT_SELECTION_ROW_ID,
+                        WorkspaceTerminalKind::Files => crate::app::FILES_TERMINAL_TEXT_SELECTION_ROW_ID,
+                    };
+                    if !this.ai_text_selection_contains_surface_index(
+                        row_id,
+                        hit.surface_id.as_str(),
+                        hit.index,
+                    ) {
+                        this.ai_place_text_selection_caret(
+                            row_id.to_string(),
+                            surfaces_for_secondary.clone(),
+                            hit.surface_id.as_str(),
+                            hit.index,
+                            window,
+                            cx,
+                        );
+                    }
+                }
+                let target_row_id = match secondary_kind {
+                    WorkspaceTerminalKind::Ai => crate::app::AI_TERMINAL_TEXT_SELECTION_ROW_ID,
+                    WorkspaceTerminalKind::Files => crate::app::FILES_TERMINAL_TEXT_SELECTION_ROW_ID,
+                };
+                let can_copy = this
+                    .ai_text_selection
+                    .as_ref()
+                    .filter(|selection| selection.row_id == target_row_id)
+                    .and_then(AiTextSelection::selected_text)
+                    .is_some();
+                this.open_workspace_text_context_menu(
+                    WorkspaceTextContextMenuTarget::Terminal(TerminalContextMenuTarget {
+                        kind: secondary_kind,
+                        selection_surfaces: surfaces_for_secondary.clone(),
+                        can_copy,
+                        can_paste: true,
+                        can_select_all: selection_enabled_for_secondary
+                            && !surfaces_for_secondary.is_empty(),
+                        can_clear: true,
+                    }),
+                    event.position,
+                    cx,
+                );
+            });
+            cx.stop_propagation();
         });
 
         let lines_for_mouse = self.lines.clone();

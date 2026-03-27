@@ -115,6 +115,53 @@ struct RepoTreeContextMenuState {
     position: Point<gpui::Pixels>,
 }
 
+#[derive(Debug, Clone)]
+struct WorkspaceTextContextMenuState {
+    target: WorkspaceTextContextMenuTarget,
+    position: Point<gpui::Pixels>,
+}
+
+#[derive(Debug, Clone)]
+enum WorkspaceTextContextMenuTarget {
+    FilesEditor(FilesEditorContextMenuTarget),
+    SelectableText(SelectableTextContextMenuTarget),
+    Terminal(TerminalContextMenuTarget),
+    DiffRows(DiffRowsContextMenuTarget),
+}
+
+#[derive(Debug, Clone)]
+struct FilesEditorContextMenuTarget {
+    can_cut: bool,
+    can_copy: bool,
+    can_paste: bool,
+    can_select_all: bool,
+}
+
+#[derive(Debug, Clone)]
+struct SelectableTextContextMenuTarget {
+    row_id: String,
+    selection_surfaces: Arc<[AiTextSelectionSurfaceSpec]>,
+    can_copy: bool,
+    can_select_all: bool,
+    link_target: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct TerminalContextMenuTarget {
+    kind: WorkspaceTerminalKind,
+    selection_surfaces: Arc<[AiTextSelectionSurfaceSpec]>,
+    can_copy: bool,
+    can_paste: bool,
+    can_select_all: bool,
+    can_clear: bool,
+}
+
+#[derive(Debug, Clone)]
+struct DiffRowsContextMenuTarget {
+    can_copy: bool,
+    can_select_all: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum AiComposerDraftKey {
     Thread(String),

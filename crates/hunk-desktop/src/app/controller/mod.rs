@@ -70,6 +70,7 @@ include!("editor.rs");
 include!("comments.rs");
 include!("comments_match.rs");
 include!("selection.rs");
+include!("context_menu.rs");
 include!("scroll.rs");
 include!("ai_perf.rs");
 include!("fps.rs");

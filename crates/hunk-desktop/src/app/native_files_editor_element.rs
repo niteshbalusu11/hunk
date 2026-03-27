@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use gpui::*;
 
 use super::paint::{
@@ -11,12 +13,19 @@ use super::{EditorLayout, FilesEditorElement};
 impl FilesEditorElement {
     pub(crate) fn new(
         state: super::SharedFilesEditor,
+        on_secondary_mouse_down: impl Fn(
+            super::FilesEditorSecondaryClickTarget,
+            Point<Pixels>,
+            &mut Window,
+            &mut App,
+        ) + 'static,
         is_focused: bool,
         style: TextStyle,
         palette: super::FilesEditorPalette,
     ) -> Self {
         Self {
             state,
+            on_secondary_mouse_down: Rc::new(on_secondary_mouse_down),
             is_focused,
             style,
             palette,
@@ -126,6 +135,26 @@ impl Element for FilesEditorElement {
             {
                 window.refresh();
             }
+        });
+        let right_click_layout = layout.clone();
+        let mouse_state = self.state.clone();
+        let on_secondary_mouse_down = self.on_secondary_mouse_down.clone();
+        window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+            if phase != DispatchPhase::Bubble
+                || event.button != gpui::MouseButton::Right
+                || !right_click_layout.hitbox.is_hovered(window)
+            {
+                return;
+            }
+            let Some(target) = mouse_state
+                .borrow_mut()
+                .prepare_context_menu_target(event.position, &right_click_layout)
+            else {
+                return;
+            };
+            on_secondary_mouse_down(target, event.position, window, cx);
+            cx.stop_propagation();
+            window.refresh();
         });
         let mouse_state = self.state.clone();
         window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, _cx| {

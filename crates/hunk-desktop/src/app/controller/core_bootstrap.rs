@@ -675,6 +675,7 @@ impl DiffViewer {
             repo_tree: RepoTreeState::new(),
             repo_tree_inline_edit: None,
             repo_tree_context_menu: None,
+            workspace_text_context_menu: None,
             file_editor_tabs: Vec::new(),
             active_file_editor_tab_id: None,
             next_file_editor_tab_id: 1,

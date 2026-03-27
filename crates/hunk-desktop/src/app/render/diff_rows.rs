@@ -115,6 +115,13 @@ impl DiffViewer {
                     this.on_diff_row_mouse_down(row_ix, event, window, cx);
                 })
             })
+            .on_mouse_down(MouseButton::Right, {
+                let row_ix = ix;
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    this.open_diff_row_context_menu(row_ix, event.position, window, cx);
+                    cx.stop_propagation();
+                })
+            })
             .on_mouse_move({
                 let row_ix = ix;
                 cx.listener(move |this, event, window, cx| {
@@ -179,6 +186,13 @@ impl DiffViewer {
                 let row_ix = ix;
                 cx.listener(move |this, event, window, cx| {
                     this.on_diff_row_mouse_down(row_ix, event, window, cx);
+                })
+            })
+            .on_mouse_down(MouseButton::Right, {
+                let row_ix = ix;
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    this.open_diff_row_context_menu(row_ix, event.position, window, cx);
+                    cx.stop_propagation();
                 })
             })
             .on_mouse_move({

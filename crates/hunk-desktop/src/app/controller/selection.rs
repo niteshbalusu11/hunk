@@ -126,6 +126,28 @@ impl DiffViewer {
         cx.notify();
     }
 
+    pub(super) fn open_diff_row_context_menu(
+        &mut self,
+        row_ix: usize,
+        position: Point<gpui::Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.focus_handle.focus(window, cx);
+        self.drag_selecting_rows = false;
+        if !self.is_row_selected(row_ix) {
+            self.select_row(row_ix, false, cx);
+        }
+        self.open_workspace_text_context_menu(
+            WorkspaceTextContextMenuTarget::DiffRows(DiffRowsContextMenuTarget {
+                can_copy: self.selected_row_range().is_some(),
+                can_select_all: !self.diff_rows.is_empty(),
+            }),
+            position,
+            cx,
+        );
+    }
+
     fn select_row_and_scroll(
         &mut self,
         row_ix: usize,
