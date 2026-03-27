@@ -109,16 +109,8 @@
               fi
 
               if [ "$(uname -s)" = "Linux" ]; then
-                # Ubuntu/Nix hybrid setups keep proprietary NVIDIA userspace libs
-                # outside the Nix store, so expose common host driver locations.
-                for host_lib_dir in /usr/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu /usr/lib64; do
-                  if [ -d "$host_lib_dir" ]; then
-                    case ":$LD_LIBRARY_PATH:" in
-                      *":$host_lib_dir:"*) ;;
-                      *) export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$host_lib_dir" ;;
-                    esac
-                  fi
-                done
+                export HUNK_LINUX_HOST_GRAPHICS_LIBRARY_PATHS="/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu:/usr/lib64"
+                export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$PWD/scripts/run_with_linux_graphics_env.sh"
               fi
 
               if [ "$(uname -s)" = "Darwin" ]; then
