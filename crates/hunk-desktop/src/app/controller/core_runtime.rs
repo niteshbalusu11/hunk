@@ -286,6 +286,12 @@ impl DiffViewer {
                 .is_empty()
     }
 
+    fn should_process_repo_watch_event(event: &notify::Event) -> bool {
+        // Linux inotify reports non-mutating access/open events for watched paths. Treating those
+        // as dirty-file changes creates a self-sustaining refresh loop while Hunk scans the repo.
+        !matches!(event.kind, notify::EventKind::Access(_))
+    }
+
     fn is_hunk_temp_save_component(name: &str) -> bool {
         let Some((_, suffix)) = name.rsplit_once(".hunk-tmp.") else {
             return false;
@@ -378,7 +384,7 @@ impl DiffViewer {
                     continue;
                 };
 
-                if event.paths.is_empty() {
+                if event.paths.is_empty() || !Self::should_process_repo_watch_event(&event) {
                     continue;
                 }
 
@@ -595,6 +601,8 @@ impl DiffViewer {
 #[cfg(test)]
 mod tests {
     use super::DiffViewer;
+    use notify::event::{AccessKind, AccessMode, CreateKind, DataChange, ModifyKind, RemoveKind};
+    use notify::{Event, EventKind};
     use std::path::PathBuf;
 
     fn fixture_repo_root() -> PathBuf {
@@ -789,6 +797,29 @@ mod tests {
             event_paths.as_slice(),
             Some(repo_root.as_path())
         ));
+    }
+
+    #[test]
+    fn repo_watch_ignores_access_events() {
+        assert!(!DiffViewer::should_process_repo_watch_event(
+            &Event::new(EventKind::Access(AccessKind::Open(AccessMode::Read)))
+        ));
+        assert!(!DiffViewer::should_process_repo_watch_event(
+            &Event::new(EventKind::Access(AccessKind::Close(AccessMode::Write)))
+        ));
+    }
+
+    #[test]
+    fn repo_watch_processes_mutating_events() {
+        assert!(DiffViewer::should_process_repo_watch_event(&Event::new(
+            EventKind::Create(CreateKind::File)
+        )));
+        assert!(DiffViewer::should_process_repo_watch_event(&Event::new(
+            EventKind::Modify(ModifyKind::Data(DataChange::Any))
+        )));
+        assert!(DiffViewer::should_process_repo_watch_event(&Event::new(
+            EventKind::Remove(RemoveKind::File)
+        )));
     }
 
 }
