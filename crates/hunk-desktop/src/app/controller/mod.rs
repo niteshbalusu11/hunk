@@ -75,4 +75,5 @@ include!("context_menu.rs");
 include!("scroll.rs");
 include!("ai_perf.rs");
 include!("fps.rs");
+include!("about.rs");
 include!("settings.rs");

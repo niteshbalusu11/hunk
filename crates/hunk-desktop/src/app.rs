@@ -138,6 +138,10 @@ const DIFF_SPLIT_HANDLE_HIT_WIDTH: f32 = 10.0;
 const FILE_EDITOR_MAX_BYTES: usize = 2_400_000;
 const FILE_EDITOR_TAB_LIMIT: usize = 8;
 pub(crate) const FILES_WORKSPACE_RAIL_HEIGHT: f32 = 32.0;
+const ABOUT_HUNK_VERSION_LABEL: &str = concat!("Version ", env!("CARGO_PKG_VERSION"));
+const ABOUT_HUNK_DESCRIPTION_LINE_ONE: &str = "A fast diff viewer and Codex orchestrator.";
+const ABOUT_HUNK_DESCRIPTION_LINE_TWO: &str =
+    "Hunk is built in GPUI and aims to be very fast.";
 const MARKDOWN_PREVIEW_DEBOUNCE: Duration = Duration::from_millis(200);
 const DIFF_SEGMENT_PREFETCH_RADIUS_ROWS: usize = 120;
 const DIFF_SEGMENT_PREFETCH_STEP_ROWS: usize = 24;
@@ -255,6 +259,7 @@ actions!(
         PreviousEditorTab,
         CloseEditorTab,
         SaveCurrentFile,
+        AboutHunk,
         OpenSettings,
         QuitApp,
         RepoTreeNewFile,
@@ -290,6 +295,8 @@ fn build_application_menus() -> Vec<Menu> {
             Menu {
                 name: "Hunk".into(),
                 items: vec![
+                    MenuItem::action("About Hunk", AboutHunk),
+                    MenuItem::separator(),
                     MenuItem::os_submenu("Services", SystemMenuType::Services),
                     MenuItem::separator(),
                     MenuItem::action("Settings...", OpenSettings),
@@ -304,6 +311,7 @@ fn build_application_menus() -> Vec<Menu> {
                     MenuItem::action("Quick Open...", QuickOpenFile),
                     MenuItem::action("Save File", SaveCurrentFile),
                     MenuItem::separator(),
+                    MenuItem::action("About Hunk", AboutHunk),
                     MenuItem::action("Settings...", OpenSettings),
                 ],
             },
@@ -323,6 +331,8 @@ fn build_application_menus() -> Vec<Menu> {
                     MenuItem::action("Open Project...", OpenProject),
                     MenuItem::action("Quick Open...", QuickOpenFile),
                     MenuItem::action("Save File", SaveCurrentFile),
+                    MenuItem::separator(),
+                    MenuItem::action("About Hunk", AboutHunk),
                     MenuItem::action("Settings...", OpenSettings),
                     MenuItem::separator(),
                     MenuItem::action("Quit Hunk", QuitApp),
