@@ -40,6 +40,25 @@ impl DiffViewer {
             ai_view_state.map(|state| state.pending_user_inputs.len());
         let (ai_connection_status_label, ai_connection_status_color) =
             ai_connection_label(self.ai_connection_state, cx);
+        let centered_project_label = ai_selected.then(|| {
+            div()
+                .flex_none()
+                .max_w(px(280.0))
+                .min_w_0()
+                .px_3()
+                .child(
+                    div()
+                        .w_full()
+                        .text_center()
+                        .text_sm()
+                        .font_semibold()
+                        .text_color(cx.theme().foreground)
+                        .whitespace_nowrap()
+                        .truncate()
+                        .child(project_label.clone()),
+                )
+                .into_any_element()
+        });
         let left = if self.workspace_view_mode.shows_toolbar_workspace_identity() {
             h_flex()
                 .flex_1()
@@ -135,8 +154,8 @@ impl DiffViewer {
         };
 
         let right = h_flex()
-            .flex_none()
             .items_center()
+            .justify_end()
             .gap_2()
             .when(review_selected, |this| {
                 let view = view.clone();
@@ -269,14 +288,14 @@ impl DiffViewer {
             .w_full()
             .h_11()
             .items_center()
-            .justify_between()
             .gap_2()
             .px_3()
             .border_b_1()
             .border_color(cx.theme().border)
             .bg(cx.theme().background)
             .child(left)
-            .child(right)
+            .when_some(centered_project_label, |this, label| this.child(label))
+            .child(h_flex().flex_1().justify_end().child(right))
             .into_any_element()
     }
 

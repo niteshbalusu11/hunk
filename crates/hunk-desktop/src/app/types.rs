@@ -345,7 +345,6 @@ enum AiThreadSidebarRowKind {
     },
     Thread {
         thread: hunk_codex::state::ThreadSummary,
-        workspace_label: String,
     },
     EmptyProject {
         project_root: PathBuf,

@@ -86,6 +86,19 @@ fn ai_format_shortcut_label(shortcut: &str) -> String {
         .join(" ")
 }
 
+fn ai_new_thread_shortcut_label(start_mode: AiNewThreadStartMode) -> Option<String> {
+    match start_mode {
+        AiNewThreadStartMode::Local => ai_preferred_shortcut_label(&[
+            "cmd-n".to_string(),
+            "ctrl-n".to_string(),
+        ]),
+        AiNewThreadStartMode::Worktree => ai_preferred_shortcut_label(&[
+            "cmd-shift-n".to_string(),
+            "ctrl-shift-n".to_string(),
+        ]),
+    }
+}
+
 fn ai_project_open_target_icon(target: project_open::ProjectOpenTargetId) -> Icon {
     let icon = match target {
         project_open::ProjectOpenTargetId::VsCode => Icon::new(HunkIconName::VisualStudioCode),
@@ -369,15 +382,11 @@ impl DiffViewer {
                 ),
                 AiPerfSidebarRowKind::ProjectHeader,
             ),
-            AiThreadSidebarRowKind::Thread {
-                thread,
-                workspace_label,
-            } => {
+            AiThreadSidebarRowKind::Thread { thread } => {
                 let bookmarked = self.ai_thread_is_bookmarked(thread.id.as_str());
                 (
                     render_ai_thread_sidebar_row(
                         thread,
-                        workspace_label,
                         state.selected_thread_id.as_deref(),
                         bookmarked,
                         view,
@@ -427,6 +436,18 @@ impl DiffViewer {
         } else {
             format!("{total_thread_count} threads")
         };
+        let new_thread_label =
+            if let Some(shortcut) = ai_new_thread_shortcut_label(AiNewThreadStartMode::Local) {
+                format!("New Thread  {shortcut}")
+            } else {
+                "New Thread".to_string()
+            };
+        let new_worktree_label =
+            if let Some(shortcut) = ai_new_thread_shortcut_label(AiNewThreadStartMode::Worktree) {
+                format!("New Worktree  {shortcut}")
+            } else {
+                "New Worktree".to_string()
+            };
 
         h_flex()
             .w_full()
@@ -473,7 +494,7 @@ impl DiffViewer {
             .child(
                 h_flex()
                     .items_center()
-                    .gap_1p5()
+                    .gap_2()
                     .child(
                         {
                             let new_button_view = view.clone();
@@ -483,12 +504,18 @@ impl DiffViewer {
                                 .outline()
                                 .rounded(px(999.0))
                                 .with_size(gpui_component::Size::Small)
-                                .icon(Icon::new(HunkIconName::NotebookPen).size(px(14.0)))
-                                .label("New")
-                                .dropdown_caret(true)
+                                .px_1()
+                                .tooltip("New thread")
+                                .child(
+                                    h_flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .child(Icon::new(HunkIconName::NotebookPen).size(px(14.0)))
+                                        .child(Icon::new(IconName::ChevronDown).size(px(12.0))),
+                                )
                                 .dropdown_menu(move |menu, _, _| {
                                     menu.item(
-                                        PopupMenuItem::new("New Thread").on_click({
+                                        PopupMenuItem::new(new_thread_label.clone()).on_click({
                                             let view = new_button_view.clone();
                                             let project_root = new_button_project_root.clone();
                                             move |_, window, cx| {
@@ -504,7 +531,7 @@ impl DiffViewer {
                                         }),
                                     )
                                     .item(
-                                        PopupMenuItem::new("New Worktree").on_click({
+                                        PopupMenuItem::new(new_worktree_label.clone()).on_click({
                                             let view = new_button_view.clone();
                                             let project_root = new_button_project_root.clone();
                                             move |_, window, cx| {
@@ -528,8 +555,9 @@ impl DiffViewer {
                             .danger()
                             .rounded(px(999.0))
                             .with_size(gpui_component::Size::Small)
+                            .px_1()
                             .icon(Icon::new(IconName::Delete).size(px(14.0)))
-                            .label("Remove")
+                            .tooltip("Remove project")
                             .on_click({
                                 let view = view.clone();
                                 let project_root = project_root.clone();

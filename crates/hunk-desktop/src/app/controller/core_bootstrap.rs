@@ -446,7 +446,7 @@ impl DiffViewer {
             ai_visible_frame_state: None,
             ai_thread_sidebar_sections: Vec::new(),
             ai_thread_sidebar_rows: Vec::new(),
-            ai_thread_sidebar_list_state: ListState::new(0, ListAlignment::Top, px(48.0)),
+            ai_thread_sidebar_list_state: ListState::new(0, ListAlignment::Top, px(40.0)),
             ai_thread_sidebar_row_count: 0,
             ai_timeline_list_view: None,
             ai_timeline_list_state: ListState::new(0, ListAlignment::Top, px(360.0)),

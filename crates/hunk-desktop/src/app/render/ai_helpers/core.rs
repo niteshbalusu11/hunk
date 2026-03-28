@@ -77,7 +77,6 @@ fn ai_thread_display_title(thread: &hunk_codex::state::ThreadSummary) -> String 
 
 fn render_ai_thread_sidebar_row(
     thread: hunk_codex::state::ThreadSummary,
-    workspace_label: String,
     selected_thread_id: Option<&str>,
     bookmarked: bool,
     view: Entity<DiffViewer>,
@@ -169,7 +168,6 @@ fn render_ai_thread_sidebar_row(
         .bg(row_background)
         .px_2()
         .py_1p5()
-        .gap_0p5()
         .hover(move |style| style.bg(row_hover_background).cursor_pointer())
         .on_mouse_down(MouseButton::Left, move |_, window, cx| {
             select_view.update(cx, |this, cx| {
@@ -186,7 +184,6 @@ fn render_ai_thread_sidebar_row(
                     v_flex()
                         .flex_1()
                         .min_w_0()
-                        .gap_0p5()
                         .child(
                             div()
                                 .w_full()
@@ -196,15 +193,6 @@ fn render_ai_thread_sidebar_row(
                                 .whitespace_nowrap()
                                 .truncate()
                                 .child(title),
-                        )
-                        .child(
-                            div()
-                                .w_full()
-                                .text_xs()
-                                .text_color(metadata_color)
-                                .whitespace_nowrap()
-                                .truncate()
-                                .child(workspace_label),
                         ),
                 )
                 .when_some(activity_label, |this, label| {

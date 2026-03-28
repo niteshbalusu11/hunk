@@ -489,11 +489,7 @@ impl DiffViewer {
                 });
             } else {
                 rows.extend(section.threads.iter().cloned().map(|thread| AiThreadSidebarRow {
-                    kind: AiThreadSidebarRowKind::Thread {
-                        workspace_label: self
-                            .ai_workspace_label_for_root(std::path::Path::new(thread.cwd.as_str())),
-                        thread,
-                    },
+                    kind: AiThreadSidebarRowKind::Thread { thread },
                 }));
             }
             if section.hidden_thread_count > 0 || section.expanded {
