@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use libghostty_vt::{
     RenderState, Terminal, TerminalOptions, ffi, focus, key, mouse,
-    render::{CellIterator, Colors, CursorVisualStyle, RowIterator, Snapshot},
+    render::{CellIterator, Colors, CursorVisualStyle, Dirty, RowIterator, Snapshot},
     style::RgbColor,
     terminal::{Mode, ScrollViewport},
 };
@@ -13,8 +13,8 @@ use crate::input::{
 };
 use crate::snapshot::{
     TerminalCellSnapshot, TerminalColorSnapshot, TerminalCursorShapeSnapshot,
-    TerminalCursorSnapshot, TerminalDamageSnapshot, TerminalModeSnapshot,
-    TerminalNamedColorSnapshot, TerminalScreenSnapshot, TerminalScroll,
+    TerminalCursorSnapshot, TerminalDamageLineSnapshot, TerminalDamageSnapshot,
+    TerminalModeSnapshot, TerminalNamedColorSnapshot, TerminalScreenSnapshot, TerminalScroll,
 };
 
 const DEFAULT_MAX_SCROLLBACK: usize = 10_000;
@@ -288,10 +288,15 @@ fn build_snapshot(
     let rows = snapshot.rows().expect("read libghostty-vt rows");
     let cols = snapshot.cols().expect("read libghostty-vt cols");
     let colors = snapshot.colors().expect("read libghostty-vt colors");
+    let dirty = snapshot.dirty().unwrap_or(Dirty::Full);
     let cursor = snapshot_cursor(terminal, &snapshot);
     let mode = snapshot_mode(terminal, &snapshot);
     let display_offset = snapshot_display_offset(terminal);
-    let cells = snapshot_cells(&snapshot, &colors, row_iterator, cell_iterator);
+    let (cells, damage) =
+        snapshot_cells_and_damage(&snapshot, cols, dirty, &colors, row_iterator, cell_iterator);
+    snapshot
+        .set_dirty(Dirty::Clean)
+        .expect("reset libghostty-vt global dirty state");
 
     TerminalScreenSnapshot {
         rows,
@@ -299,24 +304,41 @@ fn build_snapshot(
         display_offset,
         cursor,
         mode,
-        damage: TerminalDamageSnapshot::Full,
+        damage,
         cells,
     }
 }
 
-fn snapshot_cells(
+fn snapshot_cells_and_damage(
     snapshot: &Snapshot<'static, '_>,
+    cols: u16,
+    dirty: Dirty,
     colors: &Colors,
     row_iterator: &mut RowIterator<'static>,
     cell_iterator: &mut CellIterator<'static>,
-) -> Vec<TerminalCellSnapshot> {
+) -> (Vec<TerminalCellSnapshot>, TerminalDamageSnapshot) {
     let mut cells = Vec::new();
+    let mut damage_lines = Vec::new();
+    let mut damage_query_failed = false;
     let mut row_index = 0_i32;
     let mut rows = row_iterator
         .update(snapshot)
         .expect("update libghostty-vt row iterator");
+    let right = usize::from(cols.saturating_sub(1));
 
     while let Some(row) = rows.next() {
+        if matches!(dirty, Dirty::Partial) {
+            match row.dirty() {
+                Ok(true) => damage_lines.push(TerminalDamageLineSnapshot {
+                    line: row_index as usize,
+                    left: 0,
+                    right,
+                }),
+                Ok(false) => {}
+                Err(_) => damage_query_failed = true,
+            }
+        }
+
         let mut row_cells = cell_iterator
             .update(row)
             .expect("update libghostty-vt cell iterator");
@@ -326,10 +348,22 @@ fn snapshot_cells(
             column += 1;
         }
 
+        row.set_dirty(false)
+            .expect("reset libghostty-vt row dirty state");
         row_index += 1;
     }
 
-    cells
+    let damage = if damage_query_failed {
+        TerminalDamageSnapshot::Full
+    } else {
+        match dirty {
+            Dirty::Clean => TerminalDamageSnapshot::Partial(Vec::new()),
+            Dirty::Partial => TerminalDamageSnapshot::Partial(damage_lines),
+            Dirty::Full => TerminalDamageSnapshot::Full,
+        }
+    };
+
+    (cells, damage)
 }
 
 fn snapshot_cell(

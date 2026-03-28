@@ -8,7 +8,9 @@
 - Phase 1 complete
 - Phase 2 complete
 - Phase 3 complete
-- Phase 4 in progress
+- Phase 4 complete
+- Phase 5 complete
+- Phase 6 in progress
 
 ## Summary
 
@@ -346,9 +348,9 @@ Ghostty-backed input handling owns key, mouse, paste, and focus encoding, with m
 - [x] Move terminal protocol byte generation into `hunk-terminal` so `hunk-desktop` no longer knows terminal protocol details for mouse, paste, and focus events.
 - [x] Encode mouse input inside the terminal actor using Ghostty's mouse API against the live terminal instance.
 - [x] Do not use `TerminalModeSnapshot` as the final source of truth for mouse protocol encoding decisions.
-- [ ] Move keyboard encoding into the terminal actor and back it with Ghostty's key encoder for the supported GPUI keystroke surface.
-- [ ] Keep only the narrow compatibility glue needed for Hunk-specific shell shortcuts that GPUI/Ghostty do not represent directly.
-- [ ] Support at minimum:
+- [x] Move keyboard encoding into the terminal actor and back it with Ghostty's key encoder for the supported GPUI keystroke surface.
+- [x] Keep only the narrow compatibility glue needed for Hunk-specific shell shortcuts that GPUI/Ghostty do not represent directly.
+- [x] Support at minimum:
   - plain text input
   - bracketed paste
   - focus in/out
@@ -357,7 +359,7 @@ Ghostty-backed input handling owns key, mouse, paste, and focus encoding, with m
   - mouse press/release/move
   - wheel input
   - alternate scroll behavior
-- [ ] Preserve current selection bypass behavior when `Shift` is used.
+- [x] Preserve current selection bypass behavior when `Shift` is used.
 - [x] Delete temporary snapshot-driven mouse helpers once actor-side mouse encoding is live.
 
 ### Files To Touch
@@ -381,16 +383,15 @@ Hunk runs end-to-end on the Ghostty backend in the migration branch.
 
 ### TODO
 
-- [ ] Switch the AI terminal to the Ghostty backend.
-- [ ] Switch the Files terminal to the Ghostty backend.
-- [ ] Verify that `terminal_surface.rs` does not need semantic changes beyond snapshot compatibility.
-- [ ] Keep link detection, selection overlays, cursor blinking, and focus restoration behavior unchanged from the user's perspective.
-- [ ] Reconcile any backend differences in:
-  - damage handling
-  - display offset semantics
-  - cursor shape mapping
-  - color mapping
-  - zero-width / wide character behavior
+- [x] Switch the AI terminal to the Ghostty backend.
+- [x] Switch the Files terminal to the Ghostty backend.
+- [x] Verify that `terminal_surface.rs` does not need semantic changes beyond snapshot compatibility.
+- [x] Keep link detection, selection overlays, cursor blinking, and focus restoration behavior unchanged from the user's perspective.
+- [x] Reconcile backend damage handling enough to stop forcing every Ghostty snapshot to `TerminalDamageSnapshot::Full`.
+- [x] Reconcile display offset semantics.
+- [x] Reconcile cursor shape mapping.
+- [x] Reconcile color mapping.
+- [x] Reconcile zero-width / wide character behavior.
 
 ### Files To Touch
 
@@ -432,7 +433,7 @@ A clear go/no-go decision for merging the migration branch.
   - Files project switches
 - [ ] Validate Windows shell behavior with `cmd.exe`, PowerShell, and `pwsh` if installed.
 - [ ] Measure render cost and confirm the terminal surface still meets the 8ms frame budget.
-- [ ] Add crate-level tests in `crates/hunk-terminal/tests` for:
+- [x] Add crate-level tests in `crates/hunk-terminal/tests` for:
   - snapshot translation
   - color/cursor mapping
   - input encoding
