@@ -9,7 +9,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
-use crate::vt::{TerminalScreenSnapshot, TerminalScroll, TerminalVt};
+use crate::backend::TerminalVt;
+use crate::snapshot::{TerminalScreenSnapshot, TerminalScroll};
 
 const CONTROL_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const READ_BUFFER_BYTES: usize = 8192;
@@ -184,8 +185,6 @@ pub fn spawn_terminal_session(
                         Err(_) => None,
                     };
                     if let Some(snapshot) = snapshot.as_ref() {
-                        // ConPTY can emit a cursor-position query during startup; answer it
-                        // from the current VT cursor so Windows shells don't stall on launch.
                         for response in query_responder.responses(bytes.as_slice(), snapshot) {
                             if let Err(error) =
                                 write_terminal_bytes(&output_writer, response.as_slice())
