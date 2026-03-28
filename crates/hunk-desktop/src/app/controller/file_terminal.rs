@@ -37,43 +37,36 @@ impl DiffViewer {
     }
 
     fn files_store_visible_terminal_state_for_project(&mut self, project_key: Option<&str>) {
-        let Some(project_key) = project_key else {
-            return;
-        };
-        self.files_terminal_states_by_project.insert(
-            project_key.to_string(),
-            self.files_capture_visible_terminal_state(),
+        let state = self.files_capture_visible_terminal_state();
+        store_visible_terminal_state(
+            &mut self.files_terminal_states_by_project,
+            project_key,
+            state,
         );
     }
 
     fn files_restore_visible_terminal_state_for_project(&mut self, project_key: Option<&str>) {
-        let state = project_key
-            .and_then(|project_key| self.files_terminal_states_by_project.get(project_key).cloned())
-            .unwrap_or_default();
+        let state =
+            restore_visible_terminal_state(&self.files_terminal_states_by_project, project_key);
         self.files_apply_visible_terminal_state(state);
     }
 
     fn files_park_visible_terminal_runtime_for_project(&mut self, project_key: Option<&str>) {
-        let Some(project_key) = project_key else {
-            return;
-        };
-        let Some(runtime) = self.files_terminal_runtime.take() else {
-            return;
-        };
-        let event_task = std::mem::replace(&mut self.files_terminal_event_task, Task::ready(()));
-        self.files_hidden_terminal_runtimes.insert(
-            project_key.to_string(),
-            FilesHiddenTerminalRuntimeHandle { runtime, event_task },
+        park_visible_terminal_runtime(
+            project_key,
+            &mut self.files_terminal_runtime,
+            &mut self.files_terminal_event_task,
+            &mut self.files_hidden_terminal_runtimes,
         );
     }
 
     fn files_promote_hidden_terminal_runtime_for_project(&mut self, project_key: &str) -> bool {
-        let Some(hidden) = self.files_hidden_terminal_runtimes.remove(project_key) else {
-            return false;
-        };
-        self.files_terminal_runtime = Some(hidden.runtime);
-        self.files_terminal_event_task = hidden.event_task;
-        true
+        promote_hidden_terminal_runtime(
+            project_key,
+            &mut self.files_terminal_runtime,
+            &mut self.files_terminal_event_task,
+            &mut self.files_hidden_terminal_runtimes,
+        )
     }
 
     pub(super) fn files_handle_project_change(
@@ -632,12 +625,12 @@ impl DiffViewer {
 
         let mode = self.files_terminal_session.screen.as_ref().map(|screen| screen.mode);
         let point = AiTerminalGridPoint { line, column };
-        if let Some(input) = ai_terminal_mouse_scroll_input(point, delta, event.modifiers, mode) {
-            return self.files_write_terminal_pointer_input(input, cx);
-        }
-
-        if let Some(bytes) = ai_terminal_alt_scroll_bytes(delta, mode) {
-            return self.files_write_terminal_bytes(bytes.as_slice(), cx);
+        if let Some(input) = ai_terminal_wheel_input(point, delta, event.modifiers) {
+            match self.files_handle_terminal_wheel_input(input, cx) {
+                Some(true) => return true,
+                Some(false) => {}
+                None => return false,
+            }
         }
 
         if mode.is_some_and(|mode| mode.alt_screen) {
@@ -742,28 +735,6 @@ impl DiffViewer {
         true
     }
 
-    fn files_write_terminal_bytes(&mut self, bytes: &[u8], cx: &mut Context<Self>) -> bool {
-        if !self.files_terminal_is_running() {
-            return false;
-        }
-        if bytes.contains(&b'\r') || bytes.contains(&b'\n') {
-            self.files_temporarily_suppress_terminal_cursor(cx);
-        }
-        let Some(runtime) = self.files_terminal_runtime.as_ref() else {
-            return false;
-        };
-
-        if let Err(error) = runtime.handle.write_input(bytes) {
-            self.files_terminal_session.status_message = Some(error.to_string());
-            self.files_terminal_session.status = AiTerminalSessionStatus::Failed;
-            cx.notify();
-            return true;
-        }
-
-        self.files_terminal_session.status_message = None;
-        true
-    }
-
     fn files_write_terminal_pointer_input(
         &mut self,
         input: hunk_terminal::TerminalPointerInput,
@@ -785,6 +756,30 @@ impl DiffViewer {
 
         self.files_terminal_session.status_message = None;
         true
+    }
+
+    fn files_handle_terminal_wheel_input(
+        &mut self,
+        input: hunk_terminal::TerminalWheelInput,
+        cx: &mut Context<Self>,
+    ) -> Option<bool> {
+        if !self.files_terminal_is_running() {
+            return None;
+        }
+        let runtime = self.files_terminal_runtime.as_ref()?;
+
+        match runtime.handle.handle_wheel_input(input) {
+            Ok(handled) => {
+                self.files_terminal_session.status_message = None;
+                Some(handled)
+            }
+            Err(error) => {
+                self.files_terminal_session.status_message = Some(error.to_string());
+                self.files_terminal_session.status = AiTerminalSessionStatus::Failed;
+                cx.notify();
+                Some(true)
+            }
+        }
     }
 
     fn files_write_terminal_key_input(

@@ -9,7 +9,8 @@ use libghostty_vt::{
 
 use crate::input::{
     TerminalGridPoint, TerminalInputModifiers, TerminalKeyInput, TerminalMouseButton,
-    TerminalPointerInput, terminal_key_input_bytes, terminal_paste_input_bytes,
+    TerminalPointerInput, TerminalWheelInput, terminal_alt_scroll_input_bytes,
+    terminal_key_input_bytes, terminal_paste_input_bytes,
 };
 use crate::snapshot::{
     TerminalCellSnapshot, TerminalColorSnapshot, TerminalCursorShapeSnapshot,
@@ -18,9 +19,9 @@ use crate::snapshot::{
 };
 
 const DEFAULT_MAX_SCROLLBACK: usize = 10_000;
-const ALACRITTY_WIDE_CHAR_FLAG: u16 = 0b0000_0000_0010_0000;
-const ALACRITTY_WIDE_CHAR_SPACER_FLAG: u16 = 0b0000_0000_0100_0000;
-const ALACRITTY_LEADING_WIDE_CHAR_SPACER_FLAG: u16 = 0b0000_0100_0000_0000;
+const HUNK_WIDE_CHAR_FLAG: u16 = 0b0000_0000_0010_0000;
+const HUNK_WIDE_CHAR_SPACER_FLAG: u16 = 0b0000_0000_0100_0000;
+const HUNK_LEADING_WIDE_CHAR_SPACER_FLAG: u16 = 0b0000_0100_0000_0000;
 
 pub(crate) struct GhosttyTerminalVt {
     cols: u16,
@@ -129,6 +130,40 @@ impl GhosttyTerminalVt {
 
     pub(crate) fn key_input_bytes(&mut self, input: &TerminalKeyInput) -> Option<Vec<u8>> {
         terminal_key_input_bytes(input, &self.terminal, &mut self.key_encoder)
+    }
+
+    pub(crate) fn wheel_input_bytes(&mut self, input: TerminalWheelInput) -> Option<Vec<Vec<u8>>> {
+        if input.scroll_lines == 0 {
+            return None;
+        }
+
+        let mouse_tracking = self
+            .terminal
+            .is_mouse_tracking()
+            .expect("read libghostty-vt mouse tracking state");
+        if mouse_tracking && !input.modifiers.shift {
+            let reports = self.pointer_input_bytes(TerminalPointerInput::Scroll {
+                point: input.point,
+                scroll_lines: input.scroll_lines,
+                modifiers: input.modifiers,
+            });
+            return (!reports.is_empty()).then_some(reports);
+        }
+
+        let alt_screen = self
+            .terminal
+            .active_screen()
+            .expect("read libghostty-vt active screen")
+            == ffi::GhosttyTerminalScreen_GHOSTTY_TERMINAL_SCREEN_ALTERNATE;
+        let alternate_scroll = self
+            .terminal
+            .mode(Mode::ALT_SCROLL)
+            .expect("read libghostty-vt alternate scroll mode");
+        if alt_screen && alternate_scroll && !mouse_tracking {
+            return Some(terminal_alt_scroll_input_bytes(input.scroll_lines));
+        }
+
+        None
     }
 
     pub(crate) fn pointer_input_bytes(&mut self, input: TerminalPointerInput) -> Vec<Vec<u8>> {
@@ -421,9 +456,9 @@ fn snapshot_graphemes(
 fn snapshot_flags(wide: libghostty_vt::screen::CellWide) -> u16 {
     match wide {
         libghostty_vt::screen::CellWide::Narrow => 0,
-        libghostty_vt::screen::CellWide::Wide => ALACRITTY_WIDE_CHAR_FLAG,
-        libghostty_vt::screen::CellWide::SpacerTail => ALACRITTY_WIDE_CHAR_SPACER_FLAG,
-        libghostty_vt::screen::CellWide::SpacerHead => ALACRITTY_LEADING_WIDE_CHAR_SPACER_FLAG,
+        libghostty_vt::screen::CellWide::Wide => HUNK_WIDE_CHAR_FLAG,
+        libghostty_vt::screen::CellWide::SpacerTail => HUNK_WIDE_CHAR_SPACER_FLAG,
+        libghostty_vt::screen::CellWide::SpacerHead => HUNK_LEADING_WIDE_CHAR_SPACER_FLAG,
     }
 }
 
@@ -591,4 +626,59 @@ fn snapshot_display_offset(terminal: &Terminal<'static, 'static>) -> usize {
     let visible_end = scrollbar.offset.saturating_add(scrollbar.len);
     let trailing_rows = scrollbar.total.saturating_sub(visible_end);
     usize::try_from(trailing_rows).unwrap_or(usize::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GhosttyTerminalVt, TerminalGridPoint, TerminalInputModifiers, TerminalWheelInput};
+
+    #[test]
+    fn wheel_input_uses_alt_scroll_when_enabled_on_alt_screen() {
+        let mut vt = GhosttyTerminalVt::new(24, 80);
+        vt.advance(b"\x1b[?1049h\x1b[?1007h");
+
+        let reports = vt
+            .wheel_input_bytes(TerminalWheelInput {
+                point: TerminalGridPoint { line: 3, column: 5 },
+                scroll_lines: 2,
+                modifiers: TerminalInputModifiers::default(),
+            })
+            .expect("alt scroll should handle wheel input");
+
+        assert_eq!(reports, vec![b"\x1bOA".to_vec(), b"\x1bOA".to_vec()]);
+    }
+
+    #[test]
+    fn wheel_input_uses_mouse_reports_when_mouse_tracking_is_enabled() {
+        let mut vt = GhosttyTerminalVt::new(24, 80);
+        vt.advance(b"\x1b[?1000h\x1b[?1006h");
+
+        let reports = vt
+            .wheel_input_bytes(TerminalWheelInput {
+                point: TerminalGridPoint {
+                    line: 4,
+                    column: 10,
+                },
+                scroll_lines: -1,
+                modifiers: TerminalInputModifiers::default(),
+            })
+            .expect("mouse tracking should handle wheel input");
+
+        assert_eq!(reports.len(), 1);
+        assert!(!reports[0].is_empty());
+    }
+
+    #[test]
+    fn wheel_input_falls_back_when_terminal_does_not_handle_scroll() {
+        let mut vt = GhosttyTerminalVt::new(24, 80);
+
+        assert_eq!(
+            vt.wheel_input_bytes(TerminalWheelInput {
+                point: TerminalGridPoint { line: 0, column: 0 },
+                scroll_lines: 1,
+                modifiers: TerminalInputModifiers::default(),
+            }),
+            None
+        );
+    }
 }

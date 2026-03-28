@@ -39,6 +39,13 @@ pub struct TerminalKeyInput {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalWheelInput {
+    pub point: TerminalGridPoint,
+    pub scroll_lines: i32,
+    pub modifiers: TerminalInputModifiers,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalPointerInput {
     Button {
         point: TerminalGridPoint,
@@ -122,39 +129,20 @@ pub fn terminal_mouse_move_input(
     })
 }
 
-pub fn terminal_mouse_scroll_input(
+pub fn terminal_wheel_input(
     point: TerminalGridPoint,
     scroll_lines: i32,
     modifiers: TerminalInputModifiers,
-    mode: Option<TerminalModeSnapshot>,
-) -> Option<TerminalPointerInput> {
-    let mode = mode.unwrap_or_default();
-    if modifiers.shift || !mode.mouse_mode || scroll_lines == 0 {
+) -> Option<TerminalWheelInput> {
+    if scroll_lines == 0 {
         return None;
     }
 
-    Some(TerminalPointerInput::Scroll {
+    Some(TerminalWheelInput {
         point,
         scroll_lines,
         modifiers,
     })
-}
-
-pub fn terminal_alt_scroll_input_bytes(
-    scroll_lines: i32,
-    mode: Option<TerminalModeSnapshot>,
-) -> Option<Vec<u8>> {
-    let mode = mode.unwrap_or_default();
-    if !mode.alt_screen || !mode.alternate_scroll || mode.mouse_mode || scroll_lines == 0 {
-        return None;
-    }
-
-    let command = if scroll_lines > 0 { b'A' } else { b'B' };
-    let mut bytes = Vec::with_capacity(scroll_lines.unsigned_abs() as usize * 3);
-    for _ in 0..scroll_lines.abs() {
-        bytes.extend_from_slice(&[0x1b, b'O', command]);
-    }
-    Some(bytes)
 }
 
 pub fn terminal_paste_input_bytes(text: &str, bracketed: bool) -> Vec<u8> {
@@ -246,6 +234,13 @@ fn apply_key_terminal_mode(
     terminal.set_mode(Mode::DECCKM, mode.app_cursor)?;
     terminal.set_mode(Mode::KEYPAD_KEYS, mode.app_keypad)?;
     Ok(())
+}
+
+pub(crate) fn terminal_alt_scroll_input_bytes(scroll_lines: i32) -> Vec<Vec<u8>> {
+    let command = if scroll_lines > 0 { b'A' } else { b'B' };
+    std::iter::repeat_with(|| vec![0x1b, b'O', command])
+        .take(scroll_lines.unsigned_abs() as usize)
+        .collect()
 }
 
 fn terminal_compat_key_input_bytes(input: &TerminalKeyInput) -> Option<Vec<u8>> {

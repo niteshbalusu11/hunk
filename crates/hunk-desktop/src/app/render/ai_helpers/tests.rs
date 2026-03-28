@@ -1,6 +1,8 @@
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod ai_helper_tests {
+    use std::time::Instant;
+
     use super::ai_account_summary;
     use super::ai_markdown_code_block_text;
     use super::ai_markdown_code_block_text_and_highlights;
@@ -276,6 +278,75 @@ mod ai_helper_tests {
         let grid = ai_terminal_screen_grid(&screen);
         assert_eq!(grid[0][0].character, 'e');
         assert_eq!(grid[0][0].zerowidth, "\u{301}");
+    }
+
+    #[test]
+    #[ignore = "Manual terminal surface perf sweep for the Ghostty migration."]
+    fn terminal_screen_grid_large_snapshot_stays_under_budget() {
+        const ROWS: u16 = 120;
+        const COLS: u16 = 240;
+        const ITERATIONS: usize = 24;
+        const MAX_P95_MS: f64 = 8.0;
+
+        let mut cells = Vec::with_capacity(usize::from(ROWS) * usize::from(COLS));
+        for line in 0..i32::from(ROWS) {
+            for column in 0..usize::from(COLS) {
+                let (character, flags, zerowidth) = if column % 29 == 0 {
+                    ('好', 0b0000_0000_0010_0000, Vec::new())
+                } else if column % 29 == 1 {
+                    (' ', 0b0000_0000_0100_0000, Vec::new())
+                } else if column % 17 == 0 {
+                    ('e', 0, vec!['\u{301}'])
+                } else {
+                    ((b'a' + (column % 26) as u8) as char, 0, Vec::new())
+                };
+
+                cells.push(TerminalCellSnapshot {
+                    line,
+                    column,
+                    character,
+                    fg: TerminalColorSnapshot::Named(TerminalNamedColorSnapshot::Foreground),
+                    bg: TerminalColorSnapshot::Named(TerminalNamedColorSnapshot::Background),
+                    flags,
+                    zerowidth,
+                });
+            }
+        }
+
+        let screen = TerminalScreenSnapshot {
+            rows: ROWS,
+            cols: COLS,
+            display_offset: 0,
+            cursor: TerminalCursorSnapshot {
+                line: i32::from(ROWS.saturating_sub(1)),
+                column: usize::from(COLS.saturating_sub(2)),
+                shape: TerminalCursorShapeSnapshot::Block,
+            },
+            mode: TerminalModeSnapshot {
+                show_cursor: true,
+                ..TerminalModeSnapshot::default()
+            },
+            damage: TerminalDamageSnapshot::Full,
+            cells,
+        };
+
+        let mut samples_ms = Vec::with_capacity(ITERATIONS);
+        for _ in 0..ITERATIONS {
+            let started = Instant::now();
+            let grid = ai_terminal_screen_grid(&screen);
+            std::hint::black_box(&grid);
+            samples_ms.push(started.elapsed().as_secs_f64() * 1_000.0);
+        }
+        samples_ms.sort_by(|left, right| left.partial_cmp(right).expect("sortable timings"));
+
+        let p95_index = ((samples_ms.len() - 1) * 95) / 100;
+        let p95_ms = samples_ms[p95_index];
+        println!("terminal_screen_grid_p95_ms={p95_ms:.3}");
+
+        assert!(
+            p95_ms <= MAX_P95_MS,
+            "expected terminal screen grid p95 <= {MAX_P95_MS:.2} ms, got {p95_ms:.3} ms"
+        );
     }
 
     #[test]

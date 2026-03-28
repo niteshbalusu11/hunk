@@ -1,8 +1,8 @@
 use hunk_terminal::{
     TerminalGridPoint, TerminalInputModifiers, TerminalKeystroke, TerminalModeSnapshot,
-    TerminalMouseButton, TerminalPointerInput, terminal_alt_scroll_input_bytes,
-    terminal_focus_input_bytes, terminal_keystroke_input_bytes, terminal_mouse_button_input,
-    terminal_mouse_move_input, terminal_mouse_scroll_input, terminal_paste_input_bytes,
+    TerminalMouseButton, TerminalPointerInput, TerminalWheelInput, terminal_focus_input_bytes,
+    terminal_keystroke_input_bytes, terminal_mouse_button_input, terminal_mouse_move_input,
+    terminal_paste_input_bytes, terminal_wheel_input,
 };
 
 #[test]
@@ -295,21 +295,17 @@ fn terminal_mouse_move_reports_follow_drag_and_motion_modes() {
 }
 
 #[test]
-fn terminal_scroll_reports_repeat_for_each_line() {
-    let input = terminal_mouse_scroll_input(
+fn terminal_wheel_input_preserves_scroll_delta() {
+    let input = terminal_wheel_input(
         TerminalGridPoint { line: 2, column: 4 },
         -3,
         TerminalInputModifiers::default(),
-        Some(TerminalModeSnapshot {
-            mouse_mode: true,
-            ..TerminalModeSnapshot::default()
-        }),
     )
-    .expect("mouse mode should produce pointer input");
+    .expect("wheel input should preserve scroll delta");
 
     assert_eq!(
         input,
-        TerminalPointerInput::Scroll {
+        TerminalWheelInput {
             point: TerminalGridPoint { line: 2, column: 4 },
             scroll_lines: -3,
             modifiers: TerminalInputModifiers::default(),
@@ -318,32 +314,12 @@ fn terminal_scroll_reports_repeat_for_each_line() {
 }
 
 #[test]
-fn terminal_alt_scroll_requires_alt_screen_mode() {
-    assert_eq!(
-        terminal_alt_scroll_input_bytes(
-            2,
-            Some(TerminalModeSnapshot {
-                alt_screen: true,
-                alternate_scroll: true,
-                ..TerminalModeSnapshot::default()
-            }),
-        ),
-        Some(b"\x1bOA\x1bOA".to_vec())
-    );
-    assert_eq!(terminal_alt_scroll_input_bytes(2, None), None);
-}
-
-#[test]
 fn terminal_scroll_reports_ignore_zero_scroll_delta() {
     assert_eq!(
-        terminal_mouse_scroll_input(
+        terminal_wheel_input(
             TerminalGridPoint { line: 0, column: 0 },
             0,
             TerminalInputModifiers::default(),
-            Some(TerminalModeSnapshot {
-                mouse_mode: true,
-                ..TerminalModeSnapshot::default()
-            }),
         ),
         None
     );

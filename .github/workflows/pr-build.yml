@@ -201,6 +201,16 @@ jobs:
         run: ${{ matrix.install_packager }}
         shell: pwsh
 
+      - name: Run hunk-terminal tests
+        if: runner.os == 'macOS'
+        run: cargo test -p hunk-terminal --tests
+        shell: bash
+
+      - name: Run hunk-terminal tests
+        if: runner.os == 'Windows'
+        run: cargo test -p hunk-terminal --tests
+        shell: pwsh
+
       - name: Detect Apple signing configuration
         if: runner.os == 'macOS'
         id: detect_macos_signing

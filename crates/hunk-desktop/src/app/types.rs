@@ -321,10 +321,12 @@ struct FilesProjectTerminalState {
     restore_target: FilesTerminalRestoreTarget,
 }
 
-struct AiHiddenTerminalRuntimeHandle {
-    runtime: AiTerminalRuntimeHandle,
+struct ParkedTerminalRuntimeHandle<R> {
+    runtime: R,
     event_task: Task<()>,
 }
+
+type AiHiddenTerminalRuntimeHandle = ParkedTerminalRuntimeHandle<AiTerminalRuntimeHandle>;
 
 #[derive(Debug, Clone)]
 struct AiVisibleThreadProjectSection {
@@ -673,10 +675,7 @@ struct FilesTerminalRuntimeHandle {
     generation: usize,
 }
 
-struct FilesHiddenTerminalRuntimeHandle {
-    runtime: FilesTerminalRuntimeHandle,
-    event_task: Task<()>,
-}
+type FilesHiddenTerminalRuntimeHandle = ParkedTerminalRuntimeHandle<FilesTerminalRuntimeHandle>;
 
 #[derive(Debug, Clone, Default)]
 struct GitWorkspaceState {

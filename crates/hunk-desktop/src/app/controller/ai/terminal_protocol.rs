@@ -55,25 +55,16 @@ fn ai_terminal_mouse_move_input(
     )
 }
 
-fn ai_terminal_mouse_scroll_input(
+fn ai_terminal_wheel_input(
     point: AiTerminalGridPoint,
     scroll_lines: i32,
     modifiers: gpui::Modifiers,
-    mode: Option<hunk_terminal::TerminalModeSnapshot>,
-) -> Option<hunk_terminal::TerminalPointerInput> {
-    hunk_terminal::terminal_mouse_scroll_input(
+) -> Option<hunk_terminal::TerminalWheelInput> {
+    hunk_terminal::terminal_wheel_input(
         ai_terminal_terminal_grid_point(point),
         scroll_lines,
         ai_terminal_input_modifiers(modifiers),
-        mode,
     )
-}
-
-fn ai_terminal_alt_scroll_bytes(
-    scroll_lines: i32,
-    mode: Option<hunk_terminal::TerminalModeSnapshot>,
-) -> Option<Vec<u8>> {
-    hunk_terminal::terminal_alt_scroll_input_bytes(scroll_lines, mode)
 }
 
 fn ai_terminal_viewport_scroll_for_keystroke(
@@ -215,14 +206,16 @@ fn ai_terminal_uses_insert_paste_shortcut(keystroke: &gpui::Keystroke) -> bool {
 #[cfg(test)]
 mod terminal_protocol_tests {
     use super::{
-        AiTerminalGridPoint, ai_terminal_alt_scroll_bytes, ai_terminal_grid_point_from_position,
+        AiTerminalGridPoint, ai_terminal_grid_point_from_position,
         ai_terminal_input_bytes_for_keystroke, ai_terminal_mouse_button_input,
-        ai_terminal_mouse_move_input, ai_terminal_mouse_scroll_input, ai_terminal_uses_copy_shortcut,
+        ai_terminal_mouse_move_input, ai_terminal_uses_copy_shortcut,
         ai_terminal_uses_desktop_clipboard_shortcut, ai_terminal_uses_insert_paste_shortcut,
-        ai_terminal_viewport_scroll_for_keystroke,
+        ai_terminal_viewport_scroll_for_keystroke, ai_terminal_wheel_input,
     };
     use gpui::{Keystroke, MouseButton, ScrollDelta, TouchPhase, point, px};
-    use hunk_terminal::{TerminalModeSnapshot, TerminalPointerInput, TerminalScroll};
+    use hunk_terminal::{
+        TerminalModeSnapshot, TerminalPointerInput, TerminalScroll, TerminalWheelInput,
+    };
 
     #[test]
     fn terminal_keystroke_translation_handles_enter_and_arrows() {
@@ -550,41 +543,21 @@ mod terminal_protocol_tests {
 
     #[test]
     fn terminal_scroll_input_preserves_scroll_delta() {
-        let input = ai_terminal_mouse_scroll_input(
+        let input = ai_terminal_wheel_input(
             AiTerminalGridPoint { line: 2, column: 4 },
             -3,
             gpui::Modifiers::default(),
-            Some(TerminalModeSnapshot {
-                mouse_mode: true,
-                ..TerminalModeSnapshot::default()
-            }),
         )
-        .expect("mouse mode should produce pointer input");
+        .expect("wheel input should preserve scroll delta");
 
         assert_eq!(
             input,
-            TerminalPointerInput::Scroll {
+            TerminalWheelInput {
                 point: hunk_terminal::TerminalGridPoint { line: 2, column: 4 },
                 scroll_lines: -3,
                 modifiers: hunk_terminal::TerminalInputModifiers::default(),
             }
         );
-    }
-
-    #[test]
-    fn terminal_alt_scroll_requires_alt_screen_mode() {
-        assert_eq!(
-            ai_terminal_alt_scroll_bytes(
-                2,
-                Some(TerminalModeSnapshot {
-                    alt_screen: true,
-                    alternate_scroll: true,
-                    ..TerminalModeSnapshot::default()
-                }),
-            ),
-            Some(b"\x1bOA\x1bOA".to_vec())
-        );
-        assert_eq!(ai_terminal_alt_scroll_bytes(2, None), None);
     }
 
     #[test]
@@ -596,17 +569,13 @@ mod terminal_protocol_tests {
         };
 
         assert_eq!(
-            ai_terminal_mouse_scroll_input(
+            ai_terminal_wheel_input(
                 AiTerminalGridPoint { line: 0, column: 0 },
                 match event.delta {
                     ScrollDelta::Lines(lines) => lines.y as i32,
                     ScrollDelta::Pixels(_) => 0,
                 },
                 event.modifiers,
-                Some(TerminalModeSnapshot {
-                    mouse_mode: true,
-                    ..TerminalModeSnapshot::default()
-                }),
             ),
             None
         );

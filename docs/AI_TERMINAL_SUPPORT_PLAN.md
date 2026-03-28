@@ -162,13 +162,13 @@ Non-responsibilities in V1:
 ### Recommended Stack
 
 - PTY backend: `portable-pty`
-- VT engine for the next phase: `alacritty_terminal`
+- VT engine for the current implementation: `libghostty-vt`
 
 Why this shape:
 
 - `portable-pty` gives Hunk a clean cross-platform process and resize interface.
 - A PTY-backed drawer was enough for the first workflow target.
-- Zed already proves the `terminal runtime + terminal view` split with `alacritty_terminal`.
+- `libghostty-vt` now owns VT parsing, screen state, key encoding, and mouse encoding.
 - The next step should now absorb the complexity of full VT rendering rather than polishing the transcript path further.
 
 ### Current Display Model
@@ -185,7 +185,7 @@ This was the correct first slice, but it is not the final architecture.
 The target architecture for the next phase is:
 
 1. `portable-pty` for process hosting
-2. `alacritty_terminal` for terminal state and VT parsing
+2. `libghostty-vt` for terminal state and VT parsing
 3. a GPUI terminal surface that renders terminal cells, cursor, and selection from the VT state
 4. keyboard and paste handling that writes directly to the PTY
 
@@ -489,7 +489,7 @@ Files:
 
 Changes:
 
-- integrate `alacritty_terminal`
+- integrate `libghostty-vt`
 - replace transcript-only runtime state with a VT session model
 - track rows, cols, cursor state, alternate-screen mode, and scrollback
 - expose structured screen-dirty events instead of only raw text chunks

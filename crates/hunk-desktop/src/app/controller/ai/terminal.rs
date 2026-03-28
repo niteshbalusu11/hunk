@@ -198,11 +198,12 @@ impl DiffViewer {
     }
 
     fn ai_store_visible_terminal_state_for_thread(&mut self, thread_id: Option<&str>) {
-        let Some(thread_id) = thread_id else {
-            return;
-        };
-        self.ai_terminal_states_by_thread
-            .insert(thread_id.to_string(), self.ai_capture_visible_terminal_state());
+        let state = self.ai_capture_visible_terminal_state();
+        store_visible_terminal_state(
+            &mut self.ai_terminal_states_by_thread,
+            thread_id,
+            state,
+        );
     }
 
     fn ai_terminal_owner_key_for_thread(&self, thread_id: &str) -> Option<String> {
@@ -215,33 +216,26 @@ impl DiffViewer {
     }
 
     fn ai_restore_visible_terminal_state_for_thread(&mut self, thread_id: Option<&str>) {
-        let state = thread_id
-            .and_then(|thread_id| self.ai_terminal_states_by_thread.get(thread_id).cloned())
-            .unwrap_or_default();
+        let state = restore_visible_terminal_state(&self.ai_terminal_states_by_thread, thread_id);
         self.ai_apply_visible_terminal_state(state);
     }
 
     fn ai_park_visible_terminal_runtime_for_thread(&mut self, thread_id: Option<&str>) {
-        let Some(thread_id) = thread_id else {
-            return;
-        };
-        let Some(runtime) = self.ai_terminal_runtime.take() else {
-            return;
-        };
-        let event_task = std::mem::replace(&mut self.ai_terminal_event_task, Task::ready(()));
-        self.ai_hidden_terminal_runtimes.insert(
-            thread_id.to_string(),
-            AiHiddenTerminalRuntimeHandle { runtime, event_task },
+        park_visible_terminal_runtime(
+            thread_id,
+            &mut self.ai_terminal_runtime,
+            &mut self.ai_terminal_event_task,
+            &mut self.ai_hidden_terminal_runtimes,
         );
     }
 
     fn ai_promote_hidden_terminal_runtime_for_thread(&mut self, thread_id: &str) -> bool {
-        let Some(hidden) = self.ai_hidden_terminal_runtimes.remove(thread_id) else {
-            return false;
-        };
-        self.ai_terminal_runtime = Some(hidden.runtime);
-        self.ai_terminal_event_task = hidden.event_task;
-        true
+        promote_hidden_terminal_runtime(
+            thread_id,
+            &mut self.ai_terminal_runtime,
+            &mut self.ai_terminal_event_task,
+            &mut self.ai_hidden_terminal_runtimes,
+        )
     }
 
     pub(super) fn ai_handle_terminal_thread_change(
@@ -765,12 +759,12 @@ impl DiffViewer {
 
         let mode = self.ai_terminal_session.screen.as_ref().map(|screen| screen.mode);
         let point = AiTerminalGridPoint { line, column };
-        if let Some(input) = ai_terminal_mouse_scroll_input(point, delta, event.modifiers, mode) {
-            return self.ai_write_terminal_pointer_input(input, cx);
-        }
-
-        if let Some(bytes) = ai_terminal_alt_scroll_bytes(delta, mode) {
-            return self.ai_write_terminal_bytes(bytes.as_slice(), cx);
+        if let Some(input) = ai_terminal_wheel_input(point, delta, event.modifiers) {
+            match self.ai_handle_terminal_wheel_input(input, cx) {
+                Some(true) => return true,
+                Some(false) => {}
+                None => return false,
+            }
         }
 
         if mode.is_some_and(|mode| mode.alt_screen) {
@@ -875,28 +869,6 @@ impl DiffViewer {
         true
     }
 
-    fn ai_write_terminal_bytes(&mut self, bytes: &[u8], cx: &mut Context<Self>) -> bool {
-        if !self.ai_terminal_is_running() {
-            return false;
-        }
-        if bytes.contains(&b'\r') || bytes.contains(&b'\n') {
-            self.ai_temporarily_suppress_terminal_cursor(cx);
-        }
-        let Some(runtime) = self.ai_terminal_runtime.as_ref() else {
-            return false;
-        };
-
-        if let Err(error) = runtime.handle.write_input(bytes) {
-            self.ai_terminal_session.status_message = Some(error.to_string());
-            self.ai_terminal_session.status = AiTerminalSessionStatus::Failed;
-            cx.notify();
-            return true;
-        }
-
-        self.ai_terminal_session.status_message = None;
-        true
-    }
-
     fn ai_write_terminal_pointer_input(
         &mut self,
         input: hunk_terminal::TerminalPointerInput,
@@ -918,6 +890,30 @@ impl DiffViewer {
 
         self.ai_terminal_session.status_message = None;
         true
+    }
+
+    fn ai_handle_terminal_wheel_input(
+        &mut self,
+        input: hunk_terminal::TerminalWheelInput,
+        cx: &mut Context<Self>,
+    ) -> Option<bool> {
+        if !self.ai_terminal_is_running() {
+            return None;
+        }
+        let runtime = self.ai_terminal_runtime.as_ref()?;
+
+        match runtime.handle.handle_wheel_input(input) {
+            Ok(handled) => {
+                self.ai_terminal_session.status_message = None;
+                Some(handled)
+            }
+            Err(error) => {
+                self.ai_terminal_session.status_message = Some(error.to_string());
+                self.ai_terminal_session.status = AiTerminalSessionStatus::Failed;
+                cx.notify();
+                Some(true)
+            }
+        }
     }
 
     fn ai_write_terminal_key_input(

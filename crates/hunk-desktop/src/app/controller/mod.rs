@@ -60,6 +60,7 @@ include!("git_ops.rs");
 include!("recent_commits.rs");
 include!("review_compare.rs");
 include!("workspace_mode.rs");
+include!("terminal_runtime_store.rs");
 include!("ai.rs");
 include!("ai_composer_completion.rs");
 include!("ai_git_ops.rs");
