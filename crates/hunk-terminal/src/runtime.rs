@@ -1,8 +1,8 @@
 use std::ffi::OsString;
-use std::io::{Read as _, Write as _};
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -93,35 +93,49 @@ enum TerminalControl {
     WriteInput(Vec<u8>),
 }
 
-type SharedTerminalWriter = Arc<Mutex<Box<dyn std::io::Write + Send>>>;
+enum TerminalActorInput {
+    Control(TerminalControl),
+    PtyOutput(Vec<u8>),
+    PtyReadFailed(String),
+    PtyClosed,
+}
 
 pub struct TerminalSessionHandle {
-    control_tx: Sender<TerminalControl>,
+    actor_tx: Sender<TerminalActorInput>,
 }
 
 impl TerminalSessionHandle {
     pub fn kill(&self) -> Result<()> {
-        self.control_tx
-            .send(TerminalControl::Kill)
+        self.send_control(TerminalControl::Kill)
             .context("send terminal kill command")
     }
 
     pub fn resize(&self, rows: u16, cols: u16) -> Result<()> {
-        self.control_tx
-            .send(TerminalControl::Resize { rows, cols })
+        self.send_control(TerminalControl::Resize { rows, cols })
             .context("send terminal resize command")
     }
 
     pub fn write_input(&self, input: &[u8]) -> Result<()> {
-        self.control_tx
-            .send(TerminalControl::WriteInput(input.to_vec()))
+        self.send_control(TerminalControl::WriteInput(input.to_vec()))
             .context("send terminal input")
     }
 
     pub fn scroll_display(&self, scroll: TerminalScroll) -> Result<()> {
-        self.control_tx
-            .send(TerminalControl::Scroll(scroll))
+        self.send_control(TerminalControl::Scroll(scroll))
             .context("send terminal scroll")
+    }
+
+    fn send_control(&self, control: TerminalControl) -> Result<()> {
+        self.actor_tx.send(TerminalActorInput::Control(control))?;
+        Ok(())
+    }
+}
+
+impl Drop for TerminalSessionHandle {
+    fn drop(&mut self) {
+        let _ = self
+            .actor_tx
+            .send(TerminalActorInput::Control(TerminalControl::Kill));
     }
 }
 
@@ -157,72 +171,50 @@ pub fn spawn_terminal_session(
         .context("spawn terminal command")?;
     drop(pair.slave);
 
-    let mut reader = pair.master.try_clone_reader().context("clone PTY reader")?;
-    let writer: SharedTerminalWriter = Arc::new(Mutex::new(
-        pair.master.take_writer().context("take PTY writer")?,
-    ));
-    let vt = Arc::new(Mutex::new(TerminalVt::new(request.rows, request.cols)));
+    let master = pair.master;
+    let mut reader = master.try_clone_reader().context("clone PTY reader")?;
+    let writer = master.take_writer().context("take PTY writer")?;
     let (event_tx, event_rx) = mpsc::channel();
-    let (control_tx, control_rx) = mpsc::channel();
+    let (actor_tx, actor_rx) = mpsc::channel();
 
-    if let Ok(mut vt) = vt.lock() {
-        let _ = event_tx.send(TerminalEvent::Screen(vt.snapshot()));
-    }
-
-    let output_tx = event_tx.clone();
-    let output_vt = Arc::clone(&vt);
-    let output_writer = Arc::clone(&writer);
+    let output_tx = actor_tx.clone();
     thread::spawn(move || {
         let mut buffer = [0_u8; READ_BUFFER_BYTES];
-        let mut query_responder = TerminalQueryResponder::default();
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(count) => {
-                    let bytes = buffer[..count].to_vec();
-                    let snapshot = match output_vt.lock() {
-                        Ok(mut vt) => Some(vt.advance(bytes.as_slice())),
-                        Err(_) => None,
-                    };
-                    if let Some(snapshot) = snapshot.as_ref() {
-                        for response in query_responder.responses(bytes.as_slice(), snapshot) {
-                            if let Err(error) =
-                                write_terminal_bytes(&output_writer, response.as_slice())
-                            {
-                                let _ = output_tx.send(TerminalEvent::Failed(format!(
-                                    "Failed to respond to terminal query: {error}"
-                                )));
-                                return;
-                            }
-                        }
-                    }
-                    if output_tx.send(TerminalEvent::Output(bytes)).is_err() {
-                        break;
-                    }
-                    if let Some(snapshot) = snapshot
-                        && output_tx.send(TerminalEvent::Screen(snapshot)).is_err()
+                    if output_tx
+                        .send(TerminalActorInput::PtyOutput(buffer[..count].to_vec()))
+                        .is_err()
                     {
                         break;
                     }
                 }
                 Err(error) => {
-                    let _ = output_tx.send(TerminalEvent::Failed(format!(
+                    let _ = output_tx.send(TerminalActorInput::PtyReadFailed(format!(
                         "Failed to read terminal output: {error}"
                     )));
                     break;
                 }
             }
         }
+
+        let _ = output_tx.send(TerminalActorInput::PtyClosed);
     });
 
-    let control_vt = Arc::clone(&vt);
-    let control_writer = Arc::clone(&writer);
     thread::spawn(move || {
-        let master = pair.master;
+        let mut writer = writer;
+        let mut vt = TerminalVt::new(request.rows, request.cols);
+        let mut query_responder = TerminalQueryResponder::default();
         let mut child_exit_reported = false;
+        let mut pty_closed = false;
+
+        let _ = event_tx.send(TerminalEvent::Screen(vt.snapshot()));
+
         loop {
-            match control_rx.recv_timeout(CONTROL_POLL_INTERVAL) {
-                Ok(TerminalControl::Kill) => {
+            match actor_rx.recv_timeout(CONTROL_POLL_INTERVAL) {
+                Ok(TerminalActorInput::Control(TerminalControl::Kill)) => {
                     if child_exit_reported {
                         break;
                     }
@@ -232,7 +224,7 @@ pub fn spawn_terminal_session(
                         )));
                     }
                 }
-                Ok(TerminalControl::Resize { rows, cols }) => {
+                Ok(TerminalActorInput::Control(TerminalControl::Resize { rows, cols })) => {
                     if let Err(error) = master.resize(PtySize {
                         rows,
                         cols,
@@ -242,24 +234,48 @@ pub fn spawn_terminal_session(
                         let _ = event_tx.send(TerminalEvent::Failed(format!(
                             "Failed to resize terminal: {error}"
                         )));
-                    } else if let Ok(mut vt) = control_vt.lock() {
+                    } else {
                         let _ = event_tx.send(TerminalEvent::Screen(vt.resize(rows, cols)));
                     }
                 }
-                Ok(TerminalControl::Scroll(scroll)) => {
-                    if let Ok(mut vt) = control_vt.lock() {
-                        let _ = event_tx.send(TerminalEvent::Screen(vt.scroll_display(scroll)));
-                    }
+                Ok(TerminalActorInput::Control(TerminalControl::Scroll(scroll))) => {
+                    let _ = event_tx.send(TerminalEvent::Screen(vt.scroll_display(scroll)));
                 }
-                Ok(TerminalControl::WriteInput(input)) => {
+                Ok(TerminalActorInput::Control(TerminalControl::WriteInput(input))) => {
                     if child_exit_reported {
                         continue;
                     }
-                    if let Err(error) = write_terminal_bytes(&control_writer, input.as_slice()) {
+                    if let Err(error) = write_terminal_bytes(writer.as_mut(), input.as_slice()) {
                         let _ = event_tx.send(TerminalEvent::Failed(format!(
                             "Failed to write terminal input: {error}"
                         )));
                     }
+                }
+                Ok(TerminalActorInput::PtyOutput(bytes)) => {
+                    let snapshot = vt.advance(bytes.as_slice());
+                    for response in query_responder.responses(bytes.as_slice(), &snapshot) {
+                        if let Err(error) =
+                            write_terminal_bytes(writer.as_mut(), response.as_slice())
+                        {
+                            let _ = event_tx.send(TerminalEvent::Failed(format!(
+                                "Failed to respond to terminal query: {error}"
+                            )));
+                            break;
+                        }
+                    }
+                    if event_tx.send(TerminalEvent::Output(bytes)).is_err() {
+                        break;
+                    }
+                    if event_tx.send(TerminalEvent::Screen(snapshot)).is_err() {
+                        break;
+                    }
+                }
+                Ok(TerminalActorInput::PtyReadFailed(error)) => {
+                    let _ = event_tx.send(TerminalEvent::Failed(error));
+                    pty_closed = true;
+                }
+                Ok(TerminalActorInput::PtyClosed) => {
+                    pty_closed = true;
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -287,16 +303,17 @@ pub fn spawn_terminal_session(
                     break;
                 }
             }
+
+            if child_exit_reported && pty_closed {
+                break;
+            }
         }
     });
 
-    Ok((TerminalSessionHandle { control_tx }, event_rx))
+    Ok((TerminalSessionHandle { actor_tx }, event_rx))
 }
 
-fn write_terminal_bytes(writer: &SharedTerminalWriter, input: &[u8]) -> Result<()> {
-    let mut writer = writer
-        .lock()
-        .map_err(|_| anyhow::anyhow!("terminal writer poisoned"))?;
+fn write_terminal_bytes(writer: &mut dyn std::io::Write, input: &[u8]) -> Result<()> {
     writer.write_all(input).context("write terminal bytes")?;
     writer.flush().context("flush terminal bytes")?;
     Ok(())

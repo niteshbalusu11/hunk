@@ -133,6 +133,10 @@ The current fork already has:
 - Windows target handling in the Rust binding
 - a Windows GitHub Actions job proving `cargo check -p libghostty-vt --target x86_64-pc-windows-msvc`
 
+Hunk is currently pinned to fork commit:
+
+- `2d0716f1c96e1406957c46f82dc6c6b53379b489`
+
 That removes the largest immediate blocker to starting the Hunk rewrite on top of the fork.
 
 ## Target Architecture
