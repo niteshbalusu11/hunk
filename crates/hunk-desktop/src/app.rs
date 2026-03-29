@@ -168,6 +168,7 @@ mod ai_thread_catalog_scheduler;
 mod ai_thread_flow;
 mod branch_activation;
 mod branch_picker;
+mod diff_segment_prefetch;
 mod diff_viewport;
 mod fuzzy_match;
 mod project_open;

@@ -12,6 +12,9 @@ use crate::app::ai_thread_flow::{
     ai_branch_generation_seed_for_thread, ai_branch_name_for_prompt, ai_branch_name_for_thread,
     ai_commit_message_for_thread, try_ai_branch_name_for_prompt, try_ai_commit_message,
 };
+use crate::app::diff_segment_prefetch::{
+    first_paint_prefetch_window, first_paint_segment_quality, prioritized_prefetch_row_indices,
+};
 use crate::app::markdown_links::open_url_in_browser;
 
 use super::data::{

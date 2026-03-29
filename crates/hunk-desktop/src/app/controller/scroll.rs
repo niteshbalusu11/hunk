@@ -208,6 +208,74 @@ impl DiffViewer {
         });
     }
 
+    fn prime_visible_row_segment_cache_for_first_paint(
+        &mut self,
+        file_line_stats: &BTreeMap<String, LineStats>,
+    ) {
+        if self.diff_rows.is_empty() {
+            return;
+        }
+
+        if self.diff_row_segment_cache.len() != self.diff_rows.len() {
+            self.diff_row_segment_cache.resize(self.diff_rows.len(), None);
+        }
+
+        let visible_row = self
+            .diff_list_state
+            .logical_scroll_top()
+            .item_ix
+            .min(self.diff_rows.len().saturating_sub(1));
+        let (start, end) = first_paint_prefetch_window(
+            self.diff_rows.len(),
+            visible_row,
+            DIFF_SEGMENT_PREFETCH_BATCH_ROWS,
+        );
+
+        for row_ix in prioritized_prefetch_row_indices(start, end, visible_row) {
+            let Some(row) = self.diff_rows.get(row_ix) else {
+                continue;
+            };
+            if row.kind != DiffRowKind::Code {
+                continue;
+            }
+
+            let file_path = self
+                .diff_row_metadata
+                .get(row_ix)
+                .and_then(|meta| meta.file_path.clone());
+            let base_quality = file_path
+                .as_deref()
+                .and_then(|path| file_line_stats.get(path).copied())
+                .map(base_segment_quality_for_file)
+                .unwrap_or(DiffSegmentQuality::Detailed);
+            let target_quality = first_paint_segment_quality(base_quality);
+
+            if self
+                .diff_row_segment_cache
+                .get(row_ix)
+                .and_then(Option::as_ref)
+                .is_some_and(|cache| cache.quality >= target_quality)
+            {
+                continue;
+            }
+
+            let row_cache = build_diff_row_segment_cache_from_cells(
+                file_path.as_deref(),
+                row.left.text.as_str(),
+                row.left.kind,
+                row.right.text.as_str(),
+                row.right.kind,
+                target_quality,
+            );
+
+            if let Some(slot) = self.diff_row_segment_cache.get_mut(row_ix) {
+                *slot = Some(row_cache);
+            }
+        }
+
+        self.segment_prefetch_anchor_row = Some(visible_row);
+    }
+
     fn selected_file_from_row_metadata(&self, row_ix: usize) -> Option<(String, FileStatus)> {
         let row = self.diff_row_metadata.get(row_ix)?;
         if row.kind == DiffStreamRowKind::EmptyState {
@@ -286,6 +354,7 @@ impl DiffViewer {
         self.sync_diff_list_state(viewport_anchor);
         self.file_row_ranges = file_ranges;
         self.recompute_diff_layout();
+        self.prime_visible_row_segment_cache_for_first_paint(&file_line_stats);
         self.last_visible_row_start = None;
         self.recompute_diff_visible_header_lookup();
         file_line_stats
@@ -342,40 +411,4 @@ impl DiffViewer {
         };
         self.diff_list_state.scroll_to(next_scroll_top);
     }
-}
-
-fn prioritized_prefetch_row_indices(start: usize, end: usize, anchor_row: usize) -> Vec<usize> {
-    if start >= end {
-        return Vec::new();
-    }
-
-    let anchor = anchor_row.clamp(start, end.saturating_sub(1));
-    let mut rows = Vec::with_capacity(end.saturating_sub(start));
-    rows.push(anchor);
-
-    let mut step = 1usize;
-    while rows.len() < end.saturating_sub(start) {
-        let mut inserted = false;
-
-        if let Some(right) = anchor.checked_add(step)
-            && right < end
-        {
-            rows.push(right);
-            inserted = true;
-        }
-
-        if let Some(left) = anchor.checked_sub(step)
-            && left >= start
-        {
-            rows.push(left);
-            inserted = true;
-        }
-
-        if !inserted {
-            break;
-        }
-        step = step.saturating_add(1);
-    }
-
-    rows
 }
