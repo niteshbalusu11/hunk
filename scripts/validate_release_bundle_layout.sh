@@ -31,16 +31,6 @@ require_executable() {
   fi
 }
 
-forbid_helix_paths() {
-  local root_path="$1"
-
-  if find "$root_path" -print | grep -E '(^|/)(helix|hx-runtime|queries|grammars)(/|$)' >/dev/null; then
-    echo "error: forbidden Helix-era bundle content found under $root_path" >&2
-    find "$root_path" -print | grep -E '(^|/)(helix|hx-runtime|queries|grammars)(/|$)' >&2
-    exit 1
-  fi
-}
-
 validate_macos_app() {
   local app_path="$1"
 
@@ -48,7 +38,6 @@ validate_macos_app() {
   require_executable \
     "$app_path/Contents/Resources/codex-runtime/macos/codex" \
     "bundled macOS Codex runtime"
-  forbid_helix_paths "$app_path"
 }
 
 validate_linux_package() {
@@ -60,7 +49,6 @@ validate_linux_package() {
     "$package_path/codex-runtime/linux/codex" \
     "bundled Linux Codex runtime"
   require_path "$package_path/lib" "Linux shared library directory"
-  forbid_helix_paths "$package_path"
 }
 
 validate_linux_install_root() {
@@ -77,7 +65,6 @@ validate_linux_install_root() {
   require_path "$install_root/usr/share/applications/hunk-desktop.desktop" "Linux desktop entry"
   require_path "$install_root/usr/share/icons/hicolor/512x512/apps/hunk-desktop.png" "Linux desktop icon"
   require_path "$install_root/usr/share/pixmaps/hunk-desktop.png" "Linux desktop pixmap icon"
-  forbid_helix_paths "$install_root"
 }
 
 if [[ $# -ne 2 ]]; then

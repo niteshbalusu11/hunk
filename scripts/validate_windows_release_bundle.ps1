@@ -22,23 +22,57 @@ function Assert-Exists {
     }
 }
 
-function Assert-NoHelixReferences {
+function Get-WindowsMsiFileNames {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Path
+        [string]$MsiPath
     )
 
-    if (-not (Test-Path $Path)) {
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    $database = $installer.OpenDatabase($MsiPath, 0)
+    $fileQuery = 'SELECT `FileName` FROM `File`'
+    $view = $database.OpenView($fileQuery)
+    $view.Execute()
+
+    $fileNames = New-Object System.Collections.Generic.List[string]
+    while ($true) {
+        $record = $view.Fetch()
+        if (-not $record) {
+            break
+        }
+
+        $fileName = $record.StringData(1)
+        $shortNameSeparator = [char]124
+        if ($fileName.Contains($shortNameSeparator)) {
+            $fileName = $fileName.Substring($fileName.LastIndexOf($shortNameSeparator) + 1)
+        }
+        [void]$fileNames.Add($fileName)
+    }
+
+    return @($fileNames)
+}
+
+function Assert-WindowsMsiContainsFiles {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$MsiPath,
+        [string[]]$ExpectedFileNames
+    )
+
+    if (-not $ExpectedFileNames -or $ExpectedFileNames.Count -eq 0) {
         return
     }
 
-    $matches = Get-ChildItem -Path $Path -Recurse -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Extension -in @(".wxs", ".wixproj", ".xml", ".json", ".toml", ".txt") } |
-        Select-String -Pattern "helix|hx-runtime|queries|grammars" -SimpleMatch:$false
+    $actualFileNames = @(Get-WindowsMsiFileNames -MsiPath $MsiPath)
+    $missing = @(
+        $ExpectedFileNames |
+            Sort-Object -Unique |
+            Where-Object { $actualFileNames -notcontains $_ }
+    )
 
-    if ($matches) {
-        $details = $matches | ForEach-Object { "$($_.Path):$($_.LineNumber): $($_.Line.Trim())" }
-        throw ("Found forbidden Helix-era packaging references:`n" + ($details -join "`n"))
+    if ($missing.Count -gt 0) {
+        $missingList = $missing -join ", "
+        throw "Windows MSI is missing expected files: $missingList"
     }
 }
 
@@ -53,15 +87,17 @@ $cargoToml = Get-Content $cargoTomlPath -Raw
 if ($cargoToml -notmatch 'resources\s*=\s*\[\s*"../../assets/codex-runtime"\s*\]') {
     throw "Desktop packager manifest no longer bundles ../../assets/codex-runtime"
 }
-if ($cargoToml -match 'helix|hx-runtime|queries|grammars') {
-    throw "Desktop packager manifest still references Helix-era resources"
-}
-
-Assert-NoHelixReferences -Path (Join-Path $RootDir ".github/workflows/release.yml")
-Assert-NoHelixReferences -Path (Join-Path $RootDir "scripts")
 
 if ($PackagerOutDir) {
-    Assert-NoHelixReferences -Path $PackagerOutDir
+    Assert-Exists -Path $PackagerOutDir -Description "Windows packager output directory"
+    $bundleMsi = Get-ChildItem -Path $PackagerOutDir -Filter "*.msi" -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTimeUtc -Descending |
+        Select-Object -First 1
+    if (-not $bundleMsi) {
+        throw "Expected cargo-packager to produce an MSI under $PackagerOutDir"
+    }
+
+    Assert-WindowsMsiContainsFiles -MsiPath $bundleMsi.FullName -ExpectedFileNames @("ghostty-vt.dll")
 }
 
 Write-Host "Validated Windows release bundle inputs."

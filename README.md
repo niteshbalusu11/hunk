@@ -16,8 +16,6 @@ Hunk is also has full codex integration so you can use Codex inside of Hunk inst
 <img width="3320" height="2032" alt="Hunk (Window) 2026-03-07 04:36 PM" src="https://github.com/user-attachments/assets/2ae2fd5f-13b1-4270-b11f-d6d6c0dffe35" />
 <img width="3320" height="2032" alt="Hunk (Window) 2026-03-07 04:53 PM" src="https://github.com/user-attachments/assets/7270c825-61cb-4c64-b63a-17d038808269" />
 
-
-
 ## What it includes
 
 - Uses a native Git backend built on `gix` with narrow `git2` fallbacks for unsupported write flows
@@ -136,7 +134,7 @@ pwsh ./scripts/package_windows_release.ps1
 These produce:
 
 - macOS ARM64: `Hunk-<version>-macos-arm64.dmg`, signed/notarized when Apple secrets are configured
-- Linux x86_64: `Hunk-<version>-linux-x86_64.tar.gz`, `hunk-desktop_<version>-1_amd64.deb`, and `hunk-desktop-<rpm-version>-1.x86_64.rpm`
+- Linux x86*64: `Hunk-<version>-linux-x86_64.tar.gz`, `hunk-desktop*<version>-1_amd64.deb`, and `hunk-desktop-<rpm-version>-1.x86_64.rpm`
 - Windows x86_64: `Hunk-<version>-windows-x86_64.msi`
 
 Linux release packaging is custom and does not use `cargo packager`. On Ubuntu hosts you can either enter `nix develop` to get the packaging toolchain from the flake, or install host deps with `just install-linux-packaging-deps-ubuntu`, then use:
@@ -206,8 +204,6 @@ just bundle
 
 - `.github/workflows/pr-build.yml` stays as the main PR CI workflow.
 - `.github/workflows/release.yml` builds DMG/MSI/tarball/DEB/RPM artifacts and publishes them to a GitHub Release when you push a `v*` tag.
-
-The release workflows no longer bundle the old Helix runtime. The editor now uses the curated Tree-sitter language set compiled into `hunk-language`.
 
 ## Syntax Highlighting
 
