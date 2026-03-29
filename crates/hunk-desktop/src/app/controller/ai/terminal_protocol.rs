@@ -67,6 +67,34 @@ fn ai_terminal_wheel_input(
     )
 }
 
+fn ai_terminal_scroll_lines_from_event(
+    event: &gpui::ScrollWheelEvent,
+    line_height: Pixels,
+) -> Option<i32> {
+    let delta = event.delta.pixel_delta(line_height);
+    if delta.y.abs() < px(0.5) {
+        return None;
+    }
+
+    let line_count = ((delta.y.abs() / line_height).ceil() as i32).max(1);
+    Some(if delta.y > Pixels::ZERO {
+        line_count
+    } else {
+        -line_count
+    })
+}
+
+fn ai_terminal_viewport_scroll_for_wheel_delta(
+    scroll_lines: i32,
+    mode: Option<hunk_terminal::TerminalModeSnapshot>,
+) -> Option<TerminalScroll> {
+    if scroll_lines == 0 || mode.is_some_and(|mode| mode.alt_screen) {
+        return None;
+    }
+
+    Some(TerminalScroll::Delta(-scroll_lines))
+}
+
 fn ai_terminal_viewport_scroll_for_keystroke(
     keystroke: &gpui::Keystroke,
     mode: Option<hunk_terminal::TerminalModeSnapshot>,
@@ -210,7 +238,8 @@ mod terminal_protocol_tests {
         ai_terminal_input_bytes_for_keystroke, ai_terminal_mouse_button_input,
         ai_terminal_mouse_move_input, ai_terminal_uses_copy_shortcut,
         ai_terminal_uses_desktop_clipboard_shortcut, ai_terminal_uses_insert_paste_shortcut,
-        ai_terminal_viewport_scroll_for_keystroke, ai_terminal_wheel_input,
+        ai_terminal_scroll_lines_from_event, ai_terminal_viewport_scroll_for_keystroke,
+        ai_terminal_viewport_scroll_for_wheel_delta, ai_terminal_wheel_input,
     };
     use gpui::{Keystroke, MouseButton, ScrollDelta, TouchPhase, point, px};
     use hunk_terminal::{
@@ -576,6 +605,46 @@ mod terminal_protocol_tests {
                     ScrollDelta::Pixels(_) => 0,
                 },
                 event.modifiers,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn terminal_scroll_lines_follow_raw_event_delta_sign() {
+        let line_height = px(16.0);
+
+        let forward = gpui::ScrollWheelEvent {
+            delta: ScrollDelta::Pixels(point(px(0.0), px(32.0))),
+            touch_phase: TouchPhase::Moved,
+            ..Default::default()
+        };
+        let backward = gpui::ScrollWheelEvent {
+            delta: ScrollDelta::Pixels(point(px(0.0), px(-32.0))),
+            touch_phase: TouchPhase::Moved,
+            ..Default::default()
+        };
+
+        assert_eq!(ai_terminal_scroll_lines_from_event(&forward, line_height), Some(2));
+        assert_eq!(
+            ai_terminal_scroll_lines_from_event(&backward, line_height),
+            Some(-2)
+        );
+    }
+
+    #[test]
+    fn terminal_viewport_wheel_fallback_inverts_terminal_wheel_sign() {
+        assert_eq!(
+            ai_terminal_viewport_scroll_for_wheel_delta(3, None),
+            Some(TerminalScroll::Delta(-3))
+        );
+        assert_eq!(
+            ai_terminal_viewport_scroll_for_wheel_delta(
+                3,
+                Some(TerminalModeSnapshot {
+                    alt_screen: true,
+                    ..TerminalModeSnapshot::default()
+                })
             ),
             None
         );

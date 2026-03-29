@@ -192,6 +192,35 @@ fn terminal_keystroke_translation_maps_common_word_navigation_shortcuts() {
 }
 
 #[test]
+fn terminal_keystroke_translation_falls_back_to_utf8_for_unmapped_printable_text() {
+    assert_eq!(
+        terminal_keystroke_input_bytes(
+            &TerminalKeystroke {
+                key: "é",
+                key_char: Some("é"),
+                modifiers: TerminalInputModifiers::default(),
+            },
+            None,
+        ),
+        Some("é".as_bytes().to_vec())
+    );
+    assert_eq!(
+        terminal_keystroke_input_bytes(
+            &TerminalKeystroke {
+                key: "é",
+                key_char: Some("é"),
+                modifiers: TerminalInputModifiers {
+                    alt: true,
+                    ..TerminalInputModifiers::default()
+                },
+            },
+            None,
+        ),
+        Some([vec![0x1b], "é".as_bytes().to_vec()].concat())
+    );
+}
+
+#[test]
 fn terminal_paste_bytes_wrap_bracketed_paste_when_requested() {
     assert_eq!(
         terminal_paste_input_bytes("echo hi", true),

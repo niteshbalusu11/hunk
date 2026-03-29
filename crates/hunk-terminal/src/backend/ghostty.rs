@@ -327,8 +327,15 @@ fn build_snapshot(
     let cursor = snapshot_cursor(terminal, &snapshot);
     let mode = snapshot_mode(terminal, &snapshot);
     let display_offset = snapshot_display_offset(terminal);
-    let (cells, damage) =
-        snapshot_cells_and_damage(&snapshot, cols, dirty, &colors, row_iterator, cell_iterator);
+    let (cells, damage) = snapshot_cells_and_damage(
+        &snapshot,
+        cols,
+        dirty,
+        display_offset,
+        &colors,
+        row_iterator,
+        cell_iterator,
+    );
     snapshot
         .set_dirty(Dirty::Clean)
         .expect("reset libghostty-vt global dirty state");
@@ -348,6 +355,7 @@ fn snapshot_cells_and_damage(
     snapshot: &Snapshot<'static, '_>,
     cols: u16,
     dirty: Dirty,
+    display_offset: usize,
     colors: &Colors,
     row_iterator: &mut RowIterator<'static>,
     cell_iterator: &mut CellIterator<'static>,
@@ -360,12 +368,14 @@ fn snapshot_cells_and_damage(
         .update(snapshot)
         .expect("update libghostty-vt row iterator");
     let right = usize::from(cols.saturating_sub(1));
+    let line_offset = i32::try_from(display_offset).unwrap_or(i32::MAX);
 
     while let Some(row) = rows.next() {
+        let visible_line = row_index - line_offset;
         if matches!(dirty, Dirty::Partial) {
             match row.dirty() {
                 Ok(true) => damage_lines.push(TerminalDamageLineSnapshot {
-                    line: row_index as usize,
+                    line: visible_line,
                     left: 0,
                     right,
                 }),
@@ -379,7 +389,7 @@ fn snapshot_cells_and_damage(
             .expect("update libghostty-vt cell iterator");
         let mut column = 0_usize;
         while let Some(cell) = row_cells.next() {
-            cells.push(snapshot_cell(row_index, column, cell, colors));
+            cells.push(snapshot_cell(visible_line, column, cell, colors));
             column += 1;
         }
 

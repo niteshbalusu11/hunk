@@ -196,8 +196,10 @@ pub(crate) fn terminal_key_input_bytes(
         return Some(bytes);
     }
 
-    let (key, unshifted_codepoint) = terminal_key_spec(input)?;
     let text = terminal_key_text(input);
+    let Some((key, unshifted_codepoint)) = terminal_key_spec(input) else {
+        return terminal_fallback_text_bytes(input);
+    };
     let mods = terminal_key_mods(input.modifiers);
 
     let mut consumed_mods = key::Mods::empty();

@@ -5,8 +5,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use hunk_terminal::{
-    TerminalColorSnapshot, TerminalCursorShapeSnapshot, TerminalEvent, TerminalNamedColorSnapshot,
-    TerminalScreenSnapshot, TerminalScroll, TerminalSpawnRequest, spawn_terminal_session,
+    TerminalColorSnapshot, TerminalCursorShapeSnapshot, TerminalDamageSnapshot, TerminalEvent,
+    TerminalNamedColorSnapshot, TerminalScreenSnapshot, TerminalScroll, TerminalSpawnRequest,
+    spawn_terminal_session,
 };
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(3);
@@ -100,6 +101,17 @@ fn terminal_session_supports_scrollback_after_output() {
         panic!("expected a screen event");
     };
     assert!(screen.display_offset > 0);
+    assert_eq!(
+        screen.cells.iter().map(|cell| cell.line).min(),
+        Some(-(screen.display_offset as i32)),
+    );
+    if let TerminalDamageSnapshot::Partial(lines) = &screen.damage {
+        assert!(
+            lines
+                .iter()
+                .all(|line| line.line >= -(screen.display_offset as i32))
+        );
+    }
 
     handle.kill().expect("kill should succeed");
 }

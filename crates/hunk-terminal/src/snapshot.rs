@@ -82,7 +82,7 @@ pub struct TerminalModeSnapshot {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TerminalDamageLineSnapshot {
-    pub line: usize,
+    pub line: i32,
     pub left: usize,
     pub right: usize,
 }

@@ -99,9 +99,9 @@ enum TerminalControl {
     WritePaste(String),
     ReportFocus(bool),
     WritePointerInput(TerminalPointerInput),
-    HandleWheelInput {
+    WriteWheelInput {
         input: TerminalWheelInput,
-        handled_tx: Sender<bool>,
+        fallback_scroll: Option<TerminalScroll>,
     },
 }
 
@@ -152,13 +152,16 @@ impl TerminalSessionHandle {
             .context("send terminal pointer input")
     }
 
-    pub fn handle_wheel_input(&self, input: TerminalWheelInput) -> Result<bool> {
-        let (handled_tx, handled_rx) = mpsc::channel();
-        self.send_control(TerminalControl::HandleWheelInput { input, handled_tx })
-            .context("send terminal wheel input")?;
-        handled_rx
-            .recv()
-            .context("receive terminal wheel input result")
+    pub fn write_wheel_input(
+        &self,
+        input: TerminalWheelInput,
+        fallback_scroll: Option<TerminalScroll>,
+    ) -> Result<()> {
+        self.send_control(TerminalControl::WriteWheelInput {
+            input,
+            fallback_scroll,
+        })
+        .context("send terminal wheel input")
     }
 
     pub fn scroll_display(&self, scroll: TerminalScroll) -> Result<()> {
@@ -343,17 +346,15 @@ pub fn spawn_terminal_session(
                         }
                     }
                 }
-                Ok(TerminalActorInput::Control(TerminalControl::HandleWheelInput {
+                Ok(TerminalActorInput::Control(TerminalControl::WriteWheelInput {
                     input,
-                    handled_tx,
+                    fallback_scroll,
                 })) => {
                     if child_exit_reported {
-                        let _ = handled_tx.send(false);
                         continue;
                     }
 
-                    let handled = if let Some(reports) = vt.wheel_input_bytes(input) {
-                        let mut success = true;
+                    let terminal_handled = if let Some(reports) = vt.wheel_input_bytes(input) {
                         for report in reports {
                             if let Err(error) =
                                 write_terminal_bytes(writer.as_mut(), report.as_slice())
@@ -361,15 +362,21 @@ pub fn spawn_terminal_session(
                                 let _ = event_tx.send(TerminalEvent::Failed(format!(
                                     "Failed to write terminal wheel input: {error}"
                                 )));
-                                success = false;
                                 break;
                             }
                         }
-                        success
+                        true
                     } else {
                         false
                     };
-                    let _ = handled_tx.send(handled);
+
+                    if terminal_handled {
+                        continue;
+                    }
+
+                    if let Some(scroll) = fallback_scroll {
+                        let _ = event_tx.send(TerminalEvent::Screen(vt.scroll_display(scroll)));
+                    }
                 }
                 Ok(TerminalActorInput::PtyOutput(bytes)) => {
                     let snapshot = vt.advance(bytes.as_slice());

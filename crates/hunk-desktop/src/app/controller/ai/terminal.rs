@@ -746,32 +746,20 @@ impl DiffViewer {
         }
 
         let line_height = px(16.0);
-        let Some((direction, line_count)) =
-            crate::app::native_files_editor::scroll_direction_and_count(event, line_height)
-        else {
+        let Some(scroll_lines) = ai_terminal_scroll_lines_from_event(event, line_height) else {
             return false;
-        };
-
-        let delta = match direction {
-            crate::app::native_files_editor::ScrollDirection::Forward => -(line_count as i32),
-            crate::app::native_files_editor::ScrollDirection::Backward => line_count as i32,
         };
 
         let mode = self.ai_terminal_session.screen.as_ref().map(|screen| screen.mode);
         let point = AiTerminalGridPoint { line, column };
-        if let Some(input) = ai_terminal_wheel_input(point, delta, event.modifiers) {
-            match self.ai_handle_terminal_wheel_input(input, cx) {
-                Some(true) => return true,
-                Some(false) => {}
-                None => return false,
-            }
-        }
-
-        if mode.is_some_and(|mode| mode.alt_screen) {
+        if let Some(input) = ai_terminal_wheel_input(point, scroll_lines, event.modifiers) {
+            let fallback_scroll = ai_terminal_viewport_scroll_for_wheel_delta(scroll_lines, mode);
+            return self.ai_write_terminal_wheel_input(input, fallback_scroll, cx);
+        } else if mode.is_some_and(|mode| mode.alt_screen) {
             return true;
         }
 
-        self.ai_scroll_terminal_viewport(TerminalScroll::Delta(delta), cx)
+        self.ai_scroll_terminal_viewport(TerminalScroll::Delta(-scroll_lines), cx)
     }
 
     pub(super) fn ai_scroll_terminal_to_bottom_action(&mut self, cx: &mut Context<Self>) {
@@ -892,26 +880,29 @@ impl DiffViewer {
         true
     }
 
-    fn ai_handle_terminal_wheel_input(
+    fn ai_write_terminal_wheel_input(
         &mut self,
         input: hunk_terminal::TerminalWheelInput,
+        fallback_scroll: Option<TerminalScroll>,
         cx: &mut Context<Self>,
-    ) -> Option<bool> {
+    ) -> bool {
         if !self.ai_terminal_is_running() {
-            return None;
+            return false;
         }
-        let runtime = self.ai_terminal_runtime.as_ref()?;
+        let Some(runtime) = self.ai_terminal_runtime.as_ref() else {
+            return false;
+        };
 
-        match runtime.handle.handle_wheel_input(input) {
-            Ok(handled) => {
+        match runtime.handle.write_wheel_input(input, fallback_scroll) {
+            Ok(()) => {
                 self.ai_terminal_session.status_message = None;
-                Some(handled)
+                true
             }
             Err(error) => {
                 self.ai_terminal_session.status_message = Some(error.to_string());
                 self.ai_terminal_session.status = AiTerminalSessionStatus::Failed;
                 cx.notify();
-                Some(true)
+                true
             }
         }
     }
