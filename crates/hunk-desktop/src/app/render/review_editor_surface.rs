@@ -152,6 +152,7 @@ impl DiffViewer {
             .into_any_element()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_review_editor_side(
         &self,
         element_id: &'static str,
