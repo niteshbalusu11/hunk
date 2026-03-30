@@ -16,7 +16,10 @@ use crate::app::diff_segment_prefetch::{
     first_paint_prefetch_window, first_paint_segment_quality, prioritized_prefetch_row_indices,
 };
 use crate::app::markdown_links::open_url_in_browser;
-use crate::app::review_editor_model::build_review_editor_overlays_from_texts;
+use crate::app::review_editor_model::{
+    build_review_editor_presentation_from_texts, build_review_editor_right_line_anchor_from_texts,
+    should_preserve_dirty_review_editor_right,
+};
 
 use super::data::{
     DiffSegmentQuality, DiffStream, DiffStreamRowKind, RepoTreeNodeKind,

@@ -2,13 +2,13 @@
 
 ## Status
 
-Active implementation plan. Phases 1 through 4 are complete. Phase 5 is the next execution phase.
+Active implementation plan. Phases 1 through 4 are complete. Phase 5 is in progress.
 
 This document extends the work in `docs/DIFF_VIEW_QUALITY_TODO.md`. That roadmap improved the current custom diff renderer substantially, but it intentionally stopped short of editor-backed diffing and inline editing. This plan covers the work required to reach Zed-level quality.
 
 ## Progress Snapshot
 
-As of 2026-03-29:
+As of 2026-03-30:
 
 - Phase 1 is complete:
   - Review refreshes no longer replace the live diff surface with loading rows.
@@ -21,10 +21,11 @@ As of 2026-03-29:
 - Phase 4 is complete:
   - Review now uses the editor-backed surface by default.
   - The legacy custom row-list Review renderer was removed instead of kept behind a flag.
-- Phase 5 is next:
-  - finish editing parity work on top of the new editor-backed Review surface
-  - harden diff recomputation after edits
-  - restore comment affordances and anchoring on the new surface
+- Phase 5 is in progress:
+  - Review now recomputes a live presentation model from left/right text instead of relying only on full-file overlays.
+  - Unchanged regions are folded down to placeholder rows around active diff hunks, so the selected-file Review surface behaves like a diff excerpt view instead of mirroring the entire file on both sides.
+  - Inline comments remain editor-backed and anchored from live text.
+  - Remaining work is debounced recomputation polish, stronger alignment through hunk shifts, and broader state-switch verification.
 
 ## Goal
 
@@ -269,7 +270,7 @@ Status: Complete
 
 ## Phase 5: Editing Parity, Recompute Stability, And Comment Affordances
 
-Status: Next phase
+Status: In progress
 
 ### TODO
 
@@ -287,7 +288,8 @@ Status: Next phase
   - active workspace target switches
   - branch switches
   - external file changes while Review is visible
-- [ ] Add comment affordances and durable editor-line anchoring to the editor-backed hunk surface.
+- [x] Add comment affordances and durable editor-line anchoring to the editor-backed hunk surface.
+- [x] Collapse unchanged regions to editor fold placeholders around live diff hunks so the selected Review file renders as excerpts instead of two full-file mirrors.
 - [ ] Keep diagnostics disabled unless explicitly reintroduced later.
 - [ ] Add regression tests for editor-backed editing, recomputation, and comment-anchor stability.
 

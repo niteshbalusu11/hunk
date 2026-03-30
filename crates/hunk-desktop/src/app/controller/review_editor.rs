@@ -1,4 +1,5 @@
 const REVIEW_EDITOR_SAVE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(250);
+const REVIEW_EDITOR_CONTEXT_LINES: usize = 3;
 
 impl DiffViewer {
     fn next_review_editor_epoch(&mut self) -> usize {
@@ -37,22 +38,41 @@ impl DiffViewer {
         self.review_editor_session.right_editor.borrow_mut().clear();
     }
 
-    fn refresh_review_editor_live_overlays(&mut self) {
+    fn refresh_review_editor_live_presentation(&mut self) {
         let Some(left_text) = self.review_editor_session.left_editor.borrow().current_text() else {
             return;
         };
         let Some(right_text) = self.review_editor_session.right_editor.borrow().current_text() else {
             return;
         };
-        let overlays = build_review_editor_overlays_from_texts(left_text.as_str(), right_text.as_str());
+        let pinned_right_line = self
+            .review_editor_session
+            .right_editor
+            .borrow()
+            .selection()
+            .map(|selection| selection.head.line);
+        let presentation = build_review_editor_presentation_from_texts(
+            left_text.as_str(),
+            right_text.as_str(),
+            REVIEW_EDITOR_CONTEXT_LINES,
+            pinned_right_line,
+        );
         self.review_editor_session
             .left_editor
             .borrow_mut()
-            .set_manual_overlays(overlays.0);
+            .set_manual_overlays(presentation.left_overlays);
         self.review_editor_session
             .right_editor
             .borrow_mut()
-            .set_manual_overlays(overlays.1);
+            .set_manual_overlays(presentation.right_overlays);
+        self.review_editor_session
+            .left_editor
+            .borrow_mut()
+            .set_folded_regions(presentation.left_folds);
+        self.review_editor_session
+            .right_editor
+            .borrow_mut()
+            .set_folded_regions(presentation.right_folds);
     }
 
     fn sync_review_editor_viewports_from_right(&mut self) {
@@ -146,7 +166,7 @@ impl DiffViewer {
         };
         cx.write_to_clipboard(ClipboardItem::new_string(text));
         self.sync_review_editor_viewports_from_right();
-        self.refresh_review_editor_live_overlays();
+        self.refresh_review_editor_live_presentation();
         self.schedule_review_editor_save(cx);
         cx.notify();
         true
@@ -165,7 +185,7 @@ impl DiffViewer {
             return false;
         }
         self.sync_review_editor_viewports_from_right();
-        self.refresh_review_editor_live_overlays();
+        self.refresh_review_editor_live_presentation();
         self.schedule_review_editor_save(cx);
         cx.notify();
         true
@@ -185,7 +205,7 @@ impl DiffViewer {
             return false;
         }
         self.sync_review_editor_viewports_from_right();
-        self.refresh_review_editor_live_overlays();
+        self.refresh_review_editor_live_presentation();
         self.schedule_review_editor_save(cx);
         cx.notify();
         true
@@ -216,6 +236,9 @@ impl DiffViewer {
             self.clear_review_editor_session();
             return;
         };
+        if self.review_editor_session.path.as_deref() != Some(path.as_str()) {
+            self.active_review_editor_comment_line = None;
+        }
         if !self.active_diff_contains_path(path.as_str()) {
             self.clear_review_editor_session();
             return;
@@ -229,6 +252,9 @@ impl DiffViewer {
             self.clear_review_editor_session();
             return;
         };
+        let previous_path = self.review_editor_session.path.clone();
+        let previous_left_source_id = self.review_editor_session.left_source_id.clone();
+        let previous_right_source_id = self.review_editor_session.right_source_id.clone();
         let left_source_id = self.review_left_source_id.clone();
         let right_source_id = self.review_right_source_id.clone();
 
@@ -271,9 +297,15 @@ impl DiffViewer {
                         Ok(document) => {
                             let path = document.path.clone();
                             let absolute_path = project_root.join(path.as_str());
-                            let preserve_dirty_right = this.review_editor_session.path.as_deref()
-                                == Some(path.as_str())
-                                && this.review_editor_session.right_editor.borrow().is_dirty();
+                            let preserve_dirty_right = should_preserve_dirty_review_editor_right(
+                                previous_path.as_deref(),
+                                previous_left_source_id.as_deref(),
+                                previous_right_source_id.as_deref(),
+                                path.as_str(),
+                                left_source_id.as_deref(),
+                                right_source_id.as_deref(),
+                                this.review_editor_session.right_editor.borrow().is_dirty(),
+                            );
                             let left_result = this
                                 .review_editor_session
                                 .left_editor
@@ -301,7 +333,7 @@ impl DiffViewer {
                                         this.review_editor_session.last_saved_text =
                                             Some(document.right_text.clone());
                                     }
-                                    this.refresh_review_editor_live_overlays();
+                                    this.refresh_review_editor_live_presentation();
                                     this.sync_review_editor_viewports_from_right();
                                 }
                                 Err(err) => {

@@ -327,6 +327,11 @@ impl FilesEditor {
         })
     }
 
+    pub(crate) fn selection(&self) -> Option<Selection> {
+        self.active_path.as_ref()?;
+        Some(self.editor.selection())
+    }
+
     pub(crate) fn first_visible_row(&self) -> usize {
         self.editor.viewport().first_visible_row
     }
@@ -345,6 +350,45 @@ impl FilesEditor {
 
     pub(crate) fn mark_saved(&mut self) {
         self.editor.apply(EditorCommand::MarkSaved);
+    }
+
+    pub(crate) fn set_folded_regions(&mut self, folded_regions: Vec<FoldRegion>) {
+        if self.editor.folded_regions() == folded_regions.as_slice() {
+            return;
+        }
+
+        let selection = self.editor.selection();
+        let viewport = self.editor.viewport();
+        let existing_regions = self.editor.folded_regions().to_vec();
+        for region in existing_regions {
+            self.editor.apply(EditorCommand::UnfoldAtLine {
+                line: region.start_line,
+            });
+        }
+        for region in &folded_regions {
+            self.editor.apply(EditorCommand::FoldLines {
+                start_line: region.start_line,
+                end_line: region.end_line,
+            });
+        }
+
+        let snapshot = self.editor.buffer().snapshot();
+        self.editor
+            .apply(EditorCommand::SetSelection(Selection::new(
+                clamp_text_position(&snapshot, selection.anchor),
+                clamp_text_position(&snapshot, selection.head),
+            )));
+
+        let display_snapshot = self.editor.display_snapshot();
+        let visible_row_count = viewport.visible_row_count.max(1);
+        let max_first_row = display_snapshot
+            .total_display_rows
+            .saturating_sub(visible_row_count);
+        self.editor.apply(EditorCommand::SetViewport(Viewport {
+            first_visible_row: viewport.first_visible_row.min(max_first_row),
+            visible_row_count,
+            horizontal_offset: viewport.horizontal_offset,
+        }));
     }
 
     pub(crate) fn copy_selection_text(&self) -> Option<String> {

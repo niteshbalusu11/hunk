@@ -48,9 +48,10 @@ jobs:
           components: clippy, rustfmt
 
       - name: Install Zig
-        uses: mlugg/setup-zig@v2
+        uses: https://codeberg.org/mlugg/setup-zig@v2
         with:
           version: 0.15.2
+          use-cache: false
 
       - name: Cache cargo registry and Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -169,7 +170,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install Zig
-        uses: mlugg/setup-zig@v2
+        uses: https://codeberg.org/mlugg/setup-zig@v2
         with:
           version: 0.15.2
 

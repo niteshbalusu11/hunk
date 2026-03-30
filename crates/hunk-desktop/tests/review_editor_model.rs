@@ -45,11 +45,30 @@ pub struct OverlayDescriptor {
     pub message: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FoldRegion {
+    pub start_line: usize,
+    pub end_line: usize,
+}
+
+impl FoldRegion {
+    pub fn new(start_line: usize, end_line: usize) -> Option<Self> {
+        (end_line > start_line).then_some(Self {
+            start_line,
+            end_line,
+        })
+    }
+}
+
 #[path = "../src/app/review_editor_model.rs"]
 mod review_editor_model;
 
 use diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
-use review_editor_model::{build_review_editor_overlays, build_review_editor_overlays_from_texts};
+use review_editor_model::{
+    build_review_editor_overlays, build_review_editor_overlays_from_texts,
+    build_review_editor_presentation_from_texts, build_review_editor_right_line_anchor_from_texts,
+    should_preserve_dirty_review_editor_right,
+};
 
 #[test]
 fn review_editor_overlays_mark_modified_and_added_lines() {
@@ -165,4 +184,100 @@ fn text_overlays_mark_insertions_and_deletions() {
     assert_eq!(right_overlays.len(), 1);
     assert_eq!(right_overlays[0].line, 1);
     assert_eq!(right_overlays[0].kind, OverlayKind::DiffAddition);
+}
+
+#[test]
+fn right_line_anchor_tracks_modified_line_numbers_and_context() {
+    let left = "alpha\nbeta\ngamma\n";
+    let right = "alpha\nbeta changed\ngamma\n";
+
+    let anchor = build_review_editor_right_line_anchor_from_texts(left, right, 1, 1)
+        .expect("anchor should exist");
+
+    assert_eq!(anchor.old_line, Some(2));
+    assert_eq!(anchor.new_line, Some(2));
+    assert_eq!(anchor.line_text, "+beta changed");
+    assert_eq!(anchor.context_before, " alpha");
+    assert_eq!(anchor.context_after, " gamma");
+}
+
+#[test]
+fn presentation_folds_unchanged_regions_around_changed_hunks() {
+    let left = "one\ntwo\nthree\nfour\nfive\nsix";
+    let right = "one\ntwo changed\nthree\nfour\nfive\nsix";
+
+    let presentation = build_review_editor_presentation_from_texts(left, right, 1, None);
+
+    assert_eq!(
+        presentation.left_folds,
+        vec![FoldRegion {
+            start_line: 3,
+            end_line: 5,
+        }]
+    );
+    assert_eq!(
+        presentation.right_folds,
+        vec![FoldRegion {
+            start_line: 3,
+            end_line: 5,
+        }]
+    );
+}
+
+#[test]
+fn presentation_keeps_selected_right_line_visible_even_when_unchanged() {
+    let left = "zero\none\ntwo\nthree\nfour\nfive\nsix";
+    let right = "zero\none changed\ntwo\nthree\nfour\nfive\nsix";
+
+    let presentation = build_review_editor_presentation_from_texts(left, right, 1, Some(5));
+
+    assert!(
+        !presentation
+            .right_folds
+            .iter()
+            .any(|region| region.start_line <= 5 && region.end_line >= 5)
+    );
+}
+
+#[test]
+fn dirty_right_text_is_preserved_only_for_same_path_and_compare_pair() {
+    assert!(should_preserve_dirty_review_editor_right(
+        Some("src/lib.rs"),
+        Some("workspace-head"),
+        Some("workspace-target"),
+        "src/lib.rs",
+        Some("workspace-head"),
+        Some("workspace-target"),
+        true,
+    ));
+
+    assert!(!should_preserve_dirty_review_editor_right(
+        Some("src/lib.rs"),
+        Some("workspace-head"),
+        Some("workspace-target"),
+        "src/lib.rs",
+        Some("main"),
+        Some("workspace-target"),
+        true,
+    ));
+
+    assert!(!should_preserve_dirty_review_editor_right(
+        Some("src/lib.rs"),
+        Some("workspace-head"),
+        Some("workspace-target"),
+        "src/other.rs",
+        Some("workspace-head"),
+        Some("workspace-target"),
+        true,
+    ));
+
+    assert!(!should_preserve_dirty_review_editor_right(
+        Some("src/lib.rs"),
+        Some("workspace-head"),
+        Some("workspace-target"),
+        "src/lib.rs",
+        Some("workspace-head"),
+        Some("workspace-target"),
+        false,
+    ));
 }

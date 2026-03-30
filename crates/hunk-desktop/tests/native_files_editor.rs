@@ -3,7 +3,7 @@
 mod native_files_editor;
 
 use gpui::Keystroke;
-use hunk_editor::Viewport;
+use hunk_editor::{FoldRegion, Viewport};
 use hunk_language::{CompletionTriggerKind, Diagnostic, DiagnosticSeverity};
 use hunk_text::{Selection, TextPosition, TextRange};
 use native_files_editor::FilesEditor;
@@ -358,6 +358,38 @@ fn syncing_same_file_clamps_selection_when_new_text_is_shorter() {
     );
     assert_eq!(editor.viewport_for_test().first_visible_row, 0);
     assert!(!editor.is_dirty());
+}
+
+#[test]
+fn setting_folded_regions_replaces_existing_folds_and_preserves_view_state() {
+    let mut editor = FilesEditor::new();
+    let path = PathBuf::from("example.rs");
+    let contents = "zero\none\ntwo\nthree\nfour\nfive\nsix\n";
+    editor
+        .open_document(path.as_path(), contents)
+        .expect("document should open");
+    editor.set_selection_for_test(Selection::caret(TextPosition::new(5, 1)));
+    editor.set_viewport_for_test(Viewport {
+        first_visible_row: 4,
+        visible_row_count: 3,
+        horizontal_offset: 0,
+    });
+    editor.set_folded_regions(vec![FoldRegion {
+        start_line: 0,
+        end_line: 2,
+    }]);
+
+    editor.set_folded_regions(vec![FoldRegion {
+        start_line: 1,
+        end_line: 3,
+    }]);
+
+    assert_eq!(editor.folded_region_count_for_test(), 1);
+    assert_eq!(
+        editor.selection_for_test(),
+        Selection::caret(TextPosition::new(5, 1))
+    );
+    assert_eq!(editor.viewport_for_test().visible_row_count, 3);
 }
 
 #[test]

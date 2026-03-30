@@ -39,7 +39,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install Zig
-        uses: mlugg/setup-zig@v2
+        uses: https://codeberg.org/mlugg/setup-zig@v2
         with:
           version: 0.15.2
 
@@ -143,7 +143,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install Zig
-        uses: mlugg/setup-zig@v2
+        uses: https://codeberg.org/mlugg/setup-zig@v2
         with:
           version: 0.15.2
 
@@ -233,7 +233,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install Zig
-        uses: mlugg/setup-zig@v2
+        uses: https://codeberg.org/mlugg/setup-zig@v2
         with:
           version: 0.15.2
 

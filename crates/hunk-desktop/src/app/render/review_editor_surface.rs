@@ -53,6 +53,7 @@ impl DiffViewer {
         h_flex()
             .flex_1()
             .min_h_0()
+            .items_stretch()
             .relative()
             .child(
                 self.render_review_editor_side(
@@ -203,9 +204,11 @@ impl DiffViewer {
             },
         );
 
-        div()
+        v_flex()
             .flex_1()
             .min_h_0()
+            .h_full()
+            .items_stretch()
             .relative()
             .when_some(width, |this, width| {
                 this.w(width).min_w(width).max_w(width).flex_none()
@@ -228,7 +231,14 @@ impl DiffViewer {
                     }
                 }
             })
-            .child(div().id(element_id).size_full().child(element))
+            .child(
+                div()
+                    .id(element_id)
+                    .flex_1()
+                    .min_h_0()
+                    .h_full()
+                    .child(element),
+            )
             .when(!present, |this| {
                 this.child(
                     div()
@@ -251,22 +261,157 @@ impl DiffViewer {
             })
             .when(editable, |this| {
                 this.child(
-                    div()
+                    h_flex()
                         .absolute()
                         .top_2()
                         .left_2()
-                        .px_2()
-                        .py_1()
-                        .rounded(px(6.0))
-                        .bg(crate::app::theme::hunk_opacity(
-                            cx.theme().success,
-                            is_dark,
-                            0.14,
-                            0.10,
-                        ))
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .px_2()
+                                .py_1()
+                                .rounded(px(6.0))
+                                .bg(crate::app::theme::hunk_opacity(
+                                    cx.theme().success,
+                                    is_dark,
+                                    0.14,
+                                    0.10,
+                                ))
+                                .text_xs()
+                                .text_color(cx.theme().success)
+                                .child("Live"),
+                        )
+                        .when(self.review_editor_supports_comments(), |this| {
+                            let view = cx.entity();
+                            this.child(
+                                Button::new("review-editor-note")
+                                    .compact()
+                                    .outline()
+                                    .rounded(px(6.0))
+                                    .label("Note")
+                                    .on_click(move |_, window, cx| {
+                                        view.update(cx, |this, cx| {
+                                            this.open_review_editor_comment_editor(window, cx);
+                                        });
+                                    }),
+                            )
+                        }),
+                )
+                .when(
+                    self.active_review_editor_comment_line.is_some(),
+                    |this| this.child(self.render_review_editor_comment_editor(cx)),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn render_review_editor_comment_editor(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(line_ix) = self.active_review_editor_comment_line else {
+            return div().into_any_element();
+        };
+
+        let view = cx.entity();
+        let anchor = self.build_review_editor_comment_anchor(line_ix);
+        let file_path = anchor
+            .as_ref()
+            .map(|anchor| anchor.file_path.clone())
+            .or_else(|| self.review_editor_session.path.clone())
+            .unwrap_or_else(|| "file".to_string());
+        let line_hint = anchor.as_ref().map_or_else(
+            || "old - | new -".to_string(),
+            |anchor| {
+                format!(
+                    "old {} | new {}",
+                    anchor
+                        .old_line
+                        .map(|line| line.to_string())
+                        .unwrap_or_else(|| "-".to_string()),
+                    anchor
+                        .new_line
+                        .map(|line| line.to_string())
+                        .unwrap_or_else(|| "-".to_string())
+                )
+            },
+        );
+        let is_dark = cx.theme().mode.is_dark();
+
+        v_flex()
+            .absolute()
+            .top(px(44.0))
+            .left_2()
+            .w(px(380.0))
+            .max_w(px(420.0))
+            .gap_2()
+            .px_2p5()
+            .py_2()
+            .rounded(px(9.0))
+            .border_1()
+            .border_color(hunk_opacity(cx.theme().border, is_dark, 0.90, 0.74))
+            .bg(hunk_blend(cx.theme().popover, cx.theme().muted, is_dark, 0.16, 0.10))
+            .child(
+                v_flex()
+                    .gap_0p5()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .text_color(cx.theme().foreground)
+                            .child(file_path),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(line_hint),
+                    ),
+            )
+            .child(
+                Input::new(&self.comment_input_state)
+                    .rounded(px(8.0))
+                    .h(px(64.0))
+                    .border_1()
+                    .border_color(hunk_opacity(cx.theme().border, is_dark, 0.88, 0.72))
+                    .bg(hunk_blend(cx.theme().background, cx.theme().muted, is_dark, 0.20, 0.08)),
+            )
+            .child(
+                h_flex()
+                    .items_center()
+                    .justify_end()
+                    .gap_2()
+                    .child({
+                        let view = view.clone();
+                        Button::new("review-editor-comment-cancel")
+                            .compact()
+                            .outline()
+                            .rounded(px(7.0))
+                            .label("Cancel")
+                            .on_click(move |_, window, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.cancel_review_editor_comment_editor(window, cx);
+                                });
+                            })
+                    })
+                    .child({
+                        let view = view.clone();
+                        Button::new("review-editor-comment-save")
+                            .compact()
+                            .primary()
+                            .rounded(px(7.0))
+                            .label("Save Comment")
+                            .on_click(move |_, window, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.save_active_review_editor_comment(window, cx);
+                                });
+                            })
+                    }),
+            )
+            .when_some(self.comment_status_message.as_ref(), |this, message| {
+                this.child(
+                    div()
                         .text_xs()
-                        .text_color(cx.theme().success)
-                        .child("Live"),
+                        .text_color(cx.theme().muted_foreground)
+                        .child(message.clone()),
                 )
             })
             .into_any_element()

@@ -403,6 +403,7 @@ impl DiffViewer {
             comment_open_row_counts: Vec::new(),
             hovered_comment_row: None,
             active_comment_editor_row: None,
+            active_review_editor_comment_line: None,
             comment_input_state,
             comment_status_message: None,
             project_path: initial_project_path,

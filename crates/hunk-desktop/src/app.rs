@@ -1085,6 +1085,7 @@ struct DiffViewer {
     comment_open_row_counts: Vec<usize>,
     hovered_comment_row: Option<usize>,
     active_comment_editor_row: Option<usize>,
+    active_review_editor_comment_line: Option<usize>,
     #[allow(dead_code)]
     comment_input_state: Entity<InputState>,
     comment_status_message: Option<String>,

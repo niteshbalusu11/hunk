@@ -85,6 +85,7 @@ impl DiffViewer {
     fn clear_comment_ui_state(&mut self) {
         self.hovered_comment_row = None;
         self.active_comment_editor_row = None;
+        self.active_review_editor_comment_line = None;
         self.comments_preview_open = false;
     }
 
@@ -254,6 +255,12 @@ impl DiffViewer {
         cx.notify();
     }
 
+    pub(super) fn review_editor_supports_comments(&self) -> bool {
+        self.review_comments_enabled()
+            && self.workspace_view_mode == WorkspaceViewMode::Diff
+            && self.review_editor_session.path.is_some()
+    }
+
     pub(super) fn close_comments_preview(&mut self, cx: &mut Context<Self>) {
         if !self.comments_preview_open {
             return;
@@ -311,6 +318,7 @@ impl DiffViewer {
         if !self.row_supports_comments(row_ix) {
             return;
         }
+        self.active_review_editor_comment_line = None;
         self.active_comment_editor_row = Some(row_ix);
         self.comment_status_message = None;
         let state = self.comment_input_state.clone();
@@ -327,6 +335,43 @@ impl DiffViewer {
         cx: &mut Context<Self>,
     ) {
         self.active_comment_editor_row = None;
+        let state = self.comment_input_state.clone();
+        state.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+        });
+        cx.notify();
+    }
+
+    pub(super) fn open_review_editor_comment_editor(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.review_editor_supports_comments() {
+            self.comment_status_message =
+                Some("Comments are disabled for custom compare pairs.".to_string());
+            cx.notify();
+            return;
+        }
+        let Some(selection) = self.review_editor_session.right_editor.borrow().selection() else {
+            return;
+        };
+        self.active_comment_editor_row = None;
+        self.active_review_editor_comment_line = Some(selection.head.line);
+        self.comment_status_message = None;
+        let state = self.comment_input_state.clone();
+        state.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+        });
+        cx.notify();
+    }
+
+    pub(super) fn cancel_review_editor_comment_editor(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.active_review_editor_comment_line = None;
         let state = self.comment_input_state.clone();
         state.update(cx, |input, cx| {
             input.set_value("", window, cx);
@@ -409,6 +454,83 @@ impl DiffViewer {
             }
             Err(err) => {
                 error!("failed to create diff comment: {err:#}");
+                self.comment_status_message = Some("Failed to save comment.".to_string());
+            }
+        }
+        cx.notify();
+    }
+
+    pub(super) fn save_active_review_editor_comment(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.review_editor_supports_comments() {
+            self.comment_status_message =
+                Some("Comments are disabled for custom compare pairs.".to_string());
+            self.active_review_editor_comment_line = None;
+            cx.notify();
+            return;
+        }
+        let Some(store) = self.database_store.clone() else {
+            self.comment_status_message =
+                Some("Comments database is unavailable on this machine.".to_string());
+            cx.notify();
+            return;
+        };
+        let Some(line_ix) = self.active_review_editor_comment_line else {
+            return;
+        };
+
+        let comment_text = self.comment_input_state.read(cx).value().trim().to_string();
+        if comment_text.is_empty() {
+            self.comment_status_message = Some("Comment text cannot be empty.".to_string());
+            cx.notify();
+            return;
+        }
+
+        let Some(anchor) = self.build_review_editor_comment_anchor(line_ix) else {
+            self.comment_status_message =
+                Some("Could not resolve a stable anchor for this editor line.".to_string());
+            cx.notify();
+            return;
+        };
+        let Some(repo_root) = self.comment_scope_repo_root() else {
+            self.comment_status_message = Some("No repository is open.".to_string());
+            cx.notify();
+            return;
+        };
+
+        let input = NewComment {
+            repo_root,
+            branch_name: self.comment_scope_branch_name(),
+            created_head_commit: None,
+            file_path: anchor.file_path,
+            line_side: anchor.line_side,
+            old_line: anchor.old_line,
+            new_line: anchor.new_line,
+            row_stable_id: None,
+            hunk_header: anchor.hunk_header,
+            line_text: anchor.line_text,
+            context_before: anchor.context_before,
+            context_after: anchor.context_after,
+            anchor_hash: anchor.anchor_hash,
+            comment_text,
+        };
+
+        match store.create_comment(&input) {
+            Ok(_) => {
+                self.active_review_editor_comment_line = None;
+                self.comments_preview_open = false;
+                let state = self.comment_input_state.clone();
+                state.update(cx, |input, cx| {
+                    input.set_value("", window, cx);
+                });
+                self.refresh_comments_cache_from_store();
+                self.comment_status_message = Some("Comment added.".to_string());
+            }
+            Err(err) => {
+                error!("failed to create review editor comment: {err:#}");
                 self.comment_status_message = Some("Failed to save comment.".to_string());
             }
         }
@@ -761,6 +883,43 @@ impl DiffViewer {
             line_text,
             context_before,
             context_after,
+            anchor_hash,
+        })
+    }
+
+    pub(super) fn build_review_editor_comment_anchor(
+        &self,
+        right_line_ix: usize,
+    ) -> Option<RowCommentAnchor> {
+        if !self.review_editor_supports_comments() {
+            return None;
+        }
+        let file_path = self.review_editor_session.path.clone()?;
+        let left_text = self.review_editor_session.left_editor.borrow().current_text()?;
+        let right_text = self.review_editor_session.right_editor.borrow().current_text()?;
+        let line_anchor = build_review_editor_right_line_anchor_from_texts(
+            left_text.as_str(),
+            right_text.as_str(),
+            right_line_ix,
+            COMMENT_CONTEXT_RADIUS_ROWS,
+        )?;
+        let anchor_hash = compute_comment_anchor_hash(
+            file_path.as_str(),
+            None,
+            line_anchor.line_text.as_str(),
+            line_anchor.context_before.as_str(),
+            line_anchor.context_after.as_str(),
+        );
+
+        Some(RowCommentAnchor {
+            file_path,
+            line_side: CommentLineSide::Right,
+            old_line: line_anchor.old_line,
+            new_line: line_anchor.new_line,
+            hunk_header: None,
+            line_text: line_anchor.line_text,
+            context_before: line_anchor.context_before,
+            context_after: line_anchor.context_after,
             anchor_hash,
         })
     }
