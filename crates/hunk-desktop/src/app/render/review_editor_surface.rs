@@ -47,14 +47,83 @@ impl DiffViewer {
         let editor_font_size = cx.theme().mono_font_size * 1.2;
         let view = cx.entity();
         let loading = self.review_editor_session.loading;
+        let presentation_loading = self.review_editor_session.presentation_loading;
         let is_review_editor_focused = self.review_editor_focus_handle.is_focused(window);
         let save_loading = self.review_editor_session.save_loading;
+        let selected_path = self.review_editor_session.path.clone().unwrap_or_default();
+        let selected_file_index = self
+            .review_files
+            .iter()
+            .position(|file| file.path == selected_path)
+            .map(|ix| ix + 1)
+            .unwrap_or(1);
+        let total_files = self.review_files.len().max(1);
+        let hunk_count = self.review_editor_session.right_hunk_lines.len();
+        let (status_label, status_color) =
+            change_status_label_color(self.selected_status.unwrap_or(FileStatus::Unknown), cx);
 
-        h_flex()
+        v_flex()
             .flex_1()
             .min_h_0()
             .items_stretch()
-            .relative()
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .px_3()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(hunk_opacity(cx.theme().border, is_dark, 0.86, 0.70))
+                    .bg(hunk_blend(
+                        cx.theme().background,
+                        cx.theme().muted,
+                        is_dark,
+                        0.14,
+                        0.08,
+                    ))
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_2()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .px_1p5()
+                                    .py_0p5()
+                                    .rounded(px(6.0))
+                                    .bg(hunk_opacity(status_color, is_dark, 0.20, 0.12))
+                                    .text_xs()
+                                    .font_semibold()
+                                    .text_color(status_color)
+                                    .child(status_label),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_family(cx.theme().mono_font_family.clone())
+                                    .text_color(cx.theme().foreground)
+                                    .truncate()
+                                    .child(selected_path),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_3()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("{selected_file_index}/{total_files} files"))
+                            .child(format!("{hunk_count} hunks")),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .items_stretch()
+                    .relative()
             .child(
                 self.render_review_editor_side(
                     "review-editor-left",
@@ -117,7 +186,7 @@ impl DiffViewer {
                     }
                 }
             })
-            .when(loading || save_loading, |this| {
+            .when(loading || presentation_loading || save_loading, |this| {
                 this.child(
                     h_flex()
                         .absolute()
@@ -136,6 +205,18 @@ impl DiffViewer {
                                     .child("Refreshing..."),
                             )
                         })
+                        .when(presentation_loading, |this| {
+                            this.child(
+                                div()
+                                    .px_2()
+                                    .py_1()
+                                    .rounded(px(6.0))
+                                    .bg(hunk_opacity(cx.theme().accent, is_dark, 0.18, 0.14))
+                                    .text_xs()
+                                    .text_color(cx.theme().accent)
+                                    .child("Updating diff..."),
+                            )
+                        })
                         .when(save_loading, |this| {
                             this.child(
                                 div()
@@ -150,6 +231,7 @@ impl DiffViewer {
                         }),
                 )
             })
+            )
             .into_any_element()
     }
 

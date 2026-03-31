@@ -330,6 +330,30 @@ impl EditorState {
         }
     }
 
+    pub fn display_row_for_source_line(&self, source_line: usize) -> Option<usize> {
+        let generation = self.display_generation;
+        let mut cache = self.display_cache.borrow_mut();
+        let rebuild_needed = cache
+            .as_ref()
+            .is_none_or(|entry| entry.generation != generation);
+        if rebuild_needed {
+            *cache = Some(DisplayCacheEntry {
+                generation,
+                rows: self.build_display_rows(),
+            });
+        }
+
+        let rows = &cache.as_ref().expect("display cache populated").rows;
+        let mut candidate = rows.first().map(|row| row.row_index)?;
+        for row in rows {
+            if row.source_line > source_line {
+                break;
+            }
+            candidate = row.row_index;
+        }
+        Some(candidate)
+    }
+
     pub fn status_snapshot(&self) -> EditorStatusSnapshot {
         EditorStatusSnapshot {
             line_count: self.buffer.line_count(),

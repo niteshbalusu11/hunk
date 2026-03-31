@@ -552,6 +552,47 @@ fn wrapped_markdown_rows_preserve_text_around_inline_code() {
     assert_eq!(rejoined, line);
 }
 
+#[test]
+fn source_line_viewport_navigation_tracks_fold_placeholders() {
+    let mut editor = FilesEditor::new();
+    let path = PathBuf::from("example.rs");
+    editor
+        .open_document(
+            path.as_path(),
+            "zero\none\ntwo\nthree\nfour\nfive\nsix\nseven\n",
+        )
+        .expect("document should open");
+    editor.set_viewport_for_test(Viewport {
+        first_visible_row: 0,
+        visible_row_count: 3,
+        horizontal_offset: 0,
+    });
+    editor.set_folded_regions(vec![FoldRegion {
+        start_line: 2,
+        end_line: 5,
+    }]);
+
+    editor.set_first_visible_source_line(4);
+
+    assert_eq!(editor.first_visible_source_line(), Some(2));
+}
+
+#[test]
+fn setting_caret_line_clamps_to_document_bounds() {
+    let mut editor = FilesEditor::new();
+    let path = PathBuf::from("example.rs");
+    editor
+        .open_document(path.as_path(), "zero\none\ntwo\n")
+        .expect("document should open");
+    editor.set_selection_for_test(Selection::caret(TextPosition::new(0, 2)));
+
+    assert!(editor.set_caret_line(99));
+    assert_eq!(
+        editor.selection_for_test(),
+        Selection::caret(TextPosition::new(3, 0))
+    );
+}
+
 fn primary_shortcut_keystroke(key: &str) -> Keystroke {
     let shortcut = if cfg!(target_os = "macos") {
         format!("cmd-{key}")

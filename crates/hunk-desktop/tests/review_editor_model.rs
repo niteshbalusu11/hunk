@@ -67,6 +67,7 @@ use diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
 use review_editor_model::{
     build_review_editor_overlays, build_review_editor_overlays_from_texts,
     build_review_editor_presentation_from_texts, build_review_editor_right_line_anchor_from_texts,
+    find_wrapped_review_editor_hunk_line, nearest_mapped_review_editor_left_line,
     should_preserve_dirty_review_editor_right,
 };
 
@@ -236,6 +237,55 @@ fn presentation_keeps_selected_right_line_visible_even_when_unchanged() {
             .right_folds
             .iter()
             .any(|region| region.start_line <= 5 && region.end_line >= 5)
+    );
+}
+
+#[test]
+fn presentation_tracks_hunk_lines_and_right_to_left_mapping() {
+    let left = "alpha\nbeta\ngamma\ndelta\n";
+    let right = "alpha\nbeta changed\ninserted\ngamma\ndelta\n";
+
+    let presentation = build_review_editor_presentation_from_texts(left, right, 1, None);
+
+    assert_eq!(presentation.right_hunk_lines, vec![1]);
+    assert_eq!(
+        presentation.right_to_left_line_map,
+        vec![Some(0), Some(1), None, Some(2), Some(3), Some(4)]
+    );
+}
+
+#[test]
+fn wrapped_hunk_navigation_advances_and_wraps() {
+    let hunks = vec![2, 8, 14];
+
+    assert_eq!(find_wrapped_review_editor_hunk_line(&hunks, 1, 1), Some(2));
+    assert_eq!(find_wrapped_review_editor_hunk_line(&hunks, 8, 1), Some(14));
+    assert_eq!(find_wrapped_review_editor_hunk_line(&hunks, 14, 1), Some(2));
+    assert_eq!(
+        find_wrapped_review_editor_hunk_line(&hunks, 14, -1),
+        Some(8)
+    );
+    assert_eq!(
+        find_wrapped_review_editor_hunk_line(&hunks, 2, -1),
+        Some(14)
+    );
+}
+
+#[test]
+fn nearest_left_mapping_falls_back_around_inserted_lines() {
+    let right_to_left = vec![Some(0), Some(1), None, None, Some(2), Some(3)];
+
+    assert_eq!(
+        nearest_mapped_review_editor_left_line(&right_to_left, 2),
+        Some(1)
+    );
+    assert_eq!(
+        nearest_mapped_review_editor_left_line(&right_to_left, 3),
+        Some(1)
+    );
+    assert_eq!(
+        nearest_mapped_review_editor_left_line(&right_to_left, 4),
+        Some(2)
     );
 }
 

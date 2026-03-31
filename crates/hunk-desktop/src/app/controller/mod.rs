@@ -18,6 +18,7 @@ use crate::app::diff_segment_prefetch::{
 use crate::app::markdown_links::open_url_in_browser;
 use crate::app::review_editor_model::{
     build_review_editor_presentation_from_texts, build_review_editor_right_line_anchor_from_texts,
+    find_wrapped_review_editor_hunk_line, nearest_mapped_review_editor_left_line,
     should_preserve_dirty_review_editor_right,
 };
 

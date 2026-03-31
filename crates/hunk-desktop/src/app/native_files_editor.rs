@@ -332,11 +332,19 @@ impl FilesEditor {
         Some(self.editor.selection())
     }
 
-    pub(crate) fn first_visible_row(&self) -> usize {
-        self.editor.viewport().first_visible_row
+    pub(crate) fn first_visible_source_line(&self) -> Option<usize> {
+        self.active_path.as_ref()?;
+        self.editor
+            .display_snapshot()
+            .visible_rows
+            .first()
+            .map(|row| row.source_line)
     }
 
-    pub(crate) fn set_first_visible_row(&mut self, first_visible_row: usize) {
+    pub(crate) fn set_first_visible_source_line(&mut self, source_line: usize) {
+        let Some(first_visible_row) = self.editor.display_row_for_source_line(source_line) else {
+            return;
+        };
         let snapshot = self.editor.display_snapshot();
         let max_first_row = snapshot
             .total_display_rows
@@ -350,6 +358,26 @@ impl FilesEditor {
 
     pub(crate) fn mark_saved(&mut self) {
         self.editor.apply(EditorCommand::MarkSaved);
+    }
+
+    pub(crate) fn set_caret_line(&mut self, line: usize) -> bool {
+        if self.active_path.is_none() {
+            return false;
+        }
+        let snapshot = self.editor.buffer().snapshot();
+        let max_line = snapshot.line_count().saturating_sub(1);
+        let line = line.min(max_line);
+        let column = self
+            .editor
+            .selection()
+            .head
+            .column
+            .min(line_char_len(&snapshot, line));
+        self.editor
+            .apply(EditorCommand::SetSelection(Selection::caret(
+                TextPosition::new(line, column),
+            )))
+            .selection_changed
     }
 
     pub(crate) fn set_folded_regions(&mut self, folded_regions: Vec<FoldRegion>) {

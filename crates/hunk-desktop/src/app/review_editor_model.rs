@@ -11,6 +11,8 @@ pub(crate) struct ReviewEditorPresentation {
     pub right_overlays: Vec<OverlayDescriptor>,
     pub left_folds: Vec<FoldRegion>,
     pub right_folds: Vec<FoldRegion>,
+    pub right_hunk_lines: Vec<usize>,
+    pub right_to_left_line_map: Vec<Option<usize>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +102,7 @@ pub(crate) fn build_review_editor_presentation_from_texts(
     let mut right = BTreeMap::new();
     let mut left_changed_lines = BTreeSet::new();
     let mut right_changed_lines = BTreeSet::new();
+    let mut right_to_left_line_map = vec![None; right_lines.len()];
 
     let matrix_cells = left_lines.len().saturating_mul(right_lines.len());
     let ops = if matrix_cells <= MAX_LINE_LCS_MATRIX_CELLS {
@@ -114,6 +117,9 @@ pub(crate) fn build_review_editor_presentation_from_texts(
     while ix < ops.len() {
         match ops[ix] {
             LineDiffOp::Equal => {
+                if right_line < right_to_left_line_map.len() {
+                    right_to_left_line_map[right_line] = Some(left_line);
+                }
                 left_line = left_line.saturating_add(1);
                 right_line = right_line.saturating_add(1);
                 ix += 1;
@@ -137,6 +143,10 @@ pub(crate) fn build_review_editor_presentation_from_texts(
                     right.insert(right_line + offset, OverlayKind::DiffModification);
                     left_changed_lines.insert(left_line + offset);
                     right_changed_lines.insert(right_line + offset);
+                    let right_ix = right_line + offset;
+                    if right_ix < right_to_left_line_map.len() {
+                        right_to_left_line_map[right_ix] = Some(left_line + offset);
+                    }
                 }
                 for offset in paired_count..deleted_count {
                     left.insert(left_line + offset, OverlayKind::DiffDeletion);
@@ -145,6 +155,10 @@ pub(crate) fn build_review_editor_presentation_from_texts(
                 for offset in paired_count..inserted_count {
                     right.insert(right_line + offset, OverlayKind::DiffAddition);
                     right_changed_lines.insert(right_line + offset);
+                    let right_ix = right_line + offset;
+                    if right_ix < right_to_left_line_map.len() {
+                        right_to_left_line_map[right_ix] = None;
+                    }
                 }
 
                 left_line = left_line.saturating_add(deleted_count);
@@ -159,6 +173,10 @@ pub(crate) fn build_review_editor_presentation_from_texts(
                 for offset in 0..inserted_count {
                     right.insert(right_line + offset, OverlayKind::DiffAddition);
                     right_changed_lines.insert(right_line + offset);
+                    let right_ix = right_line + offset;
+                    if right_ix < right_to_left_line_map.len() {
+                        right_to_left_line_map[right_ix] = None;
+                    }
                 }
                 right_line = right_line.saturating_add(inserted_count);
             }
@@ -187,6 +205,8 @@ pub(crate) fn build_review_editor_presentation_from_texts(
             context_radius,
             pinned_right_line,
         ),
+        right_hunk_lines: right_hunk_lines(&right_changed_lines),
+        right_to_left_line_map,
     }
 }
 
@@ -235,6 +255,60 @@ fn overlays_from_entries(entries: BTreeMap<usize, OverlayKind>) -> Vec<OverlayDe
             message: None,
         })
         .collect()
+}
+
+pub(crate) fn find_wrapped_review_editor_hunk_line(
+    right_hunk_lines: &[usize],
+    current_line: usize,
+    direction: isize,
+) -> Option<usize> {
+    if right_hunk_lines.is_empty() {
+        return None;
+    }
+
+    if direction >= 0 {
+        right_hunk_lines
+            .iter()
+            .copied()
+            .find(|line| *line > current_line)
+            .or_else(|| right_hunk_lines.first().copied())
+    } else {
+        right_hunk_lines
+            .iter()
+            .rev()
+            .copied()
+            .find(|line| *line < current_line)
+            .or_else(|| right_hunk_lines.last().copied())
+    }
+}
+
+pub(crate) fn nearest_mapped_review_editor_left_line(
+    right_to_left_line_map: &[Option<usize>],
+    right_line: usize,
+) -> Option<usize> {
+    if right_to_left_line_map.is_empty() {
+        return None;
+    }
+
+    let clamped = right_line.min(right_to_left_line_map.len().saturating_sub(1));
+    if let Some(line) = right_to_left_line_map[clamped] {
+        return Some(line);
+    }
+
+    let mut backward = clamped;
+    while backward > 0 {
+        backward -= 1;
+        if let Some(line) = right_to_left_line_map[backward] {
+            return Some(line);
+        }
+    }
+
+    right_to_left_line_map
+        .iter()
+        .skip(clamped.saturating_add(1))
+        .flatten()
+        .next()
+        .copied()
 }
 
 fn build_fold_regions(
@@ -297,6 +371,18 @@ fn build_fold_regions(
     }
 
     folds
+}
+
+fn right_hunk_lines(changed_lines: &BTreeSet<usize>) -> Vec<usize> {
+    let mut hunks = Vec::new();
+    let mut previous_line = None::<usize>;
+    for line in changed_lines.iter().copied() {
+        if previous_line.is_none_or(|previous| line > previous.saturating_add(1)) {
+            hunks.push(line);
+        }
+        previous_line = Some(line);
+    }
+    hunks
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

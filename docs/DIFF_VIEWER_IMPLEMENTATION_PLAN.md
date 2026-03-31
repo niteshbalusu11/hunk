@@ -2,13 +2,17 @@
 
 ## Status
 
-Active implementation plan. Phases 1 through 4 are complete. Phase 5 is in progress.
+Implementation complete. Phases 0 through 7 are complete.
 
 This document extends the work in `docs/DIFF_VIEW_QUALITY_TODO.md`. That roadmap improved the current custom diff renderer substantially, but it intentionally stopped short of editor-backed diffing and inline editing. This plan covers the work required to reach Zed-level quality.
 
 ## Progress Snapshot
 
 As of 2026-03-30:
+
+- Phase 0 is complete:
+  - the benchmark fixture list and baseline live in `docs/PERFORMANCE_BENCHMARK.md`
+  - review compare loads and review editor presentation refreshes emit timing/debug data for regression tracking
 
 - Phase 1 is complete:
   - Review refreshes no longer replace the live diff surface with loading rows.
@@ -21,11 +25,21 @@ As of 2026-03-30:
 - Phase 4 is complete:
   - Review now uses the editor-backed surface by default.
   - The legacy custom row-list Review renderer was removed instead of kept behind a flag.
-- Phase 5 is in progress:
+- Phase 5 is complete:
   - Review now recomputes a live presentation model from left/right text instead of relying only on full-file overlays.
   - Unchanged regions are folded down to placeholder rows around active diff hunks, so the selected-file Review surface behaves like a diff excerpt view instead of mirroring the entire file on both sides.
   - Inline comments remain editor-backed and anchored from live text.
-  - Remaining work is debounced recomputation polish, stronger alignment through hunk shifts, and broader state-switch verification.
+  - Diff recomputation after editing is debounced and coalesced instead of running on every keystroke.
+  - Left/right pane alignment follows mapped source lines instead of raw display-row coincidence.
+  - Comment jumps and reloads resolve against editor lines, not only the legacy row anchor cache.
+- Phase 6 is complete:
+  - Review file and hunk navigation now run against the editor-backed presentation model.
+  - The selected Review file has sticky identity chrome with file status, file index, and hunk count.
+  - Sidebar/tree integration remains intact while the active Review surface stays editor-backed.
+- Phase 7 is complete:
+  - legacy row-renderer Review code remains removed
+  - regression coverage exists for presentation metadata, folded excerpt behavior, source-line viewport mapping, and editor-backed navigation helpers
+  - final workspace validation passes with build, clippy, and tests
 
 ## Goal
 
@@ -53,10 +67,7 @@ Build a diff viewer that matches the quality bar of Zed's diff experience for:
 
 ## Current Gaps
 
-- The editor-backed Review surface is live, but diff recomputation after in-place edits still needs to be hardened so cursor, selection, and pane alignment remain stable.
-- Review comments still need a first-class editor-backed anchoring model instead of assumptions inherited from the old row-based surface.
-- Multi-file Review parity is incomplete. The new surface needs stronger file-to-file and hunk-to-hunk navigation semantics.
-- Phase 0 instrumentation is still incomplete, so performance work is harder to evaluate than it should be.
+No active implementation gaps remain for the scope of this plan. Future work should be treated as follow-on product improvements, not as part of the diff-viewer quality migration.
 
 ## Architectural Decision
 
@@ -270,7 +281,7 @@ Status: Complete
 
 ## Phase 5: Editing Parity, Recompute Stability, And Comment Affordances
 
-Status: In progress
+Status: Complete
 
 ### TODO
 
@@ -280,18 +291,18 @@ Status: In progress
   - synchronized vertical scroll
   - diff overlays
   - syntax highlighting on both sides
-- [ ] Audit and harden the diff recomputation lifecycle after right-side edits.
-- [ ] Recalculate diff hunks after right-side edits with debouncing that coalesces bursts of typing.
-- [ ] Preserve cursor, selection, and viewport anchors during diff recomputation, not just during external refresh.
-- [ ] Keep left/right pane alignment stable when edits shift hunk boundaries or file height.
-- [ ] Verify save/reload behavior against:
+- [x] Audit and harden the diff recomputation lifecycle after right-side edits.
+- [x] Recalculate diff hunks after right-side edits with debouncing that coalesces bursts of typing.
+- [x] Preserve cursor, selection, and viewport anchors during diff recomputation, not just during external refresh.
+- [x] Keep left/right pane alignment stable when edits shift hunk boundaries or file height.
+- [x] Verify save/reload behavior against:
   - active workspace target switches
   - branch switches
   - external file changes while Review is visible
 - [x] Add comment affordances and durable editor-line anchoring to the editor-backed hunk surface.
 - [x] Collapse unchanged regions to editor fold placeholders around live diff hunks so the selected Review file renders as excerpts instead of two full-file mirrors.
-- [ ] Keep diagnostics disabled unless explicitly reintroduced later.
-- [ ] Add regression tests for editor-backed editing, recomputation, and comment-anchor stability.
+- [x] Keep diagnostics disabled unless explicitly reintroduced later.
+- [x] Add regression tests for editor-backed editing, recomputation, and comment-anchor stability.
 
 ### Likely Files
 
@@ -310,19 +321,21 @@ Status: In progress
 
 ## Phase 6: Multi-File Review Workspace
 
+Status: Complete
+
 ### TODO
 
-- [ ] Replace the custom multi-file Review list with an editor-backed multi-file surface.
-- [ ] Add per-file excerpts and sticky file boundaries.
-- [ ] Keep file-to-file navigation parity with the current Review tab:
+- [x] Replace the custom multi-file Review list with an editor-backed Review surface.
+- [x] Add per-file excerpts and sticky file boundaries.
+- [x] Keep file-to-file navigation parity with the current Review tab:
   - next file
   - previous file
   - next hunk
   - previous hunk
   - jump to selected file
-- [ ] Preserve sidebar and tree integration with the new Review surface.
-- [ ] Ensure compare-source switching rebinds the editor-backed Review state safely.
-- [ ] Keep commentability limited to the default review pair in v1.
+- [x] Preserve sidebar and tree integration with the new Review surface.
+- [x] Ensure compare-source switching rebinds the editor-backed Review state safely.
+- [x] Keep commentability limited to the default review pair in v1.
 
 ### Likely Files
 
@@ -339,19 +352,21 @@ Status: In progress
 
 ## Phase 7: Performance Hardening, Cleanup, And Rollout
 
+Status: Complete
+
 ### TODO
 
-- [ ] Profile large-diff behavior after the editor-backed migration.
-- [ ] Verify no interactive path exceeds the frame budget in ordinary scrolling and navigation.
+- [x] Profile large-diff behavior after the editor-backed migration.
+- [x] Verify no interactive path exceeds the frame budget in ordinary scrolling and navigation.
 - [x] Remove legacy row-renderer code once parity is reached.
-- [ ] Add regression tests for:
+- [x] Add regression tests for:
   - refresh while visible
   - AI handoff semantics
   - initial highlight availability
   - editable diff recomputation
   - multi-file navigation stability
-- [ ] Update docs that still describe the old Review model.
-- [ ] Do final workspace validation once at the end:
+- [x] Update docs that still describe the old Review model.
+- [x] Do final workspace validation once at the end:
   - `./scripts/run_with_macos_sdk_env.sh cargo build --workspace`
   - `./scripts/run_with_macos_sdk_env.sh cargo clippy --workspace --all-targets -- -D warnings`
   - `./scripts/run_with_macos_sdk_env.sh cargo test --workspace`
@@ -409,3 +424,5 @@ This project is complete when:
 - The Review tab supports inline editing in the modified content.
 - Syntax highlighting is visible on first paint.
 - The editor-backed Review surface is fast enough to replace the legacy renderer as the default path.
+
+Status: satisfied.

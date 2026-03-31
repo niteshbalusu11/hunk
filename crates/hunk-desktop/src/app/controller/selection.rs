@@ -194,6 +194,13 @@ impl DiffViewer {
     }
 
     fn select_hunk_relative(&mut self, direction: isize, cx: &mut Context<Self>) {
+        if self.workspace_view_mode == WorkspaceViewMode::Diff
+            && self.review_editor_session.path.is_some()
+            && self.navigate_review_editor_hunk_relative(direction, cx)
+        {
+            return;
+        }
+
         if self.diff_rows.is_empty() {
             return;
         }
@@ -213,6 +220,23 @@ impl DiffViewer {
     }
 
     fn select_file_relative(&mut self, direction: isize, cx: &mut Context<Self>) {
+        if self.workspace_view_mode == WorkspaceViewMode::Diff && !self.review_files.is_empty() {
+            let current_ix = self
+                .selected_path
+                .as_ref()
+                .and_then(|path| self.review_files.iter().position(|file| file.path == *path))
+                .unwrap_or(0);
+            let max_ix = self.review_files.len().saturating_sub(1) as isize;
+            let target_ix = (current_ix as isize + direction).clamp(0, max_ix) as usize;
+            let file = &self.review_files[target_ix];
+            self.selected_path = Some(file.path.clone());
+            self.selected_status = Some(file.status);
+            self.review_editor_session.pending_target_right_line = None;
+            self.request_review_editor_reload(true, cx);
+            cx.notify();
+            return;
+        }
+
         if self.file_row_ranges.is_empty() {
             return;
         }
@@ -262,10 +286,21 @@ impl DiffViewer {
     pub(super) fn select_next_line_action(
         &mut self,
         _: &SelectNextLine,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.workspace_view_mode != WorkspaceViewMode::Diff {
+            return;
+        }
+        if self.review_editor_focus_handle.is_focused(window)
+            && self
+                .review_editor_session
+                .right_editor
+                .borrow_mut()
+                .move_vertical_action(true, false)
+        {
+            self.sync_review_editor_viewports_from_right();
+            cx.notify();
             return;
         }
         self.move_selection_by(1, false, cx);
@@ -274,10 +309,21 @@ impl DiffViewer {
     pub(super) fn select_previous_line_action(
         &mut self,
         _: &SelectPreviousLine,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.workspace_view_mode != WorkspaceViewMode::Diff {
+            return;
+        }
+        if self.review_editor_focus_handle.is_focused(window)
+            && self
+                .review_editor_session
+                .right_editor
+                .borrow_mut()
+                .move_vertical_action(false, false)
+        {
+            self.sync_review_editor_viewports_from_right();
+            cx.notify();
             return;
         }
         self.move_selection_by(-1, false, cx);
@@ -286,10 +332,21 @@ impl DiffViewer {
     pub(super) fn extend_selection_next_line_action(
         &mut self,
         _: &ExtendSelectionNextLine,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.workspace_view_mode != WorkspaceViewMode::Diff {
+            return;
+        }
+        if self.review_editor_focus_handle.is_focused(window)
+            && self
+                .review_editor_session
+                .right_editor
+                .borrow_mut()
+                .move_vertical_action(true, true)
+        {
+            self.sync_review_editor_viewports_from_right();
+            cx.notify();
             return;
         }
         self.move_selection_by(1, true, cx);
@@ -298,10 +355,21 @@ impl DiffViewer {
     pub(super) fn extend_selection_previous_line_action(
         &mut self,
         _: &ExtendSelectionPreviousLine,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.workspace_view_mode != WorkspaceViewMode::Diff {
+            return;
+        }
+        if self.review_editor_focus_handle.is_focused(window)
+            && self
+                .review_editor_session
+                .right_editor
+                .borrow_mut()
+                .move_vertical_action(false, true)
+        {
+            self.sync_review_editor_viewports_from_right();
+            cx.notify();
             return;
         }
         self.move_selection_by(-1, true, cx);
@@ -310,7 +378,7 @@ impl DiffViewer {
     pub(super) fn copy_selection_action(
         &mut self,
         _: &CopySelection,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.workspace_view_mode == WorkspaceViewMode::Ai && self.ai_copy_selected_text(cx) {
@@ -325,6 +393,9 @@ impl DiffViewer {
         if self.workspace_view_mode != WorkspaceViewMode::Diff {
             return;
         }
+        if self.review_editor_focus_handle.is_focused(window) && self.review_editor_copy_selection(cx) {
+            return;
+        }
         let Some(selection_text) = self.selected_rows_as_text() else {
             return;
         };
@@ -334,7 +405,7 @@ impl DiffViewer {
     pub(super) fn select_all_rows_action(
         &mut self,
         _: &SelectAllDiffRows,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.workspace_view_mode == WorkspaceViewMode::Ai && self.ai_select_all_text(cx) {
@@ -347,6 +418,17 @@ impl DiffViewer {
             return;
         }
         if self.workspace_view_mode != WorkspaceViewMode::Diff {
+            return;
+        }
+        if self.review_editor_focus_handle.is_focused(window)
+            && self
+                .review_editor_session
+                .right_editor
+                .borrow_mut()
+                .select_all_action()
+        {
+            self.sync_review_editor_viewports_from_right();
+            cx.notify();
             return;
         }
         self.select_all_rows(cx);

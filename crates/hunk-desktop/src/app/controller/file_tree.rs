@@ -246,6 +246,7 @@ impl DiffViewer {
         if self.workspace_view_mode == WorkspaceViewMode::Files {
             self.request_file_editor_reload(path, cx);
         } else {
+            self.review_editor_session.pending_target_right_line = None;
             self.request_review_editor_reload(true, cx);
             self.scroll_to_file_start(&path);
             self.last_visible_row_start = None;

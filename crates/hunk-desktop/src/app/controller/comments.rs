@@ -722,6 +722,38 @@ impl DiffViewer {
             return;
         };
 
+        let editor_target_line = comment
+            .new_line
+            .or(comment.old_line)
+            .map(|line| line.saturating_sub(1) as usize);
+        let review_file_status = self
+            .review_files
+            .iter()
+            .find(|file| file.path == comment.file_path)
+            .map(|file| file.status);
+
+        if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            if self.review_editor_session.path.as_deref() == Some(comment.file_path.as_str()) {
+                if let Some(target_line) = editor_target_line
+                    && self.jump_review_editor_to_line(target_line, cx)
+                {
+                    self.comments_preview_open = false;
+                    self.comment_status_message = Some("Jumped to comment location.".to_string());
+                    return;
+                }
+            } else if let Some(status) = review_file_status {
+                self.comments_preview_open = false;
+                self.selected_path = Some(comment.file_path.clone());
+                self.selected_status = Some(status);
+                self.review_editor_session.pending_target_right_line = editor_target_line;
+                self.request_review_editor_reload(true, cx);
+                self.comment_status_message =
+                    Some("Jumped to comment file in Review.".to_string());
+                cx.notify();
+                return;
+            }
+        }
+
         let mapped_row = self
             .comment_row_matches
             .get(comment.id.as_str())
