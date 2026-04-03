@@ -16,6 +16,7 @@ mod app {
         pub plain_text: SharedString,
         pub syntax: SyntaxTokenKind,
         pub changed: bool,
+        pub search_match: bool,
     }
 
     #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -82,6 +83,7 @@ mod app {
                 plain_text: SharedString::from(text.to_string()),
                 syntax: SyntaxTokenKind::Plain,
                 changed: false,
+                search_match: false,
             }]
         }
 
@@ -90,6 +92,23 @@ mod app {
             _max_segments: usize,
         ) -> Vec<CachedStyledSegment> {
             segments
+        }
+
+        pub fn apply_search_highlights_to_cached_segments(
+            segments: Vec<CachedStyledSegment>,
+            highlight_columns: &[std::ops::Range<usize>],
+        ) -> Vec<CachedStyledSegment> {
+            if highlight_columns.is_empty() {
+                return segments;
+            }
+
+            segments
+                .into_iter()
+                .map(|mut segment| {
+                    segment.search_match = true;
+                    segment
+                })
+                .collect()
         }
     }
 
@@ -311,9 +330,62 @@ fn review_workspace_session_search_matches_follow_excerpt_surface_order() {
     assert!(matches.iter().all(|target| target.path == "src/lib.rs"));
     assert!(
         matches
+            .iter()
+            .all(|target| target.raw_column_range.is_some())
+    );
+    assert!(
+        matches
             .windows(2)
             .all(|pair| pair[0].surface_order <= pair[1].surface_order)
     );
+}
+
+#[test]
+fn review_workspace_surface_snapshot_marks_visible_search_matches() {
+    let patch = "\
+@@ -1,2 +1,2 @@
+-before
++needle first
+ keep
+@@ -10,2 +10,3 @@
+ context
+-old
++needle second
++tail
+";
+    let snapshot = CompareSnapshot {
+        files: vec![changed_file("src/lib.rs", FileStatus::Modified)],
+        file_line_stats: BTreeMap::new(),
+        overall_line_stats: LineStats::default(),
+        patches_by_path: BTreeMap::from([("src/lib.rs".to_string(), patch.to_string())]),
+    };
+
+    let rows = parse_patch_side_by_side(patch);
+    let stream = review_stream_for_rows(&rows, "src/lib.rs", FileStatus::Modified);
+    let session = ReviewWorkspaceSession::from_compare_snapshot(&snapshot, &BTreeSet::new())
+        .expect("review workspace session should build")
+        .with_render_stream(&stream);
+    let matches = session.workspace_search_matches("needle");
+    let options = ReviewWorkspaceSurfaceOptions {
+        search_highlight_columns_by_row: session.build_search_highlight_columns_by_row(&matches),
+        ..ReviewWorkspaceSurfaceOptions::default()
+    };
+
+    let surface = session.build_surface_snapshot(0, 512, 1, 8, &options);
+    let highlighted_rows = surface
+        .viewport
+        .sections
+        .iter()
+        .flat_map(|section| section.rows.iter())
+        .filter(|row| {
+            row.right_segments
+                .iter()
+                .any(|segment| segment.search_match)
+        })
+        .map(|row| row.row_index)
+        .collect::<Vec<_>>();
+
+    assert!(!highlighted_rows.is_empty());
 }
 
 #[test]
@@ -1073,6 +1145,7 @@ fn review_workspace_session_surface_snapshot_builds_sparse_overlays_from_surface
         &ReviewWorkspaceSurfaceOptions {
             comment_affordance_rows: BTreeSet::from([comment_row]),
             active_comment_editor_row: Some(comment_row),
+            search_highlight_columns_by_row: BTreeMap::new(),
         },
     );
 

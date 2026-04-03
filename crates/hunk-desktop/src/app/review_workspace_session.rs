@@ -26,7 +26,8 @@ mod workspace_display_buffers;
 
 use crate::app::data::{
     CachedStyledSegment, DiffSegmentQuality, DiffStream, DiffStreamRowKind,
-    cached_runtime_fallback_segments, compact_cached_segments_for_render,
+    apply_search_highlights_to_cached_segments, cached_runtime_fallback_segments,
+    compact_cached_segments_for_render,
 };
 use crate::app::native_files_editor::WorkspaceEditorSession;
 use crate::app::{DiffRowSegmentCache, DiffStreamRowMeta};
@@ -173,6 +174,7 @@ pub(crate) struct ReviewWorkspaceSurfaceSnapshot {
 pub(crate) struct ReviewWorkspaceSurfaceOptions {
     pub(crate) comment_affordance_rows: BTreeSet<usize>,
     pub(crate) active_comment_editor_row: Option<usize>,
+    pub(crate) search_highlight_columns_by_row: BTreeMap<usize, Vec<Range<usize>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -604,6 +606,16 @@ impl ReviewWorkspaceSession {
                     let surface_top_px = self
                         .row_top_offset_px(row_index)
                         .unwrap_or(visible_start_px);
+                    let right_search_highlights = options
+                        .search_highlight_columns_by_row
+                        .get(&row_index)
+                        .map(|ranges| {
+                            review_project_search_highlights_for_display_row(
+                                &right_display_row,
+                                ranges,
+                            )
+                        })
+                        .unwrap_or_default();
                     Some(ReviewWorkspaceViewportRow {
                         row_index,
                         stable_id: row_metadata
@@ -631,10 +643,12 @@ impl ReviewWorkspaceSession {
                         left_segments: review_viewport_render_segments(
                             row_segment_cache.map(|cache| &cache.left),
                             left_display_row.text.as_str(),
+                            &[],
                         ),
                         right_segments: review_viewport_render_segments(
                             row_segment_cache.map(|cache| &cache.right),
                             right_display_row.text.as_str(),
+                            right_search_highlights.as_slice(),
                         ),
                     })
                 })
@@ -1333,6 +1347,20 @@ impl ReviewWorkspaceSession {
         .visible_rows
     }
 
+    pub(crate) fn build_search_highlight_columns_by_row(
+        &self,
+        matches: &[ReviewWorkspaceSearchTarget],
+    ) -> BTreeMap<usize, Vec<Range<usize>>> {
+        let mut highlights = BTreeMap::<usize, Vec<Range<usize>>>::new();
+        for target in matches {
+            let Some(range) = target.raw_column_range.clone() else {
+                continue;
+            };
+            highlights.entry(target.row_index).or_default().push(range);
+        }
+        highlights
+    }
+
     fn build_document_buffers_from_lines(
         &self,
         document_lines: &BTreeMap<WorkspaceDocumentId, Vec<String>>,
@@ -1428,16 +1456,52 @@ fn review_effective_segment_quality(
 fn review_viewport_render_segments(
     cached_segments: Option<&Vec<CachedStyledSegment>>,
     display_text: &str,
+    search_highlights: &[Range<usize>],
 ) -> Vec<CachedStyledSegment> {
-    cached_segments
-        .cloned()
-        .map(|segments| {
-            compact_cached_segments_for_render(
-                segments,
-                REVIEW_VIEWPORT_RENDER_MAX_SEGMENTS_PER_CELL,
+    apply_search_highlights_to_cached_segments(
+        cached_segments
+            .cloned()
+            .map(|segments| {
+                compact_cached_segments_for_render(
+                    segments,
+                    REVIEW_VIEWPORT_RENDER_MAX_SEGMENTS_PER_CELL,
+                )
+            })
+            .unwrap_or_else(|| cached_runtime_fallback_segments(display_text)),
+        search_highlights,
+    )
+}
+
+fn review_project_search_highlights_for_display_row(
+    row: &WorkspaceDisplayRow,
+    raw_ranges: &[Range<usize>],
+) -> Vec<Range<usize>> {
+    raw_ranges
+        .iter()
+        .filter_map(|range| {
+            let start = range.start.max(row.raw_start_column);
+            let end = range.end.min(row.raw_end_column);
+            if start >= end {
+                return None;
+            }
+
+            Some(
+                review_workspace_display_column_for_raw(row, start)
+                    ..review_workspace_display_column_for_raw(row, end),
             )
         })
-        .unwrap_or_else(|| cached_runtime_fallback_segments(display_text))
+        .collect()
+}
+
+fn review_workspace_display_column_for_raw(row: &WorkspaceDisplayRow, raw_column: usize) -> usize {
+    if row.raw_column_offsets.is_empty() {
+        return 0;
+    }
+
+    let relative_raw = raw_column
+        .saturating_sub(row.raw_start_column)
+        .min(row.raw_column_offsets.len().saturating_sub(1));
+    row.raw_column_offsets[relative_raw]
 }
 
 fn prioritized_prefetch_row_indices_for_rows(

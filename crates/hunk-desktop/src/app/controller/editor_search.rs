@@ -200,18 +200,21 @@ mod editor_search_tests {
                 excerpt_id: WorkspaceExcerptId::new(1),
                 surface_order: 0,
                 row_index: 10,
+                raw_column_range: None,
             },
             ReviewWorkspaceSearchTarget {
                 path: "a.rs".to_string(),
                 excerpt_id: WorkspaceExcerptId::new(1),
                 surface_order: 0,
                 row_index: 20,
+                raw_column_range: None,
             },
             ReviewWorkspaceSearchTarget {
                 path: "b.rs".to_string(),
                 excerpt_id: WorkspaceExcerptId::new(2),
                 surface_order: 1,
                 row_index: 30,
+                raw_column_range: None,
             },
         ];
 

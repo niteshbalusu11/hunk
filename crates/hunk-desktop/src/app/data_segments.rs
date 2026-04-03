@@ -1,3 +1,4 @@
+use std::ops::Range;
 use std::path::Path;
 
 use gpui::SharedString;
@@ -29,9 +30,11 @@ pub(super) fn compact_cached_segments_for_render(
         let first_syntax = chunk[0].syntax;
         let mut mixed_syntax = false;
         let mut changed = false;
+        let mut search_match = false;
         for segment in chunk {
             plain_text.push_str(segment.plain_text.as_ref());
             changed |= segment.changed;
+            search_match |= segment.search_match;
             if segment.syntax != first_syntax {
                 mixed_syntax = true;
             }
@@ -45,6 +48,7 @@ pub(super) fn compact_cached_segments_for_render(
                 first_syntax
             },
             changed,
+            search_match,
         });
     }
 
@@ -60,7 +64,124 @@ pub(super) fn cached_runtime_fallback_segments(text: &str) -> Vec<CachedStyledSe
         plain_text: SharedString::from(text.to_string()),
         syntax: SyntaxTokenKind::Plain,
         changed: false,
+        search_match: false,
     }]
+}
+
+pub(super) fn apply_search_highlights_to_cached_segments(
+    segments: Vec<CachedStyledSegment>,
+    highlight_columns: &[Range<usize>],
+) -> Vec<CachedStyledSegment> {
+    let Some(highlight_columns) = normalize_highlight_columns(highlight_columns) else {
+        return segments;
+    };
+
+    let mut decorated = Vec::new();
+    let mut segment_start_column = 0usize;
+    let mut highlight_ix = 0usize;
+
+    for segment in segments {
+        let segment_len = segment.plain_text.chars().count();
+        let segment_end_column = segment_start_column.saturating_add(segment_len);
+        if segment_len == 0 {
+            segment_start_column = segment_end_column;
+            continue;
+        }
+
+        while highlight_ix < highlight_columns.len()
+            && highlight_columns[highlight_ix].end <= segment_start_column
+        {
+            highlight_ix += 1;
+        }
+
+        if highlight_ix >= highlight_columns.len()
+            || highlight_columns[highlight_ix].start >= segment_end_column
+        {
+            decorated.push(segment);
+            segment_start_column = segment_end_column;
+            continue;
+        }
+
+        let mut cursor = segment_start_column;
+        let mut local_highlight_ix = highlight_ix;
+        while cursor < segment_end_column {
+            while local_highlight_ix < highlight_columns.len()
+                && highlight_columns[local_highlight_ix].end <= cursor
+            {
+                local_highlight_ix += 1;
+            }
+
+            let next_boundary = if let Some(highlight) = highlight_columns.get(local_highlight_ix) {
+                if highlight.start <= cursor {
+                    segment_end_column.min(highlight.end)
+                } else {
+                    segment_end_column.min(highlight.start)
+                }
+            } else {
+                segment_end_column
+            };
+
+            if next_boundary <= cursor {
+                break;
+            }
+
+            let search_match = highlight_columns
+                .get(local_highlight_ix)
+                .is_some_and(|highlight| highlight.start <= cursor && cursor < highlight.end);
+            decorated.push(CachedStyledSegment {
+                plain_text: SharedString::from(segment_slice(
+                    segment.plain_text.as_ref(),
+                    cursor.saturating_sub(segment_start_column),
+                    next_boundary.saturating_sub(segment_start_column),
+                )),
+                syntax: segment.syntax,
+                changed: segment.changed,
+                search_match,
+            });
+            cursor = next_boundary;
+        }
+
+        segment_start_column = segment_end_column;
+        highlight_ix = local_highlight_ix;
+    }
+
+    decorated
+}
+
+fn normalize_highlight_columns(highlight_columns: &[Range<usize>]) -> Option<Vec<Range<usize>>> {
+    let mut sorted = highlight_columns
+        .iter()
+        .filter(|range| range.start < range.end)
+        .cloned()
+        .collect::<Vec<_>>();
+    if sorted.is_empty() {
+        return None;
+    }
+
+    sorted.sort_by_key(|range| (range.start, range.end));
+    let mut normalized: Vec<Range<usize>> = Vec::with_capacity(sorted.len());
+    for range in sorted {
+        if let Some(previous) = normalized.last_mut()
+            && range.start <= previous.end
+        {
+            previous.end = previous.end.max(range.end);
+            continue;
+        }
+        normalized.push(range);
+    }
+
+    Some(normalized)
+}
+
+fn segment_slice(text: &str, start_column: usize, end_column: usize) -> String {
+    if start_column >= end_column {
+        return String::new();
+    }
+
+    text.chars()
+        .skip(start_column)
+        .take(end_column.saturating_sub(start_column))
+        .collect()
 }
 
 pub(super) fn is_probably_binary_extension(path: &str) -> bool {

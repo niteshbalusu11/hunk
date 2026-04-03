@@ -8,8 +8,8 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 
 pub(super) use super::data_segments::{
-    cached_runtime_fallback_segments, compact_cached_segments_for_render, is_binary_patch,
-    is_probably_binary_extension,
+    apply_search_highlights_to_cached_segments, cached_runtime_fallback_segments,
+    compact_cached_segments_for_render, is_binary_patch, is_probably_binary_extension,
 };
 use super::highlight::{
     StyledSegment, SyntaxTokenKind, build_line_segments, build_syntax_only_line_segments,
@@ -71,6 +71,7 @@ pub(super) struct CachedStyledSegment {
     pub(super) plain_text: SharedString,
     pub(super) syntax: SyntaxTokenKind,
     pub(super) changed: bool,
+    pub(super) search_match: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -649,6 +650,7 @@ pub(super) fn cached_segments_from_styled(
             plain_text: SharedString::from(segment.text),
             syntax: segment.syntax,
             changed: segment.changed,
+            search_match: false,
         })
         .collect::<Vec<_>>()
 }

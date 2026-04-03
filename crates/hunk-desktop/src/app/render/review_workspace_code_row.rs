@@ -182,6 +182,12 @@ fn paint_review_workspace_code_cell(
     let mut text = String::new();
     let mut text_runs = Vec::new();
     let changed_bg = hunk_opacity(cell.marker_color, cx.theme().mode.is_dark(), 0.20, 0.11);
+    let search_bg = hunk_opacity(
+        hunk_text_selection_background(cx.theme(), cx.theme().mode.is_dark()),
+        cx.theme().mode.is_dark(),
+        0.42,
+        0.26,
+    );
     for segment in &cell.segments {
         let segment_text = segment.plain_text.as_ref();
         if segment_text.is_empty() {
@@ -192,7 +198,13 @@ fn paint_review_workspace_code_cell(
             len: segment_text.len(),
             color: diff_syntax_color(cx.theme(), cell.text_color, segment.syntax),
             font: font.clone(),
-            background_color: segment.changed.then_some(changed_bg),
+            background_color: if segment.search_match {
+                Some(search_bg)
+            } else if segment.changed {
+                Some(changed_bg)
+            } else {
+                None
+            },
             underline: None,
             strikethrough: None,
         });

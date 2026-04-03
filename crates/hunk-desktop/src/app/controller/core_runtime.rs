@@ -23,9 +23,20 @@ impl DiffViewer {
             comment_affordance_rows.insert(row_ix);
         }
 
+        let search_highlight_columns_by_row = self
+            .review_workspace_session
+            .as_ref()
+            .map(|session| {
+                session.build_search_highlight_columns_by_row(
+                    &self.review_surface.workspace_search_matches,
+                )
+            })
+            .unwrap_or_default();
+
         review_workspace_session::ReviewWorkspaceSurfaceOptions {
             comment_affordance_rows,
             active_comment_editor_row,
+            search_highlight_columns_by_row,
         }
     }
 
