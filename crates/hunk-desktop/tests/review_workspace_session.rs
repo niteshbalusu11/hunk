@@ -697,6 +697,55 @@ fn review_workspace_session_builds_visible_state_from_viewport() {
 }
 
 #[test]
+fn review_workspace_session_maps_viewport_pixels_back_to_rows() {
+    let patch = "\
+@@ -1,2 +1,3 @@
+ before
+-old
++new
+ keep
+";
+    let snapshot = CompareSnapshot {
+        files: vec![changed_file("src/main.rs", FileStatus::Modified)],
+        file_line_stats: BTreeMap::new(),
+        overall_line_stats: LineStats::default(),
+        patches_by_path: BTreeMap::from([("src/main.rs".to_string(), patch.to_string())]),
+    };
+    let rows = parse_patch_side_by_side(patch);
+    let stream = review_stream_for_rows(&rows, "src/main.rs", FileStatus::Modified);
+    let session = ReviewWorkspaceSession::from_compare_snapshot(&snapshot, &BTreeSet::new())
+        .expect("workspace session should build")
+        .with_render_stream(&stream);
+    let viewport =
+        session.build_viewport_snapshot(0, REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX * 3, 1, 1);
+    let code_row = viewport
+        .sections
+        .iter()
+        .flat_map(|section| section.rows.iter())
+        .find(|row| row.row_kind == DiffRowKind::Code)
+        .expect("viewport should include a code row");
+
+    assert_eq!(
+        viewport
+            .row_at_viewport_position(0, code_row.surface_top_px)
+            .map(|row| row.row_index),
+        Some(code_row.row_index)
+    );
+    assert_eq!(
+        viewport
+            .row_at_viewport_position(0, code_row.surface_top_px + code_row.height_px / 2)
+            .map(|row| row.row_index),
+        Some(code_row.row_index)
+    );
+    assert_eq!(
+        viewport
+            .row_at_viewport_position(0, viewport.total_surface_height_px + 32)
+            .map(|row| row.row_index),
+        None
+    );
+}
+
+#[test]
 fn review_workspace_session_exposes_header_and_line_number_helpers() {
     let patch = "\
 @@ -9,2 +10,3 @@

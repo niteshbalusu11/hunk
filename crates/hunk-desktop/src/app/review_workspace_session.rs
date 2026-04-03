@@ -122,6 +122,22 @@ impl ReviewWorkspaceViewportSnapshot {
     pub(crate) fn visible_pixel_range(&self) -> Option<Range<usize>> {
         Some(self.sections.first()?.pixel_range.start..self.sections.last()?.pixel_range.end)
     }
+
+    pub(crate) fn row_at_viewport_position(
+        &self,
+        viewport_origin_px: usize,
+        local_y_px: usize,
+    ) -> Option<&ReviewWorkspaceViewportRow> {
+        let surface_y_px = viewport_origin_px.saturating_add(local_y_px);
+        self.sections
+            .iter()
+            .flat_map(|section| section.rows.iter())
+            .find(|row| {
+                let top_px = row.surface_top_px;
+                let bottom_px = top_px.saturating_add(row.height_px);
+                surface_y_px >= top_px && surface_y_px < bottom_px
+            })
+    }
 }
 
 #[derive(Debug, Clone)]

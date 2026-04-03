@@ -12,7 +12,6 @@ enum ReviewWorkspacePaintedRowKind {
 
 #[derive(Clone)]
 struct ReviewWorkspacePaintedRow {
-    row_index: usize,
     top_px: usize,
     height_px: usize,
     kind: ReviewWorkspacePaintedRowKind,
@@ -21,6 +20,8 @@ struct ReviewWorkspacePaintedRow {
 #[derive(Clone)]
 struct ReviewWorkspaceViewportElement {
     view: Entity<DiffViewer>,
+    viewport: std::rc::Rc<review_workspace_session::ReviewWorkspaceViewportSnapshot>,
+    viewport_origin_px: usize,
     rows: std::rc::Rc<Vec<ReviewWorkspacePaintedRow>>,
     center_divider: gpui::Hsla,
     mono_font_family: SharedString,
@@ -34,12 +35,16 @@ struct ReviewWorkspaceSectionLayout {
 impl ReviewWorkspaceViewportElement {
     fn new(
         view: Entity<DiffViewer>,
+        viewport: review_workspace_session::ReviewWorkspaceViewportSnapshot,
+        viewport_origin_px: usize,
         rows: Vec<ReviewWorkspacePaintedRow>,
         center_divider: gpui::Hsla,
         mono_font_family: SharedString,
     ) -> Self {
         Self {
             view,
+            viewport: std::rc::Rc::new(viewport),
+            viewport_origin_px,
             rows: std::rc::Rc::new(rows),
             center_divider,
             mono_font_family,
@@ -104,15 +109,20 @@ impl Element for ReviewWorkspaceViewportElement {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let rows = self.rows.clone();
+        let viewport = self.viewport.clone();
+        let viewport_origin_px = self.viewport_origin_px;
         let hitbox = layout.hitbox.clone();
         let view = self.view.clone();
         window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
             if phase != gpui::DispatchPhase::Bubble || !hitbox.is_hovered(window) {
                 return;
             }
-            let Some(row_ix) =
-                review_workspace_row_at_position(rows.as_ref(), event.position, hitbox.bounds.origin)
+            let Some(row_ix) = review_workspace_row_at_position(
+                viewport.as_ref(),
+                viewport_origin_px,
+                event.position,
+                hitbox.bounds.origin,
+            )
             else {
                 return;
             };
@@ -128,15 +138,20 @@ impl Element for ReviewWorkspaceViewportElement {
             });
         });
 
-        let rows = self.rows.clone();
+        let viewport = self.viewport.clone();
+        let viewport_origin_px = self.viewport_origin_px;
         let hitbox = layout.hitbox.clone();
         let view = self.view.clone();
         window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
             if phase != gpui::DispatchPhase::Bubble || !hitbox.is_hovered(window) {
                 return;
             }
-            let Some(row_ix) =
-                review_workspace_row_at_position(rows.as_ref(), event.position, hitbox.bounds.origin)
+            let Some(row_ix) = review_workspace_row_at_position(
+                viewport.as_ref(),
+                viewport_origin_px,
+                event.position,
+                hitbox.bounds.origin,
+            )
             else {
                 return;
             };
@@ -200,17 +215,14 @@ impl Element for ReviewWorkspaceViewportElement {
 }
 
 fn review_workspace_row_at_position(
-    rows: &[ReviewWorkspacePaintedRow],
+    viewport: &review_workspace_session::ReviewWorkspaceViewportSnapshot,
+    viewport_origin_px: usize,
     position: gpui::Point<gpui::Pixels>,
     origin: gpui::Point<gpui::Pixels>,
 ) -> Option<usize> {
-    let local_y = (position.y - origin.y).max(gpui::Pixels::ZERO).as_f32();
-    rows.iter()
-        .find(|row| {
-            let top = row.top_px as f32;
-            let bottom = top + row.height_px as f32;
-            local_y >= top && local_y < bottom
-        })
+    let local_y = (position.y - origin.y).max(gpui::Pixels::ZERO).as_f32().floor() as usize;
+    viewport
+        .row_at_viewport_position(viewport_origin_px, local_y)
         .map(|row| row.row_index)
 }
 
@@ -290,7 +302,6 @@ impl DiffViewer {
                     }
                 };
                 Some(ReviewWorkspacePaintedRow {
-                    row_index: row_ix,
                     top_px: viewport_row.surface_top_px.saturating_sub(viewport_origin_px),
                     height_px: viewport_row.height_px,
                     kind,
@@ -315,6 +326,8 @@ impl DiffViewer {
         let chrome = hunk_diff_chrome(cx.theme(), cx.theme().mode.is_dark());
         ReviewWorkspaceViewportElement::new(
             cx.entity(),
+            viewport.clone(),
+            viewport_origin_px,
             painted_rows,
             chrome.center_divider,
             cx.theme().mono_font_family.clone(),
