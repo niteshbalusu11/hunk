@@ -266,19 +266,69 @@ impl DiffViewer {
             viewport_section.visible_row_range.len(),
             "review viewport rows should match the visible row range"
         );
-        let rows = viewport_section.rows.iter().filter_map(|viewport_row| {
-            let row_ix = viewport_row.row_index;
-            let row = self.active_diff_row(row_ix)?;
-            let is_selected = self.is_row_selected(row_ix);
-            Some(match row.kind {
-                DiffRowKind::Code => {
-                    self.render_code_row(row_ix, row, is_selected, Some(viewport_row), cx)
+        let layout = self.diff_column_layout();
+        let body_height_px = viewport_section
+            .pixel_range
+            .len()
+            .saturating_sub(viewport_section.top_spacer_height_px)
+            .saturating_sub(viewport_section.bottom_spacer_height_px);
+
+        let painted_surface = self.render_review_workspace_section_element(
+            viewport_section,
+            layout,
+            cx,
+        );
+
+        let file_header_overlays = viewport_section
+            .rows
+            .iter()
+            .filter_map(|viewport_row| {
+                let row_ix = viewport_row.row_index;
+                let meta = self.active_diff_row_metadata(row_ix)?;
+                if meta.kind != DiffStreamRowKind::FileHeader {
+                    return None;
                 }
-                DiffRowKind::HunkHeader | DiffRowKind::Meta | DiffRowKind::Empty => {
-                    self.render_meta_row(row_ix, row, is_selected, Some(viewport_row), cx)
-                }
+                let path = meta.file_path.as_deref()?;
+                let status = meta.file_status?;
+                let stats = self
+                    .active_diff_file_line_stats()
+                    .get(path)
+                    .copied()
+                    .unwrap_or_default();
+                Some(
+                    div()
+                        .absolute()
+                        .top(px(viewport_row.local_top_px as f32))
+                        .left_0()
+                        .right_0()
+                        .h(px(viewport_row.height_px as f32))
+                        .child(self.render_file_status_banner_row(
+                            row_ix,
+                            path,
+                            status,
+                            stats,
+                            self.is_row_selected(row_ix),
+                            cx,
+                        ))
+                        .into_any_element(),
+                )
             })
-        });
+            .collect::<Vec<_>>();
+
+        let comment_affordance_overlays = viewport_section
+            .rows
+            .iter()
+            .map(|viewport_row| {
+                div()
+                    .absolute()
+                    .top(px(viewport_row.local_top_px as f32))
+                    .left_0()
+                    .right_0()
+                    .h(px(viewport_row.height_px as f32))
+                    .child(self.render_row_comment_affordance(viewport_row.row_index, cx))
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
 
         v_flex()
             .id(("review-workspace-section", viewport_section.section_index as u64))
@@ -286,7 +336,15 @@ impl DiffViewer {
             .when(viewport_section.top_spacer_height_px > 0, |this| {
                 this.child(div().w_full().h(px(viewport_section.top_spacer_height_px as f32)))
             })
-            .children(rows)
+            .child(
+                div()
+                    .relative()
+                    .w_full()
+                    .h(px(body_height_px as f32))
+                    .child(painted_surface)
+                    .children(file_header_overlays)
+                    .children(comment_affordance_overlays),
+            )
             .when(viewport_section.bottom_spacer_height_px > 0, |this| {
                 this.child(div().w_full().h(px(viewport_section.bottom_spacer_height_px as f32)))
             })

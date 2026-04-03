@@ -563,6 +563,23 @@ fn review_workspace_session_builds_viewport_snapshot_from_shared_geometry() {
         .expect("session row should exist for viewport code row");
     assert_eq!(code_row.left_display_row.text, session_row.left.text);
     assert_eq!(code_row.right_display_row.text, session_row.right.text);
+    let visible_start_px = session
+        .row_boundary_offset_px(viewport.sections[0].visible_row_range.start)
+        .expect("visible range should have a top offset");
+    assert_eq!(
+        code_row.local_top_px,
+        session
+            .row_top_offset_px(code_row.row_index)
+            .expect("code row should have a top offset")
+            .saturating_sub(visible_start_px)
+    );
+    assert_eq!(code_row.height_px, REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX);
+    assert!(
+        viewport.sections[0]
+            .rows
+            .windows(2)
+            .all(|pair| pair[1].local_top_px >= pair[0].local_top_px + pair[0].height_px)
+    );
 }
 
 #[test]

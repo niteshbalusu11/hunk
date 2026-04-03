@@ -85,6 +85,8 @@ pub(crate) struct ReviewWorkspaceViewportSection {
 #[derive(Debug, Clone)]
 pub(crate) struct ReviewWorkspaceViewportRow {
     pub(crate) row_index: usize,
+    pub(crate) local_top_px: usize,
+    pub(crate) height_px: usize,
     pub(crate) left_display_row: WorkspaceDisplayRow,
     pub(crate) right_display_row: WorkspaceDisplayRow,
 }
@@ -404,8 +406,16 @@ impl ReviewWorkspaceSession {
                 .zip(left_display_rows.into_iter())
                 .zip(right_display_rows.into_iter())
                 .filter_map(|((row_index, left_display_row), right_display_row)| {
+                    let visible_start_px = self
+                        .row_boundary_offset_px(visible_row_range.start)
+                        .unwrap_or(pixel_range.start);
                     self.row(row_index).map(|_| ReviewWorkspaceViewportRow {
                         row_index,
+                        local_top_px: self
+                            .row_top_offset_px(row_index)
+                            .unwrap_or(visible_start_px)
+                            .saturating_sub(visible_start_px),
+                        height_px: self.surface_row_height_px(row_index),
                         left_display_row,
                         right_display_row,
                     })

@@ -1,8 +1,9 @@
 use gpui::{
-    AnyElement, App, Bounds, ContentMask, Element, ElementId, GlobalElementId,
-    InspectorElementId, IntoElement, LayoutId, Point, SharedString, TextAlign, TextRun, Window,
-    point, px,
+    AnyElement, App, Bounds, ContentMask, Element, ElementId, GlobalElementId, Hitbox,
+    HitboxBehavior, InspectorElementId, IntoElement, LayoutId, Point, SharedString, TextAlign,
+    TextRun, Window, point, px,
 };
+use std::rc::Rc;
 
 #[derive(Clone)]
 struct ReviewWorkspaceCodeRowCellPaint {
@@ -38,6 +39,47 @@ struct ReviewWorkspaceMetaRowElement {
     mono_font_family: SharedString,
 }
 
+#[derive(Clone)]
+struct ReviewWorkspaceMetaRowPaint {
+    kind: DiffRowKind,
+    text: SharedString,
+    background: gpui::Hsla,
+    foreground: gpui::Hsla,
+    accent: gpui::Hsla,
+    border: gpui::Hsla,
+}
+
+#[derive(Clone)]
+enum ReviewWorkspacePaintedRowKind {
+    Skip,
+    Code {
+        left: Box<ReviewWorkspaceCodeRowCellPaint>,
+        right: Box<ReviewWorkspaceCodeRowCellPaint>,
+    },
+    Meta(ReviewWorkspaceMetaRowPaint),
+}
+
+#[derive(Clone)]
+struct ReviewWorkspacePaintedRow {
+    row_index: usize,
+    local_top_px: usize,
+    height_px: usize,
+    kind: ReviewWorkspacePaintedRowKind,
+}
+
+#[derive(Clone)]
+struct ReviewWorkspaceSectionElement {
+    view: Entity<DiffViewer>,
+    rows: Rc<Vec<ReviewWorkspacePaintedRow>>,
+    center_divider: gpui::Hsla,
+    mono_font_family: SharedString,
+}
+
+#[derive(Clone)]
+struct ReviewWorkspaceSectionLayout {
+    hitbox: Hitbox,
+}
+
 impl ReviewWorkspaceCodeRowElement {
     fn new(
         left: ReviewWorkspaceCodeRowCellPaint,
@@ -71,6 +113,22 @@ impl ReviewWorkspaceMetaRowElement {
             foreground,
             accent,
             border,
+            mono_font_family,
+        }
+    }
+}
+
+impl ReviewWorkspaceSectionElement {
+    fn new(
+        view: Entity<DiffViewer>,
+        rows: Vec<ReviewWorkspacePaintedRow>,
+        center_divider: gpui::Hsla,
+        mono_font_family: SharedString,
+    ) -> Self {
+        Self {
+            view,
+            rows: Rc::new(rows),
+            center_divider,
             mono_font_family,
         }
     }
@@ -276,6 +334,154 @@ impl Element for ReviewWorkspaceMetaRowElement {
     }
 }
 
+impl IntoElement for ReviewWorkspaceSectionElement {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for ReviewWorkspaceSectionElement {
+    type RequestLayoutState = ();
+    type PrepaintState = ReviewWorkspaceSectionLayout;
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let mut style = gpui::Style::default();
+        style.size.width = gpui::relative(1.).into();
+        style.size.height = gpui::relative(1.).into();
+        (window.request_layout(style, [], cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        _cx: &mut App,
+    ) -> Self::PrepaintState {
+        ReviewWorkspaceSectionLayout {
+            hitbox: window.insert_hitbox(bounds, HitboxBehavior::Normal),
+        }
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        layout: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let rows = self.rows.clone();
+        let hitbox = layout.hitbox.clone();
+        let view = self.view.clone();
+        window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+            if phase != gpui::DispatchPhase::Bubble || !hitbox.is_hovered(window) {
+                return;
+            }
+            let Some(row_ix) = review_workspace_row_at_position(
+                rows.as_ref(),
+                event.position,
+                hitbox.bounds.origin,
+            ) else {
+                return;
+            };
+            view.update(cx, |this, cx| match event.button {
+                gpui::MouseButton::Left | gpui::MouseButton::Middle => {
+                    this.on_diff_row_mouse_down(row_ix, event, window, cx);
+                }
+                gpui::MouseButton::Right => {
+                    this.open_diff_row_context_menu(row_ix, event.position, window, cx);
+                    cx.stop_propagation();
+                }
+                _ => {}
+            });
+        });
+
+        let rows = self.rows.clone();
+        let hitbox = layout.hitbox.clone();
+        let view = self.view.clone();
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+            if phase != gpui::DispatchPhase::Bubble || !hitbox.is_hovered(window) {
+                return;
+            }
+            let Some(row_ix) = review_workspace_row_at_position(
+                rows.as_ref(),
+                event.position,
+                hitbox.bounds.origin,
+            ) else {
+                return;
+            };
+            view.update(cx, |this, cx| {
+                this.on_diff_row_mouse_move(row_ix, event, window, cx);
+            });
+        });
+
+        let view = self.view.clone();
+        window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
+            if phase != gpui::DispatchPhase::Bubble {
+                return;
+            }
+            if matches!(event.button, gpui::MouseButton::Left | gpui::MouseButton::Middle) {
+                view.update(cx, |this, cx| {
+                    this.on_diff_row_mouse_up(event, window, cx);
+                });
+            }
+        });
+
+        window.with_content_mask(Some(ContentMask { bounds }), |window| {
+            for row in self.rows.iter() {
+                let row_bounds = Bounds {
+                    origin: point(bounds.origin.x, bounds.origin.y + px(row.local_top_px as f32)),
+                    size: gpui::size(bounds.size.width, px(row.height_px as f32)),
+                };
+                match &row.kind {
+                    ReviewWorkspacePaintedRowKind::Skip => {}
+                    ReviewWorkspacePaintedRowKind::Code { left, right } => {
+                        paint_review_workspace_code_row(
+                            window,
+                            cx,
+                            row_bounds,
+                            left,
+                            right,
+                            self.center_divider,
+                            self.mono_font_family.clone(),
+                        );
+                    }
+                    ReviewWorkspacePaintedRowKind::Meta(meta) => {
+                        paint_review_workspace_meta_row(
+                            window,
+                            cx,
+                            row_bounds,
+                            meta,
+                            self.mono_font_family.clone(),
+                        );
+                    }
+                }
+            }
+        });
+    }
+}
+
 impl ReviewWorkspaceCodeRowElement {
     fn paint_cell(
         &self,
@@ -424,7 +630,381 @@ impl ReviewWorkspaceCodeRowElement {
     }
 }
 
+fn review_workspace_row_at_position(
+    rows: &[ReviewWorkspacePaintedRow],
+    position: Point<Pixels>,
+    origin: Point<Pixels>,
+) -> Option<usize> {
+    let local_y = (position.y - origin.y).max(Pixels::ZERO).as_f32();
+    rows.iter()
+        .find(|row| {
+            let top = row.local_top_px as f32;
+            let bottom = top + row.height_px as f32;
+            local_y >= top && local_y < bottom
+        })
+        .map(|row| row.row_index)
+}
+
+fn paint_review_workspace_code_row(
+    window: &mut Window,
+    cx: &mut App,
+    bounds: Bounds<Pixels>,
+    left: &ReviewWorkspaceCodeRowCellPaint,
+    right: &ReviewWorkspaceCodeRowCellPaint,
+    center_divider: gpui::Hsla,
+    mono_font_family: SharedString,
+) {
+    let left_width = left.panel_width.unwrap_or(bounds.size.width / 2.);
+    let right_width = right
+        .panel_width
+        .unwrap_or((bounds.size.width - left_width).max(Pixels::ZERO));
+    let left_bounds = Bounds {
+        origin: bounds.origin,
+        size: gpui::size(left_width, bounds.size.height),
+    };
+    let right_bounds = Bounds {
+        origin: point(bounds.origin.x + left_width, bounds.origin.y),
+        size: gpui::size(right_width, bounds.size.height),
+    };
+
+    paint_review_workspace_code_cell(
+        window,
+        cx,
+        left_bounds,
+        left,
+        true,
+        center_divider,
+        mono_font_family.clone(),
+    );
+    paint_review_workspace_code_cell(
+        window,
+        cx,
+        right_bounds,
+        right,
+        false,
+        center_divider,
+        mono_font_family,
+    );
+    window.paint_quad(gpui::fill(
+        Bounds {
+            origin: point(right_bounds.origin.x - px(1.0), bounds.origin.y),
+            size: gpui::size(px(1.0), bounds.size.height),
+        },
+        center_divider,
+    ));
+}
+
+fn paint_review_workspace_code_cell(
+    window: &mut Window,
+    cx: &mut App,
+    bounds: Bounds<Pixels>,
+    cell: &ReviewWorkspaceCodeRowCellPaint,
+    draw_right_divider: bool,
+    center_divider: gpui::Hsla,
+    mono_font_family: SharedString,
+) {
+    let padding_x = px(8.0);
+    let gutter_padding_x = px(8.0);
+    let marker_width = px(DIFF_MARKER_GUTTER_WIDTH);
+    let gutter_width = px(cell.line_number_width) + marker_width + px(16.0);
+
+    window.paint_quad(gpui::fill(bounds, cell.background));
+    let gutter_bounds = Bounds {
+        origin: bounds.origin,
+        size: gpui::size(gutter_width.min(bounds.size.width), bounds.size.height),
+    };
+    window.paint_quad(gpui::fill(gutter_bounds, cell.gutter_background));
+
+    let gutter_divider_x = gutter_bounds.origin.x + gutter_bounds.size.width - px(1.0);
+    window.paint_quad(gpui::fill(
+        Bounds {
+            origin: point(gutter_divider_x, gutter_bounds.origin.y),
+            size: gpui::size(px(1.0), gutter_bounds.size.height),
+        },
+        cell.gutter_divider,
+    ));
+
+    if draw_right_divider {
+        let divider_x = bounds.origin.x + bounds.size.width - px(1.0);
+        window.paint_quad(gpui::fill(
+            Bounds {
+                origin: point(divider_x, bounds.origin.y),
+                size: gpui::size(px(1.0), bounds.size.height),
+            },
+            center_divider,
+        ));
+    }
+
+    let text_style = gpui::TextStyle {
+        color: cell.text_color,
+        font_family: mono_font_family,
+        font_size: px(12.0).into(),
+        line_height: gpui::relative(1.45),
+        ..Default::default()
+    };
+    let font = text_style.font();
+    let font_size = text_style.font_size.to_pixels(window.rem_size());
+    let line_height = text_style.line_height_in_pixels(window.rem_size());
+    let text_origin_y = bounds.origin.y + ((bounds.size.height - line_height) / 2.).max(Pixels::ZERO);
+
+    let line_number_runs = vec![TextRun {
+        len: cell.line_number.len(),
+        color: cell.line_color,
+        font: font.clone(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    }];
+    let line_number_shape = window.text_system().shape_line(
+        cell.line_number.clone(),
+        font_size,
+        &line_number_runs,
+        None,
+    );
+    let line_number_x = gutter_bounds.origin.x
+        + gutter_padding_x
+        + (px(cell.line_number_width) - line_number_shape.width()).max(Pixels::ZERO);
+    let _ = line_number_shape.paint(
+        point(line_number_x, text_origin_y),
+        line_height,
+        TextAlign::Left,
+        None,
+        window,
+        cx,
+    );
+
+    let marker_runs = vec![TextRun {
+        len: cell.marker.len(),
+        color: cell.marker_color,
+        font: font.clone(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    }];
+    let marker_shape = window
+        .text_system()
+        .shape_line(cell.marker.clone(), font_size, &marker_runs, None);
+    let marker_origin_x =
+        gutter_bounds.origin.x + gutter_padding_x + px(cell.line_number_width) + px(8.0);
+    let marker_x = marker_origin_x + ((marker_width - marker_shape.width()) / 2.).max(Pixels::ZERO);
+    let _ = marker_shape.paint(
+        point(marker_x, text_origin_y),
+        line_height,
+        TextAlign::Left,
+        None,
+        window,
+        cx,
+    );
+
+    let mut text = String::new();
+    let mut text_runs = Vec::new();
+    let changed_bg = hunk_opacity(cell.marker_color, cx.theme().mode.is_dark(), 0.20, 0.11);
+    for segment in &cell.segments {
+        let segment_text = segment.plain_text.as_ref();
+        if segment_text.is_empty() {
+            continue;
+        }
+        text.push_str(segment_text);
+        text_runs.push(TextRun {
+            len: segment_text.len(),
+            color: diff_syntax_color(cx.theme(), cell.text_color, segment.syntax),
+            font: font.clone(),
+            background_color: segment.changed.then_some(changed_bg),
+            underline: None,
+            strikethrough: None,
+        });
+    }
+    if text_runs.is_empty() {
+        text.push(' ');
+        text_runs.push(TextRun {
+            len: 1,
+            color: cell.text_color,
+            font: font.clone(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        });
+    }
+
+    let text_shape = window
+        .text_system()
+        .shape_line(text.into(), font_size, &text_runs, None);
+    let text_origin_x = gutter_bounds.origin.x + gutter_bounds.size.width + padding_x;
+    let _ = text_shape.paint(
+        point(text_origin_x, text_origin_y),
+        line_height,
+        TextAlign::Left,
+        None,
+        window,
+        cx,
+    );
+}
+
+fn paint_review_workspace_meta_row(
+    window: &mut Window,
+    cx: &mut App,
+    bounds: Bounds<Pixels>,
+    meta: &ReviewWorkspaceMetaRowPaint,
+    mono_font_family: SharedString,
+) {
+    if meta.kind == DiffRowKind::HunkHeader {
+        window.paint_quad(gpui::fill(bounds, meta.background));
+        window.paint_quad(gpui::fill(
+            Bounds {
+                origin: point(bounds.origin.x, bounds.origin.y + bounds.size.height - px(1.0)),
+                size: gpui::size(bounds.size.width, px(1.0)),
+            },
+            meta.border,
+        ));
+        return;
+    }
+
+    window.paint_quad(gpui::fill(bounds, meta.background));
+    window.paint_quad(gpui::fill(
+        Bounds {
+            origin: point(bounds.origin.x, bounds.origin.y + bounds.size.height - px(1.0)),
+            size: gpui::size(bounds.size.width, px(1.0)),
+        },
+        meta.border,
+    ));
+    window.paint_quad(gpui::fill(
+        Bounds {
+            origin: bounds.origin,
+            size: gpui::size(px(2.0), bounds.size.height),
+        },
+        meta.accent,
+    ));
+
+    let text_style = gpui::TextStyle {
+        color: meta.foreground,
+        font_family: mono_font_family,
+        font_size: px(12.0).into(),
+        line_height: gpui::relative(1.45),
+        ..Default::default()
+    };
+    let font = text_style.font();
+    let font_size = text_style.font_size.to_pixels(window.rem_size());
+    let line_height = text_style.line_height_in_pixels(window.rem_size());
+    let text_runs = vec![TextRun {
+        len: meta.text.len(),
+        color: meta.foreground,
+        font,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    }];
+    let shape = window
+        .text_system()
+        .shape_line(meta.text.clone(), font_size, &text_runs, None);
+    let text_y = bounds.origin.y + ((bounds.size.height - line_height) / 2.).max(Pixels::ZERO);
+    let _ = shape.paint(
+        point(bounds.origin.x + px(12.0), text_y),
+        line_height,
+        TextAlign::Left,
+        None,
+        window,
+        cx,
+    );
+}
+
 impl DiffViewer {
+    fn build_review_workspace_section_painted_rows(
+        &self,
+        viewport_section: &review_workspace_session::ReviewWorkspaceViewportSection,
+        layout: Option<DiffColumnLayout>,
+        cx: &mut Context<Self>,
+    ) -> Vec<ReviewWorkspacePaintedRow> {
+        viewport_section
+            .rows
+            .iter()
+            .filter_map(|viewport_row| {
+                let row_ix = viewport_row.row_index;
+                let row = self.active_diff_row(row_ix)?;
+                let is_selected = self.is_row_selected(row_ix);
+                let kind = if self
+                    .active_diff_row_metadata(row_ix)
+                    .is_some_and(|meta| meta.kind == DiffStreamRowKind::FileHeader)
+                {
+                    ReviewWorkspacePaintedRowKind::Skip
+                } else {
+                    match row.kind {
+                        DiffRowKind::Code => {
+                            let stable_row_id = self.diff_row_stable_id(row_ix);
+                            let left = self.build_review_workspace_code_row_cell(
+                                stable_row_id,
+                                row,
+                                is_selected,
+                                DiffCellRenderSpec {
+                                    row_ix,
+                                    side: "left",
+                                    cell: &row.left,
+                                    peer_kind: row.right.kind,
+                                    panel_width: layout.map(|layout| layout.left_panel_width),
+                                },
+                                viewport_row,
+                                cx,
+                            );
+                            let right = self.build_review_workspace_code_row_cell(
+                                stable_row_id,
+                                row,
+                                is_selected,
+                                DiffCellRenderSpec {
+                                    row_ix,
+                                    side: "right",
+                                    cell: &row.right,
+                                    peer_kind: row.left.kind,
+                                    panel_width: layout.map(|layout| layout.right_panel_width),
+                                },
+                                viewport_row,
+                                cx,
+                            );
+                            ReviewWorkspacePaintedRowKind::Code {
+                                left: Box::new(left),
+                                right: Box::new(right),
+                            }
+                        }
+                        DiffRowKind::HunkHeader | DiffRowKind::Meta | DiffRowKind::Empty => {
+                            ReviewWorkspacePaintedRowKind::Meta(
+                                self.build_review_workspace_meta_row_paint(
+                                    row,
+                                    is_selected,
+                                    cx,
+                                ),
+                            )
+                        }
+                    }
+                };
+                Some(ReviewWorkspacePaintedRow {
+                    row_index: row_ix,
+                    local_top_px: viewport_row.local_top_px,
+                    height_px: viewport_row.height_px,
+                    kind,
+                })
+            })
+            .collect()
+    }
+
+    fn render_review_workspace_section_element(
+        &self,
+        viewport_section: &review_workspace_session::ReviewWorkspaceViewportSection,
+        layout: Option<DiffColumnLayout>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let painted_rows = self.build_review_workspace_section_painted_rows(
+            viewport_section,
+            layout,
+            cx,
+        );
+        let chrome = hunk_diff_chrome(cx.theme(), cx.theme().mode.is_dark());
+        ReviewWorkspaceSectionElement::new(
+            cx.entity(),
+            painted_rows,
+            chrome.center_divider,
+            cx.theme().mono_font_family.clone(),
+        )
+        .into_any_element()
+    }
+
     fn render_review_workspace_code_row_element(
         &self,
         row_stable_id: u64,
@@ -608,6 +1188,25 @@ impl DiffViewer {
         is_selected: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let paint = self.build_review_workspace_meta_row_paint(row, is_selected, cx);
+        ReviewWorkspaceMetaRowElement::new(
+            paint.kind,
+            paint.text,
+            paint.background,
+            paint.foreground,
+            paint.accent,
+            paint.border,
+            cx.theme().mono_font_family.clone(),
+        )
+        .into_any_element()
+    }
+
+    fn build_review_workspace_meta_row_paint(
+        &self,
+        row: &SideBySideRow,
+        is_selected: bool,
+        cx: &mut Context<Self>,
+    ) -> ReviewWorkspaceMetaRowPaint {
         let is_dark = cx.theme().mode.is_dark();
 
         let (background, foreground, accent) = match row.kind {
@@ -667,17 +1266,13 @@ impl DiffViewer {
             background
         };
 
-        let border = hunk_opacity(cx.theme().border, is_dark, 0.82, 0.70);
-
-        ReviewWorkspaceMetaRowElement::new(
-            row.kind,
-            row.text.clone().into(),
+        ReviewWorkspaceMetaRowPaint {
+            kind: row.kind,
+            text: row.text.clone().into(),
             background,
             foreground,
             accent,
-            border,
-            cx.theme().mono_font_family.clone(),
-        )
-        .into_any_element()
+            border: hunk_opacity(cx.theme().border, is_dark, 0.82, 0.70),
+        }
     }
 }
