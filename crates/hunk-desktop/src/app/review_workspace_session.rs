@@ -123,6 +123,13 @@ impl ReviewWorkspaceViewportSnapshot {
         Some(self.sections.first()?.pixel_range.start..self.sections.last()?.pixel_range.end)
     }
 
+    pub(crate) fn row_by_index(&self, row_index: usize) -> Option<&ReviewWorkspaceViewportRow> {
+        self.sections
+            .iter()
+            .flat_map(|section| section.rows.iter())
+            .find(|row| row.row_index == row_index)
+    }
+
     pub(crate) fn row_at_viewport_position(
         &self,
         viewport_origin_px: usize,

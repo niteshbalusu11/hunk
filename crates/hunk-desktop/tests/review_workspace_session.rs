@@ -636,6 +636,12 @@ fn review_workspace_session_builds_viewport_snapshot_from_shared_geometry() {
             .row_top_offset_px(code_row.row_index)
             .expect("row should have a top offset")
     );
+    assert_eq!(
+        viewport
+            .row_by_index(code_row.row_index)
+            .map(|row| row.surface_top_px),
+        Some(code_row.surface_top_px)
+    );
     assert!(!code_row.left_segments.is_empty());
     assert!(!code_row.right_segments.is_empty());
     assert_eq!(code_row.height_px, REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX);

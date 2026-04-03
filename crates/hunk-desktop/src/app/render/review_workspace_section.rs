@@ -12,8 +12,7 @@ enum ReviewWorkspacePaintedRowKind {
 
 #[derive(Clone)]
 struct ReviewWorkspacePaintedRow {
-    top_px: usize,
-    height_px: usize,
+    row_index: usize,
     kind: ReviewWorkspacePaintedRowKind,
 }
 
@@ -174,9 +173,21 @@ impl Element for ReviewWorkspaceViewportElement {
 
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             for row in self.rows.iter() {
+                let Some(viewport_row) = self.viewport.row_by_index(row.row_index) else {
+                    continue;
+                };
                 let row_bounds = Bounds {
-                    origin: point(bounds.origin.x, bounds.origin.y + px(row.top_px as f32)),
-                    size: gpui::size(bounds.size.width, px(row.height_px as f32)),
+                    origin: point(
+                        bounds.origin.x,
+                        bounds.origin.y
+                            + px(
+                                viewport_row
+                                    .surface_top_px
+                                    .saturating_sub(self.viewport_origin_px)
+                                    as f32,
+                            ),
+                    ),
+                    size: gpui::size(bounds.size.width, px(viewport_row.height_px as f32)),
                 };
                 match &row.kind {
                     ReviewWorkspacePaintedRowKind::FileHeader { paint } => {
@@ -230,7 +241,6 @@ impl DiffViewer {
     fn build_review_workspace_viewport_painted_rows(
         &self,
         viewport: &review_workspace_session::ReviewWorkspaceViewportSnapshot,
-        viewport_origin_px: usize,
         layout: Option<DiffColumnLayout>,
         cx: &mut Context<Self>,
     ) -> Vec<ReviewWorkspacePaintedRow> {
@@ -302,8 +312,7 @@ impl DiffViewer {
                     }
                 };
                 Some(ReviewWorkspacePaintedRow {
-                    top_px: viewport_row.surface_top_px.saturating_sub(viewport_origin_px),
-                    height_px: viewport_row.height_px,
+                    row_index: row_ix,
                     kind,
                 })
             })
@@ -319,7 +328,6 @@ impl DiffViewer {
     ) -> AnyElement {
         let painted_rows = self.build_review_workspace_viewport_painted_rows(
             viewport,
-            viewport_origin_px,
             layout,
             cx,
         );
