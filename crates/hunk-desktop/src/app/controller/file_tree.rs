@@ -12,28 +12,15 @@ fn review_mode_selected_path(
 impl DiffViewer {
     fn preferred_review_workspace_path(&self) -> Option<String> {
         if let Some(session) = self.review_workspace_session.as_ref() {
-            return self
-                .current_review_surface_row()
-                .and_then(|row_ix| session.path_at_surface_row(row_ix))
-                .map(str::to_string)
-                .or_else(|| {
-                    self.current_review_file_range()
-                        .map(|range| range.path)
-                })
-                .or_else(|| {
-                    self
-                .review_last_selected_path
-                .as_deref()
-                .filter(|path| session.contains_path(path))
-                .map(str::to_string)
-                })
-                .or_else(|| {
-                    self.selected_path
-                        .as_deref()
-                        .filter(|path| session.contains_path(path))
-                        .map(str::to_string)
-                })
-                .or_else(|| session.first_path().map(ToString::to_string));
+            return preferred_review_workspace_path_for_session(
+                self.current_review_surface_row()
+                    .and_then(|row_ix| session.path_at_surface_row(row_ix)),
+                self.current_review_file_range().map(|range| range.path).as_deref(),
+                self.current_review_editor_session_path().as_deref(),
+                self.review_last_selected_path.as_deref(),
+                self.selected_path.as_deref(),
+                session,
+            );
         }
 
         review_mode_selected_path(self.selected_path.as_deref(), &self.review_files)
@@ -190,7 +177,7 @@ impl DiffViewer {
         }
 
         if previous_mode == WorkspaceViewMode::Diff {
-            self.review_last_selected_path = self.selected_path.clone();
+            self.review_last_selected_path = self.current_review_path();
         }
 
         if previous_mode == WorkspaceViewMode::Files {
@@ -232,12 +219,11 @@ impl DiffViewer {
                 self.clear_editor_state(cx);
             }
         } else if mode == WorkspaceViewMode::Diff {
-            self.selected_path = self.preferred_review_workspace_path();
-            self.selected_status = self
-                .selected_path
+            let next_path = self.preferred_review_workspace_path();
+            let next_status = next_path
                 .as_deref()
                 .and_then(|selected| self.status_for_path(selected));
-            self.sync_review_workspace_editor_active_path();
+            self.set_review_selected_file(next_path, next_status);
             self.request_repo_tree_reload(cx);
             if self.should_reuse_loaded_review_compare() {
                 self.scroll_selected_after_reload = false;
@@ -275,18 +261,19 @@ impl DiffViewer {
             return;
         }
 
-        self.selected_path = Some(path.clone());
-        self.selected_status = self.status_for_path(path.as_str());
+        let status = self.status_for_path(path.as_str());
         if self.workspace_view_mode == WorkspaceViewMode::Files {
+            self.selected_path = Some(path.clone());
+            self.selected_status = status;
             self.request_file_editor_reload(path, cx);
         } else {
+            self.set_review_selected_file(Some(path.clone()), status);
             self.scroll_to_file_start(&path);
             self.review_surface.last_visible_row_range = None;
             self.review_surface.last_prefetched_visible_row_range = None;
             self.review_surface.last_visible_row_start = None;
             self.review_surface.last_diff_scroll_offset = None;
             self.last_scroll_activity_at = Instant::now();
-            self.sync_review_workspace_editor_active_path();
         }
         cx.notify();
     }

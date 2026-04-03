@@ -121,12 +121,12 @@ impl DiffViewer {
         if let Some((path, status)) = self.selected_file_from_row_metadata(target_ix)
             && self.selected_path.as_deref() != Some(path.as_str())
         {
-            self.selected_path = Some(path);
-            self.selected_status = Some(status);
             if self.workspace_view_mode == WorkspaceViewMode::Diff {
-                self.review_last_selected_path = self.selected_path.clone();
+                self.set_review_selected_file(Some(path), Some(status));
+            } else {
+                self.selected_path = Some(path);
+                self.selected_status = Some(status);
             }
-            self.sync_review_workspace_editor_active_path();
         }
 
         cx.notify();
@@ -283,10 +283,7 @@ impl DiffViewer {
                 return;
             };
 
-            self.selected_path = Some(path.clone());
-            self.selected_status = Some(status);
-            self.review_last_selected_path = self.selected_path.clone();
-            self.sync_review_workspace_editor_active_path();
+            self.set_review_selected_file(Some(path.clone()), Some(status));
             self.scroll_to_file_start(path.as_str());
             self.select_row(start_row, false, cx);
             cx.notify();
@@ -322,9 +319,13 @@ impl DiffViewer {
         let target_ix = (current_ix as isize + direction).clamp(0, max_ix) as usize;
         let (path, status, start_row) = file_ranges[target_ix].clone();
 
-        self.selected_path = Some(path.clone());
-        self.selected_status = Some(status);
-        self.sync_review_workspace_editor_active_path();
+        if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            self.set_review_selected_file(Some(path.clone()), Some(status));
+        } else {
+            self.selected_path = Some(path.clone());
+            self.selected_status = Some(status);
+            self.sync_review_workspace_editor_active_path();
+        }
         self.scroll_to_file_start(&path);
         self.select_row(start_row, false, cx);
         cx.notify();

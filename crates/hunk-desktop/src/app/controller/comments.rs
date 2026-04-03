@@ -612,12 +612,12 @@ impl DiffViewer {
             .map(|range| (range.status, range.start_row))
         {
             self.comments_preview_open = false;
-            self.selected_path = Some(comment.file_path);
-            self.selected_status = Some(status);
             if self.workspace_view_mode == WorkspaceViewMode::Diff {
-                self.review_last_selected_path = self.selected_path.clone();
+                self.set_review_selected_file(Some(comment.file_path), Some(status));
+            } else {
+                self.selected_path = Some(comment.file_path);
+                self.selected_status = Some(status);
             }
-            self.sync_review_workspace_editor_active_path();
             self.select_row_and_scroll(start_row, false, cx);
             self.comment_status_message =
                 Some("Comment anchor not found; jumped to file.".to_string());

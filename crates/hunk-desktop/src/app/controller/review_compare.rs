@@ -25,6 +25,35 @@ fn should_reuse_loaded_review_compare<F: PartialEq>(
         && state.current_snapshot_fingerprint == state.loaded_snapshot_fingerprint
 }
 
+fn preferred_review_workspace_path_for_session(
+    current_surface_path: Option<&str>,
+    current_range_path: Option<&str>,
+    editor_active_path: Option<&str>,
+    last_selected_path: Option<&str>,
+    selected_path: Option<&str>,
+    session: &crate::app::review_workspace_session::ReviewWorkspaceSession,
+) -> Option<String> {
+    current_surface_path
+        .map(str::to_string)
+        .or_else(|| current_range_path.map(str::to_string))
+        .or_else(|| {
+            editor_active_path
+                .filter(|path| session.contains_path(path))
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            last_selected_path
+                .filter(|path| session.contains_path(path))
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            selected_path
+                .filter(|path| session.contains_path(path))
+                .map(str::to_string)
+        })
+        .or_else(|| session.first_path().map(ToString::to_string))
+}
+
 fn review_compare_branch_source_id(
     sources: &[ReviewCompareSourceOption],
     branch_name: &str,
@@ -154,6 +183,38 @@ fn update_persisted_review_compare_selection(
 }
 
 impl DiffViewer {
+    pub(crate) fn current_review_editor_session_path(&self) -> Option<String> {
+        self.review_workspace_editor_session
+            .as_ref()
+            .and_then(|session| session.active_path())
+            .and_then(|path| path.to_str())
+            .map(ToString::to_string)
+    }
+
+    pub(crate) fn set_review_selected_file(
+        &mut self,
+        path: Option<String>,
+        status: Option<FileStatus>,
+    ) {
+        self.selected_path = path.clone();
+        self.selected_status = status;
+        self.review_last_selected_path = path.clone();
+        if let Some(path) = path.as_deref() {
+            self.activate_review_workspace_editor_path(path);
+        }
+    }
+
+    pub(crate) fn activate_review_workspace_editor_path(&mut self, path: &str) -> bool {
+        let Some(session) = self.review_workspace_editor_session.as_mut() else {
+            return false;
+        };
+        let activated = session.activate_path(std::path::Path::new(path));
+        if activated {
+            self.review_last_selected_path = Some(path.to_string());
+        }
+        activated
+    }
+
     pub(crate) fn current_review_surface_row(&self) -> Option<usize> {
         let session = self.review_workspace_session.as_ref()?;
         let row_count = session.row_count();
@@ -204,9 +265,19 @@ impl DiffViewer {
     }
 
     pub(crate) fn current_review_path(&self) -> Option<String> {
-        self.current_review_file_range()
-            .map(|range| range.path)
-            .or_else(|| self.review_last_selected_path.clone())
+        if let Some(session) = self.review_workspace_session.as_ref() {
+            return preferred_review_workspace_path_for_session(
+                None,
+                self.current_review_file_range().map(|range| range.path).as_deref(),
+                self.current_review_editor_session_path().as_deref(),
+                self.review_last_selected_path.as_deref(),
+                self.selected_path.as_deref(),
+                session,
+            );
+        }
+
+        self.review_last_selected_path
+            .clone()
             .or_else(|| self.selected_path.clone())
     }
 
@@ -236,13 +307,10 @@ impl DiffViewer {
 
     pub(crate) fn sync_review_workspace_editor_active_path(&mut self) {
         let preferred_path = self.current_review_path();
-        let Some(session) = self.review_workspace_editor_session.as_mut() else {
-            return;
-        };
         let Some(path) = preferred_path.as_deref() else {
             return;
         };
-        let _ = session.activate_path(std::path::Path::new(path));
+        let _ = self.activate_review_workspace_editor_path(path);
     }
 
     fn subscribe_review_compare_picker_states(&self, cx: &mut Context<Self>) {
@@ -793,7 +861,7 @@ impl DiffViewer {
         if self.should_reuse_loaded_review_compare() {
             self.review_compare_loading = false;
             self.review_compare_error = None;
-            self.review_last_selected_path = self.selected_path.clone();
+            self.review_last_selected_path = self.current_review_path();
             self.sync_review_workspace_editor_active_path();
             self.prime_diff_surface_visible_state(false, cx);
             cx.notify();
@@ -952,20 +1020,19 @@ impl DiffViewer {
             .selected_path
             .as_ref()
             .is_some_and(|path| self.active_diff_contains_path(path.as_str()));
-        if !has_selection {
-            self.selected_path = self
-                .review_workspace_session
+        let next_selected_path = if has_selection {
+            self.selected_path.clone()
+        } else {
+            self.review_workspace_session
                 .as_ref()
                 .and_then(|session| session.first_path().map(ToString::to_string))
-                .or_else(|| self.active_diff_first_path());
-        }
-        self.selected_status = self
-            .selected_path
+                .or_else(|| self.active_diff_first_path())
+        };
+        let next_selected_status = next_selected_path
             .as_deref()
             .and_then(|selected| self.status_for_path(selected));
-        self.review_last_selected_path = self.selected_path.clone();
         self.rebuild_review_workspace_editor_session();
-        self.sync_review_workspace_editor_active_path();
+        self.set_review_selected_file(next_selected_path, next_selected_status);
         self.refresh_comments_cache_from_store();
         self.rebuild_comment_row_match_cache();
         if self.review_comments_enabled() {
@@ -1042,8 +1109,13 @@ impl DiffViewer {
 
 #[cfg(test)]
 mod review_compare_tests {
-    use super::{LoadedReviewCompareReuseState, should_reuse_loaded_review_compare};
-    use std::collections::BTreeSet;
+    use super::{
+        LoadedReviewCompareReuseState, preferred_review_workspace_path_for_session,
+        should_reuse_loaded_review_compare,
+    };
+    use hunk_git::compare::CompareSnapshot;
+    use hunk_git::git::{ChangedFile, FileStatus, LineStats};
+    use std::collections::{BTreeMap, BTreeSet};
 
     #[test]
     fn loaded_review_compare_reuse_requires_matching_identity() {
@@ -1085,5 +1157,69 @@ mod review_compare_tests {
             has_loaded_session: false,
             ..matching_state
         }));
+    }
+
+    fn changed_file(path: &str, status: FileStatus) -> ChangedFile {
+        ChangedFile {
+            path: path.to_string(),
+            status,
+            staged: false,
+            unstaged: false,
+            untracked: false,
+        }
+    }
+
+    fn review_session(paths: &[&str]) -> crate::app::review_workspace_session::ReviewWorkspaceSession {
+        let snapshot = CompareSnapshot {
+            files: paths
+                .iter()
+                .map(|path| changed_file(path, FileStatus::Modified))
+                .collect(),
+            file_line_stats: BTreeMap::new(),
+            overall_line_stats: LineStats::default(),
+            patches_by_path: paths
+                .iter()
+                .map(|path| ((*path).to_string(), String::new()))
+                .collect(),
+        };
+        crate::app::review_workspace_session::ReviewWorkspaceSession::from_compare_snapshot(
+            &snapshot,
+            &BTreeSet::new(),
+        )
+        .expect("review workspace session should build")
+    }
+
+    #[test]
+    fn preferred_review_workspace_path_prefers_editor_active_path_before_stale_selection() {
+        let session = review_session(&["src/main.rs", "src/lib.rs"]);
+
+        assert_eq!(
+            preferred_review_workspace_path_for_session(
+                None,
+                None,
+                Some("src/lib.rs"),
+                Some("missing.rs"),
+                Some("src/main.rs"),
+                &session,
+            ),
+            Some("src/lib.rs".to_string())
+        );
+    }
+
+    #[test]
+    fn preferred_review_workspace_path_skips_missing_entries_and_falls_back_to_first_file() {
+        let session = review_session(&["src/main.rs", "src/lib.rs"]);
+
+        assert_eq!(
+            preferred_review_workspace_path_for_session(
+                None,
+                None,
+                Some("missing.rs"),
+                Some("also-missing.rs"),
+                Some("still-missing.rs"),
+                &session,
+            ),
+            Some("src/main.rs".to_string())
+        );
     }
 }

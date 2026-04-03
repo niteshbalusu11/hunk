@@ -91,12 +91,12 @@ impl DiffViewer {
             return;
         }
 
-        self.selected_path = Some(next_path);
-        self.selected_status = Some(next_status);
         if self.workspace_view_mode == WorkspaceViewMode::Diff {
-            self.review_last_selected_path = self.selected_path.clone();
+            self.set_review_selected_file(Some(next_path), Some(next_status));
+        } else {
+            self.selected_path = Some(next_path);
+            self.selected_status = Some(next_status);
         }
-        self.sync_review_workspace_editor_active_path();
         cx.notify();
     }
 

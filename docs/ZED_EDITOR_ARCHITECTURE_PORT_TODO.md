@@ -214,6 +214,7 @@ This is the phase that removes the last architectural reason for preview-only re
 Current state:
 - Review’s viewport bookkeeping now tracks the shared workspace surface’s visible row range directly, and Review syntax-segment prefetch now reuses that explicit range instead of a legacy top-row fallback.
 - Diff-mode sticky-header, file-anchor, and visible-file resolution paths now prefer the shared workspace session and active row accessors instead of reading `diff_row_metadata` directly.
+- Review file selection now also prefers the persistent workspace editor session’s active path before falling back to duplicated top-level Diff selection fields, which moves active-file ownership closer to the editor/session itself.
 
 ### Phase 6: Persist Editor Entities Across Tab Switches
 
