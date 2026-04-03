@@ -307,14 +307,6 @@ impl DiffViewer {
                         cx,
                     ))
                     .into_any_element(),
-                review_workspace_session::ReviewWorkspaceSurfaceOverlayKind::CommentAffordance => div()
-                    .absolute()
-                    .top(px(overlay.top_px as f32))
-                    .left_0()
-                    .right_0()
-                    .h(px(overlay.height_px as f32))
-                    .child(self.render_row_comment_affordance(overlay.row_index, cx))
-                    .into_any_element(),
             })
             .collect::<Vec<_>>();
 

@@ -306,10 +306,6 @@ impl DiffViewer {
         cx.notify();
     }
 
-    pub(super) fn row_open_comment_count(&self, row_ix: usize) -> usize {
-        self.comment_open_row_counts.get(row_ix).copied().unwrap_or(0)
-    }
-
     pub(super) fn open_comment_editor_for_row(
         &mut self,
         row_ix: usize,

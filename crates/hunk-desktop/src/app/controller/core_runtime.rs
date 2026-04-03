@@ -2,6 +2,12 @@ impl DiffViewer {
     pub(super) fn review_surface_snapshot_options(
         &self,
     ) -> review_workspace_session::ReviewWorkspaceSurfaceOptions {
+        let comment_open_counts_by_row = self
+            .comment_open_row_counts
+            .iter()
+            .enumerate()
+            .filter_map(|(row_ix, count)| (*count > 0).then_some((row_ix, *count)))
+            .collect::<BTreeMap<_, _>>();
         let mut comment_affordance_rows = self
             .comment_open_row_counts
             .iter()
@@ -35,6 +41,7 @@ impl DiffViewer {
 
         review_workspace_session::ReviewWorkspaceSurfaceOptions {
             comment_affordance_rows,
+            comment_open_counts_by_row,
             active_comment_editor_row,
             search_highlight_columns_by_row,
         }

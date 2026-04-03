@@ -1144,6 +1144,7 @@ fn review_workspace_session_surface_snapshot_builds_sparse_overlays_from_surface
         8,
         &ReviewWorkspaceSurfaceOptions {
             comment_affordance_rows: BTreeSet::from([comment_row]),
+            comment_open_counts_by_row: BTreeMap::from([(comment_row, 1)]),
             active_comment_editor_row: Some(comment_row),
             search_highlight_columns_by_row: BTreeMap::new(),
         },
@@ -1154,13 +1155,6 @@ fn review_workspace_session_surface_snapshot_builds_sparse_overlays_from_surface
             && matches!(
                 overlay.kind,
                 ReviewWorkspaceSurfaceOverlayKind::FileHeaderControls { .. }
-            )
-    }));
-    assert!(surface.overlays.iter().any(|overlay| {
-        overlay.row_index == comment_row
-            && matches!(
-                overlay.kind,
-                ReviewWorkspaceSurfaceOverlayKind::CommentAffordance
             )
     }));
     assert_eq!(
@@ -1174,7 +1168,7 @@ fn review_workspace_session_surface_snapshot_builds_sparse_overlays_from_surface
         surface
             .viewport
             .row_by_index(comment_row)
-            .is_some_and(|row| row.show_comment_affordance)
+            .is_some_and(|row| row.show_comment_affordance && row.open_comment_count == 1)
     );
 }
 

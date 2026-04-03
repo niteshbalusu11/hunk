@@ -112,6 +112,7 @@ pub(crate) struct ReviewWorkspaceViewportRow {
     pub(crate) file_status: Option<FileStatus>,
     pub(crate) file_line_stats: Option<LineStats>,
     pub(crate) show_comment_affordance: bool,
+    pub(crate) open_comment_count: usize,
     pub(crate) text: String,
     pub(crate) left_cell_kind: DiffCellKind,
     pub(crate) left_line: Option<u32>,
@@ -173,6 +174,7 @@ pub(crate) struct ReviewWorkspaceSurfaceSnapshot {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ReviewWorkspaceSurfaceOptions {
     pub(crate) comment_affordance_rows: BTreeSet<usize>,
+    pub(crate) comment_open_counts_by_row: BTreeMap<usize, usize>,
     pub(crate) active_comment_editor_row: Option<usize>,
     pub(crate) search_highlight_columns_by_row: BTreeMap<usize, Vec<Range<usize>>>,
 }
@@ -180,7 +182,6 @@ pub(crate) struct ReviewWorkspaceSurfaceOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ReviewWorkspaceSurfaceOverlayKind {
     FileHeaderControls { path: String, status: FileStatus },
-    CommentAffordance,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -633,6 +634,11 @@ impl ReviewWorkspaceSession {
                         show_comment_affordance: options
                             .comment_affordance_rows
                             .contains(&row_index),
+                        open_comment_count: options
+                            .comment_open_counts_by_row
+                            .get(&row_index)
+                            .copied()
+                            .unwrap_or_default(),
                         text: row.text.clone(),
                         left_cell_kind: row.left.kind,
                         left_line: row.left.line,
@@ -699,14 +705,6 @@ impl ReviewWorkspaceSession {
                             path: path.clone(),
                             status,
                         },
-                    });
-                }
-                if row.show_comment_affordance {
-                    return Some(ReviewWorkspaceSurfaceOverlay {
-                        row_index: row.row_index,
-                        top_px: row.surface_top_px,
-                        height_px: row.height_px,
-                        kind: ReviewWorkspaceSurfaceOverlayKind::CommentAffordance,
                     });
                 }
                 None

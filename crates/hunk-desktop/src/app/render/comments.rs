@@ -1,11 +1,4 @@
 impl DiffViewer {
-    pub(super) fn row_shows_comment_affordance(&self, row_ix: usize) -> bool {
-        self.row_supports_comments(row_ix)
-            && (self.row_open_comment_count(row_ix) > 0
-                || self.hovered_comment_row == Some(row_ix)
-                || self.active_comment_editor_row == Some(row_ix))
-    }
-
     fn render_comments_preview(&self, cx: &mut Context<Self>) -> AnyElement {
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
@@ -346,50 +339,6 @@ impl DiffViewer {
                         .child(message.clone()),
                 )
             })
-            .into_any_element()
-    }
-
-    fn render_row_comment_affordance(&self, row_ix: usize, cx: &mut Context<Self>) -> AnyElement {
-        if !self.row_shows_comment_affordance(row_ix) {
-            return div().into_any_element();
-        }
-
-        let open_count = self.row_open_comment_count(row_ix);
-        let view = cx.entity();
-        let is_dark = cx.theme().mode.is_dark();
-        let stable_row_id = self.diff_row_stable_id(row_ix);
-        h_flex()
-            .absolute()
-            .top(px(4.0))
-            .right(px(8.0))
-            .items_center()
-            .gap_1()
-            .child(if open_count > 0 {
-                div()
-                    .px_1p5()
-                    .py_0p5()
-                    .rounded_sm()
-                    .text_xs()
-                    .font_semibold()
-                    .bg(hunk_opacity(cx.theme().primary, is_dark, 0.34, 0.18))
-                    .text_color(cx.theme().primary_foreground)
-                    .child(open_count.to_string())
-                    .into_any_element()
-            } else {
-                div().into_any_element()
-            })
-            .child(
-                Button::new(("row-note", stable_row_id))
-                    .compact()
-                    .outline()
-                    .rounded(px(6.0))
-                    .label("Note")
-                    .on_click(move |_, window, cx| {
-                        view.update(cx, |this, cx| {
-                            this.open_comment_editor_for_row(row_ix, window, cx);
-                        });
-                    }),
-            )
             .into_any_element()
     }
 

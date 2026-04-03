@@ -9,11 +9,19 @@ struct ReviewWorkspaceViewportElement {
     right_line_number_width: f32,
     center_divider: gpui::Hsla,
     mono_font_family: SharedString,
+    ui_font_family: SharedString,
 }
 
 #[derive(Clone)]
 struct ReviewWorkspaceSectionLayout {
     hitbox: gpui::Hitbox,
+}
+
+#[derive(Clone, Copy)]
+struct ReviewWorkspaceCommentAffordanceLayout {
+    hit_bounds: Bounds<Pixels>,
+    note_bounds: Bounds<Pixels>,
+    badge_bounds: Option<Bounds<Pixels>>,
 }
 
 impl IntoElement for ReviewWorkspaceViewportElement {
@@ -89,6 +97,30 @@ impl Element for ReviewWorkspaceViewportElement {
             ) else {
                 return;
             };
+            let Some(viewport_row) = viewport.row_by_index(row_ix) else {
+                return;
+            };
+            let row_bounds = review_workspace_row_bounds(
+                viewport_row,
+                viewport_origin_px,
+                hitbox.bounds.origin,
+                hitbox.bounds.size.width,
+            );
+            if let Some(comment_layout) = review_workspace_comment_affordance_layout(
+                row_bounds,
+                viewport_row.show_comment_affordance,
+                viewport_row.open_comment_count,
+            ) && matches!(
+                event.button,
+                gpui::MouseButton::Left | gpui::MouseButton::Middle
+            ) && comment_layout.hit_bounds.contains(&event.position)
+            {
+                view.update(cx, |this, cx| {
+                    this.open_comment_editor_for_row(row_ix, window, cx);
+                    cx.stop_propagation();
+                });
+                return;
+            }
             view.update(cx, |this, cx| match event.button {
                 gpui::MouseButton::Left | gpui::MouseButton::Middle => {
                     this.on_diff_row_mouse_down(row_ix, event, window, cx);
@@ -238,6 +270,20 @@ impl Element for ReviewWorkspaceViewportElement {
                         );
                     }
                 }
+
+                if let Some(comment_layout) = review_workspace_comment_affordance_layout(
+                    row_bounds,
+                    viewport_row.show_comment_affordance,
+                    viewport_row.open_comment_count,
+                ) {
+                    paint_review_workspace_comment_affordance(
+                        window,
+                        cx,
+                        comment_layout,
+                        viewport_row.open_comment_count,
+                        self.ui_font_family.clone(),
+                    );
+                }
             }
         });
     }
@@ -263,6 +309,210 @@ fn review_workspace_row_at_position(
         .map(|row| row.row_index)
 }
 
+fn review_workspace_row_bounds(
+    viewport_row: &review_workspace_session::ReviewWorkspaceViewportRow,
+    viewport_origin_px: usize,
+    origin: gpui::Point<gpui::Pixels>,
+    width: gpui::Pixels,
+) -> Bounds<gpui::Pixels> {
+    Bounds {
+        origin: point(
+            origin.x,
+            origin.y
+                + px(
+                    viewport_row
+                        .surface_top_px
+                        .saturating_sub(viewport_origin_px) as f32,
+                ),
+        ),
+        size: gpui::size(width, px(viewport_row.height_px as f32)),
+    }
+}
+
+fn review_workspace_comment_affordance_layout(
+    row_bounds: Bounds<Pixels>,
+    show_comment_affordance: bool,
+    open_comment_count: usize,
+) -> Option<ReviewWorkspaceCommentAffordanceLayout> {
+    if !show_comment_affordance {
+        return None;
+    }
+
+    let top_inset = px(4.0);
+    let right_inset = px(8.0);
+    let gap = px(4.0);
+    let note_width = px(48.0);
+    let note_height = px(20.0);
+    let badge_height = px(18.0);
+    let badge_width = if open_comment_count > 0 {
+        px(((open_comment_count.to_string().len() as f32 * 7.0) + 12.0).max(18.0))
+    } else {
+        Pixels::ZERO
+    };
+
+    let note_bounds = Bounds {
+        origin: point(
+            row_bounds.origin.x + row_bounds.size.width - right_inset - note_width,
+            row_bounds.origin.y
+                + ((row_bounds.size.height - note_height) / 2.).max(top_inset),
+        ),
+        size: gpui::size(note_width, note_height),
+    };
+    let badge_bounds = (open_comment_count > 0).then_some(Bounds {
+        origin: point(
+            note_bounds.origin.x - gap - badge_width,
+            row_bounds.origin.y + ((row_bounds.size.height - badge_height) / 2.).max(Pixels::ZERO),
+        ),
+        size: gpui::size(badge_width, badge_height),
+    });
+    let hit_left = badge_bounds
+        .map(|bounds| bounds.origin.x)
+        .unwrap_or(note_bounds.origin.x);
+    let hit_top = badge_bounds
+        .map(|bounds| bounds.origin.y.min(note_bounds.origin.y))
+        .unwrap_or(note_bounds.origin.y);
+    let hit_bottom = badge_bounds
+        .map(|bounds| {
+            (bounds.origin.y + bounds.size.height).max(note_bounds.origin.y + note_bounds.size.height)
+        })
+        .unwrap_or(note_bounds.origin.y + note_bounds.size.height);
+
+    Some(ReviewWorkspaceCommentAffordanceLayout {
+        hit_bounds: Bounds {
+            origin: point(hit_left, hit_top),
+            size: gpui::size(
+                (note_bounds.origin.x + note_bounds.size.width - hit_left).max(Pixels::ZERO),
+                (hit_bottom - hit_top).max(Pixels::ZERO),
+            ),
+        },
+        note_bounds,
+        badge_bounds,
+    })
+}
+
+fn paint_review_workspace_comment_affordance(
+    window: &mut Window,
+    cx: &mut App,
+    layout: ReviewWorkspaceCommentAffordanceLayout,
+    open_comment_count: usize,
+    ui_font_family: SharedString,
+) {
+    let is_dark = cx.theme().mode.is_dark();
+    let note_background = hunk_blend(
+        cx.theme().background,
+        cx.theme().muted,
+        is_dark,
+        0.18,
+        0.12,
+    );
+    let note_border = hunk_opacity(cx.theme().border, is_dark, 0.88, 0.72);
+    let note_text = cx.theme().foreground;
+    let badge_background = hunk_opacity(cx.theme().primary, is_dark, 0.34, 0.18);
+    let badge_text = cx.theme().primary_foreground;
+    let note_label = SharedString::from("Note");
+    let badge_label = SharedString::from(open_comment_count.to_string());
+
+    let text_style = gpui::TextStyle {
+        color: note_text,
+        font_family: ui_font_family.clone(),
+        font_size: px(11.0).into(),
+        line_height: gpui::relative(1.35),
+        ..Default::default()
+    };
+    let font = text_style.font();
+    let font_size = text_style.font_size.to_pixels(window.rem_size());
+    let line_height = text_style.line_height_in_pixels(window.rem_size());
+
+    window.paint_quad(gpui::fill(layout.note_bounds, note_background));
+    paint_review_workspace_outline(window, layout.note_bounds, note_border);
+
+    let note_runs = vec![crate::app::native_files_editor::paint::single_color_text_run(
+        note_label.len(),
+        note_text,
+        font.clone(),
+    )];
+    let note_shape = crate::app::native_files_editor::paint::shape_editor_line(
+        window,
+        note_label,
+        font_size,
+        &note_runs,
+    );
+    crate::app::native_files_editor::paint::paint_editor_line(
+        window,
+        cx,
+        &note_shape,
+        point(
+            layout.note_bounds.origin.x
+                + ((layout.note_bounds.size.width - note_shape.width()) / 2.).max(Pixels::ZERO),
+            layout.note_bounds.origin.y
+                + ((layout.note_bounds.size.height - line_height) / 2.).max(Pixels::ZERO),
+        ),
+        line_height,
+    );
+
+    if let Some(badge_bounds) = layout.badge_bounds {
+        window.paint_quad(gpui::fill(badge_bounds, badge_background));
+        let badge_runs = vec![crate::app::native_files_editor::paint::single_color_text_run(
+            badge_label.len(),
+            badge_text,
+            font,
+        )];
+        let badge_shape = crate::app::native_files_editor::paint::shape_editor_line(
+            window,
+            badge_label,
+            font_size,
+            &badge_runs,
+        );
+        crate::app::native_files_editor::paint::paint_editor_line(
+            window,
+            cx,
+            &badge_shape,
+            point(
+                badge_bounds.origin.x
+                    + ((badge_bounds.size.width - badge_shape.width()) / 2.).max(Pixels::ZERO),
+                badge_bounds.origin.y
+                    + ((badge_bounds.size.height - line_height) / 2.).max(Pixels::ZERO),
+            ),
+            line_height,
+        );
+    }
+}
+
+fn paint_review_workspace_outline(
+    window: &mut Window,
+    bounds: Bounds<Pixels>,
+    border: gpui::Hsla,
+) {
+    window.paint_quad(gpui::fill(
+        Bounds {
+            origin: bounds.origin,
+            size: gpui::size(bounds.size.width, px(1.0)),
+        },
+        border,
+    ));
+    window.paint_quad(gpui::fill(
+        Bounds {
+            origin: point(bounds.origin.x, bounds.origin.y + bounds.size.height - px(1.0)),
+            size: gpui::size(bounds.size.width, px(1.0)),
+        },
+        border,
+    ));
+    window.paint_quad(gpui::fill(
+        Bounds {
+            origin: bounds.origin,
+            size: gpui::size(px(1.0), bounds.size.height),
+        },
+        border,
+    ));
+    window.paint_quad(gpui::fill(
+        Bounds {
+            origin: point(bounds.origin.x + bounds.size.width - px(1.0), bounds.origin.y),
+            size: gpui::size(px(1.0), bounds.size.height),
+        },
+        border,
+    ));
+}
+
 impl DiffViewer {
     fn render_review_workspace_viewport_element(
         &self,
@@ -282,6 +532,7 @@ impl DiffViewer {
             right_line_number_width: self.review_surface.diff_right_line_number_width,
             center_divider: chrome.center_divider,
             mono_font_family: cx.theme().mono_font_family.clone(),
+            ui_font_family: cx.theme().font_family.clone(),
         }
         .into_any_element()
     }
