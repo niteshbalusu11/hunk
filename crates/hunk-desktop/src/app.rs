@@ -167,6 +167,7 @@ mod ai_thread_catalog_scheduler;
 mod ai_thread_flow;
 mod branch_activation;
 mod branch_picker;
+mod comment_overlay;
 mod fuzzy_match;
 mod project_open;
 mod project_picker;

@@ -11,9 +11,7 @@ impl DiffViewer {
     }
 
     pub(super) fn uses_review_workspace_sections_surface(&self) -> bool {
-        self.workspace_view_mode == WorkspaceViewMode::Diff
-            && self.review_workspace_session.is_some()
-            && self.active_comment_editor_row.is_none()
+        self.workspace_view_mode == WorkspaceViewMode::Diff && self.review_workspace_session.is_some()
     }
 
     pub(super) fn current_review_surface_top_row(&self) -> Option<usize> {

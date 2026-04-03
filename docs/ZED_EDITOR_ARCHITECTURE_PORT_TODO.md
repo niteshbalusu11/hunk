@@ -147,9 +147,10 @@ Current state:
 - Review now builds and persists one shared workspace editor session alongside the compare session and keeps its active document in sync with Review selection/path changes.
 - Review workspace rendering now enters through its own dedicated surface module instead of sharing the generic root/diff entry point, which gives Hunk the same kind of explicit boundary Zed has between `FileDiffView` and `MultiDiffView`.
 - Review list/split/header viewport state now also lives under a dedicated Review surface state object instead of being scattered across `DiffViewer`, so the future scroller replacement has one surface-local owner to swap.
-- Review workspace sessions now also expose stable excerpt sections, and the normal Review surface scrolls over those sections instead of flattening the entire compare into one GPUI row list. The old per-row list path remains only as a fallback for inline comment editing.
+- Review workspace sessions now also expose stable excerpt sections, and the normal Review surface scrolls over those sections instead of flattening the entire compare into one GPUI row list.
 - Review visible-range bookkeeping now follows the active excerpt section window for the normal surface path, so idle syntax/prefetch work no longer keys off the legacy flat-list top-row assumptions.
 - Review surface geometry is now owned by `ReviewWorkspaceSession`: section pixel ranges, row top offsets, and visible viewport windowing are computed once from the shared session instead of being spread across `diff.rs` and controller scroll heuristics.
+- Review comment editing no longer forces Diff back onto the legacy flat list; the composer is now rendered as an overlay anchored from shared Review surface geometry, so the workspace surface stays active while editing comments.
 - Sticky file headers, hunk navigation, and comment hunk lookup in Review now read from that shared session.
 - Review rendering now also reads row content, row metadata, and syntax segment caches from the shared session.
 - Review’s live row count now comes from the shared workspace layout rather than the legacy flat render vector length, so list sizing and visible-row sync track the workspace model directly.

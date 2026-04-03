@@ -243,6 +243,10 @@ impl DiffViewer {
         row: AnyElement,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if self.uses_review_workspace_sections_surface() {
+            return row;
+        }
+
         v_flex()
             .w_full()
             .child(row)

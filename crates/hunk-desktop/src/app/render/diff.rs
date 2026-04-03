@@ -134,6 +134,12 @@ impl DiffViewer {
                                                     .right_0()
                                                     .child(sticky_file_banner),
                                             )
+                                            .when_some(
+                                                self.render_active_row_comment_overlay(cx),
+                                                |this, overlay| {
+                                                    this.child(overlay)
+                                                },
+                                            )
                                             .child(
                                                 div()
                                                     .absolute()

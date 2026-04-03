@@ -392,11 +392,7 @@ impl DiffViewer {
             .into_any_element()
     }
 
-    fn render_row_comment_editor(&self, row_ix: usize, cx: &mut Context<Self>) -> AnyElement {
-        if self.active_comment_editor_row != Some(row_ix) {
-            return div().into_any_element();
-        }
-
+    fn render_row_comment_editor_card(&self, row_ix: usize, cx: &mut Context<Self>) -> AnyElement {
         let view = cx.entity();
         let anchor = self.build_row_comment_anchor(row_ix);
         let file_path = anchor
@@ -497,5 +493,48 @@ impl DiffViewer {
                 )
             })
             .into_any_element()
+    }
+
+    fn render_row_comment_editor(&self, row_ix: usize, cx: &mut Context<Self>) -> AnyElement {
+        if self.active_comment_editor_row != Some(row_ix) {
+            return div().into_any_element();
+        }
+
+        self.render_row_comment_editor_card(row_ix, cx)
+    }
+
+    fn render_active_row_comment_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.uses_review_workspace_sections_surface() {
+            return None;
+        }
+
+        let row_ix = self.active_comment_editor_row?;
+        let session = self.review_workspace_session.as_ref()?;
+        let row_top_px = session.row_top_offset_px(row_ix)?;
+        let viewport_height_px = self
+            .review_surface
+            .diff_scroll_handle
+            .bounds()
+            .size
+            .height
+            .max(Pixels::ZERO)
+            .as_f32()
+            .round() as usize;
+        let overlay_top = crate::app::comment_overlay::review_comment_overlay_top_px(
+            row_top_px,
+            self.current_review_surface_scroll_top_px(),
+            viewport_height_px,
+            crate::app::review_workspace_session::REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX,
+        );
+
+        Some(
+            div()
+                .id(("review-row-comment-overlay", row_ix as u64))
+                .absolute()
+                .top(px(overlay_top))
+                .right(px(DIFF_SCROLLBAR_SIZE + DIFF_SCROLLBAR_RIGHT_INSET + 16.0))
+                .child(self.render_row_comment_editor_card(row_ix, cx))
+                .into_any_element(),
+        )
     }
 }
