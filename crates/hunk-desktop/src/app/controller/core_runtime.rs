@@ -92,12 +92,19 @@ impl DiffViewer {
                     || snapshot.viewport_height_px != viewport_height_px
         });
         if needs_refresh {
-            let snapshot = session.build_surface_snapshot(
+            let display_rows = self.review_surface_display_rows(
+                session,
+                scroll_top_px,
+                viewport_height_px,
+                8,
+            );
+            let snapshot = session.build_surface_snapshot_with_display_rows(
                 scroll_top_px,
                 viewport_height_px,
                 1,
                 8,
                 &self.review_surface_snapshot_options(),
+                display_rows.as_ref(),
             );
             self.review_surface.last_surface_snapshot = Some(snapshot);
         }
@@ -106,6 +113,73 @@ impl DiffViewer {
             .last_surface_snapshot
             .as_ref()
             .map(|snapshot| snapshot.visible_state.clone())
+    }
+
+    fn review_surface_display_rows(
+        &self,
+        session: &review_workspace_session::ReviewWorkspaceSession,
+        scroll_top_px: usize,
+        viewport_height_px: usize,
+        overscan_rows: usize,
+    ) -> Option<review_workspace_session::ReviewWorkspaceDisplayRows> {
+        let visible_row_range = session.visible_row_range_for_viewport(
+            scroll_top_px,
+            viewport_height_px,
+        )?;
+        let first_visible_row = visible_row_range.start.saturating_sub(overscan_rows);
+        let last_visible_row = visible_row_range
+            .end
+            .saturating_add(overscan_rows)
+            .min(session.row_count());
+        let visible_row_count = last_visible_row.saturating_sub(first_visible_row);
+        if visible_row_count == 0 {
+            return None;
+        }
+
+        let viewport = hunk_editor::Viewport {
+            first_visible_row,
+            visible_row_count,
+            horizontal_offset: 0,
+        };
+        let left_rows = self
+            .review_surface
+            .left_workspace_editor
+            .as_ref()
+            .and_then(|editor| {
+                editor
+                    .borrow()
+                    .build_workspace_display_snapshot(viewport, 4, false)
+            })
+            .map(|snapshot| {
+                snapshot
+                    .visible_rows
+                    .into_iter()
+                    .map(|row| (row.row_index, row))
+                    .collect::<BTreeMap<_, _>>()
+            })
+            .unwrap_or_default();
+        let right_rows = self
+            .review_surface
+            .right_workspace_editor
+            .as_ref()
+            .and_then(|editor| {
+                editor
+                    .borrow()
+                    .build_workspace_display_snapshot(viewport, 4, false)
+            })
+            .map(|snapshot| {
+                snapshot
+                    .visible_rows
+                    .into_iter()
+                    .map(|row| (row.row_index, row))
+                    .collect::<BTreeMap<_, _>>()
+            })
+            .unwrap_or_default();
+
+        Some(review_workspace_session::ReviewWorkspaceDisplayRows {
+            left_by_row: left_rows,
+            right_by_row: right_rows,
+        })
     }
 
     pub(super) fn current_review_surface_snapshot(

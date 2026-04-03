@@ -182,6 +182,12 @@ pub(crate) struct ReviewWorkspaceSurfaceOptions {
     pub(crate) search_highlight_columns_by_row: BTreeMap<usize, Vec<Range<usize>>>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ReviewWorkspaceDisplayRows {
+    pub(crate) left_by_row: BTreeMap<usize, WorkspaceDisplayRow>,
+    pub(crate) right_by_row: BTreeMap<usize, WorkspaceDisplayRow>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ReviewWorkspaceFloatingOverlay {
     pub(crate) row_index: usize,
@@ -530,6 +536,7 @@ impl ReviewWorkspaceSession {
         self.total_surface_height_px
     }
 
+    #[allow(dead_code)]
     pub(crate) fn build_viewport_snapshot(
         &self,
         scroll_top_px: usize,
@@ -537,6 +544,26 @@ impl ReviewWorkspaceSession {
         overscan_sections: usize,
         overscan_rows: usize,
         options: &ReviewWorkspaceSurfaceOptions,
+    ) -> ReviewWorkspaceViewportSnapshot {
+        self.build_viewport_snapshot_with_display_rows(
+            scroll_top_px,
+            viewport_height_px,
+            overscan_sections,
+            overscan_rows,
+            options,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build_viewport_snapshot_with_display_rows(
+        &self,
+        scroll_top_px: usize,
+        viewport_height_px: usize,
+        overscan_sections: usize,
+        overscan_rows: usize,
+        options: &ReviewWorkspaceSurfaceOptions,
+        display_rows: Option<&ReviewWorkspaceDisplayRows>,
     ) -> ReviewWorkspaceViewportSnapshot {
         let mut sections = Vec::new();
         for section_ix in self.visible_section_range_for_viewport(
@@ -558,13 +585,15 @@ impl ReviewWorkspaceSession {
                     overscan_rows,
                 )
                 .unwrap_or(section.start_row..section.end_row);
-            let left_display_rows = self.build_display_snapshot_for_side(
+            let left_display_rows = self.build_display_rows_for_side(
                 visible_row_range.clone(),
                 ReviewWorkspaceEditorSide::Left,
+                display_rows.map(|rows| &rows.left_by_row),
             );
-            let right_display_rows = self.build_display_snapshot_for_side(
+            let right_display_rows = self.build_display_rows_for_side(
                 visible_row_range.clone(),
                 ReviewWorkspaceEditorSide::Right,
+                display_rows.map(|rows| &rows.right_by_row),
             );
             let _top_spacer_height_px = self
                 .row_boundary_offset_px(visible_row_range.start)
@@ -675,12 +704,33 @@ impl ReviewWorkspaceSession {
         overscan_rows: usize,
         options: &ReviewWorkspaceSurfaceOptions,
     ) -> ReviewWorkspaceSurfaceSnapshot {
-        let viewport = self.build_viewport_snapshot(
+        self.build_surface_snapshot_with_display_rows(
             scroll_top_px,
             viewport_height_px,
             overscan_sections,
             overscan_rows,
             options,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn build_surface_snapshot_with_display_rows(
+        &self,
+        scroll_top_px: usize,
+        viewport_height_px: usize,
+        overscan_sections: usize,
+        overscan_rows: usize,
+        options: &ReviewWorkspaceSurfaceOptions,
+        display_rows: Option<&ReviewWorkspaceDisplayRows>,
+    ) -> ReviewWorkspaceSurfaceSnapshot {
+        let viewport = self.build_viewport_snapshot_with_display_rows(
+            scroll_top_px,
+            viewport_height_px,
+            overscan_sections,
+            overscan_rows,
+            options,
+            display_rows,
         );
         let visible_state = self.build_visible_state(scroll_top_px, viewport_height_px);
         let sticky_file_header = visible_state.top_row.and_then(|top_row| {
@@ -717,12 +767,13 @@ impl ReviewWorkspaceSession {
         overscan_sections: usize,
         overscan_rows: usize,
     ) -> Vec<usize> {
-        self.build_viewport_snapshot(
+        self.build_viewport_snapshot_with_display_rows(
             scroll_top_px,
             viewport_height_px,
             overscan_sections,
             overscan_rows,
             &ReviewWorkspaceSurfaceOptions::default(),
+            None,
         )
         .sections
         .into_iter()
@@ -1319,6 +1370,29 @@ impl ReviewWorkspaceSession {
             &document_snapshots,
         )
         .visible_rows
+    }
+
+    fn build_display_rows_for_side(
+        &self,
+        visible_row_range: Range<usize>,
+        side: ReviewWorkspaceEditorSide,
+        display_rows_by_index: Option<&BTreeMap<usize, WorkspaceDisplayRow>>,
+    ) -> Vec<WorkspaceDisplayRow> {
+        if visible_row_range.is_empty() {
+            return Vec::new();
+        }
+
+        if let Some(display_rows_by_index) = display_rows_by_index {
+            let visible_rows = visible_row_range
+                .clone()
+                .filter_map(|row_index| display_rows_by_index.get(&row_index).cloned())
+                .collect::<Vec<_>>();
+            if visible_rows.len() == visible_row_range.len() {
+                return visible_rows;
+            }
+        }
+
+        self.build_display_snapshot_for_side(visible_row_range, side)
     }
 
     pub(crate) fn build_search_highlight_columns_by_row(
