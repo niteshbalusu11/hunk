@@ -1,5 +1,6 @@
 mod display;
 mod workspace;
+mod workspace_display;
 
 use std::cell::RefCell;
 use std::cmp::min;
@@ -17,6 +18,9 @@ pub use workspace::{
     WorkspaceDocument, WorkspaceDocumentId, WorkspaceExcerptId, WorkspaceExcerptKind,
     WorkspaceExcerptLayout, WorkspaceExcerptSpec, WorkspaceLayout, WorkspaceLayoutError,
     WorkspaceRowKind, WorkspaceRowLocation,
+};
+pub use workspace_display::{
+    WorkspaceDisplayRow, WorkspaceDisplaySnapshot, build_workspace_display_snapshot,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

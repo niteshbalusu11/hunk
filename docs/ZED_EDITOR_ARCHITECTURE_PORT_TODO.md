@@ -141,6 +141,7 @@ Tasks:
 - [ ] Keep file headers and section metadata as lightweight decorations on top of the shared surface.
 
 Current state:
+- `hunk-editor` now has a workspace display snapshot primitive over `WorkspaceLayout`, which can project one multi-file viewport without falling back to the flat diff row list.
 - Review compare loading now rebuilds a shared workspace session with file ranges and hunk ranges.
 - The desktop workspace editor session now supports arbitrary multi-document/multi-excerpt layouts, not just one full-file excerpt.
 - Review now builds and persists one shared workspace editor session alongside the compare session and keeps its active document in sync with Review selection/path changes.
