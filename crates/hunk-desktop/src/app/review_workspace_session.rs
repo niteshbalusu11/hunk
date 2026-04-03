@@ -1028,6 +1028,7 @@ impl ReviewWorkspaceSession {
         &self.layout
     }
 
+    #[allow(dead_code)]
     pub(crate) fn build_editor_session(
         &self,
         preferred_path: Option<&str>,

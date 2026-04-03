@@ -615,7 +615,6 @@ impl DiffViewer {
             review_compare_loading: false,
             review_compare_error: None,
             review_workspace_session: None,
-            review_workspace_editor_session: None,
             review_loaded_snapshot_fingerprint: None,
             overall_line_stats: LineStats::default(),
             refresh_epoch: 0,

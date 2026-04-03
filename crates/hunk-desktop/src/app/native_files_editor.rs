@@ -645,6 +645,10 @@ impl FilesEditor {
         self.workspace_session.active_path_buf()
     }
 
+    pub(crate) fn active_workspace_path_buf(&self) -> Option<PathBuf> {
+        self.active_path_buf()
+    }
+
     fn refresh_visible_syntax_highlights(
         &mut self,
         display_snapshot: &hunk_editor::DisplaySnapshot,

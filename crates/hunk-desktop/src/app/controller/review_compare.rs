@@ -178,11 +178,17 @@ fn update_persisted_review_compare_selection(
 
 impl DiffViewer {
     pub(crate) fn current_review_editor_session_path(&self) -> Option<String> {
-        self.review_workspace_editor_session
+        self.review_surface
+            .left_files_editor
             .as_ref()
-            .and_then(|session| session.active_path())
-            .and_then(|path| path.to_str())
-            .map(ToString::to_string)
+            .and_then(|editor| editor.borrow().active_workspace_path_buf())
+            .or_else(|| {
+                self.review_surface
+                    .right_files_editor
+                    .as_ref()
+                    .and_then(|editor| editor.borrow().active_workspace_path_buf())
+            })
+            .and_then(|path| path.to_str().map(ToString::to_string))
     }
 
     pub(crate) fn set_review_selected_file(
@@ -198,13 +204,22 @@ impl DiffViewer {
     }
 
     pub(crate) fn activate_review_workspace_editor_path(&mut self, path: &str) -> bool {
-        let Some(session) = self.review_workspace_editor_session.as_mut() else {
-            return false;
-        };
-        let activated = session.activate_path(std::path::Path::new(path));
+        let path = std::path::Path::new(path);
+        let mut activated = false;
+        if let Some(editor) = self.review_surface.left_files_editor.as_ref() {
+            match editor.borrow_mut().activate_workspace_path(path) {
+                Ok(editor_activated) => activated |= editor_activated,
+                Err(err) => error!("failed to activate review left workspace path: {err}"),
+            }
+        }
+        if let Some(editor) = self.review_surface.right_files_editor.as_ref() {
+            match editor.borrow_mut().activate_workspace_path(path) {
+                Ok(editor_activated) => activated |= editor_activated,
+                Err(err) => error!("failed to activate review right workspace path: {err}"),
+            }
+        }
         if activated {
-            self.review_surface.selected_path = Some(path.to_string());
-            self.sync_review_workspace_side_editor_path(path);
+            self.review_surface.selected_path = path.to_str().map(ToString::to_string);
         }
         activated
     }
@@ -282,15 +297,6 @@ impl DiffViewer {
         })
     }
 
-    fn rebuild_review_workspace_editor_session(&mut self) {
-        let preferred_path = self.current_review_path();
-        self.review_workspace_editor_session = self
-            .review_workspace_session
-            .as_ref()
-            .map(|session| session.build_editor_session(preferred_path.as_deref()));
-        self.rebuild_review_workspace_side_editors(preferred_path.as_deref());
-    }
-
     fn rebuild_review_workspace_side_editors(&mut self, preferred_path: Option<&str>) {
         let Some(session) = self.review_workspace_session.as_ref() else {
             self.review_surface.left_files_editor = None;
@@ -331,26 +337,12 @@ impl DiffViewer {
         Some(Rc::new(RefCell::new(editor)))
     }
 
-    fn sync_review_workspace_side_editor_path(&mut self, path: &str) {
-        if let Some(editor) = self.review_surface.left_files_editor.as_ref() {
-            let _ = editor
-                .borrow_mut()
-                .activate_workspace_path(std::path::Path::new(path));
-        }
-        if let Some(editor) = self.review_surface.right_files_editor.as_ref() {
-            let _ = editor
-                .borrow_mut()
-                .activate_workspace_path(std::path::Path::new(path));
-        }
-    }
-
     pub(crate) fn sync_review_workspace_editor_active_path(&mut self) {
         let preferred_path = self.current_review_path();
         let Some(path) = preferred_path.as_deref() else {
             return;
         };
         let _ = self.activate_review_workspace_editor_path(path);
-        self.sync_review_workspace_side_editor_path(path);
     }
 
     fn subscribe_review_compare_picker_states(&self, cx: &mut Context<Self>) {
@@ -869,7 +861,6 @@ impl DiffViewer {
         self.review_compare_loading = false;
         self.review_compare_error = None;
         self.review_workspace_session = None;
-        self.review_workspace_editor_session = None;
         self.review_surface.left_files_editor = None;
         self.review_surface.right_files_editor = None;
         self.review_loaded_left_source_id = None;
@@ -1071,7 +1062,7 @@ impl DiffViewer {
         let next_selected_status = next_selected_path
             .as_deref()
             .and_then(|selected| self.status_for_path(selected));
-        self.rebuild_review_workspace_editor_session();
+        self.rebuild_review_workspace_side_editors(next_selected_path.as_deref());
         self.set_review_selected_file(next_selected_path, next_selected_status);
         self.refresh_comments_cache_from_store();
         self.rebuild_comment_row_match_cache();
@@ -1136,7 +1127,6 @@ impl DiffViewer {
         self.review_loaded_left_source_id = None;
         self.review_loaded_right_source_id = None;
         self.review_loaded_collapsed_files.clear();
-        self.review_workspace_editor_session = None;
         self.review_loaded_snapshot_fingerprint = None;
         if self.workspace_view_mode == WorkspaceViewMode::Diff {
             self.scroll_selected_after_reload = true;
