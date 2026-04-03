@@ -1,6 +1,8 @@
 #[derive(Clone)]
 enum ReviewWorkspacePaintedRowKind {
-    Skip,
+    FileHeader {
+        paint: Box<ReviewWorkspaceFileHeaderPaint>,
+    },
     Code {
         left: Box<ReviewWorkspaceCodeRowCellPaint>,
         right: Box<ReviewWorkspaceCodeRowCellPaint>,
@@ -162,7 +164,15 @@ impl Element for ReviewWorkspaceSectionElement {
                     size: gpui::size(bounds.size.width, px(row.height_px as f32)),
                 };
                 match &row.kind {
-                    ReviewWorkspacePaintedRowKind::Skip => {}
+                    ReviewWorkspacePaintedRowKind::FileHeader { paint } => {
+                        paint_review_workspace_file_header_row(
+                            window,
+                            cx,
+                            row_bounds,
+                            paint,
+                            self.mono_font_family.clone(),
+                        );
+                    }
                     ReviewWorkspacePaintedRowKind::Code { left, right } => {
                         paint_review_workspace_code_row(
                             window,
@@ -218,11 +228,28 @@ impl DiffViewer {
                 let row_ix = viewport_row.row_index;
                 let row = self.active_diff_row(row_ix)?;
                 let is_selected = self.is_row_selected(row_ix);
-                let kind = if self
-                    .active_diff_row_metadata(row_ix)
-                    .is_some_and(|meta| meta.kind == DiffStreamRowKind::FileHeader)
+                let kind = if let Some(meta) = self.active_diff_row_metadata(row_ix)
+                    && meta.kind == DiffStreamRowKind::FileHeader
                 {
-                    ReviewWorkspacePaintedRowKind::Skip
+                    let path = meta.file_path.as_deref()?;
+                    let status = meta
+                        .file_status
+                        .or_else(|| self.status_for_path(path))
+                        .unwrap_or(FileStatus::Unknown);
+                    let stats = self
+                        .active_diff_file_line_stats()
+                        .get(path)
+                        .copied()
+                        .unwrap_or_default();
+                    ReviewWorkspacePaintedRowKind::FileHeader {
+                        paint: Box::new(self.build_review_workspace_file_header_paint(
+                            path,
+                            status,
+                            stats,
+                            is_selected,
+                            cx,
+                        )),
+                    }
                 } else {
                     match row.kind {
                         DiffRowKind::Code => {

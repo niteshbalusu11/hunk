@@ -290,11 +290,6 @@ impl DiffViewer {
                 }
                 let path = meta.file_path.as_deref()?;
                 let status = meta.file_status?;
-                let stats = self
-                    .active_diff_file_line_stats()
-                    .get(path)
-                    .copied()
-                    .unwrap_or_default();
                 Some(
                     div()
                         .absolute()
@@ -302,11 +297,10 @@ impl DiffViewer {
                         .left_0()
                         .right_0()
                         .h(px(viewport_row.height_px as f32))
-                        .child(self.render_file_status_banner_row(
+                        .child(self.render_review_workspace_file_header_controls_overlay(
                             row_ix,
                             path,
                             status,
-                            stats,
                             self.is_row_selected(row_ix),
                             cx,
                         ))
