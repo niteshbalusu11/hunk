@@ -551,6 +551,14 @@ fn review_workspace_session_builds_viewport_snapshot_from_shared_geometry() {
             .row_metadata(viewport.sections[0].rows[0].row_index)
             .map(|meta| meta.stable_id),
     );
+    assert_eq!(
+        session.viewport_row_indices(0, REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX * 2, 1, 1),
+        viewport
+            .sections
+            .iter()
+            .flat_map(|section| section.rows.iter().map(|row| row.row_index))
+            .collect::<Vec<_>>(),
+    );
 }
 
 #[test]

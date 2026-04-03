@@ -125,32 +125,55 @@ impl DiffViewer {
         }
 
         self.segment_prefetch_anchor_row = Some(visible_row);
-        let visible_range = if self.uses_review_workspace_sections_surface() {
-            self.current_review_visible_row_range().unwrap_or_else(|| {
-                visible_row
-                    .saturating_sub(DIFF_SEGMENT_PREFETCH_RADIUS_ROWS)
-                    ..visible_row
-                        .saturating_add(DIFF_SEGMENT_PREFETCH_RADIUS_ROWS.saturating_add(1))
-                        .min(row_count)
-            })
+        let prioritized_rows = if self.uses_review_workspace_sections_surface() {
+            self.review_workspace_session
+                .as_ref()
+                .map(|session| {
+                    prioritized_prefetch_row_indices_for_rows(
+                        session.viewport_row_indices(
+                            self.current_review_surface_scroll_top_px(),
+                            self.review_surface
+                                .diff_scroll_handle
+                                .bounds()
+                                .size
+                                .height
+                                .max(Pixels::ZERO)
+                                .as_f32()
+                                .round() as usize,
+                            1,
+                            DIFF_SEGMENT_PREFETCH_RADIUS_ROWS,
+                        ),
+                        visible_row,
+                    )
+                })
+                .filter(|rows| !rows.is_empty())
+                .unwrap_or_else(|| {
+                    prioritized_prefetch_row_indices(
+                        visible_row.saturating_sub(DIFF_SEGMENT_PREFETCH_RADIUS_ROWS),
+                        visible_row
+                            .saturating_add(DIFF_SEGMENT_PREFETCH_RADIUS_ROWS.saturating_add(1))
+                            .min(row_count),
+                        visible_row,
+                    )
+                })
         } else {
-            visible_row
-                .saturating_sub(DIFF_SEGMENT_PREFETCH_RADIUS_ROWS)
-                ..visible_row
+            prioritized_prefetch_row_indices(
+                visible_row.saturating_sub(DIFF_SEGMENT_PREFETCH_RADIUS_ROWS),
+                visible_row
                     .saturating_add(DIFF_SEGMENT_PREFETCH_RADIUS_ROWS.saturating_add(1))
-                    .min(row_count)
+                    .min(row_count),
+                visible_row,
+            )
         };
-        let start = visible_range.start.min(row_count);
-        let end = visible_range.end.min(row_count);
 
         let batch_limit = if force_upgrade {
-            end.saturating_sub(start)
+            prioritized_rows.len()
         } else {
-            DIFF_SEGMENT_PREFETCH_BATCH_ROWS.min(end.saturating_sub(start))
+            DIFF_SEGMENT_PREFETCH_BATCH_ROWS.min(prioritized_rows.len())
         };
         let mut pending_rows = Vec::with_capacity(batch_limit);
         let recently_scrolling = self.recently_scrolling();
-        for row_ix in prioritized_prefetch_row_indices(start, end, visible_row) {
+        for row_ix in prioritized_rows {
             if pending_rows.len() >= batch_limit {
                 break;
             }
@@ -500,4 +523,27 @@ fn prioritized_prefetch_row_indices(start: usize, end: usize, anchor_row: usize)
     }
 
     rows
+}
+
+fn prioritized_prefetch_row_indices_for_rows(
+    row_indices: Vec<usize>,
+    anchor_row: usize,
+) -> Vec<usize> {
+    let mut unique_rows = row_indices;
+    unique_rows.sort_unstable();
+    unique_rows.dedup();
+    unique_rows.sort_by_key(|row_ix| (anchor_row.abs_diff(*row_ix), *row_ix));
+    unique_rows
+}
+
+#[cfg(test)]
+mod scroll_tests {
+    use super::prioritized_prefetch_row_indices_for_rows;
+
+    #[test]
+    fn prioritized_prefetch_row_indices_for_rows_dedupes_and_prefers_nearest_rows() {
+        let rows = prioritized_prefetch_row_indices_for_rows(vec![14, 10, 12, 10, 16], 13);
+
+        assert_eq!(rows, vec![12, 14, 10, 16]);
+    }
 }

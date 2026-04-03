@@ -215,6 +215,7 @@ This is the phase that removes the last architectural reason for preview-only re
 
 Current state:
 - Review’s viewport bookkeeping now tracks the shared workspace surface’s visible row range directly, and Review syntax-segment prefetch now reuses that explicit range instead of a legacy top-row fallback.
+- Review syntax/segment prefetch now derives its candidate rows from the shared workspace viewport snapshot instead of rebuilding a separate legacy row-range heuristic, so visible-range scheduling follows the same session-owned surface state the renderer consumes.
 - Diff-mode sticky-header, file-anchor, and visible-file resolution paths now prefer the shared workspace session and active row accessors instead of reading `diff_row_metadata` directly.
 - Review file selection now also prefers the persistent workspace editor session’s active path before falling back to duplicated top-level Diff selection fields, which moves active-file ownership closer to the editor/session itself.
 - Diff mode no longer persists duplicate `file_row_ranges` or visible header lookup vectors when a Review workspace session exists; those file-range and header queries are now expected to resolve from the shared session instead of cached flat-row state.

@@ -403,6 +403,25 @@ impl ReviewWorkspaceSession {
         }
     }
 
+    pub(crate) fn viewport_row_indices(
+        &self,
+        scroll_top_px: usize,
+        viewport_height_px: usize,
+        overscan_sections: usize,
+        overscan_rows: usize,
+    ) -> Vec<usize> {
+        self.build_viewport_snapshot(
+            scroll_top_px,
+            viewport_height_px,
+            overscan_sections,
+            overscan_rows,
+        )
+        .sections
+        .into_iter()
+        .flat_map(|section| section.rows.into_iter().map(|row| row.row_index))
+        .collect()
+    }
+
     pub(crate) fn visible_hunk_header_row(&self, row: usize) -> Option<usize> {
         self.hunk_ranges
             .iter()
