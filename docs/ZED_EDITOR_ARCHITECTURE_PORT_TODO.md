@@ -315,6 +315,7 @@ Current state:
 - Diff mode no longer stores or consults the legacy flat row-list surface state. When a compare is loaded it uses the shared Review workspace surface, and when a compare is unavailable it falls back to the dedicated Review status surface instead of reviving the old flat multi-file row list.
 - Review surface snapshots no longer depend on hidden left/right `FilesEditor` entities; the shared `ReviewWorkspaceSession` now owns Diff viewport rows, selection memory, and painted snapshot assembly directly.
 - Diff visible-range syntax/segment prefetch now also runs through a dedicated `ReviewWorkspaceSession` scheduler path instead of sharing the old flat-row cache controller branch with Files mode before cache computation starts.
+- `ReviewWorkspaceSession` no longer exposes an alternate external display-provider path for surface snapshots, so loaded Diff viewports now have one session-owned display pipeline instead of a pluggable fallback seam.
 
 ## Acceptance Criteria
 

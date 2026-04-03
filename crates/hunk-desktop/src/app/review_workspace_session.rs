@@ -533,106 +533,6 @@ impl ReviewWorkspaceSession {
         overscan_rows: usize,
         options: &ReviewWorkspaceSurfaceOptions,
     ) -> ReviewWorkspaceViewportSnapshot {
-        self.build_viewport_snapshot_with_display_provider(
-            scroll_top_px,
-            viewport_height_px,
-            overscan_sections,
-            overscan_rows,
-            options,
-            |visible_row_range, side| self.build_display_snapshot_for_side(visible_row_range, side),
-        )
-    }
-
-    pub(crate) fn build_surface_snapshot_with_display_provider<F>(
-        &self,
-        scroll_top_px: usize,
-        viewport_height_px: usize,
-        overscan_sections: usize,
-        overscan_rows: usize,
-        options: &ReviewWorkspaceSurfaceOptions,
-        mut display_rows_for_side: F,
-    ) -> ReviewWorkspaceSurfaceSnapshot
-    where
-        F: FnMut(Range<usize>, ReviewWorkspaceEditorSide) -> Vec<WorkspaceDisplayRow>,
-    {
-        let viewport = self.build_viewport_snapshot_with_display_provider(
-            scroll_top_px,
-            viewport_height_px,
-            overscan_sections,
-            overscan_rows,
-            options,
-            &mut display_rows_for_side,
-        );
-        let visible_state = self.build_visible_state(scroll_top_px, viewport_height_px);
-        let sticky_file_header = visible_state.top_row.and_then(|top_row| {
-            let header = self.visible_file_header_at_surface_row(top_row)?;
-            (header.row_index != top_row).then_some(header)
-        });
-        let overlays = viewport
-            .sections
-            .iter()
-            .flat_map(|section| section.rows.iter())
-            .filter_map(|row| {
-                if row.stream_kind == DiffStreamRowKind::FileHeader
-                    && let (Some(path), Some(status)) = (row.file_path.as_ref(), row.file_status)
-                {
-                    return Some(ReviewWorkspaceSurfaceOverlay {
-                        row_index: row.row_index,
-                        top_px: row.surface_top_px,
-                        height_px: row.height_px,
-                        kind: ReviewWorkspaceSurfaceOverlayKind::FileHeaderControls {
-                            path: path.clone(),
-                            status,
-                        },
-                    });
-                }
-                if row.show_comment_affordance {
-                    return Some(ReviewWorkspaceSurfaceOverlay {
-                        row_index: row.row_index,
-                        top_px: row.surface_top_px,
-                        height_px: row.height_px,
-                        kind: ReviewWorkspaceSurfaceOverlayKind::CommentAffordance,
-                    });
-                }
-                None
-            })
-            .collect();
-        let active_comment_editor_overlay =
-            options.active_comment_editor_row.and_then(|row_index| {
-                let row_top_px = self.row_top_offset_px(row_index)?;
-                let top_px = crate::app::comment_overlay::review_comment_overlay_top_px(
-                    row_top_px,
-                    scroll_top_px,
-                    viewport_height_px,
-                    REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX,
-                )
-                .round() as usize;
-                Some(ReviewWorkspaceFloatingOverlay { row_index, top_px })
-            });
-
-        ReviewWorkspaceSurfaceSnapshot {
-            scroll_top_px,
-            viewport_height_px,
-            viewport,
-            overlays,
-            sticky_file_header,
-            active_comment_editor_overlay,
-            visible_state,
-        }
-    }
-
-    fn build_viewport_snapshot_with_display_provider<F>(
-        &self,
-        scroll_top_px: usize,
-        viewport_height_px: usize,
-        overscan_sections: usize,
-        overscan_rows: usize,
-        options: &ReviewWorkspaceSurfaceOptions,
-        mut display_rows_for_side: F,
-    ) -> ReviewWorkspaceViewportSnapshot
-    where
-        F: FnMut(Range<usize>, ReviewWorkspaceEditorSide) -> Vec<WorkspaceDisplayRow>,
-    {
         let mut sections = Vec::new();
         for section_ix in self.visible_section_range_for_viewport(
             scroll_top_px,
@@ -653,10 +553,14 @@ impl ReviewWorkspaceSession {
                     overscan_rows,
                 )
                 .unwrap_or(section.start_row..section.end_row);
-            let left_display_rows =
-                display_rows_for_side(visible_row_range.clone(), ReviewWorkspaceEditorSide::Left);
-            let right_display_rows =
-                display_rows_for_side(visible_row_range.clone(), ReviewWorkspaceEditorSide::Right);
+            let left_display_rows = self.build_display_snapshot_for_side(
+                visible_row_range.clone(),
+                ReviewWorkspaceEditorSide::Left,
+            );
+            let right_display_rows = self.build_display_snapshot_for_side(
+                visible_row_range.clone(),
+                ReviewWorkspaceEditorSide::Right,
+            );
             let _top_spacer_height_px = self
                 .row_boundary_offset_px(visible_row_range.start)
                 .unwrap_or(pixel_range.start)
@@ -741,14 +645,69 @@ impl ReviewWorkspaceSession {
         overscan_rows: usize,
         options: &ReviewWorkspaceSurfaceOptions,
     ) -> ReviewWorkspaceSurfaceSnapshot {
-        self.build_surface_snapshot_with_display_provider(
+        let viewport = self.build_viewport_snapshot(
             scroll_top_px,
             viewport_height_px,
             overscan_sections,
             overscan_rows,
             options,
-            |visible_row_range, side| self.build_display_snapshot_for_side(visible_row_range, side),
-        )
+        );
+        let visible_state = self.build_visible_state(scroll_top_px, viewport_height_px);
+        let sticky_file_header = visible_state.top_row.and_then(|top_row| {
+            let header = self.visible_file_header_at_surface_row(top_row)?;
+            (header.row_index != top_row).then_some(header)
+        });
+        let overlays = viewport
+            .sections
+            .iter()
+            .flat_map(|section| section.rows.iter())
+            .filter_map(|row| {
+                if row.stream_kind == DiffStreamRowKind::FileHeader
+                    && let (Some(path), Some(status)) = (row.file_path.as_ref(), row.file_status)
+                {
+                    return Some(ReviewWorkspaceSurfaceOverlay {
+                        row_index: row.row_index,
+                        top_px: row.surface_top_px,
+                        height_px: row.height_px,
+                        kind: ReviewWorkspaceSurfaceOverlayKind::FileHeaderControls {
+                            path: path.clone(),
+                            status,
+                        },
+                    });
+                }
+                if row.show_comment_affordance {
+                    return Some(ReviewWorkspaceSurfaceOverlay {
+                        row_index: row.row_index,
+                        top_px: row.surface_top_px,
+                        height_px: row.height_px,
+                        kind: ReviewWorkspaceSurfaceOverlayKind::CommentAffordance,
+                    });
+                }
+                None
+            })
+            .collect();
+        let active_comment_editor_overlay =
+            options.active_comment_editor_row.and_then(|row_index| {
+                let row_top_px = self.row_top_offset_px(row_index)?;
+                let top_px = crate::app::comment_overlay::review_comment_overlay_top_px(
+                    row_top_px,
+                    scroll_top_px,
+                    viewport_height_px,
+                    REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX,
+                )
+                .round() as usize;
+                Some(ReviewWorkspaceFloatingOverlay { row_index, top_px })
+            });
+
+        ReviewWorkspaceSurfaceSnapshot {
+            scroll_top_px,
+            viewport_height_px,
+            viewport,
+            overlays,
+            sticky_file_header,
+            active_comment_editor_overlay,
+            visible_state,
+        }
     }
 
     pub(crate) fn viewport_row_indices(

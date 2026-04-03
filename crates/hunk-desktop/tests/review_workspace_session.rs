@@ -122,7 +122,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use hunk_domain::diff::{
     DiffCell, DiffCellKind, DiffRowKind, SideBySideRow, parse_patch_side_by_side,
 };
-use hunk_editor::WorkspaceDisplayRow;
 use hunk_git::compare::CompareSnapshot;
 use hunk_git::git::{ChangedFile, FileStatus, LineStats};
 use review_workspace_session::{
@@ -1146,66 +1145,6 @@ fn review_workspace_session_exports_editor_documents_for_each_side() {
             "after\nstay\n".to_string(),
         )]
     );
-}
-
-#[test]
-fn review_workspace_session_surface_snapshot_can_use_external_display_provider() {
-    let patch = "\
-@@ -1,2 +1,2 @@
--before
-+after
- stay
-";
-    let rows = parse_patch_side_by_side(patch);
-    let snapshot = CompareSnapshot {
-        files: vec![changed_file("src/main.rs", FileStatus::Modified)],
-        file_line_stats: BTreeMap::new(),
-        overall_line_stats: LineStats::default(),
-        patches_by_path: BTreeMap::from([("src/main.rs".to_string(), patch.to_string())]),
-    };
-
-    let session = ReviewWorkspaceSession::from_compare_snapshot(&snapshot, &BTreeSet::new())
-        .expect("workspace session should build")
-        .with_render_stream(&review_stream_for_rows(
-            &rows,
-            "src/main.rs",
-            FileStatus::Modified,
-        ));
-
-    let surface = session.build_surface_snapshot_with_display_provider(
-        0,
-        REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX * 4,
-        0,
-        0,
-        &ReviewWorkspaceSurfaceOptions::default(),
-        |visible_row_range, side| {
-            visible_row_range
-                .map(|row_index| WorkspaceDisplayRow {
-                    row_index,
-                    location: session.layout().locate_row(row_index),
-                    raw_start_column: 0,
-                    raw_end_column: 0,
-                    raw_column_offsets: vec![0],
-                    text: match side {
-                        ReviewWorkspaceEditorSide::Left => format!("left-{row_index}"),
-                        ReviewWorkspaceEditorSide::Right => format!("right-{row_index}"),
-                    },
-                    whitespace_markers: Vec::new(),
-                })
-                .collect::<Vec<_>>()
-        },
-    );
-
-    let code_row = surface
-        .viewport
-        .sections
-        .iter()
-        .flat_map(|section| section.rows.iter())
-        .find(|row| row.row_kind == DiffRowKind::Code)
-        .expect("surface should contain a code row");
-
-    assert_eq!(code_row.left_segments[0].plain_text.as_ref(), "left-2");
-    assert_eq!(code_row.right_segments[0].plain_text.as_ref(), "right-2");
 }
 
 #[test]
