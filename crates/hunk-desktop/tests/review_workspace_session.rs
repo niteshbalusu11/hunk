@@ -3,7 +3,20 @@
 mod workspace_editor_session;
 
 mod app {
+    use gpui::SharedString;
     use hunk_git::git::FileStatus;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum SyntaxTokenKind {
+        Plain,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct CachedStyledSegment {
+        pub plain_text: SharedString,
+        pub syntax: SyntaxTokenKind,
+        pub changed: bool,
+    }
 
     #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
     #[allow(dead_code)]
@@ -17,6 +30,8 @@ mod app {
     #[derive(Debug, Clone, Default)]
     pub struct DiffRowSegmentCache {
         pub quality: DiffSegmentQuality,
+        pub left: Vec<CachedStyledSegment>,
+        pub right: Vec<CachedStyledSegment>,
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,10 +58,11 @@ mod app {
     }
 
     pub mod data {
-        use super::{DiffRowSegmentCache, DiffStreamRowMeta};
+        use super::{DiffRowSegmentCache, DiffStreamRowMeta, SyntaxTokenKind};
+        use gpui::SharedString;
         use hunk_domain::diff::SideBySideRow;
 
-        pub use super::DiffSegmentQuality;
+        pub use super::{CachedStyledSegment, DiffSegmentQuality};
 
         #[derive(Debug, Clone, Default)]
         pub struct DiffStream {
@@ -56,6 +72,25 @@ mod app {
         }
 
         pub use super::DiffStreamRowKind;
+
+        pub fn cached_runtime_fallback_segments(text: &str) -> Vec<CachedStyledSegment> {
+            if text.is_empty() {
+                return Vec::new();
+            }
+
+            vec![CachedStyledSegment {
+                plain_text: SharedString::from(text.to_string()),
+                syntax: SyntaxTokenKind::Plain,
+                changed: false,
+            }]
+        }
+
+        pub fn compact_cached_segments_for_render(
+            segments: Vec<CachedStyledSegment>,
+            _max_segments: usize,
+        ) -> Vec<CachedStyledSegment> {
+            segments
+        }
     }
 
     pub mod native_files_editor {
@@ -581,6 +616,8 @@ fn review_workspace_session_builds_viewport_snapshot_from_shared_geometry() {
     assert_eq!(code_row.left_line, session_row.left.line);
     assert_eq!(code_row.right_cell_kind, session_row.right.kind);
     assert_eq!(code_row.right_line, session_row.right.line);
+    assert!(!code_row.left_segments.is_empty());
+    assert!(!code_row.right_segments.is_empty());
     let visible_start_px = session
         .row_boundary_offset_px(viewport.sections[0].visible_row_range.start)
         .expect("visible range should have a top offset");
@@ -668,6 +705,7 @@ fn review_workspace_session_can_attach_render_rows() {
     let mut stream = review_stream_for_rows(&rows, "src/main.rs", FileStatus::Modified);
     stream.row_segments[1] = Some(app::DiffRowSegmentCache {
         quality: app::DiffSegmentQuality::Detailed,
+        ..Default::default()
     });
     let session = ReviewWorkspaceSession::from_compare_snapshot(&snapshot, &BTreeSet::new())
         .expect("workspace session should build")
@@ -710,6 +748,7 @@ fn review_workspace_session_prefetches_visible_code_rows_from_viewport_state() {
     let mut stream = review_stream_for_rows(&rows, "src/main.rs", FileStatus::Modified);
     stream.row_segments[2] = Some(app::DiffRowSegmentCache {
         quality: app::DiffSegmentQuality::Detailed,
+        ..Default::default()
     });
     let session = ReviewWorkspaceSession::from_compare_snapshot(&snapshot, &BTreeSet::new())
         .expect("workspace session should build")
@@ -836,6 +875,7 @@ fn review_workspace_session_prefers_higher_quality_segment_upgrades() {
     let mut stream = review_stream_for_rows(&[], "src/main.rs", FileStatus::Modified);
     stream.row_segments[0] = Some(app::DiffRowSegmentCache {
         quality: app::DiffSegmentQuality::Plain,
+        ..Default::default()
     });
     let mut session = ReviewWorkspaceSession::from_compare_snapshot(&snapshot, &BTreeSet::new())
         .expect("workspace session should build")
@@ -845,6 +885,7 @@ fn review_workspace_session_prefers_higher_quality_segment_upgrades() {
         0,
         app::DiffRowSegmentCache {
             quality: app::DiffSegmentQuality::Detailed,
+            ..Default::default()
         },
     ));
     assert_eq!(
@@ -855,6 +896,7 @@ fn review_workspace_session_prefers_higher_quality_segment_upgrades() {
         0,
         app::DiffRowSegmentCache {
             quality: app::DiffSegmentQuality::Plain,
+            ..Default::default()
         },
     ));
 }

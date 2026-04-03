@@ -821,23 +821,10 @@ impl DiffViewer {
             background = hunk_blend(background, cx.theme().primary, is_dark, 0.22, 0.13);
         }
 
-        let cached_row_segments = self.active_diff_row_segment_cache(spec.row_ix);
-        let segment_cache = if side == "left" {
-            cached_row_segments.map(|segments| &segments.left)
+        let segments = if side == "left" {
+            viewport_row.left_segments.clone()
         } else {
-            cached_row_segments.map(|segments| &segments.right)
-        };
-        let display_row = if side == "left" {
-            &viewport_row.left_display_row
-        } else {
-            &viewport_row.right_display_row
-        };
-        let fallback_segments;
-        let segments = if let Some(cached) = segment_cache {
-            cached.clone()
-        } else {
-            fallback_segments = cached_runtime_fallback_segments(display_row.text.as_str());
-            fallback_segments
+            viewport_row.right_segments.clone()
         };
 
         let mut gutter_background = match cell_kind {

@@ -15,7 +15,10 @@ use hunk_git::compare::CompareSnapshot;
 use hunk_git::git::{FileStatus, LineStats};
 use hunk_text::BufferId;
 
-use crate::app::data::{DiffSegmentQuality, DiffStream, DiffStreamRowKind};
+use crate::app::data::{
+    CachedStyledSegment, DiffSegmentQuality, DiffStream, DiffStreamRowKind,
+    cached_runtime_fallback_segments, compact_cached_segments_for_render,
+};
 use crate::app::native_files_editor::WorkspaceEditorSession;
 use crate::app::{DiffRowSegmentCache, DiffStreamRowMeta};
 
@@ -23,6 +26,7 @@ const FILE_HEADER_SURFACE_ROWS: usize = 1;
 const HUNK_HEADER_SURFACE_ROWS: usize = 1;
 pub(crate) const REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX: usize = 26;
 pub(crate) const REVIEW_SURFACE_HUNK_DIVIDER_HEIGHT_PX: usize = 6;
+const REVIEW_VIEWPORT_RENDER_MAX_SEGMENTS_PER_CELL: usize = 48;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ReviewCommentAnchor {
@@ -98,7 +102,9 @@ pub(crate) struct ReviewWorkspaceViewportRow {
     pub(crate) local_top_px: usize,
     pub(crate) height_px: usize,
     pub(crate) left_display_row: WorkspaceDisplayRow,
+    pub(crate) left_segments: Vec<CachedStyledSegment>,
     pub(crate) right_display_row: WorkspaceDisplayRow,
+    pub(crate) right_segments: Vec<CachedStyledSegment>,
 }
 
 #[derive(Debug, Clone)]
@@ -466,6 +472,7 @@ impl ReviewWorkspaceSession {
                                 .as_deref()
                                 .and_then(|path| self.status_for_path(path))
                         });
+                    let row_segment_cache = self.row_segment_cache(row_index);
                     Some(ReviewWorkspaceViewportRow {
                         row_index,
                         stable_id: row_metadata
@@ -487,7 +494,15 @@ impl ReviewWorkspaceSession {
                             .unwrap_or(visible_start_px)
                             .saturating_sub(visible_start_px),
                         height_px: self.surface_row_height_px(row_index),
+                        left_segments: review_viewport_render_segments(
+                            row_segment_cache.map(|cache| &cache.left),
+                            left_display_row.text.as_str(),
+                        ),
                         left_display_row,
+                        right_segments: review_viewport_render_segments(
+                            row_segment_cache.map(|cache| &cache.right),
+                            right_display_row.text.as_str(),
+                        ),
                         right_display_row,
                     })
                 })
@@ -1182,6 +1197,21 @@ fn review_effective_segment_quality(
         DiffSegmentQuality::SyntaxOnly => DiffSegmentQuality::Plain,
         DiffSegmentQuality::Plain => DiffSegmentQuality::Plain,
     }
+}
+
+fn review_viewport_render_segments(
+    cached_segments: Option<&Vec<CachedStyledSegment>>,
+    display_text: &str,
+) -> Vec<CachedStyledSegment> {
+    cached_segments
+        .cloned()
+        .map(|segments| {
+            compact_cached_segments_for_render(
+                segments,
+                REVIEW_VIEWPORT_RENDER_MAX_SEGMENTS_PER_CELL,
+            )
+        })
+        .unwrap_or_else(|| cached_runtime_fallback_segments(display_text))
 }
 
 fn prioritized_prefetch_row_indices_for_rows(
