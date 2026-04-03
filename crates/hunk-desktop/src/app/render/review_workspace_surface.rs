@@ -8,24 +8,6 @@ impl DiffViewer {
 
         self.refresh_review_surface_snapshot()
             .and_then(|_| self.current_review_surface_snapshot().cloned())
-            .or_else(|| {
-                let session = self.review_workspace_session.as_ref()?;
-                let surface = session.build_surface_snapshot(
-                    self.current_review_surface_scroll_top_px(),
-                    self.review_surface
-                        .diff_scroll_handle
-                        .bounds()
-                        .size
-                        .height
-                        .max(Pixels::ZERO)
-                        .as_f32()
-                        .round() as usize,
-                    1,
-                    REVIEW_SECTION_ROW_OVERSCAN_ROWS,
-                    &self.review_surface_snapshot_options(),
-                );
-                Some(surface)
-            })
     }
 
     fn render_review_workspace_sticky_file_banner(

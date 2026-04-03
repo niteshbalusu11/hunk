@@ -283,7 +283,8 @@ impl DiffViewer {
 
     pub(crate) fn should_reuse_loaded_review_compare(&self) -> bool {
         should_reuse_loaded_review_compare(LoadedReviewCompareReuseState {
-            has_loaded_session: self.review_workspace_session.is_some(),
+            has_loaded_session: self.review_workspace_session.is_some()
+                && self.review_surface.has_workspace_editor_backing(),
             review_compare_loading: self.review_compare_loading,
             review_compare_error: self.review_compare_error.as_deref(),
             current_left_source_id: self.review_left_source_id.as_deref(),
@@ -1063,6 +1064,15 @@ impl DiffViewer {
             .as_deref()
             .and_then(|selected| self.status_for_path(selected));
         self.rebuild_review_workspace_side_editors(next_selected_path.as_deref());
+        if !self.review_surface.has_workspace_editor_backing() {
+            self.clear_review_compare_loaded_state(
+                "Failed to build comparison surface.",
+                cx,
+            );
+            self.review_compare_error =
+                Some("failed to build editor-backed comparison surface".to_string());
+            return;
+        }
         self.set_review_selected_file(next_selected_path, next_selected_status);
         self.refresh_comments_cache_from_store();
         self.rebuild_comment_row_match_cache();

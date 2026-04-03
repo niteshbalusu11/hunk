@@ -130,6 +130,7 @@ Current state:
 - `ReviewWorkspaceSession` can now export left/right-side workspace document text from the loaded compare session, which gives the Diff path the document-seeding primitive it needs for a future editor-backed multi-file surface.
 - `ReviewWorkspaceSession` now also seeds persistent left/right workspace buffers and builds side display rows through the same buffer-backed workspace display helper `FilesEditor` uses, so Files and Diff now share one desktop display-model stage instead of separate line-array projection paths.
 - Review surface state now also seeds persistent left/right `FilesEditor` workspace instances from the loaded compare layout, and Review surface snapshots prefer those editor-owned workspace display snapshots when painting visible rows. That is the first step where Diff display data comes from real editor state instead of only session-local projection.
+- Review surface snapshots now also require those persistent left/right `FilesEditor` instances instead of falling back to session-local side display projection, so Diff no longer has two competing visible-row display pipelines underneath the shared surface.
 
 ### Phase 3: Build A Read-Only Multi-File Diff Surface On The Same Editor Path
 

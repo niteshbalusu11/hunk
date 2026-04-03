@@ -4,8 +4,6 @@ struct DiffColumnLayout {
     right_panel_width: Pixels,
 }
 
-const REVIEW_SECTION_ROW_OVERSCAN_ROWS: usize = 8;
-
 #[derive(Clone)]
 struct DiffSplitDrag(EntityId);
 

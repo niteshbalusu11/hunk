@@ -732,6 +732,7 @@ impl ReviewWorkspaceSession {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn build_surface_snapshot(
         &self,
         scroll_top_px: usize,

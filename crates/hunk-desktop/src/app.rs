@@ -1129,6 +1129,10 @@ impl ReviewWorkspaceSurfaceState {
         self.last_surface_snapshot = None;
     }
 
+    fn has_workspace_editor_backing(&self) -> bool {
+        self.left_files_editor.is_some() && self.right_files_editor.is_some()
+    }
+
     fn clear_row_selection(&mut self) {
         self.selection_anchor_row = None;
         self.selection_head_row = None;

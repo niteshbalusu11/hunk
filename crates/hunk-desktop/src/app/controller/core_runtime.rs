@@ -56,6 +56,10 @@ impl DiffViewer {
             self.review_surface.clear_workspace_surface_snapshot();
             return None;
         }
+        if !self.review_surface.has_workspace_editor_backing() {
+            self.review_surface.clear_workspace_surface_snapshot();
+            return None;
+        }
 
         let session = self.review_workspace_session.as_ref()?;
         let scroll_top_px = self.current_review_surface_scroll_top_px();
@@ -76,10 +80,20 @@ impl DiffViewer {
             .is_none_or(|snapshot| {
                 snapshot.scroll_top_px != scroll_top_px
                     || snapshot.viewport_height_px != viewport_height_px
-            });
+        });
         if needs_refresh {
-            let left_editor = self.review_surface.left_files_editor.clone();
-            let right_editor = self.review_surface.right_files_editor.clone();
+            let left_editor = self
+                .review_surface
+                .left_files_editor
+                .as_ref()
+                .expect("review workspace surface requires a left side editor")
+                .clone();
+            let right_editor = self
+                .review_surface
+                .right_files_editor
+                .as_ref()
+                .expect("review workspace surface requires a right side editor")
+                .clone();
             let snapshot = session.build_surface_snapshot_with_display_provider(
                 scroll_top_px,
                 viewport_height_px,
@@ -87,34 +101,18 @@ impl DiffViewer {
                 8,
                 &self.review_surface_snapshot_options(),
                 |visible_row_range, side| match side {
-                    review_workspace_session::ReviewWorkspaceEditorSide::Left => left_editor
-                        .as_ref()
-                        .map(|editor| {
-                            self.review_workspace_display_rows_from_editor(
-                                editor,
-                                visible_row_range.clone(),
-                            )
-                        })
-                        .unwrap_or_else(|| {
-                            session.build_display_snapshot_for_side(
-                                visible_row_range,
-                                review_workspace_session::ReviewWorkspaceEditorSide::Left,
-                            )
-                        }),
-                    review_workspace_session::ReviewWorkspaceEditorSide::Right => right_editor
-                        .as_ref()
-                        .map(|editor| {
-                            self.review_workspace_display_rows_from_editor(
-                                editor,
-                                visible_row_range.clone(),
-                            )
-                        })
-                        .unwrap_or_else(|| {
-                            session.build_display_snapshot_for_side(
-                                visible_row_range,
-                                review_workspace_session::ReviewWorkspaceEditorSide::Right,
-                            )
-                        }),
+                    review_workspace_session::ReviewWorkspaceEditorSide::Left => {
+                        self.review_workspace_display_rows_from_editor(
+                            &left_editor,
+                            visible_row_range,
+                        )
+                    }
+                    review_workspace_session::ReviewWorkspaceEditorSide::Right => {
+                        self.review_workspace_display_rows_from_editor(
+                            &right_editor,
+                            visible_row_range,
+                        )
+                    }
                 },
             );
             self.review_surface.last_surface_snapshot = Some(snapshot);
@@ -129,7 +127,9 @@ impl DiffViewer {
     pub(super) fn current_review_surface_snapshot(
         &self,
     ) -> Option<&review_workspace_session::ReviewWorkspaceSurfaceSnapshot> {
-        if self.workspace_view_mode == WorkspaceViewMode::Diff {
+        if self.workspace_view_mode == WorkspaceViewMode::Diff
+            && self.review_surface.has_workspace_editor_backing()
+        {
             return self.review_surface.last_surface_snapshot.as_ref();
         }
 
@@ -140,20 +140,9 @@ impl DiffViewer {
         &self,
     ) -> Option<review_workspace_session::ReviewWorkspaceVisibleState> {
         if self.workspace_view_mode == WorkspaceViewMode::Diff {
-            if let Some(visible_state) = self
+            return self
                 .current_review_surface_snapshot()
-                .map(|snapshot| snapshot.visible_state.clone())
-            {
-                return Some(visible_state);
-            }
-
-            if let Some(session) = self.review_workspace_session.as_ref() {
-                let viewport_height = self.review_surface.diff_scroll_handle.bounds().size.height;
-                return Some(session.build_visible_state(
-                    self.current_review_surface_scroll_top_px(),
-                    viewport_height.max(Pixels::ZERO).as_f32().round() as usize,
-                ));
-            }
+                .map(|snapshot| snapshot.visible_state.clone());
         }
 
         None
