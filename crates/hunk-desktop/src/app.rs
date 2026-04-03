@@ -1075,6 +1075,8 @@ struct WorkspaceProjectState {
 
 struct ReviewWorkspaceSurfaceState {
     status_message: Option<String>,
+    left_files_editor: Option<native_files_editor::SharedFilesEditor>,
+    right_files_editor: Option<native_files_editor::SharedFilesEditor>,
     diff_visible_file_header_lookup: Vec<Option<usize>>,
     diff_visible_hunk_header_lookup: Vec<Option<usize>>,
     diff_list_state: ListState,
@@ -1096,6 +1098,8 @@ impl ReviewWorkspaceSurfaceState {
     fn new() -> Self {
         Self {
             status_message: None,
+            left_files_editor: None,
+            right_files_editor: None,
             diff_visible_file_header_lookup: Vec::new(),
             diff_visible_hunk_header_lookup: Vec::new(),
             diff_list_state: Self::empty_diff_list_state(),

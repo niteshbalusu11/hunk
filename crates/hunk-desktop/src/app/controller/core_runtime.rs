@@ -1,4 +1,24 @@
 impl DiffViewer {
+    fn review_workspace_display_rows_from_editor(
+        &self,
+        editor: &crate::app::native_files_editor::SharedFilesEditor,
+        visible_row_range: std::ops::Range<usize>,
+    ) -> Vec<hunk_editor::WorkspaceDisplayRow> {
+        editor
+            .borrow()
+            .build_workspace_display_snapshot(
+                hunk_editor::Viewport {
+                    first_visible_row: visible_row_range.start,
+                    visible_row_count: visible_row_range.len(),
+                    horizontal_offset: 0,
+                },
+                4,
+                false,
+            )
+            .map(|snapshot| snapshot.visible_rows)
+            .unwrap_or_default()
+    }
+
     pub(super) fn review_surface_snapshot_options(
         &self,
     ) -> review_workspace_session::ReviewWorkspaceSurfaceOptions {
@@ -58,12 +78,44 @@ impl DiffViewer {
                     || snapshot.viewport_height_px != viewport_height_px
             });
         if needs_refresh {
-            let snapshot = session.build_surface_snapshot(
+            let left_editor = self.review_surface.left_files_editor.clone();
+            let right_editor = self.review_surface.right_files_editor.clone();
+            let snapshot = session.build_surface_snapshot_with_display_provider(
                 scroll_top_px,
                 viewport_height_px,
                 1,
                 8,
                 &self.review_surface_snapshot_options(),
+                |visible_row_range, side| match side {
+                    review_workspace_session::ReviewWorkspaceEditorSide::Left => left_editor
+                        .as_ref()
+                        .map(|editor| {
+                            self.review_workspace_display_rows_from_editor(
+                                editor,
+                                visible_row_range.clone(),
+                            )
+                        })
+                        .unwrap_or_else(|| {
+                            session.build_display_snapshot_for_side(
+                                visible_row_range,
+                                review_workspace_session::ReviewWorkspaceEditorSide::Left,
+                            )
+                        }),
+                    review_workspace_session::ReviewWorkspaceEditorSide::Right => right_editor
+                        .as_ref()
+                        .map(|editor| {
+                            self.review_workspace_display_rows_from_editor(
+                                editor,
+                                visible_row_range.clone(),
+                            )
+                        })
+                        .unwrap_or_else(|| {
+                            session.build_display_snapshot_for_side(
+                                visible_row_range,
+                                review_workspace_session::ReviewWorkspaceEditorSide::Right,
+                            )
+                        }),
+                },
             );
             self.review_surface.last_surface_snapshot = Some(snapshot);
         }

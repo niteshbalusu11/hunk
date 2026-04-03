@@ -22,8 +22,7 @@ impl FilesEditor {
             return Ok(());
         }
 
-        let workspace_buffers = self.build_workspace_buffers(documents);
-        self.validate_workspace_layout_buffers(&layout, &workspace_buffers)?;
+        let workspace_buffers = self.build_workspace_layout_buffers(&layout, documents)?;
         self.workspace_session
             .open_workspace_layout(layout, preferred_path);
         self.install_workspace_buffers_for_open_session(workspace_buffers)
@@ -96,6 +95,30 @@ impl FilesEditor {
             workspace_buffers.insert(path, buffer);
         }
         workspace_buffers
+    }
+
+    fn build_workspace_layout_buffers(
+        &mut self,
+        layout: &WorkspaceLayout,
+        documents: Vec<(PathBuf, String)>,
+    ) -> Result<BTreeMap<PathBuf, TextBuffer>> {
+        let buffer_id_by_path = layout
+            .documents()
+            .iter()
+            .map(|document| (document.path().to_path_buf(), document.buffer_id))
+            .collect::<BTreeMap<_, _>>();
+
+        let mut workspace_buffers = BTreeMap::new();
+        for (path, contents) in documents {
+            let buffer_id = buffer_id_by_path.get(&path).copied().ok_or_else(|| {
+                anyhow!("missing workspace layout document for {}", path.display())
+            })?;
+            self.next_buffer_id = self.next_buffer_id.max(buffer_id.get().saturating_add(1));
+            workspace_buffers.insert(path, TextBuffer::new(buffer_id, contents.as_str()));
+        }
+
+        self.validate_workspace_layout_buffers(layout, &workspace_buffers)?;
+        Ok(workspace_buffers)
     }
 
     #[allow(dead_code)]

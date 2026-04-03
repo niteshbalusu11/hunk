@@ -352,8 +352,8 @@ fn workspace_layout_documents_can_open_custom_excerpt_layouts() {
     let lib_document_id = WorkspaceDocumentId::new(2);
     let layout = WorkspaceLayout::new(
         vec![
-            WorkspaceDocument::new(main_document_id, "src/main.rs", BufferId::new(2), 3),
-            WorkspaceDocument::new(lib_document_id, "src/lib.rs", BufferId::new(3), 2),
+            WorkspaceDocument::new(main_document_id, "src/main.rs", BufferId::new(11), 3),
+            WorkspaceDocument::new(lib_document_id, "src/lib.rs", BufferId::new(21), 2),
         ],
         vec![
             WorkspaceExcerptSpec::new(
@@ -400,8 +400,8 @@ fn workspace_display_snapshot_projects_rows_across_stored_workspace_buffers() {
     let lib_document_id = WorkspaceDocumentId::new(2);
     let layout = WorkspaceLayout::new(
         vec![
-            WorkspaceDocument::new(main_document_id, "src/main.rs", BufferId::new(2), 4),
-            WorkspaceDocument::new(lib_document_id, "src/lib.rs", BufferId::new(3), 2),
+            WorkspaceDocument::new(main_document_id, "src/main.rs", BufferId::new(11), 4),
+            WorkspaceDocument::new(lib_document_id, "src/lib.rs", BufferId::new(21), 2),
         ],
         vec![
             WorkspaceExcerptSpec::new(
