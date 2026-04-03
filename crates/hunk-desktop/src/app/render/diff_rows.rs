@@ -350,6 +350,16 @@ impl DiffViewer {
         }
 
         let line_number = cell.line.map(|line| line.to_string()).unwrap_or_default();
+        let display_row = viewport_row.map(|row| {
+            if side == "left" {
+                &row.left_display_row
+            } else {
+                &row.right_display_row
+            }
+        });
+        let cell_text = display_row
+            .map(|row| row.text.as_str())
+            .unwrap_or(cell.text.as_str());
         let cached_row_segments = viewport_row
             .and_then(|row| row.segment_cache.as_ref())
             .or_else(|| self.active_diff_row_segment_cache(spec.row_ix));
@@ -362,7 +372,7 @@ impl DiffViewer {
         let styled_segments = if let Some(cached) = segment_cache {
             cached
         } else {
-            fallback_segments = cached_runtime_fallback_segments(&cell.text);
+            fallback_segments = cached_runtime_fallback_segments(cell_text);
             &fallback_segments
         };
         let line_number_width = if side == "left" {

@@ -559,6 +559,17 @@ fn review_workspace_session_builds_viewport_snapshot_from_shared_geometry() {
             .flat_map(|section| section.rows.iter().map(|row| row.row_index))
             .collect::<Vec<_>>(),
     );
+    let code_row = viewport
+        .sections
+        .iter()
+        .flat_map(|section| section.rows.iter())
+        .find(|row| row.row.kind == DiffRowKind::Code)
+        .expect("viewport should include at least one code row");
+    let session_row = session
+        .row(code_row.row_index)
+        .expect("session row should exist for viewport code row");
+    assert_eq!(code_row.left_display_row.text, session_row.left.text);
+    assert_eq!(code_row.right_display_row.text, session_row.right.text);
 }
 
 #[test]

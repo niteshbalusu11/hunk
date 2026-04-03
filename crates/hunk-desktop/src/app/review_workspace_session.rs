@@ -7,8 +7,9 @@ use hunk_domain::diff::{
     DiffCellKind, DiffDocument, DiffHunk, DiffLineKind, DiffRowKind, parse_patch_document,
 };
 use hunk_editor::{
-    WorkspaceDocument, WorkspaceDocumentId, WorkspaceExcerptId, WorkspaceExcerptKind,
-    WorkspaceExcerptSpec, WorkspaceLayout, WorkspaceLayoutError,
+    Viewport, WorkspaceDisplayRow, WorkspaceDocument, WorkspaceDocumentId, WorkspaceExcerptId,
+    WorkspaceExcerptKind, WorkspaceExcerptSpec, WorkspaceLayout, WorkspaceLayoutError,
+    build_workspace_display_snapshot,
 };
 use hunk_git::compare::CompareSnapshot;
 use hunk_git::git::FileStatus;
@@ -87,6 +88,8 @@ pub(crate) struct ReviewWorkspaceViewportRow {
     pub(crate) row: SideBySideRow,
     pub(crate) metadata: Option<DiffStreamRowMeta>,
     pub(crate) segment_cache: Option<DiffRowSegmentCache>,
+    pub(crate) left_display_row: WorkspaceDisplayRow,
+    pub(crate) right_display_row: WorkspaceDisplayRow,
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +114,8 @@ pub(crate) struct ReviewWorkspaceSession {
     file_ranges: Vec<ReviewWorkspaceFileRange>,
     hunk_ranges: Vec<ReviewWorkspaceHunkRange>,
     sections: Vec<ReviewWorkspaceSection>,
+    left_document_lines: BTreeMap<WorkspaceDocumentId, Vec<String>>,
+    right_document_lines: BTreeMap<WorkspaceDocumentId, Vec<String>>,
     rows: Vec<SideBySideRow>,
     row_metadata: Vec<DiffStreamRowMeta>,
     row_segments: Vec<Option<DiffRowSegmentCache>>,
@@ -250,6 +255,8 @@ impl ReviewWorkspaceSession {
             file_ranges,
             hunk_ranges,
             sections,
+            left_document_lines: BTreeMap::new(),
+            right_document_lines: BTreeMap::new(),
             rows: Vec::new(),
             row_metadata: Vec::new(),
             row_segments: Vec::new(),
@@ -266,6 +273,7 @@ impl ReviewWorkspaceSession {
         self.rows = stream.rows.clone();
         self.row_metadata = stream.row_metadata.clone();
         self.row_segments = stream.row_segments.clone();
+        self.rebuild_document_line_text();
         self.rebuild_surface_geometry();
         self
     }
@@ -378,6 +386,14 @@ impl ReviewWorkspaceSession {
                     overscan_rows,
                 )
                 .unwrap_or(section.start_row..section.end_row);
+            let left_display_rows = self.build_display_snapshot_for_side(
+                visible_row_range.clone(),
+                ReviewWorkspaceDisplaySide::Left,
+            );
+            let right_display_rows = self.build_display_snapshot_for_side(
+                visible_row_range.clone(),
+                ReviewWorkspaceDisplaySide::Right,
+            );
             let top_spacer_height_px = self
                 .row_boundary_offset_px(visible_row_range.start)
                 .unwrap_or(pixel_range.start)
@@ -388,12 +404,16 @@ impl ReviewWorkspaceSession {
             );
             let rows = visible_row_range
                 .clone()
-                .filter_map(|row_index| {
+                .zip(left_display_rows.into_iter())
+                .zip(right_display_rows.into_iter())
+                .filter_map(|((row_index, left_display_row), right_display_row)| {
                     Some(ReviewWorkspaceViewportRow {
                         row_index,
                         row: self.row(row_index)?.clone(),
                         metadata: self.row_metadata(row_index).cloned(),
                         segment_cache: self.row_segment_cache(row_index).cloned(),
+                        left_display_row,
+                        right_display_row,
                     })
                 })
                 .collect();
@@ -874,6 +894,82 @@ impl ReviewWorkspaceSession {
             .collect();
     }
 
+    fn rebuild_document_line_text(&mut self) {
+        self.left_document_lines = self
+            .layout
+            .documents()
+            .iter()
+            .map(|document| (document.id, vec![String::new(); document.line_count.max(1)]))
+            .collect();
+        self.right_document_lines = self
+            .layout
+            .documents()
+            .iter()
+            .map(|document| (document.id, vec![String::new(); document.line_count.max(1)]))
+            .collect();
+
+        for row_ix in 0..self.layout.total_rows().min(self.rows.len()) {
+            let Some(location) = self.layout.locate_row(row_ix) else {
+                continue;
+            };
+            let Some(document_line) = location.document_line else {
+                continue;
+            };
+            let Some(row) = self.rows.get(row_ix) else {
+                continue;
+            };
+            if let Some(lines) = self.left_document_lines.get_mut(&location.document_id)
+                && let Some(slot) = lines.get_mut(document_line)
+            {
+                *slot = row.left.text.clone();
+            }
+            if let Some(lines) = self.right_document_lines.get_mut(&location.document_id)
+                && let Some(slot) = lines.get_mut(document_line)
+            {
+                *slot = row.right.text.clone();
+            }
+        }
+    }
+
+    fn build_display_snapshot_for_side(
+        &self,
+        visible_row_range: Range<usize>,
+        side: ReviewWorkspaceDisplaySide,
+    ) -> Vec<WorkspaceDisplayRow> {
+        if visible_row_range.is_empty() {
+            return Vec::new();
+        }
+
+        build_workspace_display_snapshot(
+            &self.layout,
+            Viewport {
+                first_visible_row: visible_row_range.start,
+                visible_row_count: visible_row_range.len(),
+                horizontal_offset: 0,
+            },
+            4,
+            false,
+            |document_id, document_line| self.document_line_text(side, document_id, document_line),
+        )
+        .visible_rows
+    }
+
+    fn document_line_text(
+        &self,
+        side: ReviewWorkspaceDisplaySide,
+        document_id: WorkspaceDocumentId,
+        document_line: usize,
+    ) -> Option<String> {
+        let lines = match side {
+            ReviewWorkspaceDisplaySide::Left => &self.left_document_lines,
+            ReviewWorkspaceDisplaySide::Right => &self.right_document_lines,
+        };
+        lines
+            .get(&document_id)
+            .and_then(|document_lines| document_lines.get(document_line))
+            .cloned()
+    }
+
     fn surface_row_height_px(&self, row_ix: usize) -> usize {
         match self.rows.get(row_ix).map(|row| row.kind) {
             Some(DiffRowKind::HunkHeader) => REVIEW_SURFACE_HUNK_DIVIDER_HEIGHT_PX,
@@ -894,6 +990,12 @@ impl ReviewWorkspaceSession {
             Err(ix) => ix.saturating_sub(1).min(row_count.saturating_sub(1)),
         }
     }
+}
+
+#[derive(Clone, Copy)]
+enum ReviewWorkspaceDisplaySide {
+    Left,
+    Right,
 }
 
 fn review_document_line_count(document: &DiffDocument) -> usize {
