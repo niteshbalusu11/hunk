@@ -158,6 +158,12 @@ pub(crate) struct ReviewWorkspaceSurfaceSnapshot {
     pub(crate) visible_state: ReviewWorkspaceVisibleState,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ReviewWorkspaceSurfaceOptions {
+    pub(crate) comment_affordance_rows: BTreeSet<usize>,
+    pub(crate) active_comment_editor_row: Option<usize>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ReviewWorkspaceSurfaceOverlayKind {
     FileHeaderControls { path: String, status: FileStatus },
@@ -513,6 +519,7 @@ impl ReviewWorkspaceSession {
         viewport_height_px: usize,
         overscan_sections: usize,
         overscan_rows: usize,
+        options: &ReviewWorkspaceSurfaceOptions,
     ) -> ReviewWorkspaceViewportSnapshot {
         let mut sections = Vec::new();
         for section_ix in self.visible_section_range_for_viewport(
@@ -587,7 +594,9 @@ impl ReviewWorkspaceSession {
                             .and_then(|path| self.file_line_stats.get(path).copied()),
                         file_path,
                         file_status,
-                        show_comment_affordance: false,
+                        show_comment_affordance: options
+                            .comment_affordance_rows
+                            .contains(&row_index),
                         text: row.text.clone(),
                         left_cell_kind: row.left.kind,
                         left_line: row.left.line,
@@ -621,26 +630,69 @@ impl ReviewWorkspaceSession {
         viewport_height_px: usize,
         overscan_sections: usize,
         overscan_rows: usize,
+        options: &ReviewWorkspaceSurfaceOptions,
     ) -> ReviewWorkspaceSurfaceSnapshot {
         let viewport = self.build_viewport_snapshot(
             scroll_top_px,
             viewport_height_px,
             overscan_sections,
             overscan_rows,
+            options,
         );
         let visible_state = self.build_visible_state(scroll_top_px, viewport_height_px);
         let sticky_file_header = visible_state.top_row.and_then(|top_row| {
             let header = self.visible_file_header_at_surface_row(top_row)?;
             (header.row_index != top_row).then_some(header)
         });
+        let overlays = viewport
+            .sections
+            .iter()
+            .flat_map(|section| section.rows.iter())
+            .filter_map(|row| {
+                if row.stream_kind == DiffStreamRowKind::FileHeader
+                    && let (Some(path), Some(status)) = (row.file_path.as_ref(), row.file_status)
+                {
+                    return Some(ReviewWorkspaceSurfaceOverlay {
+                        row_index: row.row_index,
+                        top_px: row.surface_top_px,
+                        height_px: row.height_px,
+                        kind: ReviewWorkspaceSurfaceOverlayKind::FileHeaderControls {
+                            path: path.clone(),
+                            status,
+                        },
+                    });
+                }
+                if row.show_comment_affordance {
+                    return Some(ReviewWorkspaceSurfaceOverlay {
+                        row_index: row.row_index,
+                        top_px: row.surface_top_px,
+                        height_px: row.height_px,
+                        kind: ReviewWorkspaceSurfaceOverlayKind::CommentAffordance,
+                    });
+                }
+                None
+            })
+            .collect();
+        let active_comment_editor_overlay =
+            options.active_comment_editor_row.and_then(|row_index| {
+                let row_top_px = self.row_top_offset_px(row_index)?;
+                let top_px = crate::app::comment_overlay::review_comment_overlay_top_px(
+                    row_top_px,
+                    scroll_top_px,
+                    viewport_height_px,
+                    REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX,
+                )
+                .round() as usize;
+                Some(ReviewWorkspaceFloatingOverlay { row_index, top_px })
+            });
 
         ReviewWorkspaceSurfaceSnapshot {
             scroll_top_px,
             viewport_height_px,
             viewport,
-            overlays: Vec::new(),
+            overlays,
             sticky_file_header,
-            active_comment_editor_overlay: None,
+            active_comment_editor_overlay,
             visible_state,
         }
     }
@@ -657,6 +709,7 @@ impl ReviewWorkspaceSession {
             viewport_height_px,
             overscan_sections,
             overscan_rows,
+            &ReviewWorkspaceSurfaceOptions::default(),
         )
         .sections
         .into_iter()

@@ -10,7 +10,7 @@ impl DiffViewer {
             .and_then(|_| self.current_review_surface_snapshot().cloned())
             .or_else(|| {
                 let session = self.review_workspace_session.as_ref()?;
-                let mut surface = session.build_surface_snapshot(
+                let surface = session.build_surface_snapshot(
                     self.current_review_surface_scroll_top_px(),
                     self.review_surface
                         .diff_scroll_handle
@@ -22,8 +22,8 @@ impl DiffViewer {
                         .round() as usize,
                     1,
                     REVIEW_SECTION_ROW_OVERSCAN_ROWS,
+                    &self.review_surface_snapshot_options(),
                 );
-                self.decorate_review_surface_snapshot(&mut surface);
                 Some(surface)
             })
     }

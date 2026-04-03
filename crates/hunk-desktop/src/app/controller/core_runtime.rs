@@ -1,60 +1,32 @@
 impl DiffViewer {
-    pub(super) fn decorate_review_surface_snapshot(
+    pub(super) fn review_surface_snapshot_options(
         &self,
-        snapshot: &mut review_workspace_session::ReviewWorkspaceSurfaceSnapshot,
-    ) {
-        let viewport_height_px = snapshot.viewport_height_px;
-        let scroll_top_px = snapshot.scroll_top_px;
-        let mut overlays = Vec::new();
-        for row in snapshot
-            .viewport
-            .sections
-            .iter_mut()
-            .flat_map(|section| section.rows.iter_mut())
+    ) -> review_workspace_session::ReviewWorkspaceSurfaceOptions {
+        let mut comment_affordance_rows = self
+            .comment_open_row_counts
+            .iter()
+            .enumerate()
+            .filter_map(|(row_ix, count)| {
+                (*count > 0 && self.row_supports_comments(row_ix)).then_some(row_ix)
+            })
+            .collect::<BTreeSet<_>>();
+
+        if let Some(row_ix) = self.hovered_comment_row.filter(|row_ix| self.row_supports_comments(*row_ix))
         {
-            row.show_comment_affordance = self.row_shows_comment_affordance(row.row_index);
-            if row.stream_kind == DiffStreamRowKind::FileHeader
-                && let (Some(path), Some(status)) = (row.file_path.as_ref(), row.file_status)
-            {
-                overlays.push(review_workspace_session::ReviewWorkspaceSurfaceOverlay {
-                    row_index: row.row_index,
-                    top_px: row.surface_top_px,
-                    height_px: row.height_px,
-                    kind: review_workspace_session::ReviewWorkspaceSurfaceOverlayKind::FileHeaderControls {
-                        path: path.clone(),
-                        status,
-                    },
-                });
-            }
-            if row.show_comment_affordance {
-                overlays.push(review_workspace_session::ReviewWorkspaceSurfaceOverlay {
-                    row_index: row.row_index,
-                    top_px: row.surface_top_px,
-                    height_px: row.height_px,
-                    kind: review_workspace_session::ReviewWorkspaceSurfaceOverlayKind::CommentAffordance,
-                });
-            }
+            comment_affordance_rows.insert(row_ix);
         }
-        snapshot.overlays = overlays;
-        snapshot.active_comment_editor_overlay = self
+
+        let active_comment_editor_row = self
             .active_comment_editor_row
-            .and_then(|row_index| {
-                let row_top_px = self
-                    .review_workspace_session
-                    .as_ref()
-                    .and_then(|session| session.row_top_offset_px(row_index))?;
-                let top_px = crate::app::comment_overlay::review_comment_overlay_top_px(
-                    row_top_px,
-                    scroll_top_px,
-                    viewport_height_px,
-                    crate::app::review_workspace_session::REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX,
-                )
-                .round() as usize;
-                Some(review_workspace_session::ReviewWorkspaceFloatingOverlay {
-                    row_index,
-                    top_px,
-                })
-            });
+            .filter(|row_ix| self.row_supports_comments(*row_ix));
+        if let Some(row_ix) = active_comment_editor_row {
+            comment_affordance_rows.insert(row_ix);
+        }
+
+        review_workspace_session::ReviewWorkspaceSurfaceOptions {
+            comment_affordance_rows,
+            active_comment_editor_row,
+        }
     }
 
     pub(super) fn refresh_review_surface_snapshot(
@@ -86,9 +58,13 @@ impl DiffViewer {
                     || snapshot.viewport_height_px != viewport_height_px
             });
         if needs_refresh {
-            let mut snapshot =
-                session.build_surface_snapshot(scroll_top_px, viewport_height_px, 1, 8);
-            self.decorate_review_surface_snapshot(&mut snapshot);
+            let snapshot = session.build_surface_snapshot(
+                scroll_top_px,
+                viewport_height_px,
+                1,
+                8,
+                &self.review_surface_snapshot_options(),
+            );
             self.review_surface.last_surface_snapshot = Some(snapshot);
         }
 

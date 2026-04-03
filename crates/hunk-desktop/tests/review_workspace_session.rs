@@ -96,6 +96,21 @@ mod app {
     pub mod native_files_editor {
         pub(crate) use crate::workspace_editor_session::WorkspaceEditorSession;
     }
+
+    pub mod comment_overlay {
+        pub(crate) fn review_comment_overlay_top_px(
+            row_top_px: usize,
+            scroll_top_px: usize,
+            viewport_height_px: usize,
+            row_height_px: usize,
+        ) -> f32 {
+            let desired_top = row_top_px
+                .saturating_sub(scroll_top_px)
+                .saturating_add(row_height_px) as f32;
+            let max_top = viewport_height_px.saturating_sub(176) as f32;
+            desired_top.clamp(8.0, max_top.max(8.0))
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -111,7 +126,8 @@ use hunk_git::compare::CompareSnapshot;
 use hunk_git::git::{ChangedFile, FileStatus, LineStats};
 use review_workspace_session::{
     REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX, REVIEW_SURFACE_HUNK_DIVIDER_HEIGHT_PX,
-    ReviewWorkspaceSegmentPrefetchRequest, ReviewWorkspaceSession,
+    ReviewWorkspaceSegmentPrefetchRequest, ReviewWorkspaceSession, ReviewWorkspaceSurfaceOptions,
+    ReviewWorkspaceSurfaceOverlayKind,
 };
 
 fn changed_file(path: &str, status: FileStatus) -> ChangedFile {
@@ -542,8 +558,13 @@ fn review_workspace_session_builds_viewport_snapshot_from_shared_geometry() {
         .expect("first section visible rows")
         .collect::<Vec<_>>();
 
-    let viewport =
-        session.build_viewport_snapshot(0, REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX * 2, 1, 1);
+    let viewport = session.build_viewport_snapshot(
+        0,
+        REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX * 2,
+        1,
+        1,
+        &ReviewWorkspaceSurfaceOptions::default(),
+    );
 
     assert_eq!(
         viewport.total_surface_height_px,
@@ -722,8 +743,13 @@ fn review_workspace_session_maps_viewport_pixels_back_to_rows() {
     let session = ReviewWorkspaceSession::from_compare_snapshot(&snapshot, &BTreeSet::new())
         .expect("workspace session should build")
         .with_render_stream(&stream);
-    let viewport =
-        session.build_viewport_snapshot(0, REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX * 3, 1, 1);
+    let viewport = session.build_viewport_snapshot(
+        0,
+        REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX * 3,
+        1,
+        1,
+        &ReviewWorkspaceSurfaceOptions::default(),
+    );
     let code_row = viewport
         .sections
         .iter()
@@ -907,7 +933,13 @@ fn review_workspace_session_surface_snapshot_reuses_viewport_and_visible_state()
     let session = ReviewWorkspaceSession::from_compare_snapshot(&snapshot, &BTreeSet::new())
         .expect("workspace session should build")
         .with_render_stream(&stream);
-    let surface = session.build_surface_snapshot(0, REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX * 4, 1, 8);
+    let surface = session.build_surface_snapshot(
+        0,
+        REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX * 4,
+        1,
+        8,
+        &ReviewWorkspaceSurfaceOptions::default(),
+    );
 
     assert_eq!(surface.scroll_top_px, 0);
     assert_eq!(
@@ -957,6 +989,7 @@ fn review_workspace_session_surface_snapshot_includes_sticky_file_header_after_h
         REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX * 4,
         1,
         8,
+        &ReviewWorkspaceSurfaceOptions::default(),
     );
 
     let sticky = surface
@@ -966,6 +999,74 @@ fn review_workspace_session_surface_snapshot_includes_sticky_file_header_after_h
     assert_eq!(sticky.row_index, 0);
     assert_eq!(sticky.path, "src/main.rs");
     assert_eq!(sticky.status, FileStatus::Modified);
+}
+
+#[test]
+fn review_workspace_session_surface_snapshot_builds_sparse_overlays_from_surface_options() {
+    let patch = "\
+@@ -1,2 +1,3 @@
+ before
+-old
++new
+ keep
+";
+    let snapshot = CompareSnapshot {
+        files: vec![changed_file("src/main.rs", FileStatus::Modified)],
+        file_line_stats: BTreeMap::from([(
+            "src/main.rs".to_string(),
+            LineStats {
+                added: 1,
+                removed: 1,
+            },
+        )]),
+        overall_line_stats: LineStats::default(),
+        patches_by_path: BTreeMap::from([("src/main.rs".to_string(), patch.to_string())]),
+    };
+
+    let rows = parse_patch_side_by_side(patch);
+    let stream = review_stream_for_rows(&rows, "src/main.rs", FileStatus::Modified);
+    let session = ReviewWorkspaceSession::from_compare_snapshot(&snapshot, &BTreeSet::new())
+        .expect("workspace session should build")
+        .with_render_stream(&stream);
+    let comment_row = 2;
+    let surface = session.build_surface_snapshot(
+        0,
+        REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX * 4,
+        1,
+        8,
+        &ReviewWorkspaceSurfaceOptions {
+            comment_affordance_rows: BTreeSet::from([comment_row]),
+            active_comment_editor_row: Some(comment_row),
+        },
+    );
+
+    assert!(surface.overlays.iter().any(|overlay| {
+        overlay.row_index == 0
+            && matches!(
+                overlay.kind,
+                ReviewWorkspaceSurfaceOverlayKind::FileHeaderControls { .. }
+            )
+    }));
+    assert!(surface.overlays.iter().any(|overlay| {
+        overlay.row_index == comment_row
+            && matches!(
+                overlay.kind,
+                ReviewWorkspaceSurfaceOverlayKind::CommentAffordance
+            )
+    }));
+    assert_eq!(
+        surface
+            .active_comment_editor_overlay
+            .as_ref()
+            .map(|overlay| overlay.row_index),
+        Some(comment_row)
+    );
+    assert!(
+        surface
+            .viewport
+            .row_by_index(comment_row)
+            .is_some_and(|row| row.show_comment_affordance)
+    );
 }
 
 #[test]
