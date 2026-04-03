@@ -1,3 +1,7 @@
+#[allow(dead_code)]
+#[path = "../src/app/native_files_editor_workspace.rs"]
+mod workspace_editor_session;
+
 mod app {
     #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
     pub enum DiffSegmentQuality {
@@ -27,6 +31,10 @@ mod app {
             pub row_metadata: Vec<DiffStreamRowMeta>,
             pub row_segments: Vec<Option<DiffRowSegmentCache>>,
         }
+    }
+
+    pub mod native_files_editor {
+        pub(crate) use crate::workspace_editor_session::WorkspaceEditorSession;
     }
 }
 
@@ -249,6 +257,44 @@ fn review_workspace_session_can_attach_render_rows() {
             .row(rows.len().saturating_sub(1))
             .map(|row| row.kind),
         rows.last().map(|row| row.kind)
+    );
+}
+
+#[test]
+fn review_workspace_session_can_build_editor_session_for_selected_path() {
+    let first_patch = "\
+@@ -1,2 +1,2 @@
+-before
++after
+ stay
+";
+    let second_patch = "\
+@@ -4,0 +5,2 @@
++new
++tail
+";
+    let snapshot = CompareSnapshot {
+        files: vec![
+            changed_file("src/main.rs", FileStatus::Modified),
+            changed_file("src/lib.rs", FileStatus::Added),
+        ],
+        file_line_stats: BTreeMap::new(),
+        overall_line_stats: LineStats::default(),
+        patches_by_path: BTreeMap::from([
+            ("src/main.rs".to_string(), first_patch.to_string()),
+            ("src/lib.rs".to_string(), second_patch.to_string()),
+        ]),
+    };
+
+    let session = ReviewWorkspaceSession::from_compare_snapshot(&snapshot, &BTreeSet::new())
+        .expect("workspace session should build");
+    let editor_session = session.build_editor_session(Some("src/lib.rs"));
+
+    assert_eq!(
+        editor_session
+            .active_path()
+            .map(|path| path.to_string_lossy().to_string()),
+        Some("src/lib.rs".to_string())
     );
 }
 

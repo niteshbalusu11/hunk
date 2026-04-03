@@ -29,7 +29,7 @@ mod workspace_session;
 
 use language_impl::overlay_kind_for_diagnostic_severity;
 use paint::{EditorLayout, RowSyntaxSpan, build_row_syntax_spans_for_row};
-use workspace_session::WorkspaceEditorSession;
+pub(crate) use workspace_session::WorkspaceEditorSession;
 
 pub(crate) fn scroll_direction_and_count(
     event: &ScrollWheelEvent,

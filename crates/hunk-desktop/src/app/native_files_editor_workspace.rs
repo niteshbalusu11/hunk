@@ -6,6 +6,7 @@ use hunk_editor::{
 };
 use hunk_text::BufferId;
 
+#[derive(Clone)]
 pub(crate) struct WorkspaceEditorSession {
     next_document_id: u64,
     next_excerpt_id: u64,
@@ -31,6 +32,27 @@ impl WorkspaceEditorSession {
             .expect("empty workspace layout should be valid");
         self.active_document_id = None;
         self.active_excerpt_id = None;
+    }
+
+    pub(crate) fn open_workspace_layout(
+        &mut self,
+        layout: WorkspaceLayout,
+        preferred_path: Option<&Path>,
+    ) {
+        self.layout = layout;
+        self.active_document_id = preferred_path
+            .and_then(|path| self.document_id_for_path(path))
+            .or_else(|| self.layout.documents().first().map(|document| document.id));
+        self.active_excerpt_id = self
+            .active_document_id
+            .and_then(|document_id| self.first_excerpt_id_for_document(document_id))
+            .or_else(|| {
+                self.layout
+                    .excerpts()
+                    .first()
+                    .map(|excerpt| excerpt.spec.id)
+            });
+        self.sync_id_counters_from_layout();
     }
 
     pub(crate) fn open_full_file_document(
@@ -60,10 +82,67 @@ impl WorkspaceEditorSession {
             0,
         )?;
 
-        self.layout = layout;
+        self.open_workspace_layout(layout, Some(path));
         self.active_document_id = Some(document_id);
         self.active_excerpt_id = Some(excerpt_id);
         Ok(())
+    }
+
+    pub(crate) fn activate_path(&mut self, path: &Path) -> bool {
+        let Some(document_id) = self.document_id_for_path(path) else {
+            return false;
+        };
+        self.activate_document(document_id)
+    }
+
+    fn sync_id_counters_from_layout(&mut self) {
+        self.next_document_id = self
+            .layout
+            .documents()
+            .iter()
+            .map(|document| document.id.get())
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        self.next_excerpt_id = self
+            .layout
+            .excerpts()
+            .iter()
+            .map(|excerpt| excerpt.spec.id.get())
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+    }
+
+    fn document_id_for_path(&self, path: &Path) -> Option<WorkspaceDocumentId> {
+        self.layout
+            .documents()
+            .iter()
+            .find(|document| document.path() == path)
+            .map(|document| document.id)
+    }
+
+    fn first_excerpt_id_for_document(
+        &self,
+        document_id: WorkspaceDocumentId,
+    ) -> Option<WorkspaceExcerptId> {
+        self.layout
+            .excerpts()
+            .iter()
+            .find(|excerpt| excerpt.spec.document_id == document_id)
+            .map(|excerpt| excerpt.spec.id)
+    }
+
+    fn activate_document(&mut self, document_id: WorkspaceDocumentId) -> bool {
+        if self.active_document_id == Some(document_id) {
+            return true;
+        }
+        let Some(excerpt_id) = self.first_excerpt_id_for_document(document_id) else {
+            return false;
+        };
+        self.active_document_id = Some(document_id);
+        self.active_excerpt_id = Some(excerpt_id);
+        true
     }
 
     #[cfg(test)]

@@ -227,6 +227,7 @@ impl DiffViewer {
                 .selected_path
                 .as_deref()
                 .and_then(|selected| self.status_for_path(selected));
+            self.sync_review_workspace_editor_active_path();
             self.request_repo_tree_reload(cx);
             if self.should_reuse_loaded_review_compare() {
                 self.scroll_selected_after_reload = false;
@@ -273,6 +274,7 @@ impl DiffViewer {
             self.last_visible_row_start = None;
             self.last_diff_scroll_offset = None;
             self.last_scroll_activity_at = Instant::now();
+            self.sync_review_workspace_editor_active_path();
         }
         cx.notify();
     }

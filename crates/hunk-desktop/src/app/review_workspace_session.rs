@@ -12,6 +12,7 @@ use hunk_git::git::FileStatus;
 use hunk_text::BufferId;
 
 use crate::app::data::DiffStream;
+use crate::app::native_files_editor::WorkspaceEditorSession;
 use crate::app::{DiffRowSegmentCache, DiffStreamRowMeta};
 
 const FILE_HEADER_SURFACE_ROWS: usize = 1;
@@ -277,6 +278,18 @@ impl ReviewWorkspaceSession {
 
     pub(crate) fn layout(&self) -> &WorkspaceLayout {
         &self.layout
+    }
+
+    pub(crate) fn build_editor_session(
+        &self,
+        preferred_path: Option<&str>,
+    ) -> WorkspaceEditorSession {
+        let mut session = WorkspaceEditorSession::new();
+        session.open_workspace_layout(
+            self.layout.clone(),
+            preferred_path.map(std::path::Path::new),
+        );
+        session
     }
 }
 

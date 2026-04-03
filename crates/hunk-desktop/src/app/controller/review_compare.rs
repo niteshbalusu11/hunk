@@ -170,6 +170,23 @@ impl DiffViewer {
         })
     }
 
+    fn rebuild_review_workspace_editor_session(&mut self) {
+        self.review_workspace_editor_session = self
+            .review_workspace_session
+            .as_ref()
+            .map(|session| session.build_editor_session(self.selected_path.as_deref()));
+    }
+
+    pub(crate) fn sync_review_workspace_editor_active_path(&mut self) {
+        let Some(session) = self.review_workspace_editor_session.as_mut() else {
+            return;
+        };
+        let Some(path) = self.selected_path.as_deref() else {
+            return;
+        };
+        let _ = session.activate_path(std::path::Path::new(path));
+    }
+
     fn subscribe_review_compare_picker_states(&self, cx: &mut Context<Self>) {
         let review_left_picker_state = self.review_left_picker_state.clone();
         cx.subscribe(
@@ -684,6 +701,7 @@ impl DiffViewer {
         self.review_compare_loading = false;
         self.review_compare_error = None;
         self.review_workspace_session = None;
+        self.review_workspace_editor_session = None;
         self.review_loaded_left_source_id = None;
         self.review_loaded_right_source_id = None;
         self.review_loaded_collapsed_files.clear();
@@ -718,6 +736,7 @@ impl DiffViewer {
             self.review_compare_loading = false;
             self.review_compare_error = None;
             self.review_last_selected_path = self.selected_path.clone();
+            self.sync_review_workspace_editor_active_path();
             self.prime_diff_surface_visible_state(false, cx);
             cx.notify();
             return;
@@ -884,6 +903,8 @@ impl DiffViewer {
             .as_deref()
             .and_then(|selected| self.status_for_path(selected));
         self.review_last_selected_path = self.selected_path.clone();
+        self.rebuild_review_workspace_editor_session();
+        self.sync_review_workspace_editor_active_path();
         self.refresh_comments_cache_from_store();
         self.rebuild_comment_row_match_cache();
         if self.review_comments_enabled() {
@@ -947,6 +968,7 @@ impl DiffViewer {
         self.review_loaded_left_source_id = None;
         self.review_loaded_right_source_id = None;
         self.review_loaded_collapsed_files.clear();
+        self.review_workspace_editor_session = None;
         self.review_loaded_snapshot_fingerprint = None;
         if self.workspace_view_mode == WorkspaceViewMode::Diff {
             self.scroll_selected_after_reload = true;

@@ -71,6 +71,7 @@ impl DiffViewer {
 
         self.selected_path = Some(next_path);
         self.selected_status = Some(next_status);
+        self.sync_review_workspace_editor_active_path();
         cx.notify();
     }
 

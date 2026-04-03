@@ -142,6 +142,8 @@ Tasks:
 
 Current state:
 - Review compare loading now rebuilds a shared workspace session with file ranges and hunk ranges.
+- The desktop workspace editor session now supports arbitrary multi-document/multi-excerpt layouts, not just one full-file excerpt.
+- Review now builds and persists one shared workspace editor session alongside the compare session and keeps its active document in sync with Review selection/path changes.
 - Sticky file headers, hunk navigation, and comment hunk lookup in Review now read from that shared session.
 - Review rendering now also reads row content, row metadata, and syntax segment caches from the shared session.
 - The remaining gap is the surface itself: Review still scrolls as a list over flattened rows instead of one editor-backed multi-file surface.

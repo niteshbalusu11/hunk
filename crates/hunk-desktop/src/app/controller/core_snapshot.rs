@@ -101,6 +101,7 @@ impl DiffViewer {
         self.review_compare_loading = false;
         self.review_compare_error = None;
         self.review_workspace_session = None;
+        self.review_workspace_editor_session = None;
         self.review_loaded_snapshot_fingerprint = None;
         self.review_last_selected_path = None;
         self.last_commit_subject = None;
