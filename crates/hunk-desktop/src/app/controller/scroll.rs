@@ -54,6 +54,10 @@ impl DiffViewer {
         row_ix: usize,
         cx: &mut Context<Self>,
     ) {
+        if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            self.sync_review_workspace_editor_selection_for_row(row_ix);
+        }
+
         if self.uses_review_workspace_sections_surface() {
             if let Some(visible_range) = self.current_review_visible_row_range() {
                 self.request_visible_row_range_segment_prefetch(visible_range, false, cx);

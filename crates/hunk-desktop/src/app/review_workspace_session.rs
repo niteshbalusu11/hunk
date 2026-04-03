@@ -431,6 +431,12 @@ impl ReviewWorkspaceSession {
             .map(|range| range.path.as_str())
     }
 
+    pub(crate) fn excerpt_id_at_surface_row(&self, row: usize) -> Option<WorkspaceExcerptId> {
+        self.layout
+            .excerpt_at_row(row)
+            .map(|excerpt| excerpt.spec.id)
+    }
+
     pub(crate) fn file_at_or_after_surface_row(
         &self,
         row: usize,

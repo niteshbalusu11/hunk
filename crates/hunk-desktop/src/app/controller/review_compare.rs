@@ -26,13 +26,16 @@ fn should_reuse_loaded_review_compare<F: PartialEq>(
 }
 
 fn preferred_review_workspace_path_for_session(
+    current_editor_path: Option<&str>,
     current_surface_path: Option<&str>,
     current_range_path: Option<&str>,
     last_selected_path: Option<&str>,
     session: &crate::app::review_workspace_session::ReviewWorkspaceSession,
 ) -> Option<String> {
-    current_surface_path
+    current_editor_path
+        .filter(|path| session.contains_path(path))
         .map(str::to_string)
+        .or_else(|| current_surface_path.map(str::to_string))
         .or_else(|| current_range_path.map(str::to_string))
         .or_else(|| {
             last_selected_path
@@ -171,11 +174,47 @@ fn update_persisted_review_compare_selection(
 }
 
 impl DiffViewer {
+    pub(crate) fn current_review_editor_path(&self) -> Option<String> {
+        self.review_surface
+            .workspace_editor_session
+            .as_ref()
+            .and_then(|session| session.active_path_buf())
+            .map(|path| path.to_string_lossy().to_string())
+    }
+
+    fn sync_review_workspace_editor_selection_for_path(&mut self, path: Option<&str>) {
+        let Some(workspace_session) = self.review_surface.workspace_editor_session.as_mut() else {
+            return;
+        };
+        let Some(path) = path else {
+            return;
+        };
+        let _ = workspace_session.activate_path(std::path::Path::new(path));
+    }
+
+    pub(crate) fn sync_review_workspace_editor_selection_for_row(&mut self, row_ix: usize) {
+        let Some(workspace_session) = self.review_surface.workspace_editor_session.as_mut() else {
+            return;
+        };
+        let Some(session) = self.review_workspace_session.as_ref() else {
+            return;
+        };
+        if let Some(excerpt_id) = session.excerpt_id_at_surface_row(row_ix)
+            && workspace_session.activate_excerpt(excerpt_id)
+        {
+            return;
+        }
+        if let Some(path) = session.path_at_surface_row(row_ix) {
+            let _ = workspace_session.activate_path(std::path::Path::new(path));
+        }
+    }
+
     pub(crate) fn set_review_selected_file(
         &mut self,
         path: Option<String>,
         status: Option<FileStatus>,
     ) {
+        self.sync_review_workspace_editor_selection_for_path(path.as_deref());
         self.review_surface.selected_path = path;
         let _ = status;
     }
@@ -200,13 +239,24 @@ impl DiffViewer {
 
     pub(crate) fn current_review_file_range(&self) -> Option<FileRowRange> {
         let session = self.review_workspace_session.as_ref()?;
-        self.current_review_surface_row()
+        self.current_review_editor_path()
+            .as_deref()
+            .and_then(|path| session.file_range_for_path(path))
+            .map(|range| FileRowRange {
+                path: range.path.clone(),
+                status: range.status,
+                start_row: range.start_row,
+                end_row: range.end_row,
+            })
+            .or_else(|| {
+                self.current_review_surface_row()
             .and_then(|row_ix| session.file_at_or_after_surface_row(row_ix))
             .map(|range| FileRowRange {
                 path: range.path.clone(),
                 status: range.status,
                 start_row: range.start_row,
                 end_row: range.end_row,
+            })
             })
             .or_else(|| {
                 self.review_surface.selected_path
@@ -226,6 +276,7 @@ impl DiffViewer {
     pub(crate) fn current_review_path(&self) -> Option<String> {
         if let Some(session) = self.review_workspace_session.as_ref() {
             return preferred_review_workspace_path_for_session(
+                self.current_review_editor_path().as_deref(),
                 None,
                 self.current_review_file_range().map(|range| range.path).as_deref(),
                 self.review_surface.selected_path.as_deref(),
@@ -772,6 +823,7 @@ impl DiffViewer {
         self.review_loaded_right_source_id = None;
         self.review_loaded_collapsed_files.clear();
         self.review_loaded_snapshot_fingerprint = None;
+        self.review_surface.clear_workspace_editor_session();
         self.review_surface.selected_path = None;
         self.review_surface.clear_row_selection();
         self.review_files.clear();
@@ -915,6 +967,13 @@ impl DiffViewer {
                     return;
                 }
             };
+        let preferred_selected_path = self
+            .current_review_editor_path()
+            .or_else(|| self.review_surface.selected_path.clone());
+        self.review_surface.workspace_editor_session = self
+            .review_workspace_session
+            .as_ref()
+            .map(|session| session.build_editor_session(preferred_selected_path.as_deref()));
         self.review_files = snapshot.files;
         self.review_file_status_by_path = self
             .review_files
@@ -949,7 +1008,6 @@ impl DiffViewer {
             self.review_surface.clear_legacy_diff_row_lookups();
         }
 
-        let preferred_selected_path = self.review_surface.selected_path.clone();
         let has_selection = preferred_selected_path
             .as_ref()
             .is_some_and(|path| self.active_diff_contains_path(path.as_str()));
@@ -1128,6 +1186,7 @@ mod review_compare_tests {
             preferred_review_workspace_path_for_session(
                 None,
                 None,
+                None,
                 Some("src/lib.rs"),
                 &session,
             ),
@@ -1143,10 +1202,27 @@ mod review_compare_tests {
             preferred_review_workspace_path_for_session(
                 None,
                 None,
+                None,
                 Some("also-missing.rs"),
                 &session,
             ),
             Some("src/main.rs".to_string())
+        );
+    }
+
+    #[test]
+    fn preferred_review_workspace_path_prefers_editor_session_path_when_available() {
+        let session = review_session(&["src/main.rs", "src/lib.rs"]);
+
+        assert_eq!(
+            preferred_review_workspace_path_for_session(
+                Some("src/lib.rs"),
+                Some("src/main.rs"),
+                None,
+                Some("src/main.rs"),
+                &session,
+            ),
+            Some("src/lib.rs".to_string())
         );
     }
 }

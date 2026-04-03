@@ -123,6 +123,10 @@ impl DiffViewer {
             self.review_surface.selection_head_row = Some(target_ix);
         }
 
+        if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            self.sync_review_workspace_editor_selection_for_row(target_ix);
+        }
+
         if let Some((path, status)) = self.selected_file_from_row_metadata(target_ix)
             && self.selected_path.as_deref() != Some(path.as_str())
         {
