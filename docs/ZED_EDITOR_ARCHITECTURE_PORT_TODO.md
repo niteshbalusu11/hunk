@@ -196,7 +196,7 @@ This is the phase that removes the last architectural reason for preview-only re
 
 ### Phase 6: Persist Editor Entities Across Tab Switches
 
-Status: Not started
+Status: In progress
 
 Targets:
 
@@ -207,13 +207,18 @@ Targets:
 Tasks:
 
 - [ ] Keep Files editor workspace state alive across mode switches.
-- [ ] Keep Diff editor workspace state alive when compare inputs are unchanged.
+- [x] Keep Diff editor workspace state alive when compare inputs are unchanged.
 - [ ] Recompute only when compare sources or repo snapshot fingerprints actually change.
 - [ ] Avoid scroll-position and layout churn when revisiting tabs.
 
 Zed analogue:
 
 - open editor items stay mounted and preserve state until the item itself is replaced.
+
+Current state:
+- Review now records which compare pair and repo snapshot fingerprint the loaded workspace session was built from.
+- Switching back to Diff reuses the loaded Review surface when that identity still matches, instead of unconditionally rebuilding the compare.
+- Review also remembers its last selected path separately from Files mode so tab switches can preserve Diff-oriented selection when the session is reused.
 
 ### Phase 7: Delete Legacy Diff Rendering Paths
 

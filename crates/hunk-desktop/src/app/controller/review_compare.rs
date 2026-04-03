@@ -1,3 +1,27 @@
+#[derive(Clone, Copy)]
+struct LoadedReviewCompareReuseState<'a, F> {
+    has_loaded_session: bool,
+    review_compare_loading: bool,
+    review_compare_error: Option<&'a str>,
+    current_left_source_id: Option<&'a str>,
+    current_right_source_id: Option<&'a str>,
+    loaded_left_source_id: Option<&'a str>,
+    loaded_right_source_id: Option<&'a str>,
+    current_snapshot_fingerprint: Option<&'a F>,
+    loaded_snapshot_fingerprint: Option<&'a F>,
+}
+
+fn should_reuse_loaded_review_compare<F: PartialEq>(
+    state: LoadedReviewCompareReuseState<'_, F>,
+) -> bool {
+    state.has_loaded_session
+        && !state.review_compare_loading
+        && state.review_compare_error.is_none()
+        && state.current_left_source_id == state.loaded_left_source_id
+        && state.current_right_source_id == state.loaded_right_source_id
+        && state.current_snapshot_fingerprint == state.loaded_snapshot_fingerprint
+}
+
 fn review_compare_branch_source_id(
     sources: &[ReviewCompareSourceOption],
     branch_name: &str,
@@ -127,6 +151,20 @@ fn update_persisted_review_compare_selection(
 }
 
 impl DiffViewer {
+    pub(crate) fn should_reuse_loaded_review_compare(&self) -> bool {
+        should_reuse_loaded_review_compare(LoadedReviewCompareReuseState {
+            has_loaded_session: self.review_workspace_session.is_some(),
+            review_compare_loading: self.review_compare_loading,
+            review_compare_error: self.review_compare_error.as_deref(),
+            current_left_source_id: self.review_left_source_id.as_deref(),
+            current_right_source_id: self.review_right_source_id.as_deref(),
+            loaded_left_source_id: self.review_loaded_left_source_id.as_deref(),
+            loaded_right_source_id: self.review_loaded_right_source_id.as_deref(),
+            current_snapshot_fingerprint: self.last_snapshot_fingerprint.as_ref(),
+            loaded_snapshot_fingerprint: self.review_loaded_snapshot_fingerprint.as_ref(),
+        })
+    }
+
     fn subscribe_review_compare_picker_states(&self, cx: &mut Context<Self>) {
         let review_left_picker_state = self.review_left_picker_state.clone();
         cx.subscribe(
@@ -641,6 +679,10 @@ impl DiffViewer {
         self.review_compare_loading = false;
         self.review_compare_error = None;
         self.review_workspace_session = None;
+        self.review_loaded_left_source_id = None;
+        self.review_loaded_right_source_id = None;
+        self.review_loaded_snapshot_fingerprint = None;
+        self.review_last_selected_path = None;
         self.review_files.clear();
         self.review_file_status_by_path.clear();
         self.review_file_line_stats.clear();
@@ -771,6 +813,9 @@ impl DiffViewer {
             .iter()
             .map(|file| (file.path.clone(), file.status))
             .collect();
+        self.review_loaded_left_source_id = self.review_left_source_id.clone();
+        self.review_loaded_right_source_id = self.review_right_source_id.clone();
+        self.review_loaded_snapshot_fingerprint = self.last_snapshot_fingerprint.clone();
         self.review_file_line_stats = snapshot.file_line_stats;
         self.review_overall_line_stats = snapshot.overall_line_stats;
         self.collapsed_files
@@ -822,6 +867,7 @@ impl DiffViewer {
             .selected_path
             .as_deref()
             .and_then(|selected| self.status_for_path(selected));
+        self.review_last_selected_path = self.selected_path.clone();
         self.refresh_comments_cache_from_store();
         self.rebuild_comment_row_match_cache();
         if self.review_comments_enabled() {
@@ -882,11 +928,52 @@ impl DiffViewer {
         self.comment_miss_streaks.clear();
         self.reset_comment_row_match_cache();
         self.clear_comment_ui_state();
+        self.review_loaded_left_source_id = None;
+        self.review_loaded_right_source_id = None;
+        self.review_loaded_snapshot_fingerprint = None;
         if self.workspace_view_mode == WorkspaceViewMode::Diff {
             self.scroll_selected_after_reload = true;
             self.request_review_compare_refresh(cx);
         } else {
             cx.notify();
         }
+    }
+}
+
+#[cfg(test)]
+mod review_compare_tests {
+    use super::{LoadedReviewCompareReuseState, should_reuse_loaded_review_compare};
+
+    #[test]
+    fn loaded_review_compare_reuse_requires_matching_identity() {
+        let matching_state = LoadedReviewCompareReuseState {
+            has_loaded_session: true,
+            review_compare_loading: false,
+            review_compare_error: None,
+            current_left_source_id: Some("left"),
+            current_right_source_id: Some("right"),
+            loaded_left_source_id: Some("left"),
+            loaded_right_source_id: Some("right"),
+            current_snapshot_fingerprint: Some(&1_u8),
+            loaded_snapshot_fingerprint: Some(&1_u8),
+        };
+
+        assert!(should_reuse_loaded_review_compare(matching_state));
+        assert!(!should_reuse_loaded_review_compare(LoadedReviewCompareReuseState {
+            loaded_right_source_id: Some("other"),
+            ..matching_state
+        }));
+        assert!(!should_reuse_loaded_review_compare(LoadedReviewCompareReuseState {
+            loaded_snapshot_fingerprint: Some(&2_u8),
+            ..matching_state
+        }));
+        assert!(!should_reuse_loaded_review_compare(LoadedReviewCompareReuseState {
+            review_compare_loading: true,
+            ..matching_state
+        }));
+        assert!(!should_reuse_loaded_review_compare(LoadedReviewCompareReuseState {
+            has_loaded_session: false,
+            ..matching_state
+        }));
     }
 }

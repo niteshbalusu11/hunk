@@ -14,6 +14,8 @@ impl DiffViewer {
             review_default_right_source_id: None,
             review_left_source_id: None,
             review_right_source_id: None,
+            review_loaded_left_source_id: None,
+            review_loaded_right_source_id: None,
             branch_name: "unknown".to_string(),
             branch_has_upstream: false,
             branch_ahead_count: 0,
@@ -45,6 +47,8 @@ impl DiffViewer {
             review_compare_loading: false,
             review_compare_error: None,
             review_workspace_session: None,
+            review_loaded_snapshot_fingerprint: None,
+            review_last_selected_path: None,
             overall_line_stats: LineStats::default(),
             last_git_workspace_fingerprint: None,
             recent_commits_loading: false,
@@ -124,6 +128,8 @@ impl DiffViewer {
             review_default_right_source_id: self.review_default_right_source_id.take(),
             review_left_source_id: self.review_left_source_id.take(),
             review_right_source_id: self.review_right_source_id.take(),
+            review_loaded_left_source_id: self.review_loaded_left_source_id.take(),
+            review_loaded_right_source_id: self.review_loaded_right_source_id.take(),
             branch_name: std::mem::take(&mut self.branch_name),
             branch_has_upstream: self.branch_has_upstream,
             branch_ahead_count: self.branch_ahead_count,
@@ -159,6 +165,8 @@ impl DiffViewer {
             review_compare_loading: self.review_compare_loading,
             review_compare_error: self.review_compare_error.take(),
             review_workspace_session: self.review_workspace_session.take(),
+            review_loaded_snapshot_fingerprint: self.review_loaded_snapshot_fingerprint.take(),
+            review_last_selected_path: self.review_last_selected_path.take(),
             overall_line_stats: self.overall_line_stats,
             last_git_workspace_fingerprint: self.last_git_workspace_fingerprint.take(),
             recent_commits_loading: self.recent_commits_loading,
@@ -217,6 +225,8 @@ impl DiffViewer {
         self.review_default_right_source_id = state.review_default_right_source_id;
         self.review_left_source_id = state.review_left_source_id;
         self.review_right_source_id = state.review_right_source_id;
+        self.review_loaded_left_source_id = state.review_loaded_left_source_id;
+        self.review_loaded_right_source_id = state.review_loaded_right_source_id;
         self.branch_name = state.branch_name;
         self.branch_has_upstream = state.branch_has_upstream;
         self.branch_ahead_count = state.branch_ahead_count;
@@ -248,6 +258,8 @@ impl DiffViewer {
         self.review_compare_loading = state.review_compare_loading;
         self.review_compare_error = state.review_compare_error;
         self.review_workspace_session = state.review_workspace_session;
+        self.review_loaded_snapshot_fingerprint = state.review_loaded_snapshot_fingerprint;
+        self.review_last_selected_path = state.review_last_selected_path;
         self.overall_line_stats = state.overall_line_stats;
         self.last_git_workspace_fingerprint = state.last_git_workspace_fingerprint;
         self.recent_commits_loading = state.recent_commits_loading;

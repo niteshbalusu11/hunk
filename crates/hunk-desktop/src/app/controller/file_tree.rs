@@ -13,10 +13,16 @@ impl DiffViewer {
     fn preferred_review_workspace_path(&self) -> Option<String> {
         if let Some(session) = self.review_workspace_session.as_ref() {
             return self
-                .selected_path
+                .review_last_selected_path
                 .as_deref()
                 .filter(|path| session.contains_path(path))
                 .map(str::to_string)
+                .or_else(|| {
+                    self.selected_path
+                        .as_deref()
+                        .filter(|path| session.contains_path(path))
+                        .map(str::to_string)
+                })
                 .or_else(|| session.first_path().map(ToString::to_string));
         }
 
@@ -173,6 +179,10 @@ impl DiffViewer {
             return;
         }
 
+        if previous_mode == WorkspaceViewMode::Diff {
+            self.review_last_selected_path = self.selected_path.clone();
+        }
+
         if previous_mode == WorkspaceViewMode::Files {
             self.capture_sidebar_repo_scroll_anchor();
             if self.repo_tree.full_cache.is_some() {
@@ -218,8 +228,13 @@ impl DiffViewer {
                 .as_deref()
                 .and_then(|selected| self.status_for_path(selected));
             self.request_repo_tree_reload(cx);
-            self.scroll_selected_after_reload = true;
-            self.request_selected_diff_reload(cx);
+            if self.should_reuse_loaded_review_compare() {
+                self.scroll_selected_after_reload = false;
+                self.prime_diff_surface_visible_state(cx);
+            } else {
+                self.scroll_selected_after_reload = true;
+                self.request_selected_diff_reload(cx);
+            }
         } else if mode == WorkspaceViewMode::Ai {
             self.refresh_ai_repo_thread_catalog(cx);
             self.ensure_ai_runtime_started(cx);

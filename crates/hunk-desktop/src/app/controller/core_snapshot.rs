@@ -78,6 +78,8 @@ impl DiffViewer {
         self.review_default_right_source_id = None;
         self.review_left_source_id = None;
         self.review_right_source_id = None;
+        self.review_loaded_left_source_id = None;
+        self.review_loaded_right_source_id = None;
         self.sync_review_compare_picker_states(cx);
         self.ai_handle_workspace_change(previous_ai_workspace_key, cx);
         self.request_ai_composer_file_completion_reload(cx);
@@ -97,6 +99,9 @@ impl DiffViewer {
         self.review_overall_line_stats = LineStats::default();
         self.review_compare_loading = false;
         self.review_compare_error = None;
+        self.review_workspace_session = None;
+        self.review_loaded_snapshot_fingerprint = None;
+        self.review_last_selected_path = None;
         self.last_commit_subject = None;
         self.selected_path = None;
         self.selected_status = None;
