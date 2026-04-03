@@ -20,6 +20,8 @@ use crate::app::{DiffRowSegmentCache, DiffStreamRowMeta};
 
 const FILE_HEADER_SURFACE_ROWS: usize = 1;
 const HUNK_HEADER_SURFACE_ROWS: usize = 1;
+pub(crate) const REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX: usize = 26;
+pub(crate) const REVIEW_SURFACE_HUNK_DIVIDER_HEIGHT_PX: usize = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ReviewCommentAnchor {
@@ -78,6 +80,9 @@ pub(crate) struct ReviewWorkspaceSession {
     rows: Vec<SideBySideRow>,
     row_metadata: Vec<DiffStreamRowMeta>,
     row_segments: Vec<Option<DiffRowSegmentCache>>,
+    row_top_offsets: Vec<usize>,
+    section_pixel_ranges: Vec<Range<usize>>,
+    total_surface_height_px: usize,
 }
 
 impl ReviewWorkspaceSession {
@@ -214,6 +219,9 @@ impl ReviewWorkspaceSession {
             rows: Vec::new(),
             row_metadata: Vec::new(),
             row_segments: Vec::new(),
+            row_top_offsets: Vec::new(),
+            section_pixel_ranges: Vec::new(),
+            total_surface_height_px: 0,
         })
     }
 
@@ -224,6 +232,7 @@ impl ReviewWorkspaceSession {
         self.rows = stream.rows.clone();
         self.row_metadata = stream.row_metadata.clone();
         self.row_segments = stream.row_segments.clone();
+        self.rebuild_surface_geometry();
         self
     }
 
@@ -296,29 +305,16 @@ impl ReviewWorkspaceSession {
         &self.hunk_ranges
     }
 
-    pub(crate) fn sections(&self) -> &[ReviewWorkspaceSection] {
-        &self.sections
-    }
-
     pub(crate) fn section(&self, section_ix: usize) -> Option<&ReviewWorkspaceSection> {
         self.sections.get(section_ix)
     }
 
-    pub(crate) fn section_index_for_path(&self, path: &str) -> Option<usize> {
-        self.sections
-            .iter()
-            .position(|section| section.path == path && section.show_file_header)
-            .or_else(|| {
-                self.sections
-                    .iter()
-                    .position(|section| section.path == path)
-            })
+    pub(crate) fn section_pixel_range(&self, section_ix: usize) -> Option<&Range<usize>> {
+        self.section_pixel_ranges.get(section_ix)
     }
 
-    pub(crate) fn section_index_for_row(&self, row_ix: usize) -> Option<usize> {
-        self.sections
-            .iter()
-            .position(|section| section.start_row <= row_ix && row_ix < section.end_row)
+    pub(crate) fn total_surface_height_px(&self) -> usize {
+        self.total_surface_height_px
     }
 
     pub(crate) fn visible_hunk_header_row(&self, row: usize) -> Option<usize> {
@@ -338,6 +334,60 @@ impl ReviewWorkspaceSession {
 
     pub(crate) fn row_count(&self) -> usize {
         self.layout.total_rows()
+    }
+
+    pub(crate) fn row_top_offset_px(&self, row_ix: usize) -> Option<usize> {
+        self.row_top_offsets.get(row_ix).copied()
+    }
+
+    pub(crate) fn visible_row_range_for_viewport(
+        &self,
+        scroll_top_px: usize,
+        viewport_height_px: usize,
+    ) -> Option<Range<usize>> {
+        let row_count = self.row_count();
+        if row_count == 0 || self.row_top_offsets.is_empty() {
+            return None;
+        }
+
+        let start = self.row_index_for_pixel(scroll_top_px);
+        let viewport_bottom = scroll_top_px
+            .saturating_add(viewport_height_px.max(REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX));
+        let end = self
+            .row_index_for_pixel(viewport_bottom.saturating_sub(1))
+            .saturating_add(1)
+            .min(row_count);
+        Some(
+            start.min(row_count.saturating_sub(1))..end.max(start.saturating_add(1)).min(row_count),
+        )
+    }
+
+    pub(crate) fn visible_section_range_for_viewport(
+        &self,
+        scroll_top_px: usize,
+        viewport_height_px: usize,
+        overscan_sections: usize,
+    ) -> Range<usize> {
+        if self.section_pixel_ranges.is_empty() {
+            return 0..0;
+        }
+
+        let viewport_bottom = scroll_top_px
+            .saturating_add(viewport_height_px.max(REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX));
+        let first_visible = self
+            .section_pixel_ranges
+            .partition_point(|range| range.end <= scroll_top_px)
+            .min(self.section_pixel_ranges.len().saturating_sub(1));
+        let last_visible_exclusive = self
+            .section_pixel_ranges
+            .partition_point(|range| range.start < viewport_bottom)
+            .max(first_visible.saturating_add(1))
+            .min(self.section_pixel_ranges.len());
+
+        first_visible.saturating_sub(overscan_sections)
+            ..last_visible_exclusive
+                .saturating_add(overscan_sections)
+                .min(self.section_pixel_ranges.len())
     }
 
     pub(crate) fn row(&self, row_ix: usize) -> Option<&SideBySideRow> {
@@ -599,6 +649,56 @@ impl ReviewWorkspaceSession {
             }
         }
         lines
+    }
+
+    fn rebuild_surface_geometry(&mut self) {
+        let row_count = self.row_count();
+        self.row_top_offsets = Vec::with_capacity(row_count.saturating_add(1));
+        self.row_top_offsets.push(0);
+        let mut next_offset = 0usize;
+        for row_ix in 0..row_count {
+            next_offset = next_offset.saturating_add(self.surface_row_height_px(row_ix));
+            self.row_top_offsets.push(next_offset);
+        }
+        self.total_surface_height_px = next_offset;
+        self.section_pixel_ranges = self
+            .sections
+            .iter()
+            .map(|section| {
+                let start = self
+                    .row_top_offsets
+                    .get(section.start_row)
+                    .copied()
+                    .unwrap_or(0);
+                let end = self
+                    .row_top_offsets
+                    .get(section.end_row)
+                    .copied()
+                    .unwrap_or(start);
+                start..end
+            })
+            .collect();
+    }
+
+    fn surface_row_height_px(&self, row_ix: usize) -> usize {
+        match self.rows.get(row_ix).map(|row| row.kind) {
+            Some(DiffRowKind::HunkHeader) => REVIEW_SURFACE_HUNK_DIVIDER_HEIGHT_PX,
+            Some(DiffRowKind::Code | DiffRowKind::Meta | DiffRowKind::Empty) | None => {
+                REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX
+            }
+        }
+    }
+
+    fn row_index_for_pixel(&self, pixel_offset: usize) -> usize {
+        let row_count = self.row_count();
+        if row_count == 0 || self.row_top_offsets.len() < 2 {
+            return 0;
+        }
+
+        match self.row_top_offsets.binary_search(&pixel_offset) {
+            Ok(ix) => ix.min(row_count.saturating_sub(1)),
+            Err(ix) => ix.saturating_sub(1).min(row_count.saturating_sub(1)),
+        }
     }
 }
 

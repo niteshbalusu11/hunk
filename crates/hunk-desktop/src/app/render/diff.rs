@@ -202,14 +202,14 @@ impl DiffViewer {
             return div().size_full().into_any_element();
         };
 
-        let sections = session.sections().to_vec();
         let scroll_handle = self.review_surface.diff_scroll_handle.clone();
-        let top_section_ix = scroll_handle.top_item();
-        let bottom_section_ix = scroll_handle.bottom_item();
-        let overscan_start = top_section_ix.saturating_sub(1);
-        let overscan_end = bottom_section_ix
-            .saturating_add(2)
-            .min(sections.len());
+        let viewport_height = scroll_handle.bounds().size.height.max(Pixels::ZERO);
+        let visible_sections = session.visible_section_range_for_viewport(
+            self.current_review_surface_scroll_top_px(),
+            viewport_height.as_f32().round() as usize,
+            1,
+        );
+        let total_height = session.total_surface_height_px();
 
         div()
             .id("review-workspace-sections-scroll")
@@ -217,21 +217,23 @@ impl DiffViewer {
             .track_scroll(&scroll_handle)
             .overflow_y_scroll()
             .child(
-                v_flex()
+                div()
+                    .relative()
                     .w_full()
-                    .min_h_full()
-                    .children(sections.into_iter().enumerate().map(|(section_ix, section)| {
-                        let is_visible =
-                            section_ix >= overscan_start && section_ix < overscan_end;
-                        if is_visible {
-                            self.render_review_workspace_section(&section, cx)
-                        } else {
+                    .h(px(total_height as f32))
+                    .children(visible_sections.filter_map(|section_ix| {
+                        let section = session.section(section_ix)?;
+                        let pixel_range = session.section_pixel_range(section_ix)?.clone();
+                        Some(
                             div()
                                 .id(("review-workspace-section", section.index as u64))
-                                .w_full()
-                                .h(px(self.review_workspace_section_height(&section) as f32))
-                                .into_any_element()
-                        }
+                                .absolute()
+                                .top(px(pixel_range.start as f32))
+                                .left_0()
+                                .right_0()
+                                .child(self.render_review_workspace_section(section, cx))
+                                .into_any_element(),
+                        )
                     })),
             )
             .into_any_element()
@@ -259,19 +261,6 @@ impl DiffViewer {
             .children(rows)
             .into_any_element()
     }
-
-    fn review_workspace_section_height(
-        &self,
-        section: &review_workspace_session::ReviewWorkspaceSection,
-    ) -> usize {
-        (section.start_row..section.end_row)
-            .map(|row_ix| match self.active_diff_row(row_ix).map(|row| row.kind) {
-                Some(DiffRowKind::HunkHeader) => 6,
-                Some(DiffRowKind::Code | DiffRowKind::Meta | DiffRowKind::Empty) | None => 26,
-            })
-            .sum()
-    }
-
     fn render_diff_column_header(
         &self,
         layout: Option<DiffColumnLayout>,

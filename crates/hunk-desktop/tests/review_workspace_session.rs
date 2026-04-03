@@ -72,7 +72,10 @@ use hunk_domain::diff::{
 };
 use hunk_git::compare::CompareSnapshot;
 use hunk_git::git::{ChangedFile, FileStatus, LineStats};
-use review_workspace_session::ReviewWorkspaceSession;
+use review_workspace_session::{
+    REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX, REVIEW_SURFACE_HUNK_DIVIDER_HEIGHT_PX,
+    ReviewWorkspaceSession,
+};
 
 fn changed_file(path: &str, status: FileStatus) -> ChangedFile {
     ChangedFile {
@@ -350,19 +353,78 @@ fn review_workspace_session_exposes_excerpt_sections_for_surface_rendering() {
 
     let session = ReviewWorkspaceSession::from_compare_snapshot(&snapshot, &BTreeSet::new())
         .expect("workspace session should build");
-    let sections = session.sections();
+    let first = session.section(0).expect("first section");
+    let second = session.section(1).expect("second section");
 
-    assert_eq!(sections.len(), 2);
-    assert!(sections[0].show_file_header);
-    assert!(!sections[1].show_file_header);
-    assert_eq!(sections[0].path, "src/main.rs");
-    assert_eq!(sections[1].path, "src/main.rs");
-    assert_eq!(sections[0].hunk_header.as_deref(), Some("@@ -1,2 +1,3 @@"));
-    assert_eq!(sections[1].hunk_header.as_deref(), Some("@@ -8,0 +10,2 @@"));
-    assert_eq!(session.section_index_for_path("src/main.rs"), Some(0));
+    assert!(session.section(2).is_none());
+    assert!(first.show_file_header);
+    assert!(!second.show_file_header);
+    assert_eq!(first.path, "src/main.rs");
+    assert_eq!(second.path, "src/main.rs");
+    assert_eq!(first.hunk_header.as_deref(), Some("@@ -1,2 +1,3 @@"));
+    assert_eq!(second.hunk_header.as_deref(), Some("@@ -8,0 +10,2 @@"));
+    assert_eq!(first.index, 0);
+    assert_eq!(second.index, 1);
+    assert_eq!(second.start_row, session.hunk_ranges()[1].start_row);
+}
+
+#[test]
+fn review_workspace_session_tracks_section_pixel_geometry() {
+    let patch = "\
+@@ -1,2 +1,3 @@
+ before
+-old
++new
+ keep
+@@ -8,0 +10,2 @@
++tail
++more
+";
+    let snapshot = CompareSnapshot {
+        files: vec![changed_file("src/main.rs", FileStatus::Modified)],
+        file_line_stats: BTreeMap::new(),
+        overall_line_stats: LineStats::default(),
+        patches_by_path: BTreeMap::from([("src/main.rs".to_string(), patch.to_string())]),
+    };
+    let rows = parse_patch_side_by_side(patch);
+    let stream = review_stream_for_rows(&rows, "src/main.rs", FileStatus::Modified);
+    let session = ReviewWorkspaceSession::from_compare_snapshot(&snapshot, &BTreeSet::new())
+        .expect("workspace session should build")
+        .with_render_stream(&stream);
+
+    let first = session.section(0).expect("first section");
+    let second = session.section(1).expect("second section");
+    let first_pixels = session
+        .section_pixel_range(0)
+        .expect("first section pixel range")
+        .clone();
+    let second_pixels = session
+        .section_pixel_range(1)
+        .expect("second section pixel range")
+        .clone();
+
+    assert_eq!(first_pixels.start, 0);
+    assert_eq!(second_pixels.start, first_pixels.end);
+    assert_eq!(session.total_surface_height_px(), second_pixels.end);
     assert_eq!(
-        session.section_index_for_row(sections[1].start_row),
-        Some(sections[1].index)
+        session.row_top_offset_px(first.start_row),
+        Some(first_pixels.start)
+    );
+    assert_eq!(
+        session.row_top_offset_px(second.start_row),
+        Some(second_pixels.start)
+    );
+    assert!(
+        first_pixels.end
+            >= REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX + REVIEW_SURFACE_HUNK_DIVIDER_HEIGHT_PX
+    );
+    assert_eq!(
+        session.visible_section_range_for_viewport(0, first_pixels.end, 0),
+        0..1
+    );
+    assert_eq!(
+        session.visible_section_range_for_viewport(second_pixels.start, second_pixels.len(), 0),
+        1..2
     );
 }
 

@@ -1,4 +1,15 @@
 impl DiffViewer {
+    pub(super) fn current_review_surface_scroll_top_px(&self) -> usize {
+        self.review_surface
+            .diff_scroll_handle
+            .offset()
+            .y
+            .min(Pixels::ZERO)
+            .abs()
+            .as_f32()
+            .round() as usize
+    }
+
     pub(super) fn uses_review_workspace_sections_surface(&self) -> bool {
         self.workspace_view_mode == WorkspaceViewMode::Diff
             && self.review_workspace_session.is_some()
@@ -14,11 +25,13 @@ impl DiffViewer {
         if self.uses_review_workspace_sections_surface()
             && let Some(session) = self.review_workspace_session.as_ref()
         {
-            let top_section_ix = self.review_surface.diff_scroll_handle.top_item();
+            let viewport_height = self.review_surface.diff_scroll_handle.bounds().size.height;
             return session
-                .section(top_section_ix)
-                .or_else(|| session.sections().last())
-                .map(|section| section.start_row.min(row_count.saturating_sub(1)));
+                .visible_row_range_for_viewport(
+                    self.current_review_surface_scroll_top_px(),
+                    viewport_height.max(Pixels::ZERO).as_f32().round() as usize,
+                )
+                .map(|range| range.start);
         }
 
         Some(
@@ -39,18 +52,11 @@ impl DiffViewer {
         if self.uses_review_workspace_sections_surface()
             && let Some(session) = self.review_workspace_session.as_ref()
         {
-            let start = session
-                .section(self.review_surface.diff_scroll_handle.top_item())
-                .or_else(|| session.sections().last())
-                .map(|section| section.start_row)
-                .unwrap_or(0)
-                .min(row_count.saturating_sub(1));
-            let end = session
-                .section(self.review_surface.diff_scroll_handle.bottom_item())
-                .or_else(|| session.sections().last())
-                .map(|section| section.end_row.min(row_count))
-                .unwrap_or(row_count);
-            return Some(start..end.max(start.saturating_add(1)).min(row_count));
+            let viewport_height = self.review_surface.diff_scroll_handle.bounds().size.height;
+            return session.visible_row_range_for_viewport(
+                self.current_review_surface_scroll_top_px(),
+                viewport_height.max(Pixels::ZERO).as_f32().round() as usize,
+            );
         }
 
         let top = self.current_review_surface_top_row()?;

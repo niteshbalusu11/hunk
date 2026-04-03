@@ -21,11 +21,13 @@ impl DiffViewer {
 
         if self.uses_review_workspace_sections_surface()
             && let Some(session) = self.review_workspace_session.as_ref()
-            && let Some(section_ix) = session.section_index_for_path(path)
+            && let Some(top_offset_px) = session
+                .file_range_for_path(path)
+                .and_then(|range| session.row_top_offset_px(range.start_row))
         {
             self.review_surface
                 .diff_scroll_handle
-                .scroll_to_top_of_item(section_ix);
+                .set_offset(point(px(0.), -px(top_offset_px as f32)));
         } else {
             self.review_surface.diff_list_state.scroll_to(ListOffset {
                 item_ix: start_row,
