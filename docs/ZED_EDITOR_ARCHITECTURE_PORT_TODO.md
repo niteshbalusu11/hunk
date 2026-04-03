@@ -223,6 +223,7 @@ This is the phase that removes the last architectural reason for preview-only re
 
 Current state:
 - Review’s viewport bookkeeping now tracks the shared workspace surface’s visible row range directly, and Review syntax-segment prefetch now reuses that explicit range instead of a legacy top-row fallback.
+- Review workspace sessions now also own per-file line stats and compute their own visible segment-prefetch worklists from the shared viewport snapshot, so Review syntax scheduling no longer has to rebuild that plan by rescanning `active_diff_row*` in the controller.
 - Review syntax/segment prefetch now derives its candidate rows from the shared workspace viewport snapshot instead of rebuilding a separate legacy row-range heuristic, so visible-range scheduling follows the same session-owned surface state the renderer consumes.
 - The visible Review renderer now also consumes session-owned per-column workspace display rows from those viewport snapshots, so the display-model layer for Diff is no longer just implicit raw cell text glued directly into the GPUI surface.
 - Review’s current visible top row/file/header state is now also derived from a single session-built visible-state snapshot instead of separate ad hoc row-range/start caches, which keeps selection sync and sticky-header decisions tied to the shared viewport model.

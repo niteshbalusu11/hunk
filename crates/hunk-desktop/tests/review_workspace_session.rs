@@ -46,6 +46,8 @@ mod app {
         use super::{DiffRowSegmentCache, DiffStreamRowMeta};
         use hunk_domain::diff::SideBySideRow;
 
+        pub use super::DiffSegmentQuality;
+
         #[derive(Debug, Clone, Default)]
         pub struct DiffStream {
             pub rows: Vec<SideBySideRow>,
@@ -74,7 +76,7 @@ use hunk_git::compare::CompareSnapshot;
 use hunk_git::git::{ChangedFile, FileStatus, LineStats};
 use review_workspace_session::{
     REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX, REVIEW_SURFACE_HUNK_DIVIDER_HEIGHT_PX,
-    ReviewWorkspaceSession,
+    ReviewWorkspaceSegmentPrefetchRequest, ReviewWorkspaceSession,
 };
 
 fn changed_file(path: &str, status: FileStatus) -> ChangedFile {
@@ -680,6 +682,66 @@ fn review_workspace_session_can_attach_render_rows() {
     );
     assert_eq!(session.row_file_path(0), Some("src/main.rs"));
     assert!(session.row_supports_comments(2));
+}
+
+#[test]
+fn review_workspace_session_prefetches_visible_code_rows_from_viewport_state() {
+    let patch = "\
+@@ -1,2 +1,3 @@
+ before
+-old
++new
+ keep
+";
+    let snapshot = CompareSnapshot {
+        files: vec![changed_file("src/main.rs", FileStatus::Modified)],
+        file_line_stats: BTreeMap::from([(
+            "src/main.rs".to_string(),
+            LineStats {
+                added: 1,
+                removed: 1,
+            },
+        )]),
+        overall_line_stats: LineStats::default(),
+        patches_by_path: BTreeMap::from([("src/main.rs".to_string(), patch.to_string())]),
+    };
+
+    let rows = parse_patch_side_by_side(patch);
+    let mut stream = review_stream_for_rows(&rows, "src/main.rs", FileStatus::Modified);
+    stream.row_segments[2] = Some(app::DiffRowSegmentCache {
+        quality: app::DiffSegmentQuality::Detailed,
+    });
+    let session = ReviewWorkspaceSession::from_compare_snapshot(&snapshot, &BTreeSet::new())
+        .expect("workspace session should build")
+        .with_render_stream(&stream);
+
+    let pending = session.build_segment_prefetch_rows(ReviewWorkspaceSegmentPrefetchRequest {
+        scroll_top_px: 0,
+        viewport_height_px: REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX * 3,
+        anchor_row: 2,
+        overscan_rows: 2,
+        force_upgrade: false,
+        recently_scrolling: false,
+        batch_limit: 8,
+    });
+
+    assert!(!pending.is_empty());
+    assert!(
+        pending
+            .iter()
+            .all(|row| row.file_path.as_deref() == Some("src/main.rs"))
+    );
+    assert!(
+        pending
+            .iter()
+            .all(|row| row.quality == app::DiffSegmentQuality::Detailed)
+    );
+    assert!(
+        pending
+            .iter()
+            .all(|row| rows[row.row_index.saturating_sub(1)].kind == DiffRowKind::Code)
+    );
+    assert!(pending.iter().all(|row| row.row_index != 2));
 }
 
 #[test]

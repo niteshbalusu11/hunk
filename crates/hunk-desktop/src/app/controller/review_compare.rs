@@ -485,6 +485,9 @@ impl DiffViewer {
 
     pub(crate) fn active_diff_file_line_stats(&self) -> &BTreeMap<String, LineStats> {
         if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            if let Some(session) = self.review_workspace_session.as_ref() {
+                return session.file_line_stats();
+            }
             &self.review_file_line_stats
         } else {
             &self.file_line_stats

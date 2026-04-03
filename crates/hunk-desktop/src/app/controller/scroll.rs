@@ -1,3 +1,13 @@
+type DiffSegmentPrefetchJob = (
+    usize,
+    String,
+    DiffCellKind,
+    String,
+    DiffCellKind,
+    Option<String>,
+    DiffSegmentQuality,
+);
+
 impl DiffViewer {
     fn scroll_selected_file_to_top(&mut self) {
         let target_path = if self.workspace_view_mode == WorkspaceViewMode::Diff {
@@ -127,14 +137,16 @@ impl DiffViewer {
         }
 
         self.segment_prefetch_anchor_row = Some(visible_row);
-        let prioritized_rows = if self.uses_review_workspace_sections_surface() {
+        let recently_scrolling = self.recently_scrolling();
+        let pending_rows: Vec<DiffSegmentPrefetchJob> = if self.uses_review_workspace_sections_surface() {
             self.review_workspace_session
                 .as_ref()
                 .map(|session| {
-                    prioritized_prefetch_row_indices_for_rows(
-                        session.viewport_row_indices(
-                            self.current_review_surface_scroll_top_px(),
-                            self.review_surface
+                    session.build_segment_prefetch_rows(
+                        review_workspace_session::ReviewWorkspaceSegmentPrefetchRequest {
+                            scroll_top_px: self.current_review_surface_scroll_top_px(),
+                            viewport_height_px: self
+                                .review_surface
                                 .diff_scroll_handle
                                 .bounds()
                                 .size
@@ -142,78 +154,83 @@ impl DiffViewer {
                                 .max(Pixels::ZERO)
                                 .as_f32()
                                 .round() as usize,
-                            1,
-                            DIFF_SEGMENT_PREFETCH_RADIUS_ROWS,
-                        ),
-                        visible_row,
+                            anchor_row: visible_row,
+                            overscan_rows: DIFF_SEGMENT_PREFETCH_RADIUS_ROWS,
+                            force_upgrade,
+                            recently_scrolling,
+                            batch_limit: DIFF_SEGMENT_PREFETCH_BATCH_ROWS,
+                        },
                     )
                 })
-                .filter(|rows| !rows.is_empty())
-                .unwrap_or_else(|| {
-                    prioritized_prefetch_row_indices(
-                        visible_row.saturating_sub(DIFF_SEGMENT_PREFETCH_RADIUS_ROWS),
-                        visible_row
-                            .saturating_add(DIFF_SEGMENT_PREFETCH_RADIUS_ROWS.saturating_add(1))
-                            .min(row_count),
-                        visible_row,
+                .unwrap_or_default()
+                .into_iter()
+                .map(|row| {
+                    (
+                        row.row_index,
+                        row.left_text,
+                        row.left_kind,
+                        row.right_text,
+                        row.right_kind,
+                        row.file_path,
+                        row.quality,
                     )
                 })
+                .collect::<Vec<_>>()
         } else {
-            prioritized_prefetch_row_indices(
+            let prioritized_rows = prioritized_prefetch_row_indices(
                 visible_row.saturating_sub(DIFF_SEGMENT_PREFETCH_RADIUS_ROWS),
                 visible_row
                     .saturating_add(DIFF_SEGMENT_PREFETCH_RADIUS_ROWS.saturating_add(1))
                     .min(row_count),
                 visible_row,
-            )
-        };
-
-        let batch_limit = if force_upgrade {
-            prioritized_rows.len()
-        } else {
-            DIFF_SEGMENT_PREFETCH_BATCH_ROWS.min(prioritized_rows.len())
-        };
-        let mut pending_rows = Vec::with_capacity(batch_limit);
-        let recently_scrolling = self.recently_scrolling();
-        for row_ix in prioritized_rows {
-            if pending_rows.len() >= batch_limit {
-                break;
-            }
-
-            let Some(row) = self.active_diff_row(row_ix) else {
-                continue;
+            );
+            let batch_limit = if force_upgrade {
+                prioritized_rows.len()
+            } else {
+                DIFF_SEGMENT_PREFETCH_BATCH_ROWS.min(prioritized_rows.len())
             };
-            if row.kind != DiffRowKind::Code {
-                continue;
+            let mut pending_rows = Vec::with_capacity(batch_limit);
+            for row_ix in prioritized_rows {
+                if pending_rows.len() >= batch_limit {
+                    break;
+                }
+
+                let Some(row) = self.active_diff_row(row_ix) else {
+                    continue;
+                };
+                if row.kind != DiffRowKind::Code {
+                    continue;
+                }
+
+                let file_path = self
+                    .active_diff_row_metadata(row_ix)
+                    .and_then(|meta| meta.file_path.clone());
+                let base_quality = file_path
+                    .as_deref()
+                    .and_then(|path| self.active_diff_file_line_stats().get(path).copied())
+                    .map(base_segment_quality_for_file)
+                    .unwrap_or(DiffSegmentQuality::Detailed);
+                let target_quality = effective_segment_quality(base_quality, recently_scrolling);
+
+                if self
+                    .active_diff_row_segment_cache(row_ix)
+                    .is_some_and(|cache| cache.quality >= target_quality)
+                {
+                    continue;
+                }
+
+                pending_rows.push((
+                    row_ix,
+                    row.left.text.clone(),
+                    row.left.kind,
+                    row.right.text.clone(),
+                    row.right.kind,
+                    file_path,
+                    target_quality,
+                ));
             }
-
-            let file_path = self
-                .active_diff_row_metadata(row_ix)
-                .and_then(|meta| meta.file_path.clone());
-            let base_quality = file_path
-                .as_deref()
-                .and_then(|path| self.active_diff_file_line_stats().get(path).copied())
-                .map(base_segment_quality_for_file)
-                .unwrap_or(DiffSegmentQuality::Detailed);
-            let target_quality = effective_segment_quality(base_quality, recently_scrolling);
-
-            if self
-                .active_diff_row_segment_cache(row_ix)
-                .is_some_and(|cache| cache.quality >= target_quality)
-            {
-                continue;
-            }
-
-            pending_rows.push((
-                row_ix,
-                row.left.text.clone(),
-                row.left.kind,
-                row.right.text.clone(),
-                row.right.kind,
-                file_path,
-                target_quality,
-            ));
-        }
+            pending_rows
+        };
 
         if pending_rows.is_empty() {
             return;
@@ -523,6 +540,7 @@ fn prioritized_prefetch_row_indices(start: usize, end: usize, anchor_row: usize)
     rows
 }
 
+#[cfg(test)]
 fn prioritized_prefetch_row_indices_for_rows(
     row_indices: Vec<usize>,
     anchor_row: usize,

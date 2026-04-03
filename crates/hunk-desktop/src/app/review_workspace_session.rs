@@ -12,10 +12,10 @@ use hunk_editor::{
     build_workspace_display_snapshot,
 };
 use hunk_git::compare::CompareSnapshot;
-use hunk_git::git::FileStatus;
+use hunk_git::git::{FileStatus, LineStats};
 use hunk_text::BufferId;
 
-use crate::app::data::{DiffStream, DiffStreamRowKind};
+use crate::app::data::{DiffSegmentQuality, DiffStream, DiffStreamRowKind};
 use crate::app::native_files_editor::WorkspaceEditorSession;
 use crate::app::{DiffRowSegmentCache, DiffStreamRowMeta};
 
@@ -117,9 +117,32 @@ pub(crate) struct ReviewWorkspaceVisibleState {
     pub(crate) visible_file_status: Option<FileStatus>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReviewWorkspaceSegmentPrefetchRow {
+    pub(crate) row_index: usize,
+    pub(crate) file_path: Option<String>,
+    pub(crate) left_text: String,
+    pub(crate) left_kind: DiffCellKind,
+    pub(crate) right_text: String,
+    pub(crate) right_kind: DiffCellKind,
+    pub(crate) quality: DiffSegmentQuality,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReviewWorkspaceSegmentPrefetchRequest {
+    pub(crate) scroll_top_px: usize,
+    pub(crate) viewport_height_px: usize,
+    pub(crate) anchor_row: usize,
+    pub(crate) overscan_rows: usize,
+    pub(crate) force_upgrade: bool,
+    pub(crate) recently_scrolling: bool,
+    pub(crate) batch_limit: usize,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ReviewWorkspaceSession {
     layout: WorkspaceLayout,
+    file_line_stats: BTreeMap<String, LineStats>,
     file_ranges: Vec<ReviewWorkspaceFileRange>,
     hunk_ranges: Vec<ReviewWorkspaceHunkRange>,
     sections: Vec<ReviewWorkspaceSection>,
@@ -261,6 +284,7 @@ impl ReviewWorkspaceSession {
 
         Ok(Self {
             layout,
+            file_line_stats: snapshot.file_line_stats.clone(),
             file_ranges,
             hunk_ranges,
             sections,
@@ -289,6 +313,10 @@ impl ReviewWorkspaceSession {
 
     pub(crate) fn file_ranges(&self) -> &[ReviewWorkspaceFileRange] {
         &self.file_ranges
+    }
+
+    pub(crate) fn file_line_stats(&self) -> &BTreeMap<String, LineStats> {
+        &self.file_line_stats
     }
 
     pub(crate) fn file_range_for_path(&self, path: &str) -> Option<&ReviewWorkspaceFileRange> {
@@ -489,6 +517,68 @@ impl ReviewWorkspaceSession {
         .into_iter()
         .flat_map(|section| section.rows.into_iter().map(|row| row.row_index))
         .collect()
+    }
+
+    pub(crate) fn build_segment_prefetch_rows(
+        &self,
+        request: ReviewWorkspaceSegmentPrefetchRequest,
+    ) -> Vec<ReviewWorkspaceSegmentPrefetchRow> {
+        let prioritized_rows = prioritized_prefetch_row_indices_for_rows(
+            self.viewport_row_indices(
+                request.scroll_top_px,
+                request.viewport_height_px,
+                1,
+                request.overscan_rows,
+            ),
+            request.anchor_row,
+        );
+        let max_rows = if request.force_upgrade {
+            prioritized_rows.len()
+        } else {
+            request.batch_limit.min(prioritized_rows.len())
+        };
+
+        let mut pending_rows = Vec::with_capacity(max_rows);
+        for row_ix in prioritized_rows {
+            if pending_rows.len() >= max_rows {
+                break;
+            }
+
+            let Some(row) = self.row(row_ix) else {
+                continue;
+            };
+            if row.kind != DiffRowKind::Code {
+                continue;
+            }
+
+            let file_path = self.row_file_path(row_ix).map(ToString::to_string);
+            let base_quality = file_path
+                .as_deref()
+                .and_then(|path| self.file_line_stats.get(path).copied())
+                .map(review_base_segment_quality_for_file)
+                .unwrap_or(DiffSegmentQuality::Detailed);
+            let target_quality =
+                review_effective_segment_quality(base_quality, request.recently_scrolling);
+
+            if self
+                .row_segment_cache(row_ix)
+                .is_some_and(|cache| cache.quality >= target_quality)
+            {
+                continue;
+            }
+
+            pending_rows.push(ReviewWorkspaceSegmentPrefetchRow {
+                row_index: row_ix,
+                file_path,
+                left_text: row.left.text.clone(),
+                left_kind: row.left.kind,
+                right_text: row.right.text.clone(),
+                right_kind: row.right.kind,
+                quality: target_quality,
+            });
+        }
+
+        pending_rows
     }
 
     pub(crate) fn build_visible_state(
@@ -1038,6 +1128,39 @@ fn review_stream_row_kind_for_row(row_kind: DiffRowKind) -> DiffStreamRowKind {
         DiffRowKind::Meta => DiffStreamRowKind::CoreMeta,
         DiffRowKind::Empty => DiffStreamRowKind::CoreEmpty,
     }
+}
+
+fn review_base_segment_quality_for_file(line_stats: LineStats) -> DiffSegmentQuality {
+    if line_stats.changed() <= 8_000 {
+        DiffSegmentQuality::Detailed
+    } else {
+        DiffSegmentQuality::SyntaxOnly
+    }
+}
+
+fn review_effective_segment_quality(
+    base_quality: DiffSegmentQuality,
+    recently_scrolling: bool,
+) -> DiffSegmentQuality {
+    if !recently_scrolling {
+        return base_quality;
+    }
+
+    match base_quality {
+        DiffSegmentQuality::Detailed => DiffSegmentQuality::SyntaxOnly,
+        DiffSegmentQuality::SyntaxOnly => DiffSegmentQuality::Plain,
+        DiffSegmentQuality::Plain => DiffSegmentQuality::Plain,
+    }
+}
+
+fn prioritized_prefetch_row_indices_for_rows(
+    mut row_indices: Vec<usize>,
+    anchor_row: usize,
+) -> Vec<usize> {
+    row_indices.sort_unstable();
+    row_indices.dedup();
+    row_indices.sort_by_key(|row_ix| (anchor_row.abs_diff(*row_ix), *row_ix));
+    row_indices
 }
 
 #[derive(Clone, Copy)]
