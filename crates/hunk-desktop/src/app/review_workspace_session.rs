@@ -152,7 +152,22 @@ pub(crate) struct ReviewWorkspaceSurfaceSnapshot {
     pub(crate) scroll_top_px: usize,
     pub(crate) viewport_height_px: usize,
     pub(crate) viewport: ReviewWorkspaceViewportSnapshot,
+    pub(crate) overlays: Vec<ReviewWorkspaceSurfaceOverlay>,
     pub(crate) visible_state: ReviewWorkspaceVisibleState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ReviewWorkspaceSurfaceOverlayKind {
+    FileHeaderControls { path: String, status: FileStatus },
+    CommentAffordance,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReviewWorkspaceSurfaceOverlay {
+    pub(crate) row_index: usize,
+    pub(crate) top_px: usize,
+    pub(crate) height_px: usize,
+    pub(crate) kind: ReviewWorkspaceSurfaceOverlayKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -611,6 +626,7 @@ impl ReviewWorkspaceSession {
             scroll_top_px,
             viewport_height_px,
             viewport,
+            overlays: Vec::new(),
             visible_state,
         }
     }

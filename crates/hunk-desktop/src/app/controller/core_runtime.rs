@@ -1,8 +1,9 @@
 impl DiffViewer {
-    fn decorate_review_surface_snapshot(
+    pub(super) fn decorate_review_surface_snapshot(
         &self,
         snapshot: &mut review_workspace_session::ReviewWorkspaceSurfaceSnapshot,
     ) {
+        let mut overlays = Vec::new();
         for row in snapshot
             .viewport
             .sections
@@ -10,7 +11,29 @@ impl DiffViewer {
             .flat_map(|section| section.rows.iter_mut())
         {
             row.show_comment_affordance = self.row_shows_comment_affordance(row.row_index);
+            if row.stream_kind == DiffStreamRowKind::FileHeader
+                && let (Some(path), Some(status)) = (row.file_path.as_ref(), row.file_status)
+            {
+                overlays.push(review_workspace_session::ReviewWorkspaceSurfaceOverlay {
+                    row_index: row.row_index,
+                    top_px: row.surface_top_px,
+                    height_px: row.height_px,
+                    kind: review_workspace_session::ReviewWorkspaceSurfaceOverlayKind::FileHeaderControls {
+                        path: path.clone(),
+                        status,
+                    },
+                });
+            }
+            if row.show_comment_affordance {
+                overlays.push(review_workspace_session::ReviewWorkspaceSurfaceOverlay {
+                    row_index: row.row_index,
+                    top_px: row.surface_top_px,
+                    height_px: row.height_px,
+                    kind: review_workspace_session::ReviewWorkspaceSurfaceOverlayKind::CommentAffordance,
+                });
+            }
         }
+        snapshot.overlays = overlays;
     }
 
     pub(super) fn refresh_review_surface_snapshot(

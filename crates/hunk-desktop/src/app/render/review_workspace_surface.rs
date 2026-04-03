@@ -184,7 +184,7 @@ impl DiffViewer {
 
     fn render_review_workspace_surface_children(
         &self,
-        viewport: &review_workspace_session::ReviewWorkspaceViewportSnapshot,
+        surface: &review_workspace_session::ReviewWorkspaceSurfaceSnapshot,
         visible_pixel_range: Range<usize>,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
@@ -195,63 +195,47 @@ impl DiffViewer {
             .right_0()
             .h(px(visible_pixel_range.len() as f32))
             .child(self.render_review_workspace_viewport(
-                viewport,
+                &surface.viewport,
                 visible_pixel_range.start,
                 cx,
             ))
             .into_any_element();
 
-        let file_header_overlays = viewport
-            .sections
+        let sparse_overlays = surface
+            .overlays
             .iter()
-            .flat_map(|viewport_section| viewport_section.rows.iter())
-            .filter_map(|viewport_row| {
-                let row_ix = viewport_row.row_index;
-                if viewport_row.stream_kind != DiffStreamRowKind::FileHeader {
-                    return None;
-                }
-                let path = viewport_row.file_path.as_deref()?;
-                let status = viewport_row.file_status?;
-                Some(
-                    div()
-                        .absolute()
-                        .top(px(viewport_row.surface_top_px as f32))
-                        .left_0()
-                        .right_0()
-                        .h(px(viewport_row.height_px as f32))
-                        .child(self.render_review_workspace_file_header_controls_overlay(
-                            row_ix,
-                            path,
-                            status,
-                            self.is_row_selected(row_ix),
-                            cx,
-                        ))
-                        .into_any_element(),
-                )
-            })
-            .collect::<Vec<_>>();
-
-        let comment_affordance_overlays = viewport
-            .sections
-            .iter()
-            .flat_map(|viewport_section| viewport_section.rows.iter())
-            .filter(|viewport_row| viewport_row.show_comment_affordance)
-            .map(|viewport_row| {
-                div()
+            .map(|overlay| match &overlay.kind {
+                review_workspace_session::ReviewWorkspaceSurfaceOverlayKind::FileHeaderControls {
+                    path,
+                    status,
+                } => div()
                     .absolute()
-                    .top(px(viewport_row.surface_top_px as f32))
+                    .top(px(overlay.top_px as f32))
                     .left_0()
                     .right_0()
-                    .h(px(viewport_row.height_px as f32))
-                    .child(self.render_row_comment_affordance(viewport_row.row_index, cx))
-                    .into_any_element()
+                    .h(px(overlay.height_px as f32))
+                    .child(self.render_review_workspace_file_header_controls_overlay(
+                        overlay.row_index,
+                        path.as_str(),
+                        *status,
+                        self.is_row_selected(overlay.row_index),
+                        cx,
+                    ))
+                    .into_any_element(),
+                review_workspace_session::ReviewWorkspaceSurfaceOverlayKind::CommentAffordance => div()
+                    .absolute()
+                    .top(px(overlay.top_px as f32))
+                    .left_0()
+                    .right_0()
+                    .h(px(overlay.height_px as f32))
+                    .child(self.render_row_comment_affordance(overlay.row_index, cx))
+                    .into_any_element(),
             })
             .collect::<Vec<_>>();
 
         vec![painted_surface]
             .into_iter()
-            .chain(file_header_overlays)
-            .chain(comment_affordance_overlays)
+            .chain(sparse_overlays)
             .collect()
     }
 
@@ -262,18 +246,18 @@ impl DiffViewer {
         if self.review_workspace_session.is_none() {
             return div().size_full().into_any_element();
         }
-        let viewport = self
+        let surface = self
             .refresh_review_surface_snapshot()
             .and_then(|_| {
                 self.current_review_surface_snapshot()
-                    .map(|snapshot| snapshot.viewport.clone())
+                    .cloned()
             })
             .unwrap_or_else(|| {
                 let session = self
                     .review_workspace_session
                     .as_ref()
                     .expect("checked review workspace session above");
-                session.build_viewport_snapshot(
+                let mut surface = session.build_surface_snapshot(
                     self.current_review_surface_scroll_top_px(),
                     self.review_surface
                         .diff_scroll_handle
@@ -285,14 +269,17 @@ impl DiffViewer {
                         .round() as usize,
                     1,
                     REVIEW_SECTION_ROW_OVERSCAN_ROWS,
-                )
+                );
+                self.decorate_review_surface_snapshot(&mut surface);
+                surface
             });
         let scroll_handle = self.review_surface.diff_scroll_handle.clone();
-        let surface_children = viewport
+        let surface_children = surface
+            .viewport
             .visible_pixel_range()
             .map(|visible_pixel_range| {
                 self.render_review_workspace_surface_children(
-                    &viewport,
+                    &surface,
                     visible_pixel_range,
                     cx,
                 )
@@ -308,7 +295,7 @@ impl DiffViewer {
                 div()
                     .relative()
                     .w_full()
-                    .h(px(viewport.total_surface_height_px as f32))
+                    .h(px(surface.viewport.total_surface_height_px as f32))
                     .children(surface_children),
             )
             .into_any_element()
