@@ -16,6 +16,11 @@ use hunk_git::git::{FileStatus, LineStats};
 use hunk_text::{BufferId, TextBuffer, TextSnapshot};
 
 #[allow(clippy::duplicate_mod)]
+#[path = "review_workspace_session_search.rs"]
+mod search_impl;
+#[allow(unused_imports)]
+pub(crate) use search_impl::ReviewWorkspaceSearchTarget;
+#[allow(clippy::duplicate_mod)]
 #[path = "workspace_display_buffers.rs"]
 mod workspace_display_buffers;
 

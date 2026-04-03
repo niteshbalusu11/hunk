@@ -765,13 +765,8 @@ impl DiffViewer {
             if matches!(event, InputEvent::Change) {
                 this.sync_editor_search_query(cx);
             }
-            if let InputEvent::PressEnter { secondary } = event
-                && this
-                    .files_editor
-                    .borrow_mut()
-                    .select_next_search_match(!secondary)
-            {
-                cx.notify();
+            if let InputEvent::PressEnter { secondary } = event {
+                this.navigate_editor_search(!secondary, cx);
             }
         })
         .detach();

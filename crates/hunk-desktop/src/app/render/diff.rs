@@ -456,6 +456,29 @@ impl DiffViewer {
                             )
                             .child({
                                 let view = view.clone();
+                                let mut button = Button::new("review-search-toggle")
+                                    .compact()
+                                    .rounded(px(7.0))
+                                    .icon(Icon::new(IconName::Search).size(px(12.0)))
+                                    .tooltip(if self.editor_search_visible {
+                                        "Hide find"
+                                    } else {
+                                        "Show find"
+                                    })
+                                    .on_click(move |_, window, cx| {
+                                        view.update(cx, |this, cx| {
+                                            this.toggle_editor_search_visibility(window, cx);
+                                        });
+                                    });
+                                if self.editor_search_visible {
+                                    button = button.primary();
+                                } else {
+                                    button = button.outline();
+                                }
+                                button
+                            })
+                            .child({
+                                let view = view.clone();
                                 Button::new("review-compare-reset")
                                     .compact()
                                     .outline()

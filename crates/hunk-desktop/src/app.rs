@@ -1073,6 +1073,7 @@ struct ReviewWorkspaceSurfaceState {
     status_message: Option<String>,
     selected_path: Option<String>,
     workspace_editor_session: Option<native_files_editor::WorkspaceEditorSession>,
+    workspace_search_matches: Vec<review_workspace_session::ReviewWorkspaceSearchTarget>,
     selection_anchor_row: Option<usize>,
     selection_head_row: Option<usize>,
     diff_visible_file_header_lookup: Vec<Option<usize>>,
@@ -1098,6 +1099,7 @@ impl ReviewWorkspaceSurfaceState {
             status_message: None,
             selected_path: None,
             workspace_editor_session: None,
+            workspace_search_matches: Vec::new(),
             selection_anchor_row: None,
             selection_head_row: None,
             diff_visible_file_header_lookup: Vec::new(),
@@ -1129,6 +1131,10 @@ impl ReviewWorkspaceSurfaceState {
 
     fn clear_workspace_editor_session(&mut self) {
         self.workspace_editor_session = None;
+    }
+
+    fn clear_workspace_search_matches(&mut self) {
+        self.workspace_search_matches.clear();
     }
 
     fn clear_row_selection(&mut self) {

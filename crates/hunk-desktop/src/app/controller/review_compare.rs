@@ -824,6 +824,7 @@ impl DiffViewer {
         self.review_loaded_collapsed_files.clear();
         self.review_loaded_snapshot_fingerprint = None;
         self.review_surface.clear_workspace_editor_session();
+        self.review_surface.clear_workspace_search_matches();
         self.review_surface.selected_path = None;
         self.review_surface.clear_row_selection();
         self.review_files.clear();
@@ -857,6 +858,9 @@ impl DiffViewer {
             self.review_compare_error = None;
             self.review_surface.status_message = None;
             self.review_surface.selected_path = self.current_review_path();
+            if self.editor_search_visible {
+                self.sync_editor_search_query(cx);
+            }
             self.prime_diff_surface_visible_state(false, cx);
             cx.notify();
             return;
@@ -1023,6 +1027,11 @@ impl DiffViewer {
             .as_deref()
             .and_then(|selected| self.status_for_path(selected));
         self.set_review_selected_file(next_selected_path, next_selected_status);
+        if self.editor_search_visible {
+            self.sync_editor_search_query(cx);
+        } else {
+            self.review_surface.clear_workspace_search_matches();
+        }
         self.refresh_comments_cache_from_store();
         self.rebuild_comment_row_match_cache();
         if self.review_comments_enabled() {

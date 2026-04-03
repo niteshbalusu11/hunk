@@ -69,6 +69,9 @@ impl DiffViewer {
         }
 
         let (old_label, new_label) = self.diff_column_labels();
+        let is_dark = cx.theme().mode.is_dark();
+        let editor_chrome = crate::app::theme::hunk_editor_chrome_colors(cx.theme(), is_dark);
+        let search_match_count = self.active_editor_search_match_count();
         let review_surface_snapshot = self.current_or_fresh_review_surface_snapshot();
         let sticky_file_banner = review_surface_snapshot
             .as_ref()
@@ -96,12 +99,45 @@ impl DiffViewer {
 
         v_flex()
             .size_full()
+            .on_key_down({
+                let view = view.clone();
+                move |event, window, cx| {
+                    let handled = view.update(cx, |this, cx| {
+                        let uses_primary_shortcut = if cfg!(target_os = "macos") {
+                            event.keystroke.modifiers.platform
+                        } else {
+                            event.keystroke.modifiers.control
+                        };
+                        if uses_primary_shortcut
+                            && !event.keystroke.modifiers.shift
+                            && event.keystroke.key == "f"
+                        {
+                            this.toggle_editor_search(true, window, cx);
+                            return true;
+                        }
+                        false
+                    });
+                    if handled {
+                        cx.stop_propagation();
+                    }
+                }
+            })
             .child(
                 v_flex()
                     .flex_1()
                     .min_h_0()
                     .when(self.workspace_view_mode == WorkspaceViewMode::Diff, |this| {
                         this.child(self.render_review_compare_controls(cx))
+                    })
+                    .when(self.editor_search_visible, |this| {
+                        this.child(self.render_workspace_search_bar(
+                            view.clone(),
+                            editor_chrome,
+                            is_dark,
+                            search_match_count,
+                            false,
+                            cx,
+                        ))
                     })
                     .child(
                         div()

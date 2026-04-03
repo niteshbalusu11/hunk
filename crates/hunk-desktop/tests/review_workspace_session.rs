@@ -281,6 +281,42 @@ fn review_workspace_session_registers_multi_file_hunk_excerpts() {
 }
 
 #[test]
+fn review_workspace_session_search_matches_follow_excerpt_surface_order() {
+    let patch = "\
+@@ -1,2 +1,2 @@
+-before
++needle first
+ keep
+@@ -10,2 +10,3 @@
+ context
+-old
++needle second
++tail
+";
+    let snapshot = CompareSnapshot {
+        files: vec![changed_file("src/lib.rs", FileStatus::Modified)],
+        file_line_stats: BTreeMap::new(),
+        overall_line_stats: LineStats::default(),
+        patches_by_path: BTreeMap::from([("src/lib.rs".to_string(), patch.to_string())]),
+    };
+
+    let rows = parse_patch_side_by_side(patch);
+    let stream = review_stream_for_rows(&rows, "src/lib.rs", FileStatus::Modified);
+    let session = ReviewWorkspaceSession::from_compare_snapshot(&snapshot, &BTreeSet::new())
+        .expect("review workspace session should build")
+        .with_render_stream(&stream);
+    let matches = session.workspace_search_matches("needle");
+
+    assert!(matches.len() >= 2);
+    assert!(matches.iter().all(|target| target.path == "src/lib.rs"));
+    assert!(
+        matches
+            .windows(2)
+            .all(|pair| pair[0].surface_order <= pair[1].surface_order)
+    );
+}
+
+#[test]
 fn review_workspace_session_surface_rows_match_current_side_by_side_shape() {
     let patch = "\
 @@ -3,5 +3,4 @@

@@ -246,6 +246,10 @@ impl DiffViewer {
             self.refresh_ai_repo_thread_catalog(cx);
             self.ensure_ai_runtime_started(cx);
         }
+
+        if self.editor_search_visible {
+            self.sync_editor_search_query(cx);
+        }
         cx.notify();
     }
 

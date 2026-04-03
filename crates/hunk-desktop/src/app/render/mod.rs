@@ -52,6 +52,7 @@ include!("review_workspace_code_row.rs");
 include!("review_workspace_section.rs");
 include!("review_workspace_surface.rs");
 include!("context_menu.rs");
+include!("workspace_search_bar.rs");
 include!("file_editor.rs");
 include!("file_editor_surface.rs");
 include!("file_quick_open.rs");
