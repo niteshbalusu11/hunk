@@ -3,9 +3,12 @@
 mod native_files_editor;
 
 use gpui::Keystroke;
-use hunk_editor::{Viewport, WorkspaceRowKind};
+use hunk_editor::{
+    Viewport, WorkspaceDocument, WorkspaceDocumentId, WorkspaceExcerptId, WorkspaceExcerptKind,
+    WorkspaceExcerptSpec, WorkspaceLayout, WorkspaceRowKind,
+};
 use hunk_language::{CompletionTriggerKind, Diagnostic, DiagnosticSeverity};
-use hunk_text::{Selection, TextPosition, TextRange};
+use hunk_text::{BufferId, Selection, TextPosition, TextRange};
 use native_files_editor::FilesEditor;
 use std::path::{Path, PathBuf};
 
@@ -340,6 +343,54 @@ fn workspace_documents_switch_active_buffers_without_reloading_text() {
         editor.current_text().as_deref(),
         Some("pub// lib fn helper() {}\n")
     );
+}
+
+#[test]
+fn workspace_layout_documents_can_open_custom_excerpt_layouts() {
+    let mut editor = FilesEditor::new();
+    let main_document_id = WorkspaceDocumentId::new(1);
+    let lib_document_id = WorkspaceDocumentId::new(2);
+    let layout = WorkspaceLayout::new(
+        vec![
+            WorkspaceDocument::new(main_document_id, "src/main.rs", BufferId::new(2), 3),
+            WorkspaceDocument::new(lib_document_id, "src/lib.rs", BufferId::new(3), 2),
+        ],
+        vec![
+            WorkspaceExcerptSpec::new(
+                WorkspaceExcerptId::new(1),
+                main_document_id,
+                WorkspaceExcerptKind::DiffHunk,
+                1..3,
+            ),
+            WorkspaceExcerptSpec::new(
+                WorkspaceExcerptId::new(2),
+                lib_document_id,
+                WorkspaceExcerptKind::DiffHunk,
+                0..1,
+            ),
+        ],
+        1,
+    )
+    .expect("workspace layout should build");
+
+    editor
+        .open_workspace_layout_documents(
+            layout,
+            vec![
+                (PathBuf::from("src/main.rs"), "one\ntwo\nthree".to_string()),
+                (PathBuf::from("src/lib.rs"), "alpha\nbeta".to_string()),
+            ],
+            Some(Path::new("src/lib.rs")),
+        )
+        .expect("workspace layout documents should open");
+
+    assert_eq!(editor.current_text().as_deref(), Some("alpha\nbeta"));
+    assert!(
+        editor
+            .activate_workspace_path(Path::new("src/main.rs"))
+            .expect("workspace path switch should succeed")
+    );
+    assert_eq!(editor.current_text().as_deref(), Some("one\ntwo\nthree"));
 }
 
 #[test]

@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
+use std::path::PathBuf;
 
 use hunk_domain::db::{CommentLineSide, compute_comment_anchor_hash};
 use hunk_domain::diff::SideBySideRow;
@@ -231,6 +232,13 @@ pub(crate) struct ReviewWorkspaceSession {
     row_top_offsets: Vec<usize>,
     section_pixel_ranges: Vec<Range<usize>>,
     total_surface_height_px: usize,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReviewWorkspaceEditorSide {
+    Left,
+    Right,
 }
 
 impl ReviewWorkspaceSession {
@@ -985,6 +993,26 @@ impl ReviewWorkspaceSession {
             preferred_path.map(std::path::Path::new),
         );
         session
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn editor_documents(
+        &self,
+        side: ReviewWorkspaceEditorSide,
+    ) -> Vec<(PathBuf, String)> {
+        self.layout
+            .documents()
+            .iter()
+            .map(|document| {
+                let lines = match side {
+                    ReviewWorkspaceEditorSide::Left => self.left_document_lines.get(&document.id),
+                    ReviewWorkspaceEditorSide::Right => self.right_document_lines.get(&document.id),
+                }
+                .cloned()
+                .unwrap_or_else(|| vec![String::new(); document.line_count.max(1)]);
+                (document.path.clone(), lines.join("\n"))
+            })
+            .collect()
     }
 
     pub(crate) fn file_anchor_reconcile_state(

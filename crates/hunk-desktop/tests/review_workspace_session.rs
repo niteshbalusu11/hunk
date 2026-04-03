@@ -126,8 +126,8 @@ use hunk_git::compare::CompareSnapshot;
 use hunk_git::git::{ChangedFile, FileStatus, LineStats};
 use review_workspace_session::{
     REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX, REVIEW_SURFACE_HUNK_DIVIDER_HEIGHT_PX,
-    ReviewWorkspaceSegmentPrefetchRequest, ReviewWorkspaceSession, ReviewWorkspaceSurfaceOptions,
-    ReviewWorkspaceSurfaceOverlayKind,
+    ReviewWorkspaceEditorSide, ReviewWorkspaceSegmentPrefetchRequest, ReviewWorkspaceSession,
+    ReviewWorkspaceSurfaceOptions, ReviewWorkspaceSurfaceOverlayKind,
 };
 
 fn changed_file(path: &str, status: FileStatus) -> ChangedFile {
@@ -1104,6 +1104,46 @@ fn review_workspace_session_can_build_editor_session_for_selected_path() {
             .active_path()
             .map(|path| path.to_string_lossy().to_string()),
         Some("src/lib.rs".to_string())
+    );
+}
+
+#[test]
+fn review_workspace_session_exports_editor_documents_for_each_side() {
+    let patch = "\
+@@ -1,2 +1,2 @@
+-before
++after
+ stay
+";
+    let rows = parse_patch_side_by_side(patch);
+    let snapshot = CompareSnapshot {
+        files: vec![changed_file("src/main.rs", FileStatus::Modified)],
+        file_line_stats: BTreeMap::new(),
+        overall_line_stats: LineStats::default(),
+        patches_by_path: BTreeMap::from([("src/main.rs".to_string(), patch.to_string())]),
+    };
+
+    let session = ReviewWorkspaceSession::from_compare_snapshot(&snapshot, &BTreeSet::new())
+        .expect("workspace session should build")
+        .with_render_stream(&review_stream_for_rows(
+            &rows,
+            "src/main.rs",
+            FileStatus::Modified,
+        ));
+
+    assert_eq!(
+        session.editor_documents(ReviewWorkspaceEditorSide::Left),
+        vec![(
+            std::path::PathBuf::from("src/main.rs"),
+            "before\nstay\n".to_string(),
+        )]
+    );
+    assert_eq!(
+        session.editor_documents(ReviewWorkspaceEditorSide::Right),
+        vec![(
+            std::path::PathBuf::from("src/main.rs"),
+            "after\nstay\n".to_string(),
+        )]
     );
 }
 

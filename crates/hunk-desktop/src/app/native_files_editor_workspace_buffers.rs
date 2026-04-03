@@ -1,45 +1,55 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
-use hunk_editor::{EditorCommand, EditorState, Viewport};
+use hunk_editor::{EditorCommand, EditorState, Viewport, WorkspaceLayout};
 use hunk_text::{BufferId, TextBuffer};
 
 use super::FilesEditor;
 
 impl FilesEditor {
-    pub(crate) fn open_workspace_documents(
+    #[allow(dead_code)]
+    pub(crate) fn open_workspace_layout_documents(
         &mut self,
+        layout: WorkspaceLayout,
         documents: Vec<(PathBuf, String)>,
         preferred_path: Option<&Path>,
     ) -> Result<()> {
         self.capture_active_view_state();
-        self.workspace_buffers.clear();
 
         if documents.is_empty() {
             self.clear();
             return Ok(());
         }
 
-        let mut workspace_documents = Vec::with_capacity(documents.len());
-        for (path, contents) in documents {
-            let buffer = TextBuffer::new(BufferId::new(self.next_buffer_id), contents.as_str());
-            self.next_buffer_id = self.next_buffer_id.saturating_add(1);
-            workspace_documents.push((path.clone(), buffer.id(), buffer.line_count()));
-            self.workspace_buffers.insert(path, buffer);
+        let workspace_buffers = self.build_workspace_buffers(documents);
+        self.validate_workspace_layout_buffers(&layout, &workspace_buffers)?;
+        self.workspace_session
+            .open_workspace_layout(layout, preferred_path);
+        self.install_workspace_buffers_for_open_session(workspace_buffers)
+    }
+
+    pub(crate) fn open_workspace_documents(
+        &mut self,
+        documents: Vec<(PathBuf, String)>,
+        preferred_path: Option<&Path>,
+    ) -> Result<()> {
+        self.capture_active_view_state();
+
+        if documents.is_empty() {
+            self.clear();
+            return Ok(());
         }
+
+        let workspace_buffers = self.build_workspace_buffers(documents);
+        let workspace_documents = workspace_buffers
+            .iter()
+            .map(|(path, buffer)| (path.clone(), buffer.id(), buffer.line_count()))
+            .collect::<Vec<_>>();
 
         self.workspace_session
             .open_full_file_documents(&workspace_documents, preferred_path)?;
-
-        let active_path = self
-            .active_path_buf()
-            .ok_or_else(|| anyhow!("workspace session should pick an active document"))?;
-        let active_buffer = self
-            .workspace_buffers
-            .remove(active_path.as_path())
-            .ok_or_else(|| anyhow!("active workspace buffer should exist"))?;
-        self.install_active_buffer(active_path.as_path(), active_buffer)?;
-        Ok(())
+        self.install_workspace_buffers_for_open_session(workspace_buffers)
     }
 
     #[allow(dead_code)]
@@ -73,6 +83,64 @@ impl FilesEditor {
     pub(super) fn install_active_buffer(&mut self, path: &Path, buffer: TextBuffer) -> Result<()> {
         self.editor = EditorState::new(buffer);
         self.finish_active_buffer_install(path)
+    }
+
+    fn build_workspace_buffers(
+        &mut self,
+        documents: Vec<(PathBuf, String)>,
+    ) -> BTreeMap<PathBuf, TextBuffer> {
+        let mut workspace_buffers = BTreeMap::new();
+        for (path, contents) in documents {
+            let buffer = TextBuffer::new(BufferId::new(self.next_buffer_id), contents.as_str());
+            self.next_buffer_id = self.next_buffer_id.saturating_add(1);
+            workspace_buffers.insert(path, buffer);
+        }
+        workspace_buffers
+    }
+
+    #[allow(dead_code)]
+    fn validate_workspace_layout_buffers(
+        &self,
+        layout: &WorkspaceLayout,
+        workspace_buffers: &BTreeMap<PathBuf, TextBuffer>,
+    ) -> Result<()> {
+        for document in layout.documents() {
+            let buffer = workspace_buffers.get(document.path()).ok_or_else(|| {
+                anyhow!("missing workspace buffer for {}", document.path.display())
+            })?;
+            if buffer.id() != document.buffer_id {
+                return Err(anyhow!(
+                    "workspace buffer id mismatch for {}: layout={} buffer={}",
+                    document.path.display(),
+                    document.buffer_id.get(),
+                    buffer.id().get(),
+                ));
+            }
+            if buffer.line_count() != document.line_count {
+                return Err(anyhow!(
+                    "workspace buffer line count mismatch for {}: layout={} buffer={}",
+                    document.path.display(),
+                    document.line_count,
+                    buffer.line_count(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn install_workspace_buffers_for_open_session(
+        &mut self,
+        workspace_buffers: BTreeMap<PathBuf, TextBuffer>,
+    ) -> Result<()> {
+        self.workspace_buffers = workspace_buffers;
+        let active_path = self
+            .active_path_buf()
+            .ok_or_else(|| anyhow!("workspace session should pick an active document"))?;
+        let active_buffer = self
+            .workspace_buffers
+            .remove(active_path.as_path())
+            .ok_or_else(|| anyhow!("active workspace buffer should exist"))?;
+        self.install_active_buffer(active_path.as_path(), active_buffer)
     }
 
     fn finish_active_buffer_install(&mut self, path: &Path) -> Result<()> {
