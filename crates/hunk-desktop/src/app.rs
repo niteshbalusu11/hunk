@@ -1033,11 +1033,9 @@ struct WorkspaceProjectState {
     diff_rows: Vec<SideBySideRow>,
     diff_row_metadata: Vec<DiffStreamRowMeta>,
     diff_row_segment_cache: Vec<Option<DiffRowSegmentCache>>,
-    diff_visible_file_header_lookup: Vec<Option<usize>>,
-    diff_visible_hunk_header_lookup: Vec<Option<usize>>,
     file_row_ranges: Vec<FileRowRange>,
     file_line_stats: BTreeMap<String, LineStats>,
-    diff_list_state: ListState,
+    review_surface: ReviewWorkspaceSurfaceState,
     review_files: Vec<ChangedFile>,
     review_file_status_by_path: BTreeMap<String, FileStatus>,
     review_file_line_stats: BTreeMap<String, LineStats>,
@@ -1072,8 +1070,42 @@ struct WorkspaceProjectState {
     editor_search_visible: bool,
     selection_anchor_row: Option<usize>,
     selection_head_row: Option<usize>,
+}
+
+struct ReviewWorkspaceSurfaceState {
+    diff_visible_file_header_lookup: Vec<Option<usize>>,
+    diff_visible_hunk_header_lookup: Vec<Option<usize>>,
+    diff_list_state: ListState,
+    diff_split_ratio: f32,
+    diff_split_bounds: Option<Bounds<Pixels>>,
+    diff_left_line_number_width: f32,
+    diff_right_line_number_width: f32,
     last_visible_row_start: Option<usize>,
     last_diff_scroll_offset: Option<gpui::Point<gpui::Pixels>>,
+}
+
+impl ReviewWorkspaceSurfaceState {
+    fn empty_diff_list_state() -> ListState {
+        ListState::new(0, ListAlignment::Top, px(360.0))
+    }
+
+    fn new() -> Self {
+        Self {
+            diff_visible_file_header_lookup: Vec::new(),
+            diff_visible_hunk_header_lookup: Vec::new(),
+            diff_list_state: Self::empty_diff_list_state(),
+            diff_split_ratio: 0.5,
+            diff_split_bounds: None,
+            diff_left_line_number_width: crate::app::data::line_number_column_width(
+                DIFF_LINE_NUMBER_MIN_DIGITS,
+            ),
+            diff_right_line_number_width: crate::app::data::line_number_column_width(
+                DIFF_LINE_NUMBER_MIN_DIGITS,
+            ),
+            last_visible_row_start: None,
+            last_diff_scroll_offset: None,
+        }
+    }
 }
 
 struct DiffViewer {
@@ -1294,15 +1326,9 @@ struct DiffViewer {
     diff_rows: Vec<SideBySideRow>,
     diff_row_metadata: Vec<DiffStreamRowMeta>,
     diff_row_segment_cache: Vec<Option<DiffRowSegmentCache>>,
-    diff_visible_file_header_lookup: Vec<Option<usize>>,
-    diff_visible_hunk_header_lookup: Vec<Option<usize>>,
     file_row_ranges: Vec<FileRowRange>,
     file_line_stats: BTreeMap<String, LineStats>,
-    diff_list_state: ListState,
-    diff_split_ratio: f32,
-    diff_split_bounds: Option<Bounds<Pixels>>,
-    diff_left_line_number_width: f32,
-    diff_right_line_number_width: f32,
+    review_surface: ReviewWorkspaceSurfaceState,
     review_files: Vec<ChangedFile>,
     review_file_status_by_path: BTreeMap<String, FileStatus>,
     review_file_line_stats: BTreeMap<String, LineStats>,
@@ -1353,8 +1379,6 @@ struct DiffViewer {
     selection_head_row: Option<usize>,
     drag_selecting_rows: bool,
     scroll_selected_after_reload: bool,
-    last_visible_row_start: Option<usize>,
-    last_diff_scroll_offset: Option<gpui::Point<gpui::Pixels>>,
     last_scroll_activity_at: Instant,
     segment_prefetch_anchor_row: Option<usize>,
     segment_prefetch_epoch: usize,

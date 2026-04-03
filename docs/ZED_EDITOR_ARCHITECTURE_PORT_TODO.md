@@ -146,6 +146,7 @@ Current state:
 - The desktop workspace editor session now supports arbitrary multi-document/multi-excerpt layouts, not just one full-file excerpt.
 - Review now builds and persists one shared workspace editor session alongside the compare session and keeps its active document in sync with Review selection/path changes.
 - Review workspace rendering now enters through its own dedicated surface module instead of sharing the generic root/diff entry point, which gives Hunk the same kind of explicit boundary Zed has between `FileDiffView` and `MultiDiffView`.
+- Review list/split/header viewport state now also lives under a dedicated Review surface state object instead of being scattered across `DiffViewer`, so the future scroller replacement has one surface-local owner to swap.
 - Sticky file headers, hunk navigation, and comment hunk lookup in Review now read from that shared session.
 - Review rendering now also reads row content, row metadata, and syntax segment caches from the shared session.
 - Review’s live row count now comes from the shared workspace layout rather than the legacy flat render vector length, so list sizing and visible-row sync track the workspace model directly.

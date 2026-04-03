@@ -351,9 +351,9 @@ impl DiffViewer {
             &fallback_segments
         };
         let line_number_width = if side == "left" {
-            self.diff_left_line_number_width
+            self.review_surface.diff_left_line_number_width
         } else {
-            self.diff_right_line_number_width
+            self.review_surface.diff_right_line_number_width
         };
 
         let should_draw_right_divider = side == "left";

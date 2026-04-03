@@ -46,8 +46,8 @@ impl DiffViewer {
 
     fn recompute_diff_visible_header_lookup(&mut self) {
         let row_count = self.active_diff_row_count();
-        self.diff_visible_file_header_lookup = vec![None; row_count];
-        self.diff_visible_hunk_header_lookup = vec![None; row_count];
+        self.review_surface.diff_visible_file_header_lookup = vec![None; row_count];
+        self.review_surface.diff_visible_hunk_header_lookup = vec![None; row_count];
         if row_count == 0 {
             return;
         }
@@ -56,9 +56,9 @@ impl DiffViewer {
             && let Some(session) = self.review_workspace_session.as_ref()
         {
             for row_ix in 0..row_count {
-                self.diff_visible_file_header_lookup[row_ix] =
+                self.review_surface.diff_visible_file_header_lookup[row_ix] =
                     session.visible_file_header_row(row_ix);
-                self.diff_visible_hunk_header_lookup[row_ix] =
+                self.review_surface.diff_visible_hunk_header_lookup[row_ix] =
                     session.visible_hunk_header_row(row_ix);
             }
             return;
@@ -93,8 +93,8 @@ impl DiffViewer {
                     _ => {}
                 }
 
-                self.diff_visible_file_header_lookup[row_ix] = current_file_header;
-                self.diff_visible_hunk_header_lookup[row_ix] = current_hunk_header;
+                self.review_surface.diff_visible_file_header_lookup[row_ix] = current_file_header;
+                self.review_surface.diff_visible_hunk_header_lookup[row_ix] = current_hunk_header;
             }
             return;
         }
@@ -115,8 +115,8 @@ impl DiffViewer {
                     None
                 }
             });
-            self.diff_visible_file_header_lookup[row_ix] = file_header_ix;
-            self.diff_visible_hunk_header_lookup[row_ix] = current_hunk_header;
+            self.review_surface.diff_visible_file_header_lookup[row_ix] = file_header_ix;
+            self.review_surface.diff_visible_hunk_header_lookup[row_ix] = current_hunk_header;
         }
     }
 

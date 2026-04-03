@@ -605,15 +605,9 @@ impl DiffViewer {
             diff_rows: Vec::new(),
             diff_row_metadata: Vec::new(),
             diff_row_segment_cache: Vec::new(),
-            diff_visible_file_header_lookup: Vec::new(),
-            diff_visible_hunk_header_lookup: Vec::new(),
             file_row_ranges: Vec::new(),
             file_line_stats: BTreeMap::new(),
-            diff_list_state: ListState::new(0, ListAlignment::Top, px(360.0)),
-            diff_split_ratio: 0.5,
-            diff_split_bounds: None,
-            diff_left_line_number_width: line_number_column_width(DIFF_LINE_NUMBER_MIN_DIGITS),
-            diff_right_line_number_width: line_number_column_width(DIFF_LINE_NUMBER_MIN_DIGITS),
+            review_surface: ReviewWorkspaceSurfaceState::new(),
             review_files: Vec::new(),
             review_file_status_by_path: BTreeMap::new(),
             review_file_line_stats: BTreeMap::new(),
@@ -664,8 +658,6 @@ impl DiffViewer {
             selection_head_row: None,
             drag_selecting_rows: false,
             scroll_selected_after_reload: true,
-            last_visible_row_start: None,
-            last_diff_scroll_offset: None,
             last_scroll_activity_at: Instant::now(),
             segment_prefetch_anchor_row: None,
             segment_prefetch_epoch: 0,
@@ -935,7 +927,7 @@ impl DiffViewer {
     fn install_list_scroll_handlers(&self, cx: &mut Context<Self>) {
         let weak_view = cx.entity().downgrade();
 
-        self.diff_list_state.set_scroll_handler({
+        self.review_surface.diff_list_state.set_scroll_handler({
             let weak_view = weak_view.clone();
             move |event, _, cx| {
                 let visible_row = event.visible_range.start;

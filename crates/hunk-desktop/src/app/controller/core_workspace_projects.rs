@@ -1,8 +1,4 @@
 impl DiffViewer {
-    fn empty_diff_list_state() -> ListState {
-        ListState::new(0, ListAlignment::Top, px(360.0))
-    }
-
     fn empty_workspace_project_state() -> WorkspaceProjectState {
         WorkspaceProjectState {
             repo_root: None,
@@ -36,11 +32,9 @@ impl DiffViewer {
             diff_rows: Vec::new(),
             diff_row_metadata: Vec::new(),
             diff_row_segment_cache: Vec::new(),
-            diff_visible_file_header_lookup: Vec::new(),
-            diff_visible_hunk_header_lookup: Vec::new(),
             file_row_ranges: Vec::new(),
             file_line_stats: BTreeMap::new(),
-            diff_list_state: Self::empty_diff_list_state(),
+            review_surface: ReviewWorkspaceSurfaceState::new(),
             review_files: Vec::new(),
             review_file_status_by_path: BTreeMap::new(),
             review_file_line_stats: BTreeMap::new(),
@@ -75,8 +69,6 @@ impl DiffViewer {
             editor_search_visible: false,
             selection_anchor_row: None,
             selection_head_row: None,
-            last_visible_row_start: None,
-            last_diff_scroll_offset: None,
         }
     }
 
@@ -152,15 +144,12 @@ impl DiffViewer {
             diff_rows: std::mem::take(&mut self.diff_rows),
             diff_row_metadata: std::mem::take(&mut self.diff_row_metadata),
             diff_row_segment_cache: std::mem::take(&mut self.diff_row_segment_cache),
-            diff_visible_file_header_lookup: std::mem::take(
-                &mut self.diff_visible_file_header_lookup,
-            ),
-            diff_visible_hunk_header_lookup: std::mem::take(
-                &mut self.diff_visible_hunk_header_lookup,
-            ),
             file_row_ranges: std::mem::take(&mut self.file_row_ranges),
             file_line_stats: std::mem::take(&mut self.file_line_stats),
-            diff_list_state: std::mem::replace(&mut self.diff_list_state, Self::empty_diff_list_state()),
+            review_surface: std::mem::replace(
+                &mut self.review_surface,
+                ReviewWorkspaceSurfaceState::new(),
+            ),
             review_files: std::mem::take(&mut self.review_files),
             review_file_status_by_path: std::mem::take(&mut self.review_file_status_by_path),
             review_file_line_stats: std::mem::take(&mut self.review_file_line_stats),
@@ -198,8 +187,6 @@ impl DiffViewer {
             editor_search_visible: self.editor_search_visible,
             selection_anchor_row: self.selection_anchor_row.take(),
             selection_head_row: self.selection_head_row.take(),
-            last_visible_row_start: self.last_visible_row_start.take(),
-            last_diff_scroll_offset: self.last_diff_scroll_offset.take(),
         }
     }
 
@@ -251,11 +238,9 @@ impl DiffViewer {
         self.diff_rows = state.diff_rows;
         self.diff_row_metadata = state.diff_row_metadata;
         self.diff_row_segment_cache = state.diff_row_segment_cache;
-        self.diff_visible_file_header_lookup = state.diff_visible_file_header_lookup;
-        self.diff_visible_hunk_header_lookup = state.diff_visible_hunk_header_lookup;
         self.file_row_ranges = state.file_row_ranges;
         self.file_line_stats = state.file_line_stats;
-        self.diff_list_state = state.diff_list_state;
+        self.review_surface = state.review_surface;
         self.review_files = state.review_files;
         self.review_file_status_by_path = state.review_file_status_by_path;
         self.review_file_line_stats = state.review_file_line_stats;
@@ -290,8 +275,6 @@ impl DiffViewer {
         self.editor_search_visible = state.editor_search_visible;
         self.selection_anchor_row = state.selection_anchor_row;
         self.selection_head_row = state.selection_head_row;
-        self.last_visible_row_start = state.last_visible_row_start;
-        self.last_diff_scroll_offset = state.last_diff_scroll_offset;
 
         self.snapshot_loading = false;
         self.snapshot_active_request = None;

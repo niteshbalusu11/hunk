@@ -19,11 +19,11 @@ impl DiffViewer {
             return;
         };
 
-        self.diff_list_state.scroll_to(ListOffset {
+        self.review_surface.diff_list_state.scroll_to(ListOffset {
             item_ix: start_row,
             offset_in_item: px(0.),
         });
-        self.last_diff_scroll_offset = None;
+        self.review_surface.last_diff_scroll_offset = None;
         self.last_scroll_activity_at = Instant::now();
     }
 
@@ -32,10 +32,10 @@ impl DiffViewer {
         row_ix: usize,
         cx: &mut Context<Self>,
     ) {
-        if self.last_visible_row_start == Some(row_ix) {
+        if self.review_surface.last_visible_row_start == Some(row_ix) {
             return;
         }
-        self.last_visible_row_start = Some(row_ix);
+        self.review_surface.last_visible_row_start = Some(row_ix);
         self.request_visible_row_segment_prefetch(row_ix, false, cx);
 
         let Some((next_path, next_status)) = (if self.workspace_view_mode == WorkspaceViewMode::Diff {
@@ -278,12 +278,13 @@ impl DiffViewer {
         }
 
         let visible_row = self
+            .review_surface
             .diff_list_state
             .logical_scroll_top()
             .item_ix
             .min(row_count.saturating_sub(1));
         if force_reprime {
-            self.last_visible_row_start = None;
+            self.review_surface.last_visible_row_start = None;
         }
         self.sync_selected_file_from_visible_row(visible_row, cx);
     }
@@ -293,8 +294,8 @@ impl DiffViewer {
         self.diff_row_metadata.clear();
         self.diff_row_segment_cache.clear();
         self.invalidate_segment_prefetch();
-        self.diff_visible_file_header_lookup.clear();
-        self.diff_visible_hunk_header_lookup.clear();
+        self.review_surface.diff_visible_file_header_lookup.clear();
+        self.review_surface.diff_visible_hunk_header_lookup.clear();
         self.file_row_ranges.clear();
         self.selection_anchor_row = None;
         self.selection_head_row = None;
@@ -325,7 +326,7 @@ impl DiffViewer {
         self.sync_diff_list_state();
         self.file_row_ranges = file_ranges;
         self.recompute_diff_layout();
-        self.last_visible_row_start = None;
+        self.review_surface.last_visible_row_start = None;
         self.recompute_diff_visible_header_lookup();
         file_line_stats
     }
@@ -337,7 +338,7 @@ impl DiffViewer {
         self.drag_selecting_rows = false;
         self.sync_diff_list_state();
         self.recompute_diff_layout();
-        self.last_visible_row_start = None;
+        self.review_surface.last_visible_row_start = None;
         self.recompute_diff_visible_header_lookup();
     }
 
@@ -360,14 +361,16 @@ impl DiffViewer {
             }
         }
 
-        self.diff_left_line_number_width = line_number_column_width(max_left_line_digits);
-        self.diff_right_line_number_width = line_number_column_width(max_right_line_digits);
+        self.review_surface.diff_left_line_number_width =
+            line_number_column_width(max_left_line_digits);
+        self.review_surface.diff_right_line_number_width =
+            line_number_column_width(max_right_line_digits);
     }
 
     fn sync_diff_list_state(&self) {
-        let previous_top = self.diff_list_state.logical_scroll_top();
+        let previous_top = self.review_surface.diff_list_state.logical_scroll_top();
         let row_count = self.active_diff_row_count();
-        self.diff_list_state.reset(row_count);
+        self.review_surface.diff_list_state.reset(row_count);
         let clamped_item_ix = if row_count == 0 {
             0
         } else {
@@ -380,7 +383,7 @@ impl DiffViewer {
         } else {
             previous_top.offset_in_item
         };
-        self.diff_list_state.scroll_to(ListOffset {
+        self.review_surface.diff_list_state.scroll_to(ListOffset {
             item_ix: clamped_item_ix,
             offset_in_item,
         });

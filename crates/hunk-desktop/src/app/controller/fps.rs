@@ -28,7 +28,7 @@ impl DiffViewer {
                     this.frame_sample_started_at = Instant::now();
 
                     if !this.recently_scrolling()
-                        && let Some(visible_row) = this.last_visible_row_start
+                        && let Some(visible_row) = this.review_surface.last_visible_row_start
                     {
                         this.request_visible_row_segment_prefetch(visible_row, true, cx);
                     }

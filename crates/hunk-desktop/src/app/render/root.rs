@@ -421,9 +421,12 @@ impl DiffViewer {
 impl Render for DiffViewer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let render_started_at = Instant::now();
-        let current_scroll_offset = self.diff_list_state.scroll_px_offset_for_scrollbar();
-        if self.last_diff_scroll_offset != Some(current_scroll_offset) {
-            self.last_diff_scroll_offset = Some(current_scroll_offset);
+        let current_scroll_offset = self
+            .review_surface
+            .diff_list_state
+            .scroll_px_offset_for_scrollbar();
+        if self.review_surface.last_diff_scroll_offset != Some(current_scroll_offset) {
+            self.review_surface.last_diff_scroll_offset = Some(current_scroll_offset);
             self.last_scroll_activity_at = Instant::now();
         }
         if self.ignore_next_frame_sample {

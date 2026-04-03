@@ -51,7 +51,7 @@ impl DiffViewer {
         }
 
         let (old_label, new_label) = self.diff_column_labels();
-        let diff_list_state = self.diff_list_state.clone();
+        let diff_list_state = self.review_surface.diff_list_state.clone();
         let logical_top = diff_list_state.logical_scroll_top();
         let row_count = self.active_diff_row_count();
         let visible_row = if row_count == 0 {
@@ -303,19 +303,21 @@ impl DiffViewer {
     }
 
     fn update_diff_split_bounds(&mut self, bounds: Bounds<Pixels>, cx: &mut Context<Self>) {
-        let width_changed = self.diff_split_bounds.is_none_or(|current| {
+        let width_changed = self.review_surface.diff_split_bounds.is_none_or(|current| {
             (current.left() - bounds.left()).abs() > px(0.5)
                 || (current.size.width - bounds.size.width).abs() > px(0.5)
         });
-        let clamped_ratio = self.clamp_diff_split_ratio(bounds.size.width, self.diff_split_ratio);
-        let ratio_changed = (clamped_ratio - self.diff_split_ratio).abs() > f32::EPSILON;
+        let clamped_ratio =
+            self.clamp_diff_split_ratio(bounds.size.width, self.review_surface.diff_split_ratio);
+        let ratio_changed =
+            (clamped_ratio - self.review_surface.diff_split_ratio).abs() > f32::EPSILON;
 
         if !width_changed && !ratio_changed {
             return;
         }
 
-        self.diff_split_bounds = Some(bounds);
-        self.diff_split_ratio = clamped_ratio;
+        self.review_surface.diff_split_bounds = Some(bounds);
+        self.review_surface.diff_split_ratio = clamped_ratio;
         cx.notify();
     }
 
@@ -324,28 +326,30 @@ impl DiffViewer {
         position: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        let Some(bounds) = self.diff_split_bounds else {
+        let Some(bounds) = self.review_surface.diff_split_bounds else {
             return;
         };
         let local_x = (position.x - bounds.left()).clamp(px(0.), bounds.size.width);
         let next_ratio = self.clamp_diff_split_ratio(bounds.size.width, local_x / bounds.size.width);
-        if (next_ratio - self.diff_split_ratio).abs() <= f32::EPSILON {
+        if (next_ratio - self.review_surface.diff_split_ratio).abs() <= f32::EPSILON {
             return;
         }
 
-        self.diff_split_ratio = next_ratio;
+        self.review_surface.diff_split_ratio = next_ratio;
         cx.notify();
     }
 
     fn diff_column_layout(&self) -> Option<DiffColumnLayout> {
-        let bounds = self.diff_split_bounds?;
+        let bounds = self.review_surface.diff_split_bounds?;
         let total_width = bounds.size.width;
         if total_width <= px(0.) {
             return None;
         }
 
-        let left_gutter = px(self.diff_left_line_number_width + DIFF_MARKER_GUTTER_WIDTH + 16.0);
-        let right_gutter = px(self.diff_right_line_number_width + DIFF_MARKER_GUTTER_WIDTH + 16.0);
+        let left_gutter =
+            px(self.review_surface.diff_left_line_number_width + DIFF_MARKER_GUTTER_WIDTH + 16.0);
+        let right_gutter =
+            px(self.review_surface.diff_right_line_number_width + DIFF_MARKER_GUTTER_WIDTH + 16.0);
         let minimum_content_width = px(DIFF_SPLIT_MIN_CODE_WIDTH);
         let left_min = left_gutter + minimum_content_width;
         let right_min = right_gutter + minimum_content_width;
@@ -355,7 +359,8 @@ impl DiffViewer {
             let shared_content = (total_width - left_gutter - right_gutter).max(px(0.)) / 2.;
             left_gutter + shared_content
         } else {
-            (total_width * self.diff_split_ratio).clamp(left_min, total_width - right_min)
+            (total_width * self.review_surface.diff_split_ratio)
+                .clamp(left_min, total_width - right_min)
         };
 
         Some(DiffColumnLayout {
@@ -365,8 +370,10 @@ impl DiffViewer {
     }
 
     fn clamp_diff_split_ratio(&self, total_width: Pixels, candidate_ratio: f32) -> f32 {
-        let left_gutter = px(self.diff_left_line_number_width + DIFF_MARKER_GUTTER_WIDTH + 16.0);
-        let right_gutter = px(self.diff_right_line_number_width + DIFF_MARKER_GUTTER_WIDTH + 16.0);
+        let left_gutter =
+            px(self.review_surface.diff_left_line_number_width + DIFF_MARKER_GUTTER_WIDTH + 16.0);
+        let right_gutter =
+            px(self.review_surface.diff_right_line_number_width + DIFF_MARKER_GUTTER_WIDTH + 16.0);
         let minimum_content_width = px(DIFF_SPLIT_MIN_CODE_WIDTH);
         let left_min = left_gutter + minimum_content_width;
         let right_min = right_gutter + minimum_content_width;
@@ -477,6 +484,7 @@ impl DiffViewer {
 
         if self.diff_row_metadata.len() == row_count {
             let header_ix = self
+                .review_surface
                 .diff_visible_file_header_lookup
                 .get(capped)
                 .copied()
@@ -494,6 +502,7 @@ impl DiffViewer {
         }
 
         let header_ix = self
+            .review_surface
             .diff_visible_file_header_lookup
             .get(capped)
             .copied()

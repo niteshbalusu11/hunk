@@ -301,6 +301,7 @@ impl DiffViewer {
         }
 
         let hunk_ix = self
+            .review_surface
             .diff_visible_hunk_header_lookup
             .get(row_ix)
             .copied()
