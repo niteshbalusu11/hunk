@@ -615,7 +615,7 @@ impl DiffViewer {
         top_offset: gpui::Pixels,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some((header_row_ix, path, status)) = self.visible_file_header(visible_row) else {
+        let Some((header_row_ix, path, status, stats)) = self.visible_file_header(visible_row) else {
             return div().w_full().h(px(0.)).into_any_element();
         };
 
@@ -623,15 +623,13 @@ impl DiffViewer {
             return div().w_full().h(px(0.)).into_any_element();
         }
 
-        let stats = self
-            .active_diff_file_line_stats()
-            .get(path.as_str())
-            .copied()
-            .unwrap_or_default();
         self.render_sticky_file_status_banner_row(header_row_ix, path.as_str(), status, stats, cx)
     }
 
-    fn visible_file_header(&self, visible_row: usize) -> Option<(usize, String, FileStatus)> {
+    fn visible_file_header(
+        &self,
+        visible_row: usize,
+    ) -> Option<(usize, String, FileStatus, LineStats)> {
         let row_count = self.active_diff_row_count();
         if row_count == 0 {
             return None;
@@ -645,23 +643,12 @@ impl DiffViewer {
             if let Some(visible_state) = self.current_review_visible_state()
                 && visible_state.top_row == Some(capped)
             {
-                let header_ix = visible_state.visible_file_header_row?;
-                let path = visible_state.visible_file_path?;
-                let status = visible_state
-                    .visible_file_status
-                    .or_else(|| session.status_for_path(path.as_str()))
-                    .or_else(|| self.status_for_path(path.as_str()))
-                    .unwrap_or(FileStatus::Unknown);
-                return Some((header_ix, path, status));
+                let header = session.visible_file_header_at_surface_row(capped)?;
+                return Some((header.row_index, header.path, header.status, header.line_stats));
             }
 
-            let header_ix = session.visible_file_header_row(capped)?;
-            let path = session.path_at_surface_row(capped)?.to_string();
-            let status = session
-                .status_for_path(path.as_str())
-                .or_else(|| self.status_for_path(path.as_str()))
-                .unwrap_or(FileStatus::Unknown);
-            return Some((header_ix, path, status));
+            let header = session.visible_file_header_at_surface_row(capped)?;
+            return Some((header.row_index, header.path, header.status, header.line_stats));
         }
 
         let header_ix = self
@@ -679,13 +666,28 @@ impl DiffViewer {
                 .file_status
                 .or_else(|| self.status_for_path(path.as_str()))
                 .unwrap_or(FileStatus::Unknown);
-            return Some((header_ix, path, status));
+            let stats = self
+                .active_diff_file_line_stats()
+                .get(path.as_str())
+                .copied()
+                .unwrap_or_default();
+            return Some((header_ix, path, status, stats));
         }
 
         self.file_row_ranges
             .iter()
             .find(|range| range.start_row == header_ix)
-            .map(|range| (range.start_row, range.path.clone(), range.status))
+            .map(|range| {
+                (
+                    range.start_row,
+                    range.path.clone(),
+                    range.status,
+                    self.active_diff_file_line_stats()
+                        .get(range.path.as_str())
+                        .copied()
+                        .unwrap_or_default(),
+                )
+            })
     }
 
     fn diff_column_labels(&self) -> (String, String) {

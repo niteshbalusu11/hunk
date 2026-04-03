@@ -453,6 +453,18 @@ impl DiffViewer {
     }
 
     fn recompute_diff_layout(&mut self) {
+        if self.uses_review_workspace_sections_surface()
+            && let Some(session) = self.review_workspace_session.as_ref()
+        {
+            let (max_left_line_digits, max_right_line_digits) =
+                session.line_number_digit_widths();
+            self.review_surface.diff_left_line_number_width =
+                line_number_column_width(max_left_line_digits);
+            self.review_surface.diff_right_line_number_width =
+                line_number_column_width(max_right_line_digits);
+            return;
+        }
+
         let mut max_left_line_digits = DIFF_LINE_NUMBER_MIN_DIGITS;
         let mut max_right_line_digits = DIFF_LINE_NUMBER_MIN_DIGITS;
 

@@ -26,6 +26,7 @@ const FILE_HEADER_SURFACE_ROWS: usize = 1;
 const HUNK_HEADER_SURFACE_ROWS: usize = 1;
 pub(crate) const REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX: usize = 26;
 pub(crate) const REVIEW_SURFACE_HUNK_DIVIDER_HEIGHT_PX: usize = 6;
+const REVIEW_LINE_NUMBER_MIN_DIGITS: u32 = 3;
 const REVIEW_VIEWPORT_RENDER_MAX_SEGMENTS_PER_CELL: usize = 48;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,6 +75,14 @@ pub(crate) struct ReviewWorkspaceSection {
     pub(crate) end_row: usize,
     pub(crate) show_file_header: bool,
     pub(crate) hunk_header: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReviewWorkspaceVisibleFileHeader {
+    pub(crate) row_index: usize,
+    pub(crate) path: String,
+    pub(crate) status: FileStatus,
+    pub(crate) line_stats: LineStats,
 }
 
 #[derive(Debug, Clone)]
@@ -389,6 +398,46 @@ impl ReviewWorkspaceSession {
 
     pub(crate) fn status_for_path(&self, path: &str) -> Option<FileStatus> {
         self.file_range_for_path(path).map(|range| range.status)
+    }
+
+    pub(crate) fn visible_file_header_at_surface_row(
+        &self,
+        row: usize,
+    ) -> Option<ReviewWorkspaceVisibleFileHeader> {
+        let header_row = self.visible_file_header_row(row)?;
+        let file_range = self
+            .file_ranges
+            .iter()
+            .find(|range| range.start_row == header_row)?;
+        Some(ReviewWorkspaceVisibleFileHeader {
+            row_index: file_range.start_row,
+            path: file_range.path.clone(),
+            status: file_range.status,
+            line_stats: self
+                .file_line_stats
+                .get(file_range.path.as_str())
+                .copied()
+                .unwrap_or_default(),
+        })
+    }
+
+    pub(crate) fn line_number_digit_widths(&self) -> (u32, u32) {
+        let mut max_left_digits = REVIEW_LINE_NUMBER_MIN_DIGITS;
+        let mut max_right_digits = REVIEW_LINE_NUMBER_MIN_DIGITS;
+
+        for row in &self.rows {
+            if row.kind != DiffRowKind::Code {
+                continue;
+            }
+            if let Some(line) = row.left.line {
+                max_left_digits = max_left_digits.max(review_decimal_digits(line));
+            }
+            if let Some(line) = row.right.line {
+                max_right_digits = max_right_digits.max(review_decimal_digits(line));
+            }
+        }
+
+        (max_left_digits, max_right_digits)
     }
 
     pub(crate) fn visible_file_header_row(&self, row: usize) -> Option<usize> {
@@ -1223,6 +1272,10 @@ fn prioritized_prefetch_row_indices_for_rows(
     row_indices.dedup();
     row_indices.sort_by_key(|row_ix| (anchor_row.abs_diff(*row_ix), *row_ix));
     row_indices
+}
+
+fn review_decimal_digits(value: u32) -> u32 {
+    if value == 0 { 1 } else { value.ilog10() + 1 }
 }
 
 #[derive(Clone, Copy)]

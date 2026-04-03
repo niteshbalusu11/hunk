@@ -691,6 +691,44 @@ fn review_workspace_session_builds_visible_state_from_viewport() {
 }
 
 #[test]
+fn review_workspace_session_exposes_header_and_line_number_helpers() {
+    let patch = "\
+@@ -9,2 +10,3 @@
+ before
+-old
++new
+ keep
+";
+    let snapshot = CompareSnapshot {
+        files: vec![changed_file("src/main.rs", FileStatus::Modified)],
+        file_line_stats: BTreeMap::from([(
+            "src/main.rs".to_string(),
+            LineStats {
+                added: 2,
+                removed: 1,
+            },
+        )]),
+        overall_line_stats: LineStats::default(),
+        patches_by_path: BTreeMap::from([("src/main.rs".to_string(), patch.to_string())]),
+    };
+    let rows = parse_patch_side_by_side(patch);
+    let stream = review_stream_for_rows(&rows, "src/main.rs", FileStatus::Modified);
+    let session = ReviewWorkspaceSession::from_compare_snapshot(&snapshot, &BTreeSet::new())
+        .expect("workspace session should build")
+        .with_render_stream(&stream);
+
+    let header = session
+        .visible_file_header_at_surface_row(2)
+        .expect("file header should resolve");
+    assert_eq!(header.row_index, 0);
+    assert_eq!(header.path, "src/main.rs");
+    assert_eq!(header.status, FileStatus::Modified);
+    assert_eq!(header.line_stats.added, 2);
+    assert_eq!(header.line_stats.removed, 1);
+    assert_eq!(session.line_number_digit_widths(), (3, 3));
+}
+
+#[test]
 fn review_workspace_session_can_attach_render_rows() {
     let patch = "\
 @@ -1,2 +1,2 @@
