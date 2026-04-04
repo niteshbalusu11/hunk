@@ -97,9 +97,7 @@ impl Element for ReviewWorkspaceViewportElement {
             ) else {
                 return;
             };
-            let Some(viewport_row) = viewport.row_by_index(row_ix) else {
-                return;
-            };
+            let viewport_row = row_ix;
             let row_bounds = review_workspace_row_bounds(
                 viewport_row,
                 viewport_origin_px,
@@ -142,17 +140,22 @@ impl Element for ReviewWorkspaceViewportElement {
             ) && comment_layout.hit_bounds.contains(&event.position)
             {
                 view.update(cx, |this, cx| {
-                    this.open_comment_editor_for_row(row_ix, window, cx);
+                    this.open_comment_editor_for_row(viewport_row.row_index, window, cx);
                     cx.stop_propagation();
                 });
                 return;
             }
             view.update(cx, |this, cx| match event.button {
                 gpui::MouseButton::Left | gpui::MouseButton::Middle => {
-                    this.on_diff_row_mouse_down(row_ix, event, window, cx);
+                    this.on_diff_row_mouse_down(viewport_row.row_index, event, window, cx);
                 }
                 gpui::MouseButton::Right => {
-                    this.open_diff_row_context_menu(row_ix, event.position, window, cx);
+                    this.open_diff_row_context_menu(
+                        viewport_row.row_index,
+                        event.position,
+                        window,
+                        cx,
+                    );
                     cx.stop_propagation();
                 }
                 _ => {}
@@ -176,7 +179,7 @@ impl Element for ReviewWorkspaceViewportElement {
                 return;
             };
             view.update(cx, |this, cx| {
-                this.on_diff_row_mouse_move(row_ix, event, window, cx);
+                this.on_diff_row_mouse_move(row_ix.row_index, event, window, cx);
             });
         });
 
@@ -331,11 +334,9 @@ fn review_workspace_row_at_position(
     viewport_origin_px: usize,
     position: gpui::Point<gpui::Pixels>,
     origin: gpui::Point<gpui::Pixels>,
-) -> Option<usize> {
+) -> Option<&review_workspace_session::ReviewWorkspaceViewportRow> {
     let local_y = (position.y - origin.y).max(gpui::Pixels::ZERO).as_f32().floor() as usize;
-    viewport
-        .row_at_viewport_position(viewport_origin_px, local_y)
-        .map(|row| row.row_index)
+    viewport.row_at_viewport_position(viewport_origin_px, local_y)
 }
 
 fn review_workspace_row_bounds(

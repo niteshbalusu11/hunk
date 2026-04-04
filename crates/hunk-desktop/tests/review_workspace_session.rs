@@ -943,7 +943,7 @@ fn review_workspace_session_builds_viewport_snapshot_from_shared_geometry() {
     );
     assert_eq!(
         viewport
-            .row_by_index(code_row.row_index)
+            .row_by_raw_index(code_row.row_index)
             .map(|row| row.surface_top_px),
         Some(code_row.surface_top_px)
     );
@@ -996,6 +996,13 @@ fn review_workspace_session_builds_visible_state_from_viewport() {
             .map(|range| range.start),
     );
     assert_eq!(
+        visible_state.top_display_row,
+        visible_state
+            .visible_display_row_range
+            .as_ref()
+            .map(|range| range.start),
+    );
+    assert_eq!(
         visible_state.visible_file_path.as_deref(),
         Some("src/main.rs")
     );
@@ -1005,6 +1012,10 @@ fn review_workspace_session_builds_visible_state_from_viewport() {
     );
     assert_eq!(visible_state.visible_file_header_row, Some(0));
     assert_eq!(visible_state.visible_hunk_header_row, Some(1));
+    assert_eq!(
+        visible_state.visible_display_row_range,
+        visible_state.visible_row_range.clone(),
+    );
 }
 
 #[test]
@@ -1335,7 +1346,7 @@ fn review_workspace_session_surface_snapshot_builds_sparse_overlays_from_surface
             .map(|overlay| overlay.row_index),
         Some(comment_row)
     );
-    assert!(surface.viewport.row_by_index(0).is_some_and(|row| {
+    assert!(surface.viewport.row_by_raw_index(0).is_some_and(|row| {
         row.stream_kind == app::DiffStreamRowKind::FileHeader
             && row.file_is_collapsed
             && row.can_view_file
@@ -1343,7 +1354,7 @@ fn review_workspace_session_surface_snapshot_builds_sparse_overlays_from_surface
     assert!(
         surface
             .viewport
-            .row_by_index(comment_row)
+            .row_by_raw_index(comment_row)
             .is_some_and(|row| row.show_comment_affordance && row.open_comment_count == 1)
     );
 }
@@ -1613,7 +1624,9 @@ fn review_workspace_surface_snapshot_preserves_display_row_identity() {
             })
         })
         .collect::<Vec<_>>();
-    rows[0].display_row_index = 42;
+    for (ix, row) in rows.iter_mut().enumerate() {
+        row.display_row_index = 42 + ix;
+    }
     let display_rows = ReviewWorkspaceDisplayRows {
         rows,
         left_by_display_row: left_by_row,
@@ -1639,6 +1652,15 @@ fn review_workspace_surface_snapshot_preserves_display_row_identity() {
         .expect("surface snapshot should contain the injected display row");
     assert_eq!(viewport_row.display_row_index, 42);
     assert_eq!(viewport_row.row_index, first_row_index);
+    assert_eq!(surface.visible_state.top_display_row, Some(42));
+    assert_eq!(
+        surface
+            .visible_state
+            .visible_display_row_range
+            .as_ref()
+            .map(|range| range.start),
+        Some(42)
+    );
 }
 
 fn display_row(row_index: usize, text: &str) -> WorkspaceDisplayRow {

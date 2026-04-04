@@ -146,12 +146,46 @@ impl ReviewWorkspaceViewportSnapshot {
         Some(self.sections.first()?.pixel_range.start..self.sections.last()?.pixel_range.end)
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
-    pub(crate) fn row_by_index(&self, row_index: usize) -> Option<&ReviewWorkspaceViewportRow> {
+    pub(crate) fn row_by_raw_index(&self, row_index: usize) -> Option<&ReviewWorkspaceViewportRow> {
         self.sections
             .iter()
             .flat_map(|section| section.rows.iter())
             .find(|row| row.row_index == row_index)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn visible_display_row_range(&self) -> Option<Range<usize>> {
+        let first = self
+            .sections
+            .iter()
+            .flat_map(|section| section.rows.iter())
+            .next()?;
+        let last = self
+            .sections
+            .iter()
+            .flat_map(|section| section.rows.iter())
+            .last()?;
+        Some(first.display_row_index..last.display_row_index.saturating_add(1))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn top_display_row(&self) -> Option<usize> {
+        self.sections
+            .iter()
+            .flat_map(|section| section.rows.iter())
+            .next()
+            .map(|row| row.display_row_index)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn top_raw_row(&self) -> Option<usize> {
+        self.sections
+            .iter()
+            .flat_map(|section| section.rows.iter())
+            .next()
+            .map(|row| row.row_index)
     }
 
     pub(crate) fn row_at_viewport_position(
@@ -238,7 +272,9 @@ pub(crate) struct ReviewWorkspaceFloatingOverlay {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ReviewWorkspaceVisibleState {
     pub(crate) visible_row_range: Option<Range<usize>>,
+    pub(crate) visible_display_row_range: Option<Range<usize>>,
     pub(crate) top_row: Option<usize>,
+    pub(crate) top_display_row: Option<usize>,
     pub(crate) visible_file_header_row: Option<usize>,
     pub(crate) visible_hunk_header_row: Option<usize>,
     pub(crate) visible_file_path: Option<String>,
@@ -798,7 +834,8 @@ impl ReviewWorkspaceSession {
             options,
             display_rows,
         );
-        let visible_state = self.build_visible_state(scroll_top_px, viewport_height_px);
+        let visible_state =
+            self.build_visible_state_from_viewport(scroll_top_px, viewport_height_px, &viewport);
         let sticky_file_header = visible_state.top_row.and_then(|top_row| {
             let header = self.visible_file_header_at_surface_row(top_row)?;
             (header.row_index != top_row).then_some(header)
@@ -917,14 +954,54 @@ impl ReviewWorkspaceSession {
         pending_rows
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn build_visible_state(
         &self,
         scroll_top_px: usize,
         viewport_height_px: usize,
     ) -> ReviewWorkspaceVisibleState {
+        let viewport = self.build_viewport_snapshot(
+            scroll_top_px,
+            viewport_height_px,
+            1,
+            0,
+            &ReviewWorkspaceSurfaceOptions::default(),
+        );
+        self.build_visible_state_from_viewport(scroll_top_px, viewport_height_px, &viewport)
+    }
+
+    fn build_visible_state_from_viewport(
+        &self,
+        scroll_top_px: usize,
+        viewport_height_px: usize,
+        viewport: &ReviewWorkspaceViewportSnapshot,
+    ) -> ReviewWorkspaceVisibleState {
         let visible_row_range =
             self.visible_row_range_for_viewport(scroll_top_px, viewport_height_px);
-        let top_row = visible_row_range.as_ref().map(|range| range.start);
+        let visible_viewport_rows = visible_row_range
+            .as_ref()
+            .map(|range| {
+                viewport
+                    .sections
+                    .iter()
+                    .flat_map(|section| section.rows.iter())
+                    .filter(|row| row.row_index >= range.start && row.row_index < range.end)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let visible_display_row_range = visible_viewport_rows.first().and_then(|first| {
+            visible_viewport_rows
+                .last()
+                .map(|last| first.display_row_index..last.display_row_index.saturating_add(1))
+        });
+        let top_row = visible_viewport_rows
+            .first()
+            .map(|row| row.row_index)
+            .or_else(|| visible_row_range.as_ref().map(|range| range.start));
+        let top_display_row = visible_viewport_rows
+            .first()
+            .map(|row| row.display_row_index);
         let visible_file_header_row = visible_row_range.as_ref().and_then(|range| {
             self.file_ranges
                 .iter()
@@ -950,7 +1027,9 @@ impl ReviewWorkspaceSession {
             visible_file_path,
             visible_file_status,
             visible_row_range,
+            visible_display_row_range,
             top_row,
+            top_display_row,
         }
     }
 
