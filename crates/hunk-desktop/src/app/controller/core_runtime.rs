@@ -151,6 +151,65 @@ impl DiffViewer {
             viewport_height_px,
             overscan_rows,
         )?;
+        let display_rows = Self::project_review_surface_display_rows_for_viewport(
+            left_workspace_editor,
+            right_workspace_editor,
+            viewport,
+        )?;
+        if display_rows.covers_row_range(requested_row_range) {
+            session.cache_display_rows(display_rows.clone());
+            Some(display_rows)
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn seed_review_surface_display_rows(&mut self) -> bool {
+        let Some(session) = self.review_workspace_session.as_mut() else {
+            return false;
+        };
+        if session.row_count() == 0 {
+            return false;
+        }
+        let Some(left_workspace_editor) = self.review_surface.left_workspace_editor.as_ref() else {
+            return false;
+        };
+        let Some(right_workspace_editor) = self.review_surface.right_workspace_editor.as_ref() else {
+            return false;
+        };
+
+        let viewport = hunk_editor::Viewport {
+            first_visible_row: 0,
+            visible_row_count: usize::MAX,
+            horizontal_offset: 0,
+        };
+        let requested_row_range = 0..session.row_count();
+        if let Some(display_rows) = session.cached_display_rows_covering(requested_row_range.clone())
+            && display_rows.covers_row_range(requested_row_range.clone())
+        {
+            session.refresh_display_geometry_from_display_rows(&display_rows);
+            return true;
+        }
+
+        let Some(display_rows) = Self::project_review_surface_display_rows_for_viewport(
+            left_workspace_editor,
+            right_workspace_editor,
+            viewport,
+        ) else {
+            return false;
+        };
+        if !display_rows.covers_row_range(requested_row_range) {
+            return false;
+        }
+        session.cache_display_rows(display_rows);
+        true
+    }
+
+    fn project_review_surface_display_rows_for_viewport(
+        left_workspace_editor: &crate::app::native_files_editor::SharedFilesEditor,
+        right_workspace_editor: &crate::app::native_files_editor::SharedFilesEditor,
+        viewport: hunk_editor::Viewport,
+    ) -> Option<review_workspace_session::ReviewWorkspaceDisplayRows> {
         let mut left_editor = left_workspace_editor.borrow_mut();
         let left_projected = projected_review_workspace_side_rows(
             left_editor.build_workspace_projected_snapshot(viewport, 4)?,
@@ -173,19 +232,13 @@ impl DiffViewer {
         let rows =
             review_workspace_display_row_entries_from_projected_sides(&left_projected, &right_projected)?;
 
-        let display_rows = review_workspace_session::ReviewWorkspaceDisplayRows {
+        Some(review_workspace_session::ReviewWorkspaceDisplayRows {
             rows,
             left_by_display_row: left_rows,
             right_by_display_row: right_rows,
             left_syntax_by_display_row,
             right_syntax_by_display_row,
-        };
-        if display_rows.covers_row_range(requested_row_range) {
-            session.cache_display_rows(display_rows.clone());
-            Some(display_rows)
-        } else {
-            None
-        }
+        })
     }
 
     pub(super) fn current_review_surface_snapshot(

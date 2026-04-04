@@ -289,7 +289,8 @@ impl ReviewWorkspaceDisplayRows {
         self.rows
             .iter()
             .filter(|entry| {
-                entry.raw_row_range.start < row_range.end && row_range.start < entry.raw_row_range.end
+                entry.raw_row_range.start < row_range.end
+                    && row_range.start < entry.raw_row_range.end
             })
             .cloned()
             .collect()
@@ -1325,8 +1326,9 @@ impl ReviewWorkspaceSession {
         &self,
         row_range: Range<usize>,
     ) -> Option<ReviewWorkspaceDisplayRows> {
-        (!self.cached_display_rows.is_empty() && self.cached_display_rows.covers_row_range(row_range))
-            .then(|| self.cached_display_rows.clone())
+        (!self.cached_display_rows.is_empty()
+            && self.cached_display_rows.covers_row_range(row_range))
+        .then(|| self.cached_display_rows.clone())
     }
 
     pub(crate) fn cache_display_rows(&mut self, display_rows: ReviewWorkspaceDisplayRows) {

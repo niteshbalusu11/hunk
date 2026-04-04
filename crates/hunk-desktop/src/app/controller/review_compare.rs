@@ -1056,6 +1056,7 @@ impl DiffViewer {
         };
         self.review_surface.left_workspace_editor = Some(left_workspace_editor);
         self.review_surface.right_workspace_editor = Some(right_workspace_editor);
+        let seeded_display_rows = self.seed_review_surface_display_rows();
         self.review_files = snapshot.files;
         self.review_file_status_by_path = self
             .review_files
@@ -1072,6 +1073,10 @@ impl DiffViewer {
             .retain(|path| self.review_files.iter().any(|file| file.path == *path));
 
         self.apply_loaded_review_workspace_surface();
+        debug!(
+            seeded_display_rows,
+            "review workspace surface projection initialized"
+        );
 
         if let Some(session) = self.review_workspace_session.as_ref() {
             let workspace_row_count = session.file_ranges().last().map(|range| range.end_row).unwrap_or(0);
