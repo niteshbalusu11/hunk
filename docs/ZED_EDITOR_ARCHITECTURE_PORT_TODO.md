@@ -1,6 +1,6 @@
 # Zed Editor Architecture Port TODO
 
-Status: In progress
+Status: Done
 
 ## Goal
 
@@ -134,7 +134,7 @@ Current state:
 
 ### Phase 3: Build A Read-Only Multi-File Diff Surface On The Same Editor Path
 
-Status: In progress
+Status: Done
 
 Targets:
 
@@ -207,7 +207,6 @@ Targets:
 
 Tasks:
 
-- [ ] Move comment anchors from file-local assumptions to workspace row/file mappings.
 - [x] Move comment anchors from file-local assumptions to workspace row/file mappings.
 - [x] Move hunk navigation to workspace coordinates.
 - [x] Move diff selection and reveal logic off `selected_path`-driven row lists.
@@ -225,7 +224,7 @@ Current state:
 
 ### Phase 5: Unify Syntax, Folding, Search, And Visible-Range Work
 
-Status: In progress
+Status: Done
 
 Targets:
 
@@ -237,8 +236,8 @@ Tasks:
 
 - [x] Make visible-range syntax work operate on workspace excerpts, not separate preview paths.
 - [x] Make fold placeholders and search results work across excerpt boundaries.
-- [ ] Ensure inactive diff sections do not need a separate rendering/highlighting system.
-- [ ] Keep the 8ms frame budget for 120fps scrolling.
+- [x] Ensure inactive diff sections do not need a separate rendering/highlighting system.
+- [x] Keep the 8ms frame budget for 120fps scrolling.
 
 This is the phase that removes the last architectural reason for preview-only rendering.
 
@@ -285,6 +284,8 @@ Current state:
 - Diff mode now also keeps its own persistent `WorkspaceEditorSession`, hydrated from `ReviewWorkspaceSession`, and scroll/row selection update that shared editor session before touching mirrored `selected_path` state. That moves Diff file/excerpt ownership another step closer to the same workspace-editor primitive Files mode already uses.
 - Diff-mode search target generation and next/previous-match navigation now resolve directly from `ReviewWorkspaceSession` excerpt order, while the persistent side editors only supply the underlying search-aware display projection. That keeps search ownership on the shared workspace/session model across excerpt boundaries instead of on a separate editor-only match list.
 - Review surface snapshots now also project visible search-match columns into the shared right-side code-row segments, so Diff search highlighting is no longer just controller-side navigation state; it rides on the same session-owned viewport payload the painted surface consumes.
+- Diff no longer has a separate inactive preview/render/highlight path; every visible Review row now comes from the retained shared workspace/editor display projection and is painted through the same native text/gutter helpers as Files mode.
+- The performance harness now defaults to enforcing `scroll_fps_p95 >= 120`, which matches the 8ms frame-budget target instead of a lower placeholder threshold.
 - Diff-mode compare rebuilds, file-to-file navigation, visible-row selection sync, and no-session review path selection now preserve the Review workspace/editor session’s active path or `review_last_selected_path` before falling back to the mirrored top-level `selected_path`.
 - Diff mode no longer persists duplicate `file_row_ranges` or visible header lookup vectors when a Review workspace session exists; those file-range and header queries are now expected to resolve from the shared session instead of cached flat-row state.
 - FilesEditor workspace layouts now also search across excerpt/document order instead of only the active buffer, which moves another default editor behavior closer to Zed’s multibuffer `Editor` model for both Files and Diff surfaces.
@@ -294,7 +295,7 @@ Current state:
 
 ### Phase 6: Persist Editor Entities Across Tab Switches
 
-Status: In progress
+Status: Done
 
 Targets:
 
@@ -326,7 +327,7 @@ Current state:
 
 ### Phase 7: Delete Legacy Diff Rendering Paths
 
-Status: Not started
+Status: Done
 
 Targets:
 
@@ -338,7 +339,7 @@ Tasks:
 - [x] Remove row-list-driven multi-file diff rendering.
 - [x] Remove duplicated preview syntax/highlight scheduling paths.
 - [x] Remove per-file scroll hydration logic from Diff mode.
-- [ ] Keep only one editor-native rendering pipeline for Files and Diff.
+- [x] Keep only one editor-native rendering pipeline for Files and Diff.
 
 Current state:
 - Diff mode no longer stores or consults the legacy flat row-list surface state. When a compare is loaded it uses the shared Review workspace surface, and when a compare is unavailable it falls back to the dedicated Review status surface instead of reviving the old flat multi-file row list.
@@ -347,6 +348,7 @@ Current state:
 - `ReviewWorkspaceSession` no longer exposes an alternate external display-provider path for surface snapshots, so loaded Diff viewports now have one session-owned display pipeline instead of a pluggable fallback seam.
 - The production Review surface runtime now also requires complete visible-row coverage from the persistent left/right Review editors before building a fresh surface snapshot, instead of silently falling back to session-local display projection for missing rows.
 - The remaining session-projection display-row builder is now test-only; production Diff viewport assembly and viewport-row enumeration both require explicit side-editor display rows instead of routing through an optional fallback parameter.
+- Files and Diff now both render from workspace-editor-derived display rows, search state, syntax spans, and native paint helpers. Diff still wraps those rows in a multi-file surface, but it no longer maintains a separate preview-only rendering/highlighting pipeline outside the shared editor-derived path.
 
 ## Acceptance Criteria
 
