@@ -651,16 +651,25 @@ impl ReviewWorkspaceSession {
                     let surface_top_px = self
                         .row_top_offset_px(row_index)
                         .unwrap_or(visible_start_px);
-                    let right_search_highlights = options
-                        .search_highlight_columns_by_row
-                        .get(&row_index)
-                        .map(|ranges| {
-                            review_project_search_highlights_for_display_row(
-                                &right_display_row,
-                                ranges,
-                            )
-                        })
-                        .unwrap_or_default();
+                    let right_search_highlights = if right_display_row.search_highlights.is_empty()
+                    {
+                        options
+                            .search_highlight_columns_by_row
+                            .get(&row_index)
+                            .map(|ranges| {
+                                review_project_search_highlights_for_display_row(
+                                    &right_display_row,
+                                    ranges,
+                                )
+                            })
+                            .unwrap_or_default()
+                    } else {
+                        right_display_row
+                            .search_highlights
+                            .iter()
+                            .map(|highlight| highlight.start_column..highlight.end_column)
+                            .collect()
+                    };
                     Some(ReviewWorkspaceViewportRow {
                         row_index,
                         stable_id: row_metadata

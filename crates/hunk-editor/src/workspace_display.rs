@@ -2,7 +2,8 @@ use std::cmp::min;
 
 use crate::display::ExpandedLine;
 use crate::{
-    Viewport, WhitespaceMarker, WorkspaceDocumentId, WorkspaceLayout, WorkspaceRowLocation,
+    SearchHighlight, Viewport, WhitespaceMarker, WorkspaceDocumentId, WorkspaceLayout,
+    WorkspaceRowLocation,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,6 +15,7 @@ pub struct WorkspaceDisplayRow {
     pub raw_column_offsets: Vec<usize>,
     pub text: String,
     pub whitespace_markers: Vec<WhitespaceMarker>,
+    pub search_highlights: Vec<SearchHighlight>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,6 +76,7 @@ where
             raw_column_offsets: vec![0],
             text: String::new(),
             whitespace_markers: Vec::new(),
+            search_highlights: Vec::new(),
         };
     };
 
@@ -86,6 +89,7 @@ where
             raw_column_offsets: vec![0],
             text: String::new(),
             whitespace_markers: Vec::new(),
+            search_highlights: Vec::new(),
         };
     };
 
@@ -101,5 +105,6 @@ where
         raw_column_offsets: expanded_line.raw_offsets_in_range(0, display_len),
         text: expanded_line.display_text.clone(),
         whitespace_markers: expanded_line.markers_in_range(0, display_len),
+        search_highlights: Vec::new(),
     }
 }

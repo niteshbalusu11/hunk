@@ -231,7 +231,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use hunk_domain::diff::{
     DiffCell, DiffCellKind, DiffRowKind, SideBySideRow, parse_patch_side_by_side,
 };
-use hunk_editor::WorkspaceDisplayRow;
+use hunk_editor::{SearchHighlight, WorkspaceDisplayRow};
 use hunk_git::compare::CompareSnapshot;
 use hunk_git::git::{ChangedFile, FileStatus, LineStats};
 use review_workspace_session::{
@@ -477,6 +477,79 @@ fn review_workspace_surface_snapshot_marks_visible_search_matches() {
         .collect::<Vec<_>>();
 
     assert!(!highlighted_rows.is_empty());
+}
+
+#[test]
+fn review_workspace_surface_snapshot_prefers_display_row_search_highlights() {
+    let patch = "\
+@@ -1,2 +1,2 @@
+-before
++needle first
+ keep
+";
+    let snapshot = CompareSnapshot {
+        files: vec![changed_file("src/lib.rs", FileStatus::Modified)],
+        file_line_stats: BTreeMap::new(),
+        overall_line_stats: LineStats::default(),
+        patches_by_path: BTreeMap::from([("src/lib.rs".to_string(), patch.to_string())]),
+    };
+
+    let rows = parse_patch_side_by_side(patch);
+    let stream = review_stream_for_rows(&rows, "src/lib.rs", FileStatus::Modified);
+    let session = ReviewWorkspaceSession::from_compare_snapshot(&snapshot, &BTreeSet::new())
+        .expect("review workspace session should build")
+        .with_render_stream(&stream);
+    let row_range = 0..session.row_count();
+    let left_by_row = session
+        .build_display_snapshot_for_side(row_range.clone(), ReviewWorkspaceEditorSide::Left)
+        .into_iter()
+        .map(|row| (row.row_index, row))
+        .collect::<BTreeMap<_, _>>();
+    let mut right_by_row = session
+        .build_display_snapshot_for_side(row_range, ReviewWorkspaceEditorSide::Right)
+        .into_iter()
+        .map(|row| {
+            let mut row = row;
+            if row.text.contains("needle") {
+                row.search_highlights = vec![SearchHighlight {
+                    start_column: 0,
+                    end_column: 6,
+                }];
+            }
+            (row.row_index, row)
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert!(
+        right_by_row
+            .values()
+            .any(|row| !row.search_highlights.is_empty())
+    );
+
+    let display_rows = ReviewWorkspaceDisplayRows {
+        left_by_row,
+        right_by_row: std::mem::take(&mut right_by_row),
+        left_syntax_by_row: BTreeMap::new(),
+        right_syntax_by_row: BTreeMap::new(),
+    };
+    let surface = session.build_surface_snapshot_with_display_rows(
+        0,
+        512,
+        1,
+        8,
+        &ReviewWorkspaceSurfaceOptions::default(),
+        &display_rows,
+    );
+    assert!(
+        surface
+            .viewport
+            .sections
+            .iter()
+            .flat_map(|section| section.rows.iter())
+            .any(|row| row
+                .right_segments
+                .iter()
+                .any(|segment| segment.search_match))
+    );
 }
 
 #[test]
@@ -1478,5 +1551,6 @@ fn display_row(row_index: usize, text: &str) -> WorkspaceDisplayRow {
         raw_column_offsets: (0..=text.len()).collect(),
         text: text.to_string(),
         whitespace_markers: Vec::new(),
+        search_highlights: Vec::new(),
     }
 }

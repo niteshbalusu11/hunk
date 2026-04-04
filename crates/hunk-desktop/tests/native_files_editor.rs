@@ -516,7 +516,7 @@ fn workspace_syntax_segments_cover_inactive_layout_documents() {
         .build_workspace_display_snapshot(
             Viewport {
                 first_visible_row: 0,
-                visible_row_count: 5,
+                visible_row_count: 6,
                 horizontal_offset: 0,
             },
             4,
@@ -606,6 +606,74 @@ fn workspace_search_counts_matches_across_layout_documents() {
 
     editor.set_search_query(Some("needle"));
     assert_eq!(editor.search_match_count(), 2);
+}
+
+#[test]
+fn workspace_display_snapshot_projects_search_highlights_across_layout_documents() {
+    let mut editor = FilesEditor::new();
+    let main_document_id = WorkspaceDocumentId::new(1);
+    let lib_document_id = WorkspaceDocumentId::new(2);
+    let layout = WorkspaceLayout::new(
+        vec![
+            WorkspaceDocument::new(main_document_id, "src/main.rs", BufferId::new(11), 3),
+            WorkspaceDocument::new(lib_document_id, "src/lib.rs", BufferId::new(21), 3),
+        ],
+        vec![
+            WorkspaceExcerptSpec::new(
+                WorkspaceExcerptId::new(1),
+                main_document_id,
+                WorkspaceExcerptKind::FullFile,
+                0..3,
+            ),
+            WorkspaceExcerptSpec::new(
+                WorkspaceExcerptId::new(2),
+                lib_document_id,
+                WorkspaceExcerptKind::FullFile,
+                0..3,
+            ),
+        ],
+        1,
+    )
+    .expect("workspace layout should build");
+
+    editor
+        .open_workspace_layout_documents(
+            layout,
+            vec![
+                (
+                    PathBuf::from("src/main.rs"),
+                    "needle in main\nomega\n".to_string(),
+                ),
+                (
+                    PathBuf::from("src/lib.rs"),
+                    "alpha\nneedle in lib\n".to_string(),
+                ),
+            ],
+            Some(Path::new("src/main.rs")),
+        )
+        .expect("workspace layout documents should open");
+
+    editor.set_search_query(Some("needle"));
+    let snapshot = editor
+        .build_workspace_display_snapshot(
+            Viewport {
+                first_visible_row: 0,
+                visible_row_count: 7,
+                horizontal_offset: 0,
+            },
+            4,
+            false,
+        )
+        .expect("workspace display snapshot should exist");
+
+    let highlighted_texts = snapshot
+        .visible_rows
+        .iter()
+        .filter(|row| !row.search_highlights.is_empty())
+        .map(|row| row.text.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(highlighted_texts, vec!["needle in main", "needle in lib"]);
 }
 
 #[test]
