@@ -565,6 +565,134 @@ fn review_workspace_surface_snapshot_prefers_display_row_search_highlights() {
 }
 
 #[test]
+fn review_workspace_display_geometry_tracks_expanded_display_rows() {
+    let patch = "\
+@@ -1,3 +1,3 @@
+-before
++after
+ keep
+ tail
+";
+    let snapshot = CompareSnapshot {
+        files: vec![changed_file("src/lib.rs", FileStatus::Modified)],
+        file_line_stats: BTreeMap::new(),
+        overall_line_stats: LineStats::default(),
+        patches_by_path: BTreeMap::from([("src/lib.rs".to_string(), patch.to_string())]),
+    };
+
+    let rows = parse_patch_side_by_side(patch);
+    let stream = review_stream_for_rows(&rows, "src/lib.rs", FileStatus::Modified);
+    let mut session = ReviewWorkspaceSession::from_compare_snapshot(&snapshot, &BTreeSet::new())
+        .expect("review workspace session should build")
+        .with_render_stream(&stream);
+    let base_total_height = session.total_surface_height_px();
+    let base_section_pixel_range = session
+        .section_pixel_range(0)
+        .cloned()
+        .expect("section pixel range");
+
+    let left_by_raw_row = session
+        .build_display_snapshot_for_side(0..session.row_count(), ReviewWorkspaceEditorSide::Left)
+        .into_iter()
+        .map(|row| (row.row_index, row))
+        .collect::<BTreeMap<_, _>>();
+    let right_by_raw_row = session
+        .build_display_snapshot_for_side(0..session.row_count(), ReviewWorkspaceEditorSide::Right)
+        .into_iter()
+        .map(|row| (row.row_index, row))
+        .collect::<BTreeMap<_, _>>();
+    let target_code_row = (0..session.row_count())
+        .find(|&row_ix| {
+            session
+                .row(row_ix)
+                .is_some_and(|row| row.kind == DiffRowKind::Code)
+        })
+        .expect("code row");
+    let hunk_header_row = (0..session.row_count())
+        .find(|&row_ix| {
+            session
+                .row(row_ix)
+                .is_some_and(|row| row.kind == DiffRowKind::HunkHeader)
+        })
+        .expect("hunk header row");
+
+    let mut rows = Vec::new();
+    let mut left_by_display_row = BTreeMap::new();
+    let mut right_by_display_row = BTreeMap::new();
+    let mut next_display_row = 0usize;
+    for row_ix in 0..session.row_count() {
+        let repeat = if row_ix == target_code_row { 3 } else { 1 };
+        let left = left_by_raw_row
+            .get(&row_ix)
+            .cloned()
+            .expect("left display row");
+        let right = right_by_raw_row
+            .get(&row_ix)
+            .cloned()
+            .expect("right display row");
+        for _ in 0..repeat {
+            let mut left = left.clone();
+            left.row_index = next_display_row;
+            let mut right = right.clone();
+            right.row_index = next_display_row;
+            rows.push(ReviewWorkspaceDisplayRowEntry {
+                display_row_index: next_display_row,
+                row_index: row_ix,
+                left: left.clone(),
+                right: right.clone(),
+            });
+            left_by_display_row.insert(next_display_row, left);
+            right_by_display_row.insert(next_display_row, right);
+            next_display_row = next_display_row.saturating_add(1);
+        }
+    }
+
+    let display_rows = ReviewWorkspaceDisplayRows {
+        rows,
+        left_by_display_row,
+        right_by_display_row,
+        left_syntax_by_display_row: BTreeMap::new(),
+        right_syntax_by_display_row: BTreeMap::new(),
+    };
+    session.refresh_display_geometry_from_display_rows(&display_rows);
+
+    assert_eq!(
+        session.display_row_range_for_raw_row(hunk_header_row),
+        Some(hunk_header_row..hunk_header_row.saturating_add(1))
+    );
+    assert_eq!(
+        session.display_row_range_for_raw_row(target_code_row),
+        Some(target_code_row..target_code_row.saturating_add(3))
+    );
+    assert_eq!(
+        session.display_row_boundary_for_raw_row(target_code_row.saturating_add(1)),
+        Some(target_code_row.saturating_add(3))
+    );
+    assert_eq!(
+        session.display_geometry_total_display_rows(),
+        session.row_count().saturating_add(2)
+    );
+    assert_eq!(
+        session.display_geometry_total_surface_height_px(),
+        base_total_height
+            .saturating_add(2usize.saturating_mul(REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX))
+    );
+    assert_eq!(
+        session.display_geometry_section_pixel_range(0),
+        Some(
+            &(base_section_pixel_range.start
+                ..base_section_pixel_range
+                    .end
+                    .saturating_add(2usize.saturating_mul(REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX)))
+        )
+    );
+    assert_eq!(
+        session.display_geometry_section_display_row_range(0),
+        Some(&(0..session.row_count().saturating_add(2)))
+    );
+}
+
+#[test]
 fn review_workspace_session_surface_rows_match_current_side_by_side_shape() {
     let patch = "\
 @@ -3,5 +3,4 @@

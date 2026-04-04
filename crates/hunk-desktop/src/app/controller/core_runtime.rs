@@ -71,7 +71,6 @@ impl DiffViewer {
             return None;
         }
 
-        let session = self.review_workspace_session.as_ref()?;
         let scroll_top_px = self.current_review_surface_scroll_top_px();
         let viewport_height_px = self
             .review_surface
@@ -92,8 +91,14 @@ impl DiffViewer {
                     || snapshot.viewport_height_px != viewport_height_px
         });
         if needs_refresh {
-            let Some(display_rows) = self.review_surface_display_rows(
+            let surface_options = self.review_surface_snapshot_options();
+            let left_workspace_editor = self.review_surface.left_workspace_editor.clone()?;
+            let right_workspace_editor = self.review_surface.right_workspace_editor.clone()?;
+            let session = self.review_workspace_session.as_mut()?;
+            let Some(display_rows) = Self::review_surface_display_rows(
                 session,
+                &left_workspace_editor,
+                &right_workspace_editor,
                 scroll_top_px,
                 viewport_height_px,
                 8,
@@ -106,7 +111,7 @@ impl DiffViewer {
                 viewport_height_px,
                 1,
                 8,
-                &self.review_surface_snapshot_options(),
+                &surface_options,
                 &display_rows,
             );
             self.review_surface.last_surface_snapshot = Some(snapshot);
@@ -119,8 +124,9 @@ impl DiffViewer {
     }
 
     fn review_surface_display_rows(
-        &self,
-        session: &review_workspace_session::ReviewWorkspaceSession,
+        session: &mut review_workspace_session::ReviewWorkspaceSession,
+        left_workspace_editor: &crate::app::native_files_editor::SharedFilesEditor,
+        right_workspace_editor: &crate::app::native_files_editor::SharedFilesEditor,
         scroll_top_px: usize,
         viewport_height_px: usize,
         overscan_rows: usize,
@@ -144,9 +150,7 @@ impl DiffViewer {
             visible_row_count,
             horizontal_offset: 0,
         };
-        let left_editor = self.review_surface.left_workspace_editor.as_ref()?;
-        let right_editor = self.review_surface.right_workspace_editor.as_ref()?;
-        let mut left_editor = left_editor.borrow_mut();
+        let mut left_editor = left_workspace_editor.borrow_mut();
         let left_projected =
             left_editor.build_workspace_projected_snapshot(viewport, 4).and_then(projected_review_workspace_side_rows);
         let left_rows = if left_projected.is_some() {
@@ -167,7 +171,7 @@ impl DiffViewer {
             left_editor.workspace_display_segments_by_row(&left_syntax_rows)?;
         drop(left_editor);
 
-        let mut right_editor = right_editor.borrow_mut();
+        let mut right_editor = right_workspace_editor.borrow_mut();
         let right_projected =
             right_editor.build_workspace_projected_snapshot(viewport, 4).and_then(projected_review_workspace_side_rows);
         let right_rows = if right_projected.is_some() {
@@ -205,9 +209,12 @@ impl DiffViewer {
             left_syntax_by_display_row,
             right_syntax_by_display_row,
         };
-        display_rows
-            .covers_row_range(first_visible_row..last_visible_row)
-            .then_some(display_rows)
+        if display_rows.covers_row_range(first_visible_row..last_visible_row) {
+            session.refresh_display_geometry_from_display_rows(&display_rows);
+            Some(display_rows)
+        } else {
+            None
+        }
     }
 
     pub(super) fn current_review_surface_snapshot(

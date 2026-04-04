@@ -16,8 +16,12 @@ use hunk_git::git::{FileStatus, LineStats};
 use hunk_text::{BufferId, TextBuffer};
 
 #[allow(clippy::duplicate_mod)]
+#[path = "review_workspace_session_geometry.rs"]
+mod geometry_impl;
+#[allow(clippy::duplicate_mod)]
 #[path = "review_workspace_session_search.rs"]
 mod search_impl;
+pub(crate) use geometry_impl::ReviewWorkspaceDisplayGeometry;
 #[allow(unused_imports)]
 pub(crate) use search_impl::ReviewWorkspaceSearchTarget;
 #[allow(clippy::duplicate_mod)]
@@ -318,6 +322,7 @@ pub(crate) struct ReviewWorkspaceSession {
     row_top_offsets: Vec<usize>,
     section_pixel_ranges: Vec<Range<usize>>,
     total_surface_height_px: usize,
+    display_geometry: ReviewWorkspaceDisplayGeometry,
 }
 
 #[allow(dead_code)]
@@ -467,6 +472,7 @@ impl ReviewWorkspaceSession {
             row_top_offsets: Vec::new(),
             section_pixel_ranges: Vec::new(),
             total_surface_height_px: 0,
+            display_geometry: ReviewWorkspaceDisplayGeometry::default(),
         })
     }
 
@@ -479,6 +485,7 @@ impl ReviewWorkspaceSession {
         self.row_segments = stream.row_segments.clone();
         self.rebuild_document_buffers();
         self.rebuild_surface_geometry();
+        self.rebuild_display_geometry(None);
         self
     }
 
@@ -611,6 +618,42 @@ impl ReviewWorkspaceSession {
 
     pub(crate) fn total_surface_height_px(&self) -> usize {
         self.total_surface_height_px
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn display_geometry_total_surface_height_px(&self) -> usize {
+        self.display_geometry.total_surface_height_px()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn display_row_range_for_raw_row(&self, row_ix: usize) -> Option<Range<usize>> {
+        self.display_geometry.row_display_range(row_ix)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn display_row_boundary_for_raw_row(&self, boundary_ix: usize) -> Option<usize> {
+        self.display_geometry.row_display_boundary(boundary_ix)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn display_geometry_section_pixel_range(
+        &self,
+        section_ix: usize,
+    ) -> Option<&Range<usize>> {
+        self.display_geometry.section_pixel_range(section_ix)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn display_geometry_section_display_row_range(
+        &self,
+        section_ix: usize,
+    ) -> Option<&Range<usize>> {
+        self.display_geometry.section_display_row_range(section_ix)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn display_geometry_total_display_rows(&self) -> usize {
+        self.display_geometry.total_display_rows()
     }
 
     #[cfg(test)]
@@ -1192,6 +1235,13 @@ impl ReviewWorkspaceSession {
         &self.layout
     }
 
+    pub(crate) fn refresh_display_geometry_from_display_rows(
+        &mut self,
+        display_rows: &ReviewWorkspaceDisplayRows,
+    ) {
+        self.rebuild_display_geometry(Some(display_rows));
+    }
+
     #[allow(dead_code)]
     pub(crate) fn build_editor_session(
         &self,
@@ -1459,6 +1509,11 @@ impl ReviewWorkspaceSession {
                 start..end
             })
             .collect();
+    }
+
+    fn rebuild_display_geometry(&mut self, display_rows: Option<&ReviewWorkspaceDisplayRows>) {
+        self.display_geometry =
+            ReviewWorkspaceDisplayGeometry::build(&self.rows, &self.sections, display_rows);
     }
 
     fn rebuild_document_buffers(&mut self) {
