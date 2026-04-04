@@ -325,6 +325,7 @@ Current state:
 - Diff visible-range syntax/segment prefetch now also runs through a dedicated `ReviewWorkspaceSession` scheduler path instead of sharing the old flat-row cache controller branch with Files mode before cache computation starts.
 - `ReviewWorkspaceSession` no longer exposes an alternate external display-provider path for surface snapshots, so loaded Diff viewports now have one session-owned display pipeline instead of a pluggable fallback seam.
 - The production Review surface runtime now also requires complete visible-row coverage from the persistent left/right Review editors before building a fresh surface snapshot, instead of silently falling back to session-local display projection for missing rows.
+- The remaining session-projection display-row builder is now test-only; production Diff viewport assembly and viewport-row enumeration both require explicit side-editor display rows instead of routing through an optional fallback parameter.
 
 ## Acceptance Criteria
 

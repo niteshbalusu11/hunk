@@ -107,7 +107,7 @@ impl DiffViewer {
                 1,
                 8,
                 &self.review_surface_snapshot_options(),
-                Some(&display_rows),
+                &display_rows,
             );
             self.review_surface.last_surface_snapshot = Some(snapshot);
         }
