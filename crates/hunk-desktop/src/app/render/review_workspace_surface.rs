@@ -285,19 +285,39 @@ impl DiffViewer {
             .map(|range| range.len())
             .unwrap_or_default();
         let layout = self.diff_column_layout();
+        let chrome = hunk_diff_chrome(cx.theme(), cx.theme().mode.is_dark());
+        let sticky_file_can_view = surface
+            .sticky_file_header
+            .as_ref()
+            .is_some_and(|header| {
+                self.can_open_file_in_files_workspace(header.path.as_str(), header.status)
+            });
 
         div()
             .id("review-workspace-viewport")
             .relative()
             .w_full()
             .h(px(visible_height_px as f32))
-            .child(self.render_review_workspace_viewport_element(
-                surface,
-                viewport,
-                viewport_origin_px,
-                layout,
-                cx,
-            ))
+            .child(
+                crate::app::workspace_surface::WorkspaceSurfaceElement::Projected(Box::new(
+                    crate::app::workspace_surface::ProjectedWorkspaceSurfaceElement {
+                        view: cx.entity(),
+                        viewport: std::rc::Rc::new(viewport.clone()),
+                        sticky_file_header: surface.sticky_file_header.clone(),
+                        sticky_file_can_view,
+                        viewport_origin_px,
+                        selected_row_range: self.selected_row_range(),
+                        left_panel_width: layout.map(|layout| layout.left_panel_width),
+                        right_panel_width: layout.map(|layout| layout.right_panel_width),
+                        left_line_number_width: self.review_surface.diff_left_line_number_width,
+                        right_line_number_width: self.review_surface.diff_right_line_number_width,
+                        center_divider: chrome.center_divider,
+                        mono_font_family: cx.theme().mono_font_family.clone(),
+                        ui_font_family: cx.theme().font_family.clone(),
+                    },
+                ))
+                .into_any_element(),
+            )
             .when_some(surface.active_comment_editor_overlay.as_ref(), |this, overlay| {
                 this.child(self.render_active_row_comment_overlay(
                     overlay.row_index,

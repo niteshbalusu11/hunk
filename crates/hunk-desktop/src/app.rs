@@ -1207,13 +1207,15 @@ impl ReviewWorkspaceSurfaceOwner {
             &right_projected,
         )?;
 
-        Some(crate::app::review_workspace_session::ReviewWorkspaceDisplayRows {
-            rows,
-            left_by_display_row: left_rows,
-            right_by_display_row: right_rows,
-            left_syntax_by_display_row,
-            right_syntax_by_display_row,
-        })
+        Some(
+            crate::app::review_workspace_session::ReviewWorkspaceDisplayRows {
+                rows,
+                left_by_display_row: left_rows,
+                right_by_display_row: right_rows,
+                left_syntax_by_display_row,
+                right_syntax_by_display_row,
+            },
+        )
     }
 }
 

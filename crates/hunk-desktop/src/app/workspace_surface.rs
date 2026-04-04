@@ -9,8 +9,8 @@ use gpui::{
 use crate::app::{DiffViewer, review_workspace_session};
 
 pub(crate) enum WorkspaceSurfaceElement {
-    Files(crate::app::native_files_editor::FilesEditorElement),
-    Review(ReviewWorkspaceSurfaceElement),
+    Files(Box<crate::app::native_files_editor::FilesEditorElement>),
+    Projected(Box<ProjectedWorkspaceSurfaceElement>),
 }
 
 impl IntoElement for WorkspaceSurfaceElement {
@@ -18,17 +18,18 @@ impl IntoElement for WorkspaceSurfaceElement {
 
     fn into_element(self) -> Self::Element {
         match self {
-            Self::Files(element) => element.into_any_element(),
-            Self::Review(element) => element.into_any_element(),
+            Self::Files(element) => (*element).into_any_element(),
+            Self::Projected(element) => (*element).into_any_element(),
         }
     }
 }
 
 #[derive(Clone)]
-pub(crate) struct ReviewWorkspaceSurfaceElement {
+pub(crate) struct ProjectedWorkspaceSurfaceElement {
     pub(crate) view: gpui::Entity<DiffViewer>,
     pub(crate) viewport: Rc<review_workspace_session::ReviewWorkspaceViewportSnapshot>,
-    pub(crate) sticky_file_header: Option<review_workspace_session::ReviewWorkspaceVisibleFileHeader>,
+    pub(crate) sticky_file_header:
+        Option<review_workspace_session::ReviewWorkspaceVisibleFileHeader>,
     pub(crate) sticky_file_can_view: bool,
     pub(crate) viewport_origin_px: usize,
     pub(crate) selected_row_range: Option<(usize, usize)>,
@@ -42,11 +43,11 @@ pub(crate) struct ReviewWorkspaceSurfaceElement {
 }
 
 #[derive(Clone)]
-pub(crate) struct ReviewWorkspaceSurfaceLayout {
+pub(crate) struct ProjectedWorkspaceSurfaceLayout {
     hitbox: gpui::Hitbox,
 }
 
-impl IntoElement for ReviewWorkspaceSurfaceElement {
+impl IntoElement for ProjectedWorkspaceSurfaceElement {
     type Element = Self;
 
     fn into_element(self) -> Self::Element {
@@ -54,9 +55,9 @@ impl IntoElement for ReviewWorkspaceSurfaceElement {
     }
 }
 
-impl Element for ReviewWorkspaceSurfaceElement {
+impl Element for ProjectedWorkspaceSurfaceElement {
     type RequestLayoutState = ();
-    type PrepaintState = ReviewWorkspaceSurfaceLayout;
+    type PrepaintState = ProjectedWorkspaceSurfaceLayout;
 
     fn id(&self) -> Option<ElementId> {
         None
@@ -88,7 +89,7 @@ impl Element for ReviewWorkspaceSurfaceElement {
         window: &mut Window,
         _cx: &mut App,
     ) -> Self::PrepaintState {
-        ReviewWorkspaceSurfaceLayout {
+        ProjectedWorkspaceSurfaceLayout {
             hitbox: window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal),
         }
     }
@@ -107,6 +108,15 @@ impl Element for ReviewWorkspaceSurfaceElement {
         let sticky_file_header = self.sticky_file_header.clone();
         let sticky_file_can_view = self.sticky_file_can_view;
         let viewport_origin_px = self.viewport_origin_px;
+        let paint_style = crate::app::render::ReviewWorkspaceViewportPaintStyle {
+            left_panel_width: self.left_panel_width,
+            right_panel_width: self.right_panel_width,
+            left_line_number_width: self.left_line_number_width,
+            right_line_number_width: self.right_line_number_width,
+            center_divider: self.center_divider,
+            mono_font_family: self.mono_font_family.clone(),
+            ui_font_family: self.ui_font_family.clone(),
+        };
         let hitbox = layout.hitbox.clone();
         let view = self.view.clone();
         window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
@@ -171,9 +181,8 @@ impl Element for ReviewWorkspaceSurfaceElement {
                 && let (Some(path), Some(status)) =
                     (viewport_row.file_path.as_ref(), viewport_row.file_status)
             {
-                let controls = crate::app::render::review_workspace_file_header_controls_layout(
-                    row_bounds,
-                );
+                let controls =
+                    crate::app::render::review_workspace_file_header_controls_layout(row_bounds);
                 if controls.collapse_bounds.contains(&event.position) {
                     let path = path.clone();
                     view.update(cx, |this, cx| {
@@ -191,11 +200,13 @@ impl Element for ReviewWorkspaceSurfaceElement {
                     return;
                 }
             }
-            if let Some(comment_layout) = crate::app::render::review_workspace_comment_affordance_layout(
-                row_bounds,
-                viewport_row.show_comment_affordance,
-                viewport_row.open_comment_count,
-            ) && matches!(event.button, MouseButton::Left | MouseButton::Middle)
+            if let Some(comment_layout) =
+                crate::app::render::review_workspace_comment_affordance_layout(
+                    row_bounds,
+                    viewport_row.show_comment_affordance,
+                    viewport_row.open_comment_count,
+                )
+                && matches!(event.button, MouseButton::Left | MouseButton::Middle)
                 && comment_layout.hit_bounds.contains(&event.position)
             {
                 view.update(cx, |this, cx| {
@@ -278,13 +289,7 @@ impl Element for ReviewWorkspaceSurfaceElement {
                     row_bounds,
                     viewport_row,
                     is_selected,
-                    self.left_panel_width,
-                    self.right_panel_width,
-                    self.left_line_number_width,
-                    self.right_line_number_width,
-                    self.center_divider,
-                    self.mono_font_family.clone(),
-                    self.ui_font_family.clone(),
+                    &paint_style,
                 );
             }
 
@@ -304,20 +309,19 @@ impl Element for ReviewWorkspaceSurfaceElement {
                     is_selected,
                     self.sticky_file_can_view,
                     sticky_bounds,
-                    self.mono_font_family.clone(),
-                    self.ui_font_family.clone(),
+                    &paint_style,
                 );
             }
         });
     }
 }
 
-fn review_workspace_row_at_position<'a>(
-    viewport: &'a review_workspace_session::ReviewWorkspaceViewportSnapshot,
+fn review_workspace_row_at_position(
+    viewport: &review_workspace_session::ReviewWorkspaceViewportSnapshot,
     viewport_origin_px: usize,
     position: Point<Pixels>,
     origin: Point<Pixels>,
-) -> Option<&'a review_workspace_session::ReviewWorkspaceViewportRow> {
+) -> Option<&review_workspace_session::ReviewWorkspaceViewportRow> {
     let local_y = (position.y - origin.y).max(Pixels::ZERO).as_f32().floor() as usize;
     viewport.row_at_viewport_position(viewport_origin_px, local_y)
 }
@@ -332,11 +336,9 @@ fn review_workspace_row_bounds(
         origin: point(
             origin.x,
             origin.y
-                + px(
-                    viewport_row
-                        .surface_top_px
-                        .saturating_sub(viewport_origin_px) as f32,
-                ),
+                + px(viewport_row
+                    .surface_top_px
+                    .saturating_sub(viewport_origin_px) as f32),
         ),
         size: gpui::size(width, px(viewport_row.height_px as f32)),
     }

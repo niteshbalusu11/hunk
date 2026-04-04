@@ -5,19 +5,24 @@ pub(crate) struct ReviewWorkspaceCommentAffordanceLayout {
     badge_bounds: Option<Bounds<Pixels>>,
 }
 
+#[derive(Clone)]
+pub(crate) struct ReviewWorkspaceViewportPaintStyle {
+    pub(crate) left_panel_width: Option<Pixels>,
+    pub(crate) right_panel_width: Option<Pixels>,
+    pub(crate) left_line_number_width: f32,
+    pub(crate) right_line_number_width: f32,
+    pub(crate) center_divider: gpui::Hsla,
+    pub(crate) mono_font_family: SharedString,
+    pub(crate) ui_font_family: SharedString,
+}
+
 pub(crate) fn paint_review_workspace_viewport_row(
     window: &mut Window,
     cx: &mut App,
     row_bounds: Bounds<Pixels>,
     viewport_row: &review_workspace_session::ReviewWorkspaceViewportRow,
     is_selected: bool,
-    left_panel_width: Option<Pixels>,
-    right_panel_width: Option<Pixels>,
-    left_line_number_width: f32,
-    right_line_number_width: f32,
-    center_divider: gpui::Hsla,
-    mono_font_family: SharedString,
-    ui_font_family: SharedString,
+    style: &ReviewWorkspaceViewportPaintStyle,
 ) {
     if viewport_row.stream_kind == DiffStreamRowKind::FileHeader {
         let Some(path) = viewport_row.file_path.as_deref() else {
@@ -39,8 +44,8 @@ pub(crate) fn paint_review_workspace_viewport_row(
             cx,
             row_bounds,
             &paint,
-            mono_font_family,
-            ui_font_family,
+            style.mono_font_family.clone(),
+            style.ui_font_family.clone(),
         );
         return;
     }
@@ -49,7 +54,7 @@ pub(crate) fn paint_review_workspace_viewport_row(
         DiffRowKind::Code => {
             let left = build_review_workspace_code_row_cell_paint(
                 cx.theme(),
-                left_line_number_width,
+                style.left_line_number_width,
                 viewport_row.stable_id,
                 is_selected,
                 DiffCellRenderSpec {
@@ -57,13 +62,13 @@ pub(crate) fn paint_review_workspace_viewport_row(
                     line: viewport_row.left_line,
                     cell_kind: viewport_row.left_cell_kind,
                     peer_kind: viewport_row.right_cell_kind,
-                    panel_width: left_panel_width,
+                    panel_width: style.left_panel_width,
                 },
                 viewport_row,
             );
             let right = build_review_workspace_code_row_cell_paint(
                 cx.theme(),
-                right_line_number_width,
+                style.right_line_number_width,
                 viewport_row.stable_id,
                 is_selected,
                 DiffCellRenderSpec {
@@ -71,7 +76,7 @@ pub(crate) fn paint_review_workspace_viewport_row(
                     line: viewport_row.right_line,
                     cell_kind: viewport_row.right_cell_kind,
                     peer_kind: viewport_row.left_cell_kind,
-                    panel_width: right_panel_width,
+                    panel_width: style.right_panel_width,
                 },
                 viewport_row,
             );
@@ -81,8 +86,8 @@ pub(crate) fn paint_review_workspace_viewport_row(
                 row_bounds,
                 &left,
                 &right,
-                center_divider,
-                mono_font_family,
+                style.center_divider,
+                style.mono_font_family.clone(),
             );
         }
         DiffRowKind::HunkHeader | DiffRowKind::Meta | DiffRowKind::Empty => {
@@ -92,7 +97,13 @@ pub(crate) fn paint_review_workspace_viewport_row(
                 &viewport_row.text,
                 is_selected,
             );
-            paint_review_workspace_meta_row(window, cx, row_bounds, &meta, mono_font_family);
+            paint_review_workspace_meta_row(
+                window,
+                cx,
+                row_bounds,
+                &meta,
+                style.mono_font_family.clone(),
+            );
         }
     }
 
@@ -106,7 +117,7 @@ pub(crate) fn paint_review_workspace_viewport_row(
             cx,
             comment_layout,
             viewport_row.open_comment_count,
-            ui_font_family,
+            style.ui_font_family.clone(),
         );
     }
 }
@@ -118,8 +129,7 @@ pub(crate) fn paint_review_workspace_sticky_header(
     is_selected: bool,
     can_view_file: bool,
     bounds: Bounds<Pixels>,
-    mono_font_family: SharedString,
-    ui_font_family: SharedString,
+    style: &ReviewWorkspaceViewportPaintStyle,
 ) {
     let paint = build_review_workspace_file_header_paint(
         cx.theme(),
@@ -135,8 +145,8 @@ pub(crate) fn paint_review_workspace_sticky_header(
         cx,
         bounds,
         &paint,
-        mono_font_family,
-        ui_font_family,
+        style.mono_font_family.clone(),
+        style.ui_font_family.clone(),
     );
 }
 
@@ -343,41 +353,4 @@ fn paint_review_workspace_outline(
         },
         border,
     ));
-}
-
-impl DiffViewer {
-    fn render_review_workspace_viewport_element(
-        &self,
-        surface: &review_workspace_session::ReviewWorkspaceSurfaceSnapshot,
-        viewport: &review_workspace_session::ReviewWorkspaceViewportSnapshot,
-        viewport_origin_px: usize,
-        layout: Option<DiffColumnLayout>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let chrome = hunk_diff_chrome(cx.theme(), cx.theme().mode.is_dark());
-        let sticky_file_can_view = surface
-            .sticky_file_header
-            .as_ref()
-            .is_some_and(|header| {
-                self.can_open_file_in_files_workspace(header.path.as_str(), header.status)
-            });
-        crate::app::workspace_surface::WorkspaceSurfaceElement::Review(
-            crate::app::workspace_surface::ReviewWorkspaceSurfaceElement {
-                view: cx.entity(),
-                viewport: std::rc::Rc::new(viewport.clone()),
-                sticky_file_header: surface.sticky_file_header.clone(),
-                sticky_file_can_view,
-                viewport_origin_px,
-                selected_row_range: self.selected_row_range(),
-                left_panel_width: layout.map(|layout| layout.left_panel_width),
-                right_panel_width: layout.map(|layout| layout.right_panel_width),
-                left_line_number_width: self.review_surface.diff_left_line_number_width,
-                right_line_number_width: self.review_surface.diff_right_line_number_width,
-                center_divider: chrome.center_divider,
-                mono_font_family: cx.theme().mono_font_family.clone(),
-                ui_font_family: cx.theme().font_family.clone(),
-            },
-        )
-        .into_any_element()
-    }
 }

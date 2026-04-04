@@ -1,6 +1,6 @@
 # Zed Editor Architecture Port TODO
 
-Status: In Progress
+Status: Done
 
 ## Goal
 
@@ -495,7 +495,7 @@ Current state:
 
 ### Phase 14: Delete Transitional Review Surface Code
 
-Status: Pending
+Status: Done
 
 Targets:
 
@@ -505,10 +505,16 @@ Targets:
 
 Tasks:
 
-- [ ] Delete custom viewport ownership once the editor-owned workspace surface is live.
-- [ ] Delete paired-side adapter state and controller shims no longer needed.
-- [ ] Re-run performance validation against the 8ms frame budget / 120fps target.
-- [ ] Mark the tracker done only when Files and Diff both mount the shared surface contract and Diff no longer depends on a custom viewport painter.
+- [x] Delete custom viewport ownership once the editor-owned workspace surface is live.
+- [x] Delete paired-side adapter state and controller shims no longer needed.
+- [x] Re-run performance validation against the 8ms frame budget / 120fps target.
+- [x] Mark the tracker done only when Files and Diff both mount the shared surface contract and Diff no longer depends on a custom viewport painter.
+
+Current state:
+- Diff now mounts the shared `WorkspaceSurfaceElement::Projected` contract directly from `review_workspace_surface.rs` instead of going through the deleted `render_review_workspace_viewport_element` adapter.
+- Files and Diff now both enter the workspace UI through the same shared surface contract in `crates/hunk-desktop/src/app/workspace_surface.rs`.
+- The remaining paired left/right editor machinery now sits behind one `ReviewWorkspaceSurfaceOwner`, so controller code no longer coordinates paired side editors directly.
+- Final validation passed, including the full workspace build/clippy/test pass and the ignored `large_diff_perf_harness` benchmark with `HUNK_PERF_REPO=/Volumes/hulk/dev/projects/hunk`, which satisfied the 120fps-equivalent scroll threshold in the harness model.
 
 ## Acceptance Criteria
 

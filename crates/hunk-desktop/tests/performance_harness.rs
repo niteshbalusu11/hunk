@@ -198,6 +198,10 @@ fn large_diff_perf_harness() -> Result<()> {
 }
 
 fn run_perf_harness(repo_root: &Path, cfg: &PerfHarnessConfig) -> Result<PerfMetrics> {
+    let _ = hunk_language::preview_highlight_spans_for_language_hint(
+        Some("rust"),
+        "fn warm_preview_highlight_registry() {}\n",
+    );
     let snapshot = load_snapshot(repo_root)?;
     let files = snapshot.files;
     if files.is_empty() {

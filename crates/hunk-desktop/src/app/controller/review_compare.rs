@@ -195,14 +195,12 @@ impl DiffViewer {
             return;
         };
         if let Some(excerpt_id) = session.excerpt_id_at_surface_row(row_ix)
-        {
-            if self
+            && self
                 .review_surface
                 .workspace_owner()
                 .is_some_and(|owner| owner.activate_workspace_excerpt(excerpt_id))
-            {
-                return;
-            }
+        {
+            return;
         }
         if let Some(path) = session
             .path_at_surface_row(row_ix)

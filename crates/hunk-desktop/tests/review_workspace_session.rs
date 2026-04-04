@@ -2,6 +2,7 @@
 #[path = "../src/app/native_files_editor_workspace.rs"]
 mod workspace_editor_session;
 
+#[allow(dead_code, unused_imports)]
 mod app {
     use gpui::SharedString;
     use hunk_git::git::FileStatus;
@@ -1381,14 +1382,8 @@ fn review_workspace_session_builds_viewport_snapshot_from_shared_geometry() {
     let session_row_meta = session
         .row_metadata(code_row.row_index)
         .expect("session row metadata should exist for viewport code row");
-    assert_eq!(
-        code_row.left_cell.display_row.text,
-        session_row.left.text
-    );
-    assert_eq!(
-        code_row.right_cell.display_row.text,
-        session_row.right.text
-    );
+    assert_eq!(code_row.left_cell.display_row.text, session_row.left.text);
+    assert_eq!(code_row.right_cell.display_row.text, session_row.right.text);
     assert_eq!(code_row.stable_id, session_row_meta.stable_id);
     assert_eq!(code_row.row_kind, session_row.kind);
     assert_eq!(code_row.stream_kind, session_row_meta.kind);

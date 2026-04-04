@@ -35,6 +35,13 @@ struct ReviewWorkspaceMetaRowPaint {
     border: gpui::Hsla,
 }
 
+struct ReviewWorkspaceTextRunStyle {
+    default_foreground: gpui::Hsla,
+    font: gpui::Font,
+    changed_bg: gpui::Hsla,
+    search_bg: gpui::Hsla,
+}
+
 fn paint_review_workspace_code_row(
     window: &mut Window,
     cx: &mut App,
@@ -193,10 +200,12 @@ fn paint_review_workspace_code_cell(
         &cell.display_row,
         &cell.syntax_spans,
         &cell.changed_ranges,
-        cell.text_color,
-        font.clone(),
-        changed_bg,
-        search_bg,
+        ReviewWorkspaceTextRunStyle {
+            default_foreground: cell.text_color,
+            font: font.clone(),
+            changed_bg,
+            search_bg,
+        },
     );
     let mut text = cell.display_row.text.clone();
     if text_runs.is_empty() {
@@ -479,10 +488,7 @@ fn build_review_workspace_text_runs(
     display_row: &hunk_editor::WorkspaceDisplayRow,
     syntax_spans: &[crate::app::native_files_editor::paint::RowSyntaxSpan],
     changed_ranges: &[std::ops::Range<usize>],
-    default_foreground: gpui::Hsla,
-    font: gpui::Font,
-    changed_bg: gpui::Hsla,
-    search_bg: gpui::Hsla,
+    style: ReviewWorkspaceTextRunStyle,
 ) -> Vec<TextRun> {
     if display_row.text.is_empty() {
         return Vec::new();
@@ -532,29 +538,29 @@ fn build_review_workspace_text_runs(
             .map(|span| {
                 diff_syntax_color(
                     cx.theme(),
-                    default_foreground,
+                    style.default_foreground,
                     review_workspace_syntax_token_for_style_key(span.style_key.as_str()),
                 )
             })
-            .unwrap_or(default_foreground);
+            .unwrap_or(style.default_foreground);
         let background_color = if display_row
             .search_highlights
             .iter()
             .any(|highlight| highlight.start_column <= start && start < highlight.end_column)
         {
-            Some(search_bg)
+            Some(style.search_bg)
         } else if changed_ranges
             .iter()
             .any(|range| range.start <= start && start < range.end)
         {
-            Some(changed_bg)
+            Some(style.changed_bg)
         } else {
             None
         };
         runs.push(TextRun {
             len: column_byte_offsets[end].saturating_sub(column_byte_offsets[start]),
             color: syntax,
-            font: font.clone(),
+            font: style.font.clone(),
             background_color,
             underline: None,
             strikethrough: None,
@@ -564,8 +570,8 @@ fn build_review_workspace_text_runs(
     if runs.is_empty() {
         runs.push(TextRun {
             len: display_row.text.len(),
-            color: default_foreground,
-            font,
+            color: style.default_foreground,
+            font: style.font,
             background_color: None,
             underline: None,
             strikethrough: None,

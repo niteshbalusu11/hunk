@@ -843,6 +843,7 @@ struct ReviewWorkspaceProjectedSideRow {
 
 #[cfg(test)]
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ReviewWorkspaceProjectedSideRows {
     rows: Vec<ReviewWorkspaceProjectedSideRow>,
     rows_by_display_row: BTreeMap<usize, hunk_editor::WorkspaceDisplayRow>,
