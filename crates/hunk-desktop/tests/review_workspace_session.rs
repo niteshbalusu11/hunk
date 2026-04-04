@@ -141,12 +141,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use hunk_domain::diff::{
     DiffCell, DiffCellKind, DiffRowKind, SideBySideRow, parse_patch_side_by_side,
 };
+use hunk_editor::WorkspaceDisplayRow;
 use hunk_git::compare::CompareSnapshot;
 use hunk_git::git::{ChangedFile, FileStatus, LineStats};
 use review_workspace_session::{
     REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX, REVIEW_SURFACE_HUNK_DIVIDER_HEIGHT_PX,
-    ReviewWorkspaceEditorSide, ReviewWorkspaceSegmentPrefetchRequest, ReviewWorkspaceSession,
-    ReviewWorkspaceSurfaceOptions,
+    ReviewWorkspaceDisplayRows, ReviewWorkspaceEditorSide, ReviewWorkspaceSegmentPrefetchRequest,
+    ReviewWorkspaceSession, ReviewWorkspaceSurfaceOptions,
 };
 
 fn changed_file(path: &str, status: FileStatus) -> ChangedFile {
@@ -1354,4 +1355,34 @@ fn review_workspace_session_builds_comment_anchors_from_render_rows() {
     assert_eq!(anchor.file_path, "src/main.rs");
     assert!(anchor.line_text.contains("+new line"));
     assert_eq!(anchor.hunk_header.as_deref(), Some("@@ -1,2 +1,3 @@"));
+}
+
+#[test]
+fn review_workspace_display_rows_require_complete_left_and_right_coverage() {
+    let full = ReviewWorkspaceDisplayRows {
+        left_by_row: BTreeMap::from([(3, display_row(3, "left-a")), (4, display_row(4, "left-b"))]),
+        right_by_row: BTreeMap::from([
+            (3, display_row(3, "right-a")),
+            (4, display_row(4, "right-b")),
+        ]),
+    };
+    assert!(full.covers_row_range(3..5));
+
+    let missing_right = ReviewWorkspaceDisplayRows {
+        left_by_row: full.left_by_row.clone(),
+        right_by_row: BTreeMap::from([(3, display_row(3, "right-a"))]),
+    };
+    assert!(!missing_right.covers_row_range(3..5));
+}
+
+fn display_row(row_index: usize, text: &str) -> WorkspaceDisplayRow {
+    WorkspaceDisplayRow {
+        row_index,
+        location: None,
+        raw_start_column: 0,
+        raw_end_column: text.len(),
+        raw_column_offsets: (0..=text.len()).collect(),
+        text: text.to_string(),
+        whitespace_markers: Vec::new(),
+    }
 }

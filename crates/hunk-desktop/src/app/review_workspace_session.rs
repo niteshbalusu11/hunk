@@ -188,6 +188,14 @@ pub(crate) struct ReviewWorkspaceDisplayRows {
     pub(crate) right_by_row: BTreeMap<usize, WorkspaceDisplayRow>,
 }
 
+impl ReviewWorkspaceDisplayRows {
+    pub(crate) fn covers_row_range(&self, row_range: Range<usize>) -> bool {
+        row_range
+            .clone()
+            .all(|row| self.left_by_row.contains_key(&row) && self.right_by_row.contains_key(&row))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ReviewWorkspaceFloatingOverlay {
     pub(crate) row_index: usize,
