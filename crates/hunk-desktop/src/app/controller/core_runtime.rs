@@ -152,56 +152,26 @@ impl DiffViewer {
             overscan_rows,
         )?;
         let mut left_editor = left_workspace_editor.borrow_mut();
-        let left_projected =
-            left_editor.build_workspace_projected_snapshot(viewport, 4).and_then(projected_review_workspace_side_rows);
-        let left_rows = if left_projected.is_some() {
-            left_projected
-                .as_ref()
-                .map(|rows| rows.rows_by_display_row.clone())
-                .unwrap_or_default()
-        } else {
-            let left_snapshot = left_editor.build_workspace_display_snapshot(viewport, 4, false)?;
-            left_snapshot
-                .visible_rows
-                .into_iter()
-                .map(|row| (row.row_index, row))
-                .collect::<BTreeMap<_, _>>()
-        };
+        let left_projected = projected_review_workspace_side_rows(
+            left_editor.build_workspace_projected_snapshot(viewport, 4)?,
+        )?;
+        let left_rows = left_projected.rows_by_display_row.clone();
         let left_syntax_rows = left_rows.values().cloned().collect::<Vec<_>>();
         let left_syntax_by_display_row =
             left_editor.workspace_display_segments_by_row(&left_syntax_rows)?;
         drop(left_editor);
 
         let mut right_editor = right_workspace_editor.borrow_mut();
-        let right_projected =
-            right_editor.build_workspace_projected_snapshot(viewport, 4).and_then(projected_review_workspace_side_rows);
-        let right_rows = if right_projected.is_some() {
-            right_projected
-                .as_ref()
-                .map(|rows| rows.rows_by_display_row.clone())
-                .unwrap_or_default()
-        } else {
-            let right_snapshot = right_editor.build_workspace_display_snapshot(viewport, 4, false)?;
-            right_snapshot
-                .visible_rows
-                .into_iter()
-                .map(|row| (row.row_index, row))
-                .collect::<BTreeMap<_, _>>()
-        };
+        let right_projected = projected_review_workspace_side_rows(
+            right_editor.build_workspace_projected_snapshot(viewport, 4)?,
+        )?;
+        let right_rows = right_projected.rows_by_display_row.clone();
         let right_syntax_rows = right_rows.values().cloned().collect::<Vec<_>>();
         let right_syntax_by_display_row =
             right_editor.workspace_display_segments_by_row(&right_syntax_rows)?;
 
-        let rows = if let (Some(left_projected), Some(right_projected)) =
-            (left_projected, right_projected)
-        {
-            review_workspace_display_row_entries_from_projected_sides(
-                &left_projected,
-                &right_projected,
-            )?
-        } else {
-            review_workspace_display_row_entries(&left_rows, &right_rows)
-        };
+        let rows =
+            review_workspace_display_row_entries_from_projected_sides(&left_projected, &right_projected)?;
 
         let display_rows = review_workspace_session::ReviewWorkspaceDisplayRows {
             rows,
@@ -1043,6 +1013,7 @@ fn review_workspace_display_row_entries_from_projected_sides(
     Some(entries)
 }
 
+#[cfg(test)]
 fn review_workspace_display_row_entries(
     left_rows: &BTreeMap<usize, hunk_editor::WorkspaceDisplayRow>,
     right_rows: &BTreeMap<usize, hunk_editor::WorkspaceDisplayRow>,

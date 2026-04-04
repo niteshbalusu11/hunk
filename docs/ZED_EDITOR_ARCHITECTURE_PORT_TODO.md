@@ -286,6 +286,7 @@ Current state:
 - FilesEditor workspace layouts now also search across excerpt/document order instead of only the active buffer, which moves another default editor behavior closer to Zed’s multibuffer `Editor` model for both Files and Diff surfaces.
 - FilesEditor workspace search/navigation now also follows excerpt order within the shared layout instead of collapsing everything to one result stream per document, which moves search behavior closer to Zed’s multibuffer excerpt model and closes part of the remaining search-across-excerpts gap.
 - Visible Review code-row syntax now also comes from persistent left/right `FilesEditor` workspace-document syntax state keyed by the shared `WorkspaceLayout`, and the Review surface only converts those editor-owned spans into cached render segments for changed-flag decoration at paint time. That removes the last visible-row syntax ownership seam between Files and Diff.
+- Production Review viewport assembly now also requires projected editor display rows on both sides and no longer falls back to the older raw-line workspace display snapshot path, so Diff stays on one editor-display projection pipeline in production.
 
 ### Phase 6: Persist Editor Entities Across Tab Switches
 
