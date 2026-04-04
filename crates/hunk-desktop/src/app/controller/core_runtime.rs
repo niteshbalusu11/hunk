@@ -147,24 +147,40 @@ impl DiffViewer {
         let left_editor = self.review_surface.left_workspace_editor.as_ref()?;
         let right_editor = self.review_surface.right_workspace_editor.as_ref()?;
         let mut left_editor = left_editor.borrow_mut();
-        let left_snapshot = left_editor.build_workspace_display_snapshot(viewport, 4, false)?;
-        let left_syntax_by_row = left_editor.workspace_display_segments_by_row(&left_snapshot.visible_rows)?;
-        let left_rows = left_snapshot
-            .visible_rows
-            .into_iter()
-            .map(|row| (row.row_index, row))
-            .collect::<BTreeMap<_, _>>();
+        let left_rows = if let Some(projected) =
+            left_editor.build_workspace_projected_snapshot(viewport, 4)
+                && let Some(rows) = workspace_display_rows_from_projected_snapshot(projected)
+        {
+            rows
+        } else {
+            let left_snapshot = left_editor.build_workspace_display_snapshot(viewport, 4, false)?;
+            left_snapshot
+                .visible_rows
+                .into_iter()
+                .map(|row| (row.row_index, row))
+                .collect::<BTreeMap<_, _>>()
+        };
+        let left_syntax_rows = left_rows.values().cloned().collect::<Vec<_>>();
+        let left_syntax_by_row = left_editor.workspace_display_segments_by_row(&left_syntax_rows)?;
         drop(left_editor);
 
         let mut right_editor = right_editor.borrow_mut();
-        let right_snapshot = right_editor.build_workspace_display_snapshot(viewport, 4, false)?;
+        let right_rows = if let Some(projected) =
+            right_editor.build_workspace_projected_snapshot(viewport, 4)
+                && let Some(rows) = workspace_display_rows_from_projected_snapshot(projected)
+        {
+            rows
+        } else {
+            let right_snapshot = right_editor.build_workspace_display_snapshot(viewport, 4, false)?;
+            right_snapshot
+                .visible_rows
+                .into_iter()
+                .map(|row| (row.row_index, row))
+                .collect::<BTreeMap<_, _>>()
+        };
+        let right_syntax_rows = right_rows.values().cloned().collect::<Vec<_>>();
         let right_syntax_by_row =
-            right_editor.workspace_display_segments_by_row(&right_snapshot.visible_rows)?;
-        let right_rows = right_snapshot
-            .visible_rows
-            .into_iter()
-            .map(|row| (row.row_index, row))
-            .collect::<BTreeMap<_, _>>();
+            right_editor.workspace_display_segments_by_row(&right_syntax_rows)?;
 
         let display_rows = review_workspace_session::ReviewWorkspaceDisplayRows {
             left_by_row: left_rows,
@@ -894,6 +910,142 @@ impl DiffViewer {
 
     fn recently_scrolling(&self) -> bool {
         self.last_scroll_activity_at.elapsed() < AUTO_REFRESH_SCROLL_DEBOUNCE
+    }
+}
+
+fn workspace_display_rows_from_projected_snapshot(
+    snapshot: hunk_editor::WorkspaceProjectedSnapshot,
+) -> Option<BTreeMap<usize, hunk_editor::WorkspaceDisplayRow>> {
+    let mut rows = BTreeMap::new();
+    for row in snapshot.visible_rows {
+        let Some(workspace_row_range) = row.workspace_row_range else {
+            return None;
+        };
+        if workspace_row_range.end != workspace_row_range.start.saturating_add(1) {
+            return None;
+        }
+        let raw_row_index = workspace_row_range.start;
+        let projected = hunk_editor::WorkspaceDisplayRow {
+            row_index: raw_row_index,
+            location: row.location,
+            raw_start_column: row.raw_start_column,
+            raw_end_column: row.raw_end_column,
+            raw_column_offsets: row.raw_column_offsets,
+            text: row.text,
+            whitespace_markers: row.whitespace_markers,
+            search_highlights: row.search_highlights,
+        };
+        if rows.insert(raw_row_index, projected).is_some() {
+            return None;
+        }
+    }
+    Some(rows)
+}
+
+#[cfg(test)]
+mod review_projection_tests {
+    use super::*;
+
+    #[test]
+    fn projected_workspace_rows_convert_when_mapping_is_one_to_one() {
+        let rows = workspace_display_rows_from_projected_snapshot(
+            hunk_editor::WorkspaceProjectedSnapshot {
+                viewport: hunk_editor::Viewport {
+                    first_visible_row: 0,
+                    visible_row_count: 2,
+                    horizontal_offset: 0,
+                },
+                total_display_rows: 2,
+                visible_rows: vec![
+                    hunk_editor::WorkspaceProjectedRow {
+                        row_index: 0,
+                        workspace_row_range: Some(4..5),
+                        location: None,
+                        kind: hunk_editor::DisplayRowKind::Text,
+                        raw_start_column: 0,
+                        raw_end_column: 3,
+                        raw_column_offsets: vec![0, 1, 2, 3],
+                        start_column: 0,
+                        end_column: 3,
+                        text: "abc".to_string(),
+                        is_wrapped: false,
+                        whitespace_markers: Vec::new(),
+                        search_highlights: Vec::new(),
+                        overlays: Vec::new(),
+                    },
+                    hunk_editor::WorkspaceProjectedRow {
+                        row_index: 1,
+                        workspace_row_range: Some(5..6),
+                        location: None,
+                        kind: hunk_editor::DisplayRowKind::Text,
+                        raw_start_column: 0,
+                        raw_end_column: 2,
+                        raw_column_offsets: vec![0, 1, 2],
+                        start_column: 0,
+                        end_column: 2,
+                        text: "de".to_string(),
+                        is_wrapped: false,
+                        whitespace_markers: Vec::new(),
+                        search_highlights: Vec::new(),
+                        overlays: Vec::new(),
+                    },
+                ],
+            },
+        )
+        .expect("one-to-one rows should convert");
+
+        assert_eq!(rows.keys().copied().collect::<Vec<_>>(), vec![4, 5]);
+        assert_eq!(rows.get(&4).map(|row| row.text.as_str()), Some("abc"));
+    }
+
+    #[test]
+    fn projected_workspace_rows_fall_back_when_projection_expands_one_raw_row() {
+        let rows = workspace_display_rows_from_projected_snapshot(
+            hunk_editor::WorkspaceProjectedSnapshot {
+                viewport: hunk_editor::Viewport {
+                    first_visible_row: 0,
+                    visible_row_count: 2,
+                    horizontal_offset: 0,
+                },
+                total_display_rows: 2,
+                visible_rows: vec![
+                    hunk_editor::WorkspaceProjectedRow {
+                        row_index: 0,
+                        workspace_row_range: Some(4..5),
+                        location: None,
+                        kind: hunk_editor::DisplayRowKind::Text,
+                        raw_start_column: 0,
+                        raw_end_column: 80,
+                        raw_column_offsets: vec![0; 81],
+                        start_column: 0,
+                        end_column: 80,
+                        text: "left".to_string(),
+                        is_wrapped: false,
+                        whitespace_markers: Vec::new(),
+                        search_highlights: Vec::new(),
+                        overlays: Vec::new(),
+                    },
+                    hunk_editor::WorkspaceProjectedRow {
+                        row_index: 1,
+                        workspace_row_range: Some(4..5),
+                        location: None,
+                        kind: hunk_editor::DisplayRowKind::Text,
+                        raw_start_column: 80,
+                        raw_end_column: 120,
+                        raw_column_offsets: vec![0; 41],
+                        start_column: 80,
+                        end_column: 120,
+                        text: "right".to_string(),
+                        is_wrapped: true,
+                        whitespace_markers: Vec::new(),
+                        search_highlights: Vec::new(),
+                        overlays: Vec::new(),
+                    },
+                ],
+            },
+        );
+
+        assert!(rows.is_none());
     }
 }
 
