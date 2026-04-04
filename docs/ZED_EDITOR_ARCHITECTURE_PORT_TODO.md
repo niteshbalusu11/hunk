@@ -473,7 +473,7 @@ Current state:
 
 ### Phase 13: Replace Paired-Side Diff Orchestration With One Diff Surface Owner
 
-Status: Pending
+Status: Done
 
 Targets:
 
@@ -483,10 +483,15 @@ Targets:
 
 Tasks:
 
-- [ ] Reduce controller coordination around `left_workspace_editor` and `right_workspace_editor`.
-- [ ] Introduce one diff-surface owner over the shared workspace layout, following Zed's `MultiDiffView::open` / `register_entry` orchestration as closely as Hunk allows.
-- [ ] Preserve side-by-side compare behavior and diff metadata while making the surface owner singular.
-- [ ] Keep revisit/reload behavior stable when compare inputs are unchanged.
+- [x] Reduce controller coordination around `left_workspace_editor` and `right_workspace_editor`.
+- [x] Introduce one diff-surface owner over the shared workspace layout, following Zed's `MultiDiffView::open` / `register_entry` orchestration as closely as Hunk allows.
+- [x] Preserve side-by-side compare behavior and diff metadata while making the surface owner singular.
+- [x] Keep revisit/reload behavior stable when compare inputs are unchanged.
+
+Current state:
+- Review compare apply now constructs one `ReviewWorkspaceSurfaceOwner`, and that owner is the singular entry point for side-editor creation from the shared workspace layout.
+- Review selection sync, search query sync, and display-row projection now route through that owner instead of controller code coordinating paired left/right editors directly.
+- The paired editors still exist to preserve side-by-side compare behavior, but they now sit behind one surface owner in the same way Zed hides multibuffer registration/orchestration behind `MultiDiffView::open`.
 
 ### Phase 14: Delete Transitional Review Surface Code
 

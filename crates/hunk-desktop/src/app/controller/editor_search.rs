@@ -55,21 +55,15 @@ impl DiffViewer {
             return;
         }
         let Some(query) = query.map(str::trim).filter(|query| !query.is_empty()) else {
-            if let Some(editor) = self.review_surface.left_workspace_editor() {
-                editor.borrow_mut().set_search_query(None);
-            }
-            if let Some(editor) = self.review_surface.right_workspace_editor() {
-                editor.borrow_mut().set_search_query(None);
+            if let Some(owner) = self.review_surface.workspace_owner() {
+                owner.set_search_query(None);
             }
             self.review_surface.clear_workspace_search_matches();
             let _ = self.rebuild_review_surface_display_rows();
             return;
         };
-        if let Some(editor) = self.review_surface.left_workspace_editor() {
-            editor.borrow_mut().set_search_query(Some(query));
-        }
-        if let Some(editor) = self.review_surface.right_workspace_editor() {
-            editor.borrow_mut().set_search_query(Some(query));
+        if let Some(owner) = self.review_surface.workspace_owner() {
+            owner.set_search_query(Some(query));
         }
 
         self.review_surface.workspace_search_matches = self
@@ -117,11 +111,8 @@ impl DiffViewer {
                 state.set_value("", window, cx);
             });
             self.review_surface.clear_workspace_search_matches();
-            if let Some(editor) = self.review_surface.left_workspace_editor() {
-                editor.borrow_mut().set_search_query(None);
-            }
-            if let Some(editor) = self.review_surface.right_workspace_editor() {
-                editor.borrow_mut().set_search_query(None);
+            if let Some(owner) = self.review_surface.workspace_owner() {
+                owner.set_search_query(None);
             }
             self.files_editor.borrow_mut().set_search_query(None);
             if self.workspace_view_mode == WorkspaceViewMode::Diff {

@@ -160,10 +160,7 @@ impl DiffViewer {
         if session.row_count() == 0 {
             return false;
         }
-        let Some(left_workspace_editor) = self.review_surface.left_workspace_editor() else {
-            return false;
-        };
-        let Some(right_workspace_editor) = self.review_surface.right_workspace_editor() else {
+        let Some(workspace_owner) = self.review_surface.workspace_owner() else {
             return false;
         };
 
@@ -178,11 +175,7 @@ impl DiffViewer {
             return true;
         }
 
-        let Some(display_rows) = Self::project_review_surface_display_rows_for_viewport(
-            left_workspace_editor,
-            right_workspace_editor,
-            viewport,
-        ) else {
+        let Some(display_rows) = workspace_owner.build_display_rows_for_viewport(viewport) else {
             return false;
         };
         if !display_rows.covers_row_range(requested_row_range) {
@@ -200,38 +193,6 @@ impl DiffViewer {
         session.clear_cached_display_rows();
         self.review_surface.clear_workspace_surface_snapshot();
         self.seed_review_surface_display_rows()
-    }
-
-    fn project_review_surface_display_rows_for_viewport(
-        left_workspace_editor: &crate::app::native_files_editor::SharedFilesEditor,
-        right_workspace_editor: &crate::app::native_files_editor::SharedFilesEditor,
-        viewport: hunk_editor::Viewport,
-    ) -> Option<review_workspace_session::ReviewWorkspaceDisplayRows> {
-        let mut left_editor = left_workspace_editor.borrow_mut();
-        let left_projected = projected_review_workspace_side_rows(
-            left_editor.build_workspace_projected_render_snapshot(viewport, 4)?,
-        )?;
-        let left_rows = left_projected.rows_by_display_row.clone();
-        let left_syntax_by_display_row = left_projected.syntax_by_display_row.clone();
-        drop(left_editor);
-
-        let mut right_editor = right_workspace_editor.borrow_mut();
-        let right_projected = projected_review_workspace_side_rows(
-            right_editor.build_workspace_projected_render_snapshot(viewport, 4)?,
-        )?;
-        let right_rows = right_projected.rows_by_display_row.clone();
-        let right_syntax_by_display_row = right_projected.syntax_by_display_row.clone();
-
-        let rows =
-            review_workspace_display_row_entries_from_projected_sides(&left_projected, &right_projected)?;
-
-        Some(review_workspace_session::ReviewWorkspaceDisplayRows {
-            rows,
-            left_by_display_row: left_rows,
-            right_by_display_row: right_rows,
-            left_syntax_by_display_row,
-            right_syntax_by_display_row,
-        })
     }
 
     pub(super) fn current_review_surface_snapshot(
@@ -871,6 +832,7 @@ impl DiffViewer {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone)]
 struct ReviewWorkspaceProjectedSideRow {
     display_row_index: usize,
@@ -879,6 +841,7 @@ struct ReviewWorkspaceProjectedSideRow {
     row: hunk_editor::WorkspaceDisplayRow,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone)]
 struct ReviewWorkspaceProjectedSideRows {
     rows: Vec<ReviewWorkspaceProjectedSideRow>,
@@ -887,6 +850,7 @@ struct ReviewWorkspaceProjectedSideRows {
         BTreeMap<usize, Vec<crate::app::native_files_editor::paint::RowSyntaxSpan>>,
 }
 
+#[cfg(test)]
 fn projected_review_workspace_side_rows(
     render_snapshot: crate::app::native_files_editor::WorkspaceProjectedRenderSnapshot,
 ) -> Option<ReviewWorkspaceProjectedSideRows> {
@@ -992,6 +956,7 @@ fn test_render_snapshot_from_projected(
     }
 }
 
+#[cfg(test)]
 fn review_workspace_display_row_entries_from_projected_sides(
     left: &ReviewWorkspaceProjectedSideRows,
     right: &ReviewWorkspaceProjectedSideRows,

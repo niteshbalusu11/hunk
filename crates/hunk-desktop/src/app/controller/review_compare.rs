@@ -176,8 +176,8 @@ fn update_persisted_review_compare_selection(
 impl DiffViewer {
     pub(crate) fn current_review_editor_path(&self) -> Option<String> {
         self.review_surface
-            .left_workspace_editor()
-            .and_then(|editor| editor.borrow().active_workspace_path_buf())
+            .workspace_owner()
+            .and_then(|owner| owner.active_workspace_path_buf())
             .map(|path| path.to_string_lossy().to_string())
     }
 
@@ -185,15 +185,8 @@ impl DiffViewer {
         let Some(path) = path else {
             return;
         };
-        if let Some(editor) = self.review_surface.left_workspace_editor() {
-            let _ = editor
-                .borrow_mut()
-                .activate_workspace_path(std::path::Path::new(path));
-        }
-        if let Some(editor) = self.review_surface.right_workspace_editor() {
-            let _ = editor
-                .borrow_mut()
-                .activate_workspace_path(std::path::Path::new(path));
+        if let Some(owner) = self.review_surface.workspace_owner() {
+            let _ = owner.activate_workspace_path(std::path::Path::new(path));
         }
     }
 
@@ -203,22 +196,11 @@ impl DiffViewer {
         };
         if let Some(excerpt_id) = session.excerpt_id_at_surface_row(row_ix)
         {
-            let mut handled = false;
-            if let Some(editor) = self.review_surface.left_workspace_editor() {
-                handled |= editor
-                    .borrow_mut()
-                    .activate_workspace_excerpt(excerpt_id)
-                    .ok()
-                    == Some(true);
-            }
-            if let Some(editor) = self.review_surface.right_workspace_editor() {
-                handled |= editor
-                    .borrow_mut()
-                    .activate_workspace_excerpt(excerpt_id)
-                    .ok()
-                    == Some(true);
-            }
-            if handled {
+            if self
+                .review_surface
+                .workspace_owner()
+                .is_some_and(|owner| owner.activate_workspace_excerpt(excerpt_id))
+            {
                 return;
             }
         }
@@ -805,45 +787,6 @@ impl DiffViewer {
             && self.active_review_compare_is_default_pair()
     }
 
-    fn build_review_workspace_editors(
-        &self,
-        session: &crate::app::review_workspace_session::ReviewWorkspaceSession,
-        preferred_path: Option<&str>,
-    ) -> anyhow::Result<(
-        crate::app::native_files_editor::SharedFilesEditor,
-        crate::app::native_files_editor::SharedFilesEditor,
-    )> {
-        let layout = session.layout().clone();
-        let preferred_path = preferred_path.map(std::path::Path::new);
-        let left_workspace_editor = std::rc::Rc::new(std::cell::RefCell::new(
-            crate::app::native_files_editor::FilesEditor::new(),
-        ));
-        left_workspace_editor
-            .borrow_mut()
-            .open_workspace_layout_documents(
-                layout.clone(),
-                session.editor_documents(
-                    crate::app::review_workspace_session::ReviewWorkspaceEditorSide::Left,
-                ),
-                preferred_path,
-            )?;
-
-        let right_workspace_editor = std::rc::Rc::new(std::cell::RefCell::new(
-            crate::app::native_files_editor::FilesEditor::new(),
-        ));
-        right_workspace_editor
-            .borrow_mut()
-            .open_workspace_layout_documents(
-                layout,
-                session.editor_documents(
-                    crate::app::review_workspace_session::ReviewWorkspaceEditorSide::Right,
-                ),
-                preferred_path,
-            )?;
-
-        Ok((left_workspace_editor, right_workspace_editor))
-    }
-
     fn clear_review_compare_loaded_state(&mut self, empty_message: &str, cx: &mut Context<Self>) {
         self.cancel_patch_reload();
         self.review_compare_loading = false;
@@ -1005,11 +948,14 @@ impl DiffViewer {
         let preferred_selected_path = self
             .current_review_editor_path()
             .or_else(|| self.review_surface.selected_path.clone());
-        let Some((left_workspace_editor, right_workspace_editor)) = self
+        let Some(workspace_owner) = self
             .review_workspace_session
             .as_ref()
             .map(|session| {
-                self.build_review_workspace_editors(session, preferred_selected_path.as_deref())
+                crate::app::ReviewWorkspaceSurfaceOwner::new(
+                    session,
+                    preferred_selected_path.as_deref(),
+                )
             })
             .transpose()
             .unwrap_or_else(|err| {
@@ -1024,8 +970,7 @@ impl DiffViewer {
         else {
             return;
         };
-        self.review_surface
-            .set_workspace_owner(left_workspace_editor, right_workspace_editor);
+        self.review_surface.set_workspace_owner(workspace_owner);
         let seeded_display_rows = self.seed_review_surface_display_rows();
         self.review_files = snapshot.files;
         self.review_file_status_by_path = self

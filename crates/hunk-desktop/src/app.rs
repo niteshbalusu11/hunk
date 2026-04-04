@@ -1085,6 +1085,198 @@ struct ReviewWorkspaceSurfaceOwner {
     right_workspace_editor: native_files_editor::SharedFilesEditor,
 }
 
+#[derive(Debug, Clone)]
+struct ReviewWorkspaceProjectedSideRow {
+    display_row_index: usize,
+    row_index: usize,
+    raw_row_range: std::ops::Range<usize>,
+    row: hunk_editor::WorkspaceDisplayRow,
+}
+
+#[derive(Debug, Clone)]
+struct ReviewWorkspaceProjectedSideRows {
+    rows: Vec<ReviewWorkspaceProjectedSideRow>,
+    rows_by_display_row: BTreeMap<usize, hunk_editor::WorkspaceDisplayRow>,
+    syntax_by_display_row:
+        BTreeMap<usize, Vec<crate::app::native_files_editor::paint::RowSyntaxSpan>>,
+}
+
+impl ReviewWorkspaceSurfaceOwner {
+    fn new(
+        session: &crate::app::review_workspace_session::ReviewWorkspaceSession,
+        preferred_path: Option<&str>,
+    ) -> anyhow::Result<Self> {
+        let layout = session.layout().clone();
+        let preferred_path = preferred_path.map(std::path::Path::new);
+        let left_workspace_editor = Rc::new(RefCell::new(
+            crate::app::native_files_editor::FilesEditor::new(),
+        ));
+        left_workspace_editor
+            .borrow_mut()
+            .open_workspace_layout_documents(
+                layout.clone(),
+                session.editor_documents(
+                    crate::app::review_workspace_session::ReviewWorkspaceEditorSide::Left,
+                ),
+                preferred_path,
+            )?;
+
+        let right_workspace_editor = Rc::new(RefCell::new(
+            crate::app::native_files_editor::FilesEditor::new(),
+        ));
+        right_workspace_editor
+            .borrow_mut()
+            .open_workspace_layout_documents(
+                layout,
+                session.editor_documents(
+                    crate::app::review_workspace_session::ReviewWorkspaceEditorSide::Right,
+                ),
+                preferred_path,
+            )?;
+
+        Ok(Self {
+            left_workspace_editor,
+            right_workspace_editor,
+        })
+    }
+
+    fn active_workspace_path_buf(&self) -> Option<PathBuf> {
+        self.left_workspace_editor
+            .borrow()
+            .active_workspace_path_buf()
+    }
+
+    fn activate_workspace_path(&self, path: &std::path::Path) -> bool {
+        let left_handled = self
+            .left_workspace_editor
+            .borrow_mut()
+            .activate_workspace_path(path)
+            .unwrap_or(false);
+        let right_handled = self
+            .right_workspace_editor
+            .borrow_mut()
+            .activate_workspace_path(path)
+            .unwrap_or(false);
+        left_handled || right_handled
+    }
+
+    fn activate_workspace_excerpt(&self, excerpt_id: hunk_editor::WorkspaceExcerptId) -> bool {
+        let left_handled = self
+            .left_workspace_editor
+            .borrow_mut()
+            .activate_workspace_excerpt(excerpt_id)
+            .unwrap_or(false);
+        let right_handled = self
+            .right_workspace_editor
+            .borrow_mut()
+            .activate_workspace_excerpt(excerpt_id)
+            .unwrap_or(false);
+        left_handled || right_handled
+    }
+
+    fn set_search_query(&self, query: Option<&str>) {
+        self.left_workspace_editor
+            .borrow_mut()
+            .set_search_query(query);
+        self.right_workspace_editor
+            .borrow_mut()
+            .set_search_query(query);
+    }
+
+    fn build_display_rows_for_viewport(
+        &self,
+        viewport: hunk_editor::Viewport,
+    ) -> Option<crate::app::review_workspace_session::ReviewWorkspaceDisplayRows> {
+        let mut left_editor = self.left_workspace_editor.borrow_mut();
+        let left_projected = projected_review_workspace_side_rows(
+            left_editor.build_workspace_projected_render_snapshot(viewport, 4)?,
+        )?;
+        let left_rows = left_projected.rows_by_display_row.clone();
+        let left_syntax_by_display_row = left_projected.syntax_by_display_row.clone();
+        drop(left_editor);
+
+        let mut right_editor = self.right_workspace_editor.borrow_mut();
+        let right_projected = projected_review_workspace_side_rows(
+            right_editor.build_workspace_projected_render_snapshot(viewport, 4)?,
+        )?;
+        let right_rows = right_projected.rows_by_display_row.clone();
+        let right_syntax_by_display_row = right_projected.syntax_by_display_row.clone();
+
+        let rows = review_workspace_display_row_entries_from_projected_sides(
+            &left_projected,
+            &right_projected,
+        )?;
+
+        Some(crate::app::review_workspace_session::ReviewWorkspaceDisplayRows {
+            rows,
+            left_by_display_row: left_rows,
+            right_by_display_row: right_rows,
+            left_syntax_by_display_row,
+            right_syntax_by_display_row,
+        })
+    }
+}
+
+fn projected_review_workspace_side_rows(
+    render_snapshot: crate::app::native_files_editor::WorkspaceProjectedRenderSnapshot,
+) -> Option<ReviewWorkspaceProjectedSideRows> {
+    let mut rows = Vec::<ReviewWorkspaceProjectedSideRow>::new();
+    let mut rows_by_display_row = BTreeMap::<usize, hunk_editor::WorkspaceDisplayRow>::new();
+    for (row, display_row) in render_snapshot
+        .projection
+        .visible_rows
+        .into_iter()
+        .zip(render_snapshot.visible_display_rows)
+    {
+        let workspace_row_range = row.workspace_row_range?;
+        if workspace_row_range.is_empty() {
+            return None;
+        }
+        let raw_row_index = workspace_row_range.start;
+        let display_row_index = row.row_index;
+        rows.push(ReviewWorkspaceProjectedSideRow {
+            display_row_index,
+            row_index: raw_row_index,
+            raw_row_range: workspace_row_range,
+            row: display_row.clone(),
+        });
+        rows_by_display_row.insert(display_row_index, display_row);
+    }
+    Some(ReviewWorkspaceProjectedSideRows {
+        rows,
+        rows_by_display_row,
+        syntax_by_display_row: render_snapshot.syntax_by_display_row,
+    })
+}
+
+fn review_workspace_display_row_entries_from_projected_sides(
+    left: &ReviewWorkspaceProjectedSideRows,
+    right: &ReviewWorkspaceProjectedSideRows,
+) -> Option<Vec<crate::app::review_workspace_session::ReviewWorkspaceDisplayRowEntry>> {
+    let right_rows_by_display = right
+        .rows
+        .iter()
+        .map(|row| (row.display_row_index, row))
+        .collect::<BTreeMap<_, _>>();
+    let mut entries = Vec::with_capacity(left.rows.len());
+    for left_row in &left.rows {
+        let right_row = right_rows_by_display.get(&left_row.display_row_index)?;
+        if right_row.raw_row_range != left_row.raw_row_range {
+            return None;
+        }
+        entries.push(
+            crate::app::review_workspace_session::ReviewWorkspaceDisplayRowEntry {
+                display_row_index: left_row.display_row_index,
+                row_index: left_row.row_index,
+                raw_row_range: left_row.raw_row_range.clone(),
+                left: left_row.row.clone(),
+                right: right_row.row.clone(),
+            },
+        );
+    }
+    Some(entries)
+}
+
 impl ReviewWorkspaceSurfaceState {
     fn new() -> Self {
         Self {
@@ -1130,25 +1322,8 @@ impl ReviewWorkspaceSurfaceState {
         self.workspace_owner.as_ref()
     }
 
-    fn left_workspace_editor(&self) -> Option<&native_files_editor::SharedFilesEditor> {
-        self.workspace_owner()
-            .map(|owner| &owner.left_workspace_editor)
-    }
-
-    fn right_workspace_editor(&self) -> Option<&native_files_editor::SharedFilesEditor> {
-        self.workspace_owner()
-            .map(|owner| &owner.right_workspace_editor)
-    }
-
-    fn set_workspace_owner(
-        &mut self,
-        left_workspace_editor: native_files_editor::SharedFilesEditor,
-        right_workspace_editor: native_files_editor::SharedFilesEditor,
-    ) {
-        self.workspace_owner = Some(ReviewWorkspaceSurfaceOwner {
-            left_workspace_editor,
-            right_workspace_editor,
-        });
+    fn set_workspace_owner(&mut self, workspace_owner: ReviewWorkspaceSurfaceOwner) {
+        self.workspace_owner = Some(workspace_owner);
     }
 }
 
