@@ -1,15 +1,41 @@
 use std::path::{Component, Path, PathBuf};
 
 fn review_mode_selected_path(
-    selected_path: Option<&str>,
+    review_selected_path: Option<&str>,
     review_files: &[ChangedFile],
 ) -> Option<String> {
-    selected_path
+    review_selected_path
         .map(str::to_string)
         .or_else(|| review_files.first().map(|file| file.path.clone()))
 }
 
 impl DiffViewer {
+    pub(crate) fn current_tree_selected_path(&self) -> Option<String> {
+        if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            return self.current_review_path();
+        }
+
+        self.selected_path.clone()
+    }
+
+    fn preferred_review_workspace_path(&self) -> Option<String> {
+        if let Some(session) = self.review_workspace_session.as_ref() {
+            return preferred_review_workspace_path_for_session(
+                self.current_review_editor_path().as_deref(),
+                self.current_review_surface_row()
+                    .and_then(|row_ix| session.path_at_surface_row(row_ix)),
+                self.current_review_file_range().map(|range| range.path).as_deref(),
+                self.review_surface.selected_path.as_deref(),
+                session,
+            );
+        }
+
+        review_mode_selected_path(
+            self.review_surface.selected_path.as_deref(),
+            &self.review_files,
+        )
+    }
+
     fn path_exists_in_primary_checkout(&self, path: &str) -> bool {
         if repo_tree_contains_path(&self.repo_tree.nodes, path) {
             return true;
@@ -160,6 +186,10 @@ impl DiffViewer {
             return;
         }
 
+        if previous_mode == WorkspaceViewMode::Diff {
+            self.review_surface.selected_path = self.current_review_path();
+        }
+
         if previous_mode == WorkspaceViewMode::Files {
             self.capture_sidebar_repo_scroll_anchor();
             if self.repo_tree.full_cache.is_some() {
@@ -199,20 +229,26 @@ impl DiffViewer {
                 self.clear_editor_state(cx);
             }
         } else if mode == WorkspaceViewMode::Diff {
-            self.selected_path = review_mode_selected_path(
-                self.selected_path.as_deref(),
-                &self.review_files,
-            );
-            self.selected_status = self
-                .selected_path
+            let next_path = self.preferred_review_workspace_path();
+            let next_status = next_path
                 .as_deref()
                 .and_then(|selected| self.status_for_path(selected));
+            self.set_review_selected_file(next_path, next_status);
             self.request_repo_tree_reload(cx);
-            self.scroll_selected_after_reload = true;
-            self.request_selected_diff_reload(cx);
+            if self.should_reuse_loaded_review_compare() {
+                self.scroll_selected_after_reload = false;
+                self.prime_diff_surface_visible_state(false, cx);
+            } else {
+                self.scroll_selected_after_reload = true;
+                self.request_selected_diff_reload(cx);
+            }
         } else if mode == WorkspaceViewMode::Ai {
             self.refresh_ai_repo_thread_catalog(cx);
             self.ensure_ai_runtime_started(cx);
+        }
+
+        if self.editor_search_visible {
+            self.sync_editor_search_query(cx);
         }
         cx.notify();
     }
@@ -239,14 +275,17 @@ impl DiffViewer {
             return;
         }
 
-        self.selected_path = Some(path.clone());
-        self.selected_status = self.status_for_path(path.as_str());
+        let status = self.status_for_path(path.as_str());
         if self.workspace_view_mode == WorkspaceViewMode::Files {
+            self.selected_path = Some(path.clone());
+            self.selected_status = status;
             self.request_file_editor_reload(path, cx);
         } else {
+            self.set_review_selected_file(Some(path.clone()), status);
             self.scroll_to_file_start(&path);
-            self.last_visible_row_start = None;
-            self.last_diff_scroll_offset = None;
+            self.review_surface.clear_workspace_surface_snapshot();
+            self.review_surface.last_prefetched_visible_row_range = None;
+            self.review_surface.last_diff_scroll_offset = None;
             self.last_scroll_activity_at = Instant::now();
         }
         cx.notify();

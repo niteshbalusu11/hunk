@@ -17,7 +17,7 @@ const DEFAULT_FILES: usize = 50;
 const DEFAULT_LINES: usize = 10_000;
 const DEFAULT_MAX_TTFD_MS: f64 = 300.0;
 const DEFAULT_MAX_SELECTED_FILE_MS: f64 = 800.0;
-const DEFAULT_MIN_SCROLL_FPS: f64 = 115.0;
+const DEFAULT_MIN_SCROLL_FPS: f64 = 120.0;
 const DEFAULT_SCROLL_VIEWPORT_ROWS: usize = 84;
 const DEFAULT_SCROLL_STEP_ROWS: usize = 24;
 const DEFAULT_SCROLL_PREFETCH_RADIUS_ROWS: usize = 120;
@@ -198,6 +198,10 @@ fn large_diff_perf_harness() -> Result<()> {
 }
 
 fn run_perf_harness(repo_root: &Path, cfg: &PerfHarnessConfig) -> Result<PerfMetrics> {
+    let _ = hunk_language::preview_highlight_spans_for_language_hint(
+        Some("rust"),
+        "fn warm_preview_highlight_registry() {}\n",
+    );
     let snapshot = load_snapshot(repo_root)?;
     let files = snapshot.files;
     if files.is_empty() {

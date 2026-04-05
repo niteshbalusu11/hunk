@@ -30,34 +30,41 @@ impl DiffViewer {
             self.collapsed_files.insert(path.clone());
         }
 
-        self.selected_path = Some(path.clone());
-        self.selected_status = self
+        let status = self
             .active_diff_files()
             .iter()
             .find(|file| file.path == path)
             .map(|file| file.status);
+        if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            self.set_review_selected_file(Some(path.clone()), status);
+        } else {
+            self.selected_path = Some(path.clone());
+            self.selected_status = status;
+        }
         self.scroll_selected_after_reload = true;
-        self.last_diff_scroll_offset = None;
+        self.review_surface.last_diff_scroll_offset = None;
         self.last_scroll_activity_at = Instant::now();
         self.request_selected_diff_reload(cx);
         cx.notify();
     }
 
     fn clamp_selection_to_rows(&mut self) {
-        if self.diff_rows.is_empty() {
-            self.selection_anchor_row = None;
-            self.selection_head_row = None;
+        let row_count = self.active_diff_row_count();
+        if row_count == 0 {
+            self.review_surface.clear_row_selection();
             return;
         }
 
-        let max_ix = self.diff_rows.len().saturating_sub(1);
-        self.selection_anchor_row = self.selection_anchor_row.map(|ix| ix.min(max_ix));
-        self.selection_head_row = self.selection_head_row.map(|ix| ix.min(max_ix));
+        let max_ix = row_count.saturating_sub(1);
+        self.review_surface.selection_anchor_row =
+            self.review_surface.selection_anchor_row.map(|ix| ix.min(max_ix));
+        self.review_surface.selection_head_row =
+            self.review_surface.selection_head_row.map(|ix| ix.min(max_ix));
     }
 
     pub(super) fn selected_row_range(&self) -> Option<(usize, usize)> {
-        let anchor = self.selection_anchor_row?;
-        let head = self.selection_head_row?;
+        let anchor = self.review_surface.selection_anchor_row?;
+        let head = self.review_surface.selection_head_row?;
         Some((anchor.min(head), anchor.max(head)))
     }
 
@@ -102,25 +109,33 @@ impl DiffViewer {
     }
 
     fn select_row(&mut self, row_ix: usize, extend_selection: bool, cx: &mut Context<Self>) {
-        if self.diff_rows.is_empty() {
-            self.selection_anchor_row = None;
-            self.selection_head_row = None;
+        let row_count = self.active_diff_row_count();
+        if row_count == 0 {
+            self.review_surface.clear_row_selection();
             return;
         }
 
-        let target_ix = row_ix.min(self.diff_rows.len().saturating_sub(1));
-        if extend_selection && self.selection_anchor_row.is_some() {
-            self.selection_head_row = Some(target_ix);
+        let target_ix = row_ix.min(row_count.saturating_sub(1));
+        if extend_selection && self.review_surface.selection_anchor_row.is_some() {
+            self.review_surface.selection_head_row = Some(target_ix);
         } else {
-            self.selection_anchor_row = Some(target_ix);
-            self.selection_head_row = Some(target_ix);
+            self.review_surface.selection_anchor_row = Some(target_ix);
+            self.review_surface.selection_head_row = Some(target_ix);
+        }
+
+        if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            self.sync_review_workspace_editor_selection_for_row(target_ix);
         }
 
         if let Some((path, status)) = self.selected_file_from_row_metadata(target_ix)
             && self.selected_path.as_deref() != Some(path.as_str())
         {
-            self.selected_path = Some(path);
-            self.selected_status = Some(status);
+            if self.workspace_view_mode == WorkspaceViewMode::Diff {
+                self.set_review_selected_file(Some(path), Some(status));
+            } else {
+                self.selected_path = Some(path);
+                self.selected_status = Some(status);
+            }
         }
 
         cx.notify();
@@ -141,7 +156,7 @@ impl DiffViewer {
         self.open_workspace_text_context_menu(
             WorkspaceTextContextMenuTarget::DiffRows(DiffRowsContextMenuTarget {
                 can_copy: self.selected_row_range().is_some(),
-                can_select_all: !self.diff_rows.is_empty(),
+                can_select_all: self.active_diff_row_count() > 0,
             }),
             position,
             cx,
@@ -154,51 +169,104 @@ impl DiffViewer {
         extend_selection: bool,
         cx: &mut Context<Self>,
     ) {
+        let row_count = self.active_diff_row_count();
+        if row_count == 0 {
+            return;
+        }
         self.select_row(row_ix, extend_selection, cx);
-        self.diff_list_state.scroll_to(ListOffset {
-            item_ix: row_ix.min(self.diff_rows.len().saturating_sub(1)),
-            offset_in_item: px(0.),
-        });
-        self.last_diff_scroll_offset = None;
+        let target_row = row_ix.min(row_count.saturating_sub(1));
+        if let Some(session) = self.review_workspace_session.as_ref()
+            && let Some(top_offset_px) = session.row_top_offset_px(target_row)
+        {
+            self.review_surface
+                .diff_scroll_handle
+                .set_offset(point(px(0.), -px(top_offset_px as f32)));
+        }
+        self.review_surface.last_diff_scroll_offset = None;
         self.last_scroll_activity_at = Instant::now();
     }
 
     fn move_selection_by(&mut self, delta: isize, extend_selection: bool, cx: &mut Context<Self>) {
-        if self.diff_rows.is_empty() {
+        let row_count = self.active_diff_row_count();
+        if row_count == 0 {
             return;
         }
 
-        let max_ix = self.diff_rows.len().saturating_sub(1) as isize;
+        let max_ix = row_count.saturating_sub(1) as isize;
         let base_ix = self
+            .review_surface
             .selection_head_row
             .map(|ix| ix as isize)
-            .unwrap_or(self.diff_list_state.logical_scroll_top().item_ix as isize);
+            .or_else(|| self.current_review_surface_top_row().map(|ix| ix as isize))
+            .unwrap_or(0);
         let target_ix = (base_ix + delta).clamp(0, max_ix) as usize;
         self.select_row_and_scroll(target_ix, extend_selection, cx);
     }
 
     fn select_all_rows(&mut self, cx: &mut Context<Self>) {
-        if self.diff_rows.is_empty() {
+        let row_count = self.active_diff_row_count();
+        if row_count == 0 {
             return;
         }
 
-        self.selection_anchor_row = Some(0);
-        self.selection_head_row = Some(self.diff_rows.len().saturating_sub(1));
+        self.review_surface.selection_anchor_row = Some(0);
+        self.review_surface.selection_head_row = Some(row_count.saturating_sub(1));
         cx.notify();
     }
 
     fn select_hunk_relative(&mut self, direction: isize, cx: &mut Context<Self>) {
-        if self.diff_rows.is_empty() {
+        let row_count = self.active_diff_row_count();
+        if row_count == 0 {
+            return;
+        }
+
+        if self.workspace_view_mode == WorkspaceViewMode::Diff
+            && let Some(session) = self.review_workspace_session.as_ref()
+            && !session.hunk_ranges().is_empty()
+        {
+            let start_ix = self
+                .review_surface
+                .selection_head_row
+                .or_else(|| self.current_review_surface_top_row())
+                .unwrap_or(0)
+                .min(row_count.saturating_sub(1));
+            let hunk_rows = session
+                .hunk_ranges()
+                .iter()
+                .map(|range| range.start_row)
+                .collect::<Vec<_>>();
+            let current_ix = hunk_rows
+                .iter()
+                .position(|row_ix| *row_ix == start_ix)
+                .unwrap_or_else(|| {
+                    hunk_rows
+                        .iter()
+                        .position(|row_ix| *row_ix > start_ix)
+                        .unwrap_or(0)
+                });
+            let target_ix = if direction >= 0 {
+                current_ix.saturating_add(1) % hunk_rows.len()
+            } else if current_ix == 0 {
+                hunk_rows.len().saturating_sub(1)
+            } else {
+                current_ix.saturating_sub(1)
+            };
+            if let Some(target_row) = hunk_rows.get(target_ix).copied() {
+                self.select_row_and_scroll(target_row, false, cx);
+            }
             return;
         }
 
         let start_ix = self
+            .review_surface
             .selection_head_row
-            .unwrap_or(self.diff_list_state.logical_scroll_top().item_ix)
-            .min(self.diff_rows.len().saturating_sub(1));
+            .or_else(|| self.current_review_surface_top_row())
+            .unwrap_or(0)
+            .min(row_count.saturating_sub(1));
 
-        let target = find_wrapped_hunk_target(self.diff_rows.len(), start_ix, direction, |ix| {
-            self.diff_rows[ix].kind == DiffRowKind::HunkHeader
+        let target = find_wrapped_hunk_target(row_count, start_ix, direction, |ix| {
+            self.active_diff_row(ix)
+                .is_some_and(|row| row.kind == DiffRowKind::HunkHeader)
         });
 
         if let Some(target_ix) = target {
@@ -207,42 +275,39 @@ impl DiffViewer {
     }
 
     fn select_file_relative(&mut self, direction: isize, cx: &mut Context<Self>) {
-        if self.file_row_ranges.is_empty() {
+        let Some(session) = self.review_workspace_session.as_ref() else {
             return;
-        }
-
-        let current_ix = self
-            .selected_path
-            .as_ref()
-            .and_then(|path| {
-                self.file_row_ranges
-                    .iter()
-                    .position(|range| range.path == *path)
-            })
-            .unwrap_or(0);
-        let max_ix = self.file_row_ranges.len().saturating_sub(1) as isize;
-        let target_ix = (current_ix as isize + direction).clamp(0, max_ix) as usize;
-        let (path, status, start_row) = {
-            let range = &self.file_row_ranges[target_ix];
-            (range.path.clone(), range.status, range.start_row)
         };
 
-        self.selected_path = Some(path.clone());
-        self.selected_status = Some(status);
-        self.scroll_to_file_start(&path);
+        let current_path = self
+            .current_review_file_range()
+            .map(|range| range.path)
+            .or_else(|| self.current_review_path());
+        let Some((path, status, start_row)) = session
+            .adjacent_file(current_path.as_deref(), direction)
+            .map(|range| (range.path.clone(), range.status, range.start_row))
+        else {
+            return;
+        };
+
+        self.set_review_selected_file(Some(path.clone()), Some(status));
+        self.scroll_to_file_start(path.as_str());
         self.select_row(start_row, false, cx);
         cx.notify();
     }
 
     fn selected_rows_as_text(&self) -> Option<String> {
         let (start, end) = self.selected_row_range()?;
-        if self.diff_rows.is_empty() {
+        let row_count = self.active_diff_row_count();
+        if row_count == 0 {
             return None;
         }
 
         let mut lines = Vec::new();
-        for row_ix in start..=end.min(self.diff_rows.len().saturating_sub(1)) {
-            let row = &self.diff_rows[row_ix];
+        for row_ix in start..=end.min(row_count.saturating_sub(1)) {
+            let Some(row) = self.active_diff_row(row_ix) else {
+                continue;
+            };
             lines.extend(Self::row_diff_lines(row));
         }
 

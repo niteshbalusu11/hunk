@@ -1,26 +1,37 @@
+type DiffSegmentPrefetchJob = (
+    usize,
+    String,
+    DiffCellKind,
+    String,
+    DiffCellKind,
+    Option<String>,
+    DiffSegmentQuality,
+);
+
 impl DiffViewer {
     fn scroll_selected_file_to_top(&mut self) {
-        let Some(path) = self.selected_path.clone() else {
+        let target_path = if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            self.current_review_file_range().map(|range| range.path)
+        } else {
+            self.selected_path.clone()
+        };
+        let Some(path) = target_path else {
             return;
         };
         self.scroll_to_file_start(&path);
     }
 
     fn scroll_to_file_start(&mut self, path: &str) {
-        let Some(start_row) = self
-            .file_row_ranges
-            .iter()
-            .find(|range| range.path == path)
-            .map(|range| range.start_row)
-        else {
-            return;
-        };
-
-        self.diff_list_state.scroll_to(ListOffset {
-            item_ix: start_row,
-            offset_in_item: px(0.),
-        });
-        self.last_diff_scroll_offset = None;
+        if let Some(session) = self.review_workspace_session.as_ref()
+            && let Some(top_offset_px) = session
+                .file_range_for_path(path)
+                .and_then(|range| session.row_top_offset_px(range.start_row))
+        {
+            self.review_surface
+                .diff_scroll_handle
+                .set_offset(point(px(0.), -px(top_offset_px as f32)));
+        }
+        self.review_surface.last_diff_scroll_offset = None;
         self.last_scroll_activity_at = Instant::now();
     }
 
@@ -29,110 +40,147 @@ impl DiffViewer {
         row_ix: usize,
         cx: &mut Context<Self>,
     ) {
-        if self.last_visible_row_start == Some(row_ix) {
-            return;
+        if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            self.sync_review_workspace_editor_selection_for_row(row_ix);
         }
-        self.last_visible_row_start = Some(row_ix);
-        self.request_visible_row_segment_prefetch(row_ix, false, cx);
 
-        let Some((next_path, next_status)) =
+        if self.uses_review_workspace_sections_surface()
+            && let Some(visible_range) = self.current_review_visible_row_range()
+        {
+            self.request_visible_row_range_segment_prefetch(visible_range, false, cx);
+        }
+
+        let Some((next_path, next_status)) = (if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            self.review_workspace_session
+                .as_ref()
+                .and_then(|session| {
+                    session
+                        .path_at_surface_row(row_ix)
+                        .and_then(|path| {
+                            session.file_range_for_path(path).map(|range| {
+                                (range.path.clone(), range.status)
+                            })
+                        })
+                        .or_else(|| {
+                            self.active_diff_file_range_at_or_after_row(row_ix)
+                                .map(|range| (range.path, range.status))
+                        })
+                })
+                .or_else(|| {
+                    self.selected_file_from_row_metadata(row_ix).or_else(|| {
+                        self.active_diff_file_range_at_or_after_row(row_ix)
+                            .map(|range| (range.path, range.status))
+                    })
+                })
+        } else {
             self.selected_file_from_row_metadata(row_ix).or_else(|| {
-                self.file_row_ranges
-                    .iter()
-                    .find(|range| row_ix < range.end_row)
-                    .or_else(|| self.file_row_ranges.last())
-                    .map(|range| (range.path.clone(), range.status))
+                self.active_diff_file_range_at_or_after_row(row_ix)
+                    .map(|range| (range.path, range.status))
             })
+        })
         else {
             return;
         };
 
-        if self.selected_path.as_deref() == Some(next_path.as_str()) {
+        let current_selected_path = if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            self.current_review_path()
+        } else {
+            self.selected_path.clone()
+        };
+
+        if current_selected_path.as_deref() == Some(next_path.as_str()) {
             return;
         }
 
-        self.selected_path = Some(next_path);
-        self.selected_status = Some(next_status);
+        if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            self.set_review_selected_file(Some(next_path), Some(next_status));
+        } else {
+            self.selected_path = Some(next_path);
+            self.selected_status = Some(next_status);
+        }
         cx.notify();
     }
 
-    fn request_visible_row_segment_prefetch(
+    fn request_review_visible_row_range_segment_prefetch(
         &mut self,
-        visible_row: usize,
+        visible_range: std::ops::Range<usize>,
         force_upgrade: bool,
         cx: &mut Context<Self>,
     ) {
-        if self.diff_rows.is_empty() {
+        let Some(session) = self.review_workspace_session.as_ref() else {
+            return;
+        };
+
+        let row_count = session.row_count();
+        if row_count == 0 || visible_range.start >= row_count {
             return;
         }
 
-        if self.diff_row_segment_cache.len() != self.diff_rows.len() {
-            self.diff_row_segment_cache.resize(self.diff_rows.len(), None);
+        let clamped_range = visible_range.start.min(row_count)..visible_range.end.min(row_count);
+        if clamped_range.is_empty() {
+            return;
         }
 
         if !force_upgrade
-            && let Some(anchor_row) = self.segment_prefetch_anchor_row
-            && anchor_row.abs_diff(visible_row) < DIFF_SEGMENT_PREFETCH_STEP_ROWS
+            && self
+                .review_surface
+                .last_prefetched_visible_row_range
+                .as_ref()
+                .is_some_and(|previous| {
+                    previous.start.abs_diff(clamped_range.start) < DIFF_SEGMENT_PREFETCH_STEP_ROWS
+                        && previous.end.abs_diff(clamped_range.end)
+                            < DIFF_SEGMENT_PREFETCH_STEP_ROWS
+                })
         {
             return;
         }
 
-        self.segment_prefetch_anchor_row = Some(visible_row);
-        let start = visible_row.saturating_sub(DIFF_SEGMENT_PREFETCH_RADIUS_ROWS);
-        let end = visible_row
-            .saturating_add(DIFF_SEGMENT_PREFETCH_RADIUS_ROWS.saturating_add(1))
-            .min(self.diff_rows.len());
+        self.review_surface.last_prefetched_visible_row_range = Some(clamped_range.clone());
+        let anchor_row =
+            clamped_range.start + (clamped_range.end.saturating_sub(clamped_range.start) / 2);
 
-        let batch_limit = if force_upgrade {
-            end.saturating_sub(start)
-        } else {
-            DIFF_SEGMENT_PREFETCH_BATCH_ROWS.min(end.saturating_sub(start))
-        };
-        let mut pending_rows = Vec::with_capacity(batch_limit);
-        let recently_scrolling = self.recently_scrolling();
-        for row_ix in prioritized_prefetch_row_indices(start, end, visible_row) {
-            if pending_rows.len() >= batch_limit {
-                break;
-            }
+        let pending_rows = session
+            .build_segment_prefetch_rows(
+                review_workspace_session::ReviewWorkspaceSegmentPrefetchRequest {
+                    scroll_top_px: self.current_review_surface_scroll_top_px(),
+                    viewport_height_px: self
+                        .review_surface
+                        .diff_scroll_handle
+                        .bounds()
+                        .size
+                        .height
+                        .max(Pixels::ZERO)
+                        .as_f32()
+                        .round() as usize,
+                    anchor_row,
+                    overscan_rows: DIFF_SEGMENT_PREFETCH_RADIUS_ROWS,
+                    force_upgrade,
+                    recently_scrolling: self.recently_scrolling(),
+                    batch_limit: DIFF_SEGMENT_PREFETCH_BATCH_ROWS,
+                },
+            )
+            .into_iter()
+            .map(|row| {
+                (
+                    row.row_index,
+                    row.left_text,
+                    row.left_kind,
+                    row.right_text,
+                    row.right_kind,
+                    row.file_path,
+                    row.quality,
+                )
+            })
+            .collect::<Vec<_>>();
 
-            let Some(row) = self.diff_rows.get(row_ix) else {
-                continue;
-            };
-            if row.kind != DiffRowKind::Code {
-                continue;
-            }
+        self.spawn_review_segment_prefetch_task(pending_rows, cx);
+    }
 
-            let file_path = self
-                .diff_row_metadata
-                .get(row_ix)
-                .and_then(|meta| meta.file_path.clone());
-            let base_quality = file_path
-                .as_deref()
-                .and_then(|path| self.file_line_stats.get(path).copied())
-                .map(base_segment_quality_for_file)
-                .unwrap_or(DiffSegmentQuality::Detailed);
-            let target_quality = effective_segment_quality(base_quality, recently_scrolling);
-
-            if self
-                .diff_row_segment_cache
-                .get(row_ix)
-                .and_then(Option::as_ref)
-                .is_some_and(|cache| cache.quality >= target_quality)
-            {
-                continue;
-            }
-
-            pending_rows.push((
-                row_ix,
-                row.left.text.clone(),
-                row.left.kind,
-                row.right.text.clone(),
-                row.right.kind,
-                file_path,
-                target_quality,
-            ));
-        }
-
+    fn spawn_review_segment_prefetch_task(
+        &mut self,
+        pending_rows: Vec<DiffSegmentPrefetchJob>,
+        cx: &mut Context<Self>,
+    ) {
         if pending_rows.is_empty() {
             return;
         }
@@ -179,15 +227,10 @@ impl DiffViewer {
 
                     let mut inserted = false;
                     for (row_ix, row_cache) in computed_rows {
-                        if let Some(slot) = this.diff_row_segment_cache.get_mut(row_ix) {
-                            let should_replace = slot
-                                .as_ref()
-                                .map(|cached: &DiffRowSegmentCache| row_cache.quality > cached.quality)
-                                .unwrap_or(true);
-                            if should_replace {
-                                *slot = Some(row_cache);
-                                inserted = true;
-                            }
+                        if let Some(session) = this.review_workspace_session.as_mut()
+                            && session.set_row_segment_cache_if_better(row_ix, row_cache)
+                        {
+                            inserted = true;
                         }
                     }
 
@@ -199,8 +242,27 @@ impl DiffViewer {
         });
     }
 
+    fn request_visible_row_range_segment_prefetch(
+        &mut self,
+        visible_range: std::ops::Range<usize>,
+        force_upgrade: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.request_review_visible_row_range_segment_prefetch(visible_range, force_upgrade, cx);
+    }
+
     fn selected_file_from_row_metadata(&self, row_ix: usize) -> Option<(String, FileStatus)> {
-        let row = self.diff_row_metadata.get(row_ix)?;
+        if self.workspace_view_mode == WorkspaceViewMode::Diff
+            && let Some(session) = self.review_workspace_session.as_ref()
+            && let Some(path) = session.path_at_surface_row(row_ix)
+        {
+            let status = session
+                .status_for_path(path)
+                .or_else(|| self.status_for_path(path))?;
+            return Some((path.to_string(), status));
+        }
+
+        let row = self.active_diff_row_metadata(row_ix)?;
         if row.kind == DiffStreamRowKind::EmptyState {
             return None;
         }
@@ -222,137 +284,62 @@ impl DiffViewer {
         self.last_scroll_activity_at = Instant::now();
     }
 
-    fn prime_diff_surface_visible_state(&mut self, cx: &mut Context<Self>) {
-        if self.diff_rows.is_empty() {
+    fn prime_diff_surface_visible_state(
+        &mut self,
+        force_reprime: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let row_count = self.active_diff_row_count();
+        if row_count == 0 {
             return;
         }
 
         let visible_row = self
-            .diff_list_state
-            .logical_scroll_top()
-            .item_ix
-            .min(self.diff_rows.len().saturating_sub(1));
-        self.last_visible_row_start = None;
+            .current_review_surface_top_row()
+            .unwrap_or(0)
+            .min(row_count.saturating_sub(1));
+        if force_reprime {
+            self.review_surface.clear_workspace_surface_snapshot();
+            self.review_surface.last_prefetched_visible_row_range = None;
+        }
         self.sync_selected_file_from_visible_row(visible_row, cx);
     }
 
-    fn reset_diff_surface_rows(&mut self, rows: Vec<SideBySideRow>) {
-        self.diff_rows = rows;
-        self.diff_row_metadata.clear();
-        self.diff_row_segment_cache.clear();
+    fn reset_review_surface_runtime_state(&mut self) {
         self.invalidate_segment_prefetch();
-        self.diff_visible_file_header_lookup.clear();
-        self.diff_visible_hunk_header_lookup.clear();
-        self.file_row_ranges.clear();
-        self.selection_anchor_row = None;
-        self.selection_head_row = None;
+        self.review_surface.clear_row_selection();
         self.drag_selecting_rows = false;
-        self.sync_diff_list_state();
         self.recompute_diff_layout();
+        self.review_surface.clear_workspace_surface_snapshot();
+        self.review_surface.last_prefetched_visible_row_range = None;
     }
 
-    fn apply_loaded_diff_surface_stream(
-        &mut self,
-        stream: DiffStream,
-    ) -> BTreeMap<String, LineStats> {
-        let DiffStream {
-            rows,
-            row_metadata,
-            row_segments,
-            file_ranges,
-            file_line_stats,
-        } = stream;
-
+    fn apply_loaded_review_workspace_surface(&mut self) {
         self.invalidate_segment_prefetch();
-        self.diff_rows = rows;
-        self.diff_row_metadata = row_metadata;
-        self.diff_row_segment_cache = row_segments;
         self.clamp_comment_rows_to_diff();
         self.clamp_selection_to_rows();
         self.drag_selecting_rows = false;
-        self.sync_diff_list_state();
-        self.file_row_ranges = file_ranges;
         self.recompute_diff_layout();
-        self.last_visible_row_start = None;
-        self.recompute_diff_visible_header_lookup();
-        file_line_stats
+        self.review_surface.clear_workspace_surface_snapshot();
+        self.review_surface.last_prefetched_visible_row_range = None;
     }
 
     fn recompute_diff_layout(&mut self) {
-        let mut max_left_line_digits = DIFF_LINE_NUMBER_MIN_DIGITS;
-        let mut max_right_line_digits = DIFF_LINE_NUMBER_MIN_DIGITS;
-
-        for row in &self.diff_rows {
-            if row.kind != DiffRowKind::Code {
-                continue;
-            }
-            if let Some(line) = row.left.line {
-                max_left_line_digits = max_left_line_digits.max(decimal_digits(line));
-            }
-            if let Some(line) = row.right.line {
-                max_right_line_digits = max_right_line_digits.max(decimal_digits(line));
-            }
-        }
-
-        self.diff_left_line_number_width = line_number_column_width(max_left_line_digits);
-        self.diff_right_line_number_width = line_number_column_width(max_right_line_digits);
-    }
-
-    fn sync_diff_list_state(&self) {
-        let previous_top = self.diff_list_state.logical_scroll_top();
-        self.diff_list_state.reset(self.diff_rows.len());
-        let clamped_item_ix = if self.diff_rows.is_empty() {
-            0
-        } else {
-            previous_top
-                .item_ix
-                .min(self.diff_rows.len().saturating_sub(1))
-        };
-        let offset_in_item = if self.diff_rows.is_empty() || clamped_item_ix != previous_top.item_ix
+        if self.uses_review_workspace_sections_surface()
+            && let Some(session) = self.review_workspace_session.as_ref()
         {
-            px(0.)
-        } else {
-            previous_top.offset_in_item
-        };
-        self.diff_list_state.scroll_to(ListOffset {
-            item_ix: clamped_item_ix,
-            offset_in_item,
-        });
-    }
-}
-
-fn prioritized_prefetch_row_indices(start: usize, end: usize, anchor_row: usize) -> Vec<usize> {
-    if start >= end {
-        return Vec::new();
+            let (max_left_line_digits, max_right_line_digits) =
+                session.line_number_digit_widths();
+            self.review_surface.diff_left_line_number_width =
+                line_number_column_width(max_left_line_digits);
+            self.review_surface.diff_right_line_number_width =
+                line_number_column_width(max_right_line_digits);
+            return;
+        }
+        self.review_surface.diff_left_line_number_width =
+            line_number_column_width(DIFF_LINE_NUMBER_MIN_DIGITS);
+        self.review_surface.diff_right_line_number_width =
+            line_number_column_width(DIFF_LINE_NUMBER_MIN_DIGITS);
     }
 
-    let anchor = anchor_row.clamp(start, end.saturating_sub(1));
-    let mut rows = Vec::with_capacity(end.saturating_sub(start));
-    rows.push(anchor);
-
-    let mut step = 1usize;
-    while rows.len() < end.saturating_sub(start) {
-        let mut inserted = false;
-
-        if let Some(right) = anchor.checked_add(step)
-            && right < end
-        {
-            rows.push(right);
-            inserted = true;
-        }
-
-        if let Some(left) = anchor.checked_sub(step)
-            && left >= start
-        {
-            rows.push(left);
-            inserted = true;
-        }
-
-        if !inserted {
-            break;
-        }
-        step = step.saturating_add(1);
-    }
-
-    rows
 }

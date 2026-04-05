@@ -198,6 +198,22 @@ fn review_mode_selected_path_preserves_explicit_selection() {
 }
 
 #[test]
+fn review_mode_selected_path_prefers_last_review_selection() {
+    let review_files = vec![hunk_git::git::ChangedFile {
+        path: "src/lib.rs".to_string(),
+        status: hunk_git::git::FileStatus::Modified,
+        staged: false,
+        unstaged: true,
+        untracked: false,
+    }];
+
+    assert_eq!(
+        review_mode_selected_path(Some("src/review.rs"), &review_files),
+        Some("src/review.rs".to_string()),
+    );
+}
+
+#[test]
 fn review_mode_selected_path_falls_back_to_first_review_file() {
     let review_files = vec![hunk_git::git::ChangedFile {
         path: "src/lib.rs".to_string(),

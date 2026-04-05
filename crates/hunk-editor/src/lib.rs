@@ -1,4 +1,7 @@
 mod display;
+mod workspace;
+mod workspace_display;
+mod workspace_display_projection;
 
 use std::cell::RefCell;
 use std::cmp::min;
@@ -12,6 +15,17 @@ use hunk_language::{
     SemanticToken,
 };
 use hunk_text::{Selection, TextBuffer, TextPosition, Transaction};
+pub use workspace::{
+    WorkspaceDocument, WorkspaceDocumentId, WorkspaceExcerptId, WorkspaceExcerptKind,
+    WorkspaceExcerptLayout, WorkspaceExcerptSpec, WorkspaceLayout, WorkspaceLayoutError,
+    WorkspaceRowKind, WorkspaceRowLocation,
+};
+pub use workspace_display::{
+    WorkspaceDisplayRow, WorkspaceDisplaySnapshot, build_workspace_display_snapshot,
+};
+pub use workspace_display_projection::{
+    WorkspaceProjectedRow, WorkspaceProjectedSnapshot, build_workspace_projected_snapshot,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Viewport {
@@ -246,6 +260,10 @@ impl EditorState {
 
     pub fn buffer(&self) -> &TextBuffer {
         &self.buffer
+    }
+
+    pub fn into_buffer(self) -> TextBuffer {
+        self.buffer
     }
 
     pub fn viewport(&self) -> Viewport {

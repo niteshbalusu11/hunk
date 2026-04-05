@@ -1,4 +1,4 @@
-use gpui::{Keystroke, Pixels, TextStyle, relative};
+use gpui::{Keystroke, TextStyle, relative};
 
 use crate::app::theme::{hunk_editor_chrome_colors, hunk_opacity};
 
@@ -68,6 +68,9 @@ impl DiffViewer {
                 diff_modification: cx.theme().warning,
             },
         );
+
+        let surface =
+            crate::app::workspace_surface::WorkspaceSurfaceElement::Files(Box::new(editor_element));
 
         v_flex()
             .flex_1()
@@ -177,7 +180,7 @@ impl DiffViewer {
                     }
                 }
             })
-            .child(div().flex_1().min_h_0().child(editor_element))
+            .child(div().flex_1().min_h_0().child(surface))
             .into_any_element()
     }
 }

@@ -71,6 +71,7 @@ pub(super) struct CachedStyledSegment {
     pub(super) plain_text: SharedString,
     pub(super) syntax: SyntaxTokenKind,
     pub(super) changed: bool,
+    pub(super) search_match: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -93,7 +94,6 @@ pub(super) struct FileRowRange {
     pub(super) path: String,
     pub(super) status: FileStatus,
     pub(super) start_row: usize,
-    pub(super) end_row: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,46 +121,15 @@ pub(super) struct DiffStream {
     pub(super) rows: Vec<SideBySideRow>,
     pub(super) row_metadata: Vec<DiffStreamRowMeta>,
     pub(super) row_segments: Vec<Option<DiffRowSegmentCache>>,
-    pub(super) file_ranges: Vec<FileRowRange>,
-    pub(super) file_line_stats: BTreeMap<String, LineStats>,
 }
 
 struct LoadedFileDiffRows {
     core_rows: Vec<SideBySideRow>,
-    stats: LineStats,
     load_error: Option<String>,
 }
 
-const DETAILED_SEGMENT_MAX_CHANGED_LINES: u64 = 8_000;
 const MAX_RENDER_SEGMENTS_PER_CELL_DETAILED: usize = 48;
 const MAX_RENDER_SEGMENTS_PER_CELL_LARGE_FILE: usize = 24;
-
-pub(super) fn use_detailed_segments_for_file(line_stats: LineStats) -> bool {
-    line_stats.changed() <= DETAILED_SEGMENT_MAX_CHANGED_LINES
-}
-
-pub(super) fn base_segment_quality_for_file(line_stats: LineStats) -> DiffSegmentQuality {
-    if use_detailed_segments_for_file(line_stats) {
-        DiffSegmentQuality::Detailed
-    } else {
-        DiffSegmentQuality::SyntaxOnly
-    }
-}
-
-pub(super) fn effective_segment_quality(
-    base_quality: DiffSegmentQuality,
-    recently_scrolling: bool,
-) -> DiffSegmentQuality {
-    if !recently_scrolling {
-        return base_quality;
-    }
-
-    match base_quality {
-        DiffSegmentQuality::Detailed => DiffSegmentQuality::SyntaxOnly,
-        DiffSegmentQuality::SyntaxOnly => DiffSegmentQuality::Plain,
-        DiffSegmentQuality::Plain => DiffSegmentQuality::Plain,
-    }
-}
 
 pub(super) fn build_repo_tree(entries: &[RepoTreeEntry]) -> Vec<RepoTreeNode> {
     let mut root = RepoTreeFolder::default();
@@ -476,11 +445,8 @@ pub(super) fn build_diff_stream_from_patch_map(
     let mut rows = Vec::new();
     let mut row_metadata = Vec::new();
     let mut row_segments = Vec::new();
-    let mut file_ranges = Vec::with_capacity(files.len());
-    let mut file_line_stats = BTreeMap::new();
 
     for file in files {
-        let start_row = rows.len();
         let mut file_row_ordinal = 0_usize;
         push_stream_row(
             &mut rows,
@@ -499,7 +465,6 @@ pub(super) fn build_diff_stream_from_patch_map(
                 .get(file.path.as_str())
                 .copied()
                 .unwrap_or_default();
-            file_line_stats.insert(file.path.clone(), collapsed_stats);
             let collapsed_message = if collapsed_stats.changed() > 0 {
                 format!(
                     "File collapsed ({} changed lines hidden, counts may be stale). Expand to refresh.",
@@ -519,11 +484,6 @@ pub(super) fn build_diff_stream_from_patch_map(
             );
             row_segments.push(None);
         } else if loading_paths.contains(file.path.as_str()) {
-            let loading_stats = previous_file_line_stats
-                .get(file.path.as_str())
-                .copied()
-                .unwrap_or_default();
-            file_line_stats.insert(file.path.clone(), loading_stats);
             push_stream_row(
                 &mut rows,
                 &mut row_metadata,
@@ -540,7 +500,6 @@ pub(super) fn build_diff_stream_from_patch_map(
                 .map(String::as_str)
                 .unwrap_or_default();
             let loaded_file = load_file_diff_rows(file, patch);
-            file_line_stats.insert(file.path.clone(), loaded_file.stats);
             if let Some(load_error) = loaded_file.load_error {
                 push_stream_row(
                     &mut rows,
@@ -574,14 +533,6 @@ pub(super) fn build_diff_stream_from_patch_map(
                 }
             }
         }
-
-        let end_row = rows.len();
-        file_ranges.push(FileRowRange {
-            path: file.path.clone(),
-            status: file.status,
-            start_row,
-            end_row,
-        });
     }
 
     if rows.is_empty() {
@@ -603,8 +554,6 @@ pub(super) fn build_diff_stream_from_patch_map(
         rows,
         row_metadata,
         row_segments,
-        file_ranges,
-        file_line_stats,
     }
 }
 
@@ -612,7 +561,6 @@ fn load_file_diff_rows(file: &ChangedFile, patch: &str) -> LoadedFileDiffRows {
     if is_probably_binary_extension(file.path.as_str()) {
         return LoadedFileDiffRows {
             core_rows: Vec::new(),
-            stats: LineStats::default(),
             load_error: Some(format!(
                 "Preview unavailable for {}: binary file type.",
                 file.path
@@ -623,7 +571,6 @@ fn load_file_diff_rows(file: &ChangedFile, patch: &str) -> LoadedFileDiffRows {
     if is_binary_patch(patch) {
         return LoadedFileDiffRows {
             core_rows: Vec::new(),
-            stats: LineStats::default(),
             load_error: Some(format!(
                 "Preview unavailable for {}: binary diff.",
                 file.path
@@ -632,10 +579,8 @@ fn load_file_diff_rows(file: &ChangedFile, patch: &str) -> LoadedFileDiffRows {
     }
 
     let core_rows = parse_patch_side_by_side(patch);
-    let stats = line_stats_from_rows(&core_rows);
     LoadedFileDiffRows {
         core_rows,
-        stats,
         load_error: None,
     }
 }
@@ -649,6 +594,7 @@ pub(super) fn cached_segments_from_styled(
             plain_text: SharedString::from(segment.text),
             syntax: segment.syntax,
             changed: segment.changed,
+            search_match: false,
         })
         .collect::<Vec<_>>()
 }
@@ -755,29 +701,6 @@ fn stable_kind_tag(kind: DiffStreamRowKind) -> &'static str {
         DiffStreamRowKind::FileError => "file-error",
         DiffStreamRowKind::EmptyState => "empty-state",
     }
-}
-
-fn line_stats_from_rows(rows: &[SideBySideRow]) -> LineStats {
-    let mut stats = LineStats::default();
-
-    for row in rows {
-        if row.kind != DiffRowKind::Code {
-            continue;
-        }
-
-        if row.left.kind == DiffCellKind::Removed {
-            stats.removed = stats.removed.saturating_add(1);
-        }
-        if row.right.kind == DiffCellKind::Added {
-            stats.added = stats.added.saturating_add(1);
-        }
-    }
-
-    stats
-}
-
-pub(super) fn decimal_digits(value: u32) -> u32 {
-    if value == 0 { 1 } else { value.ilog10() + 1 }
 }
 
 pub(super) fn line_number_column_width(digits: u32) -> f32 {

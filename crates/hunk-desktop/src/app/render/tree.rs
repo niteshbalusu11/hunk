@@ -553,8 +553,10 @@ impl DiffViewer {
     ) -> AnyElement {
         let view = cx.entity();
         let is_dark = cx.theme().mode.is_dark();
+        let selected_path = self.current_tree_selected_path();
         let is_selected =
-            row.kind == RepoTreeNodeKind::File && self.selected_path.as_deref() == Some(row.path.as_str());
+            row.kind == RepoTreeNodeKind::File
+                && selected_path.as_deref() == Some(row.path.as_str());
         let row_bg = if is_selected {
             hunk_opacity(cx.theme().accent, is_dark, 0.30, 0.14)
         } else if row.ignored {

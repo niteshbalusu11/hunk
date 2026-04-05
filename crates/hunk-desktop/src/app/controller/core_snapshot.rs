@@ -78,6 +78,9 @@ impl DiffViewer {
         self.review_default_right_source_id = None;
         self.review_left_source_id = None;
         self.review_right_source_id = None;
+        self.review_loaded_left_source_id = None;
+        self.review_loaded_right_source_id = None;
+        self.review_loaded_collapsed_files.clear();
         self.sync_review_compare_picker_states(cx);
         self.ai_handle_workspace_change(previous_ai_workspace_key, cx);
         self.request_ai_composer_file_completion_reload(cx);
@@ -97,6 +100,12 @@ impl DiffViewer {
         self.review_overall_line_stats = LineStats::default();
         self.review_compare_loading = false;
         self.review_compare_error = None;
+        self.review_workspace_session = None;
+        self.review_loaded_snapshot_fingerprint = None;
+        self.review_surface.clear_workspace_editors();
+        self.review_surface.clear_workspace_search_matches();
+        self.review_surface.selected_path = None;
+        self.review_surface.clear_row_selection();
         self.last_commit_subject = None;
         self.selected_path = None;
         self.selected_status = None;
@@ -106,10 +115,7 @@ impl DiffViewer {
         self.reset_comment_row_match_cache();
         self.clear_comment_ui_state();
         self.file_line_stats.clear();
-        self.reset_diff_surface_rows(vec![message_row(
-            DiffRowKind::Empty,
-            "Use File > Open Project... (Cmd/Ctrl+Shift+O) to load a Git repository.",
-        )]);
+        self.reset_review_surface_runtime_state();
         self.repo_discovery_failed = true;
         self.error_message = None;
         self.repo_tree.nodes.clear();
@@ -612,15 +618,13 @@ impl DiffViewer {
         self.recompute_overall_line_stats_from_file_stats();
         self.collapsed_files
             .retain(|path| self.files.iter().any(|file| file.path == *path));
-        self.selected_path = self
-            .selected_path
-            .clone()
-            .filter(|selected| self.files.iter().any(|file| &file.path == selected))
-            .or_else(|| self.files.first().map(|file| file.path.clone()));
-        self.selected_status = self
-            .selected_path
-            .as_deref()
-            .and_then(|selected| self.status_for_path(selected));
+        if self.workspace_view_mode == WorkspaceViewMode::Files {
+            self.selected_path = retained_selection_path(&self.files, self.selected_path.as_deref());
+            self.selected_status = self
+                .selected_path
+                .as_deref()
+                .and_then(|selected| self.status_for_path(selected));
+        }
         self.last_commit_subject = last_commit_subject;
         self.persist_workflow_cache();
     }
@@ -746,18 +750,18 @@ impl DiffViewer {
         }
         self.collapsed_files
             .retain(|path| self.files.iter().any(|file| file.path == *path));
-        let current_selection = self.selected_path.clone();
-        self.selected_path = if full_refresh && self.workspace_view_mode == WorkspaceViewMode::Files {
-            current_selection.or_else(|| self.files.first().map(|file| file.path.clone()))
-        } else {
-            current_selection
-                .filter(|selected| self.files.iter().any(|file| &file.path == selected))
-                .or_else(|| self.files.first().map(|file| file.path.clone()))
-        };
-        self.selected_status = self
-            .selected_path
-            .as_deref()
-            .and_then(|selected| self.status_for_path(selected));
+        if self.workspace_view_mode == WorkspaceViewMode::Files {
+            let current_selection = self.selected_path.clone();
+            self.selected_path = if full_refresh {
+                current_selection.or_else(|| self.files.first().map(|file| file.path.clone()))
+            } else {
+                retained_selection_path(&self.files, current_selection.as_deref())
+            };
+            self.selected_status = self
+                .selected_path
+                .as_deref()
+                .and_then(|selected| self.status_for_path(selected));
+        }
 
         if full_refresh {
             let selected_changed = self.selected_path != previous_selected_path
@@ -786,12 +790,15 @@ impl DiffViewer {
             if !should_reload_diff_after_snapshot(
                 self.workspace_view_mode.supports_diff_stream(),
                 diff_changed,
-                self.diff_rows.is_empty(),
+                self.active_diff_row_count() == 0,
             ) {
                 self.scroll_selected_after_reload = false;
             } else {
                 self.scroll_selected_after_reload =
-                    should_scroll_selected_after_reload(selected_changed, self.diff_rows.is_empty());
+                    should_scroll_selected_after_reload(
+                        selected_changed,
+                        self.active_diff_row_count() == 0,
+                    );
                 self.request_selected_diff_reload(cx);
             }
 

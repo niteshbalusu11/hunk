@@ -1,45 +1,12 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum FileAnchorReconcileState {
-    Ready,
-    Deferred,
-    Unavailable,
-}
+pub(super) type FileAnchorReconcileState =
+    crate::app::review_workspace_session::ReviewFileAnchorReconcileState;
 
 impl DiffViewer {
     pub(super) fn file_anchor_reconcile_state(&self, file_path: &str) -> FileAnchorReconcileState {
-        if self.diff_row_metadata.len() != self.diff_rows.len() {
-            return FileAnchorReconcileState::Deferred;
-        }
-
-        let mut has_anchor_rows = false;
-        let mut saw_rows_for_file = false;
-        for row in self
-            .diff_row_metadata
-            .iter()
-            .filter(|row| row.file_path.as_deref() == Some(file_path))
-        {
-            saw_rows_for_file = true;
-            match row.kind {
-                DiffStreamRowKind::CoreCode
-                | DiffStreamRowKind::CoreHunkHeader
-                | DiffStreamRowKind::CoreMeta
-                | DiffStreamRowKind::CoreEmpty => {
-                    has_anchor_rows = true;
-                }
-                DiffStreamRowKind::FileLoading
-                | DiffStreamRowKind::FileCollapsed => return FileAnchorReconcileState::Deferred,
-                DiffStreamRowKind::FileError => return FileAnchorReconcileState::Unavailable,
-                DiffStreamRowKind::FileHeader | DiffStreamRowKind::EmptyState => {}
-            }
-        }
-
-        if has_anchor_rows {
-            FileAnchorReconcileState::Ready
-        } else if self.patch_loading || saw_rows_for_file {
-            FileAnchorReconcileState::Deferred
-        } else {
-            FileAnchorReconcileState::Unavailable
-        }
+        self.review_workspace_session
+            .as_ref()
+            .map(|session| session.file_anchor_reconcile_state(file_path, self.patch_loading))
+            .unwrap_or(FileAnchorReconcileState::Unavailable)
     }
 
     fn find_matching_row_for_comment(&self, comment: &CommentRecord) -> Option<usize> {
@@ -247,7 +214,7 @@ impl DiffViewer {
         if self.row_file_path(row_ix).as_deref() != Some(comment.file_path.as_str()) {
             return false;
         }
-        let Some(row) = self.diff_rows.get(row_ix) else {
+        let Some(row) = self.active_diff_row(row_ix) else {
             return false;
         };
 
@@ -273,21 +240,7 @@ impl DiffViewer {
     }
 
     fn row_file_path(&self, row_ix: usize) -> Option<String> {
-        if self.diff_row_metadata.len() == self.diff_rows.len() {
-            return self
-                .diff_row_metadata
-                .get(row_ix)
-                .and_then(|row| row.file_path.clone());
-        }
-        None
-    }
-
-    fn row_hunk_header(&self, row_ix: usize) -> Option<String> {
-        let hunk_ix = self
-            .diff_visible_hunk_header_lookup
-            .get(row_ix)
-            .copied()
-            .flatten()?;
-        self.diff_rows.get(hunk_ix).map(|row| row.text.clone())
+        self.active_diff_row_metadata(row_ix)
+            .and_then(|row| row.file_path.clone())
     }
 }

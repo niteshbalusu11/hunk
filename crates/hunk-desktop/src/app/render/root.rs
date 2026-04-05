@@ -1,4 +1,28 @@
 impl DiffViewer {
+    fn render_tree_workspace_screen(
+        &mut self,
+        resize_id: &'static str,
+        surface: AnyElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .size_full()
+            .child(if self.sidebar_collapsed {
+                surface
+            } else {
+                h_resizable(resize_id)
+                    .child(
+                        resizable_panel()
+                            .size(px(300.0))
+                            .size_range(px(240.0)..px(520.0))
+                            .child(self.render_tree(cx)),
+                    )
+                    .child(resizable_panel().child(surface))
+                    .into_any_element()
+            })
+            .into_any_element()
+    }
+
     fn render_linux_client_title_bar(&self, cx: &mut Context<Self>) -> AnyElement {
         let menu_bar = self.in_app_menu_bar.clone();
         let is_dark = cx.theme().mode.is_dark();
@@ -68,25 +92,6 @@ impl DiffViewer {
             .into_any_element()
     }
 
-    fn render_diff_workspace_screen(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .size_full()
-            .child(if self.sidebar_collapsed {
-                self.render_diff(cx).into_any_element()
-            } else {
-                h_resizable("hunk-diff-workspace")
-                    .child(
-                        resizable_panel()
-                            .size(px(300.0))
-                            .size_range(px(240.0)..px(520.0))
-                            .child(self.render_tree(cx)),
-                    )
-                    .child(resizable_panel().child(self.render_diff(cx)))
-                    .into_any_element()
-            })
-            .into_any_element()
-    }
-
     fn render_file_workspace_screen(
         &mut self,
         window: &mut Window,
@@ -111,22 +116,8 @@ impl DiffViewer {
                 .into_any_element();
         }
 
-        div()
-            .size_full()
-            .child(if self.sidebar_collapsed {
-                self.render_file_editor(window, cx).into_any_element()
-            } else {
-                h_resizable("hunk-file-workspace")
-                    .child(
-                        resizable_panel()
-                            .size(px(300.0))
-                            .size_range(px(240.0)..px(520.0))
-                            .child(self.render_tree(cx)),
-                    )
-                    .child(resizable_panel().child(self.render_file_editor(window, cx)))
-                    .into_any_element()
-            })
-            .into_any_element()
+        let surface = self.render_file_editor(window, cx);
+        self.render_tree_workspace_screen("hunk-file-workspace", surface, cx)
     }
 
     fn render_git_workspace_screen(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -440,10 +431,17 @@ impl DiffViewer {
 impl Render for DiffViewer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let render_started_at = Instant::now();
-        let current_scroll_offset = self.diff_list_state.scroll_px_offset_for_scrollbar();
-        if self.last_diff_scroll_offset != Some(current_scroll_offset) {
-            self.last_diff_scroll_offset = Some(current_scroll_offset);
+        let current_scroll_offset = self.current_review_surface_scroll_offset();
+        if self.review_surface.last_diff_scroll_offset != Some(current_scroll_offset) {
+            self.review_surface.last_diff_scroll_offset = Some(current_scroll_offset);
             self.last_scroll_activity_at = Instant::now();
+            if let Some(visible_state) = self.refresh_review_surface_snapshot()
+                && let Some(top_row) = visible_state.top_row
+            {
+                self.sync_selected_file_from_visible_row(top_row, cx);
+            }
+        } else if self.uses_review_workspace_sections_surface() {
+            self.refresh_review_surface_snapshot();
         }
         if self.ignore_next_frame_sample {
             self.ignore_next_frame_sample = false;
@@ -502,7 +500,7 @@ impl Render for DiffViewer {
                     .min_h_0()
                     .child(match self.workspace_view_mode {
                         WorkspaceViewMode::Files => self.render_file_workspace_screen(window, cx),
-                        WorkspaceViewMode::Diff => self.render_diff_workspace_screen(cx),
+                        WorkspaceViewMode::Diff => self.render_diff_workspace_screen(window, cx),
                         WorkspaceViewMode::GitWorkspace => self.render_git_workspace_screen(cx),
                         WorkspaceViewMode::Ai => {
                             self.render_ai_workspace_screen(ai_view_state.clone(), cx)

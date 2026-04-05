@@ -291,12 +291,17 @@ impl DiffViewer {
             return;
         }
 
-        let Some(path) = self.selected_path.clone() else {
+        let current_review_file_range = self.current_review_file_range();
+        let Some(path) = self
+            .current_review_path()
+            .or_else(|| current_review_file_range.as_ref().map(|range| range.path.clone()))
+        else {
             self.set_git_warning_message("No review file is selected.".to_string(), Some(window), cx);
             return;
         };
-        let status = self
-            .selected_status
+        let status = current_review_file_range
+            .as_ref()
+            .map(|range| range.status)
             .or_else(|| self.status_for_path(path.as_str()))
             .unwrap_or(FileStatus::Unknown);
 
@@ -376,18 +381,38 @@ impl DiffViewer {
             return;
         }
 
-        self.request_file_editor_reload(path, cx);
+        self.request_file_editor_reload_with_mode(path, true, cx);
     }
 
     pub(super) fn request_file_editor_reload(&mut self, path: String, cx: &mut Context<Self>) -> bool {
+        self.request_file_editor_reload_with_mode(path, false, cx)
+    }
+
+    fn request_file_editor_reload_with_mode(
+        &mut self,
+        path: String,
+        force: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(tab_index) = self.ensure_file_editor_tab_index(path.as_str()) else {
             cx.notify();
             return false;
         };
         self.activate_file_editor_tab_index(tab_index, None, cx);
-        let Some(tab_id) = self.active_file_editor_tab_id else {
-            return false;
-        };
+
+        if !force
+            && should_reuse_loaded_file_editor(LoadedFileEditorReuseState {
+                requested_path: path.as_str(),
+                current_editor_path: self.editor_path.as_deref(),
+                editor_loading: self.editor_loading,
+                editor_error: self.editor_error.as_deref(),
+                has_document: self.files_editor.borrow().current_text().is_some(),
+            })
+        {
+            self.sync_editor_search_query(cx);
+            cx.notify();
+            return true;
+        }
 
         let retain_markdown_preview = if self.editor_path.as_deref() == Some(path.as_str()) {
             self.editor_markdown_preview
@@ -405,6 +430,9 @@ impl DiffViewer {
             self.sync_active_file_editor_tab_state();
             cx.notify();
             return true;
+        };
+        let Some(tab_id) = self.active_file_editor_tab_id else {
+            return false;
         };
 
         let epoch = self.next_editor_epoch();
@@ -1198,91 +1226,4 @@ impl DiffViewer {
         self.editor_save_epoch
     }
 
-    pub(super) fn sync_editor_search_query(&mut self, cx: &mut Context<Self>) {
-        let query = if self.editor_search_visible {
-            self.editor_search_input_state.read(cx).value().to_string()
-        } else {
-            String::new()
-        };
-        self.files_editor
-            .borrow_mut()
-            .set_search_query(Some(query.as_str()));
-        cx.notify();
-    }
-
-    pub(super) fn toggle_editor_search(
-        &mut self,
-        visible: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.editor_search_visible = visible;
-        if visible {
-            self.editor_search_input_state.update(cx, |state, cx| {
-                state.focus(window, cx);
-            });
-        } else {
-            self.editor_search_input_state.update(cx, |state, cx| {
-                state.set_value("", window, cx);
-            });
-            self.editor_replace_input_state.update(cx, |state, cx| {
-                state.set_value("", window, cx);
-            });
-            self.files_editor.borrow_mut().set_search_query(None);
-            self.files_editor_focus_handle.focus(window, cx);
-        }
-        cx.notify();
-    }
-
-    pub(super) fn toggle_editor_search_visibility(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.toggle_editor_search(!self.editor_search_visible, window, cx);
-    }
-
-    pub(super) fn navigate_editor_search(
-        &mut self,
-        forward: bool,
-        cx: &mut Context<Self>,
-    ) {
-        if self.files_editor.borrow_mut().select_next_search_match(forward) {
-            cx.notify();
-        }
-    }
-
-    pub(super) fn replace_current_editor_search_match(
-        &mut self,
-        window: Option<&mut Window>,
-        cx: &mut Context<Self>,
-    ) {
-        let replacement = self.editor_replace_input_state.read(cx).value().to_string();
-        if self
-            .files_editor
-            .borrow_mut()
-            .replace_selected_search_match(replacement.as_str())
-        {
-            self.sync_editor_dirty_from_input(cx);
-            let _ = self.files_editor.borrow_mut().select_next_search_match(true);
-            if let Some(window) = window {
-                self.files_editor_focus_handle.focus(window, cx);
-            }
-            self.sync_active_file_editor_tab_state();
-            cx.notify();
-        }
-    }
-
-    pub(super) fn replace_all_editor_search_matches(&mut self, cx: &mut Context<Self>) {
-        let replacement = self.editor_replace_input_state.read(cx).value().to_string();
-        if self
-            .files_editor
-            .borrow_mut()
-            .replace_all_search_matches(replacement.as_str())
-        {
-            self.sync_editor_dirty_from_input(cx);
-            self.sync_active_file_editor_tab_state();
-            cx.notify();
-        }
-    }
 }

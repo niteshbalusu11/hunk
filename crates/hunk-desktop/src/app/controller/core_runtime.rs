@@ -1,67 +1,321 @@
 impl DiffViewer {
-    fn recompute_diff_visible_header_lookup(&mut self) {
-        let row_count = self.diff_rows.len();
-        self.diff_visible_file_header_lookup = vec![None; row_count];
-        self.diff_visible_hunk_header_lookup = vec![None; row_count];
+    pub(super) fn review_surface_snapshot_options(
+        &self,
+    ) -> review_workspace_session::ReviewWorkspaceSurfaceOptions {
+        let comment_open_counts_by_row = self
+            .comment_open_row_counts
+            .iter()
+            .enumerate()
+            .filter_map(|(row_ix, count)| (*count > 0).then_some((row_ix, *count)))
+            .collect::<BTreeMap<_, _>>();
+        let mut comment_affordance_rows = self
+            .comment_open_row_counts
+            .iter()
+            .enumerate()
+            .filter_map(|(row_ix, count)| {
+                (*count > 0 && self.row_supports_comments(row_ix)).then_some(row_ix)
+            })
+            .collect::<BTreeSet<_>>();
+
+        if let Some(row_ix) = self.hovered_comment_row.filter(|row_ix| self.row_supports_comments(*row_ix))
+        {
+            comment_affordance_rows.insert(row_ix);
+        }
+
+        let active_comment_editor_row = self
+            .active_comment_editor_row
+            .filter(|row_ix| self.row_supports_comments(*row_ix));
+        if let Some(row_ix) = active_comment_editor_row {
+            comment_affordance_rows.insert(row_ix);
+        }
+        let view_file_enabled_paths = self
+            .review_workspace_session
+            .as_ref()
+            .map(|session| {
+                session
+                    .file_ranges()
+                    .iter()
+                    .filter(|range| {
+                        self.can_open_file_in_files_workspace(range.path.as_str(), range.status)
+                    })
+                    .map(|range| range.path.clone())
+                    .collect::<BTreeSet<_>>()
+            })
+            .unwrap_or_default();
+
+        let search_highlight_columns_by_row = self
+            .review_workspace_session
+            .as_ref()
+            .map(|session| {
+                session.build_search_highlight_columns_by_row(
+                    &self.review_surface.workspace_search_matches,
+                )
+            })
+            .unwrap_or_default();
+
+        review_workspace_session::ReviewWorkspaceSurfaceOptions {
+            comment_affordance_rows,
+            comment_open_counts_by_row,
+            active_comment_editor_row,
+            collapsed_paths: self.collapsed_files.clone(),
+            view_file_enabled_paths,
+            search_highlight_columns_by_row,
+        }
+    }
+
+    pub(super) fn refresh_review_surface_snapshot(
+        &mut self,
+    ) -> Option<review_workspace_session::ReviewWorkspaceVisibleState> {
+        if !self.uses_review_workspace_sections_surface() {
+            self.review_surface.clear_workspace_surface_snapshot();
+            return None;
+        }
+
+        let scroll_top_px = self.current_review_surface_scroll_top_px();
+        let viewport_height_px = self
+            .review_surface
+            .diff_scroll_handle
+            .bounds()
+            .size
+            .height
+            .max(Pixels::ZERO)
+            .as_f32()
+            .round() as usize;
+
+        let needs_refresh = self
+            .review_surface
+            .last_surface_snapshot
+            .as_ref()
+            .is_none_or(|snapshot| {
+                snapshot.scroll_top_px != scroll_top_px
+                    || snapshot.viewport_height_px != viewport_height_px
+        });
+        if needs_refresh {
+            let surface_options = self.review_surface_snapshot_options();
+            let has_display_rows = self
+                .review_workspace_session
+                .as_mut()
+                .is_some_and(|session| {
+                    Self::review_surface_display_rows(session, scroll_top_px, viewport_height_px, 8)
+                });
+            if !has_display_rows && !self.seed_review_surface_display_rows() {
+                self.review_surface.last_surface_snapshot = None;
+                return None;
+            }
+            let session = self.review_workspace_session.as_mut()?;
+            if !Self::review_surface_display_rows(session, scroll_top_px, viewport_height_px, 8) {
+                self.review_surface.last_surface_snapshot = None;
+                return None;
+            }
+            let Some(display_rows) = session.cached_display_rows() else {
+                self.review_surface.last_surface_snapshot = None;
+                return None;
+            };
+            let snapshot = session.build_surface_snapshot_with_display_rows(
+                scroll_top_px,
+                viewport_height_px,
+                1,
+                8,
+                &surface_options,
+                display_rows,
+            );
+            self.review_surface.last_surface_snapshot = Some(snapshot);
+        }
+
+        self.review_surface
+            .last_surface_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.visible_state.clone())
+    }
+
+    fn review_surface_display_rows(
+        session: &mut review_workspace_session::ReviewWorkspaceSession,
+        scroll_top_px: usize,
+        viewport_height_px: usize,
+        overscan_rows: usize,
+    ) -> bool {
+        let Some(visible_row_range) = session.visible_row_range_for_viewport(
+            scroll_top_px,
+            viewport_height_px,
+        ) else {
+            return false;
+        };
+        let first_visible_row = visible_row_range.start.saturating_sub(overscan_rows);
+        let last_visible_row = visible_row_range
+            .end
+            .saturating_add(overscan_rows)
+            .min(session.row_count());
+        let requested_row_range = first_visible_row..last_visible_row;
+        if session.cached_display_rows_covering(requested_row_range) {
+            session.refresh_display_geometry_from_cached_display_rows();
+            return true;
+        }
+        false
+    }
+
+    pub(super) fn seed_review_surface_display_rows(&mut self) -> bool {
+        let scroll_top_px = self.current_review_surface_scroll_top_px();
+        let viewport_height_px = self
+            .review_surface
+            .diff_scroll_handle
+            .bounds()
+            .size
+            .height
+            .max(Pixels::ZERO)
+            .as_f32()
+            .round() as usize;
+        let Some(session) = self.review_workspace_session.as_mut() else {
+            return false;
+        };
+        if session.row_count() == 0 {
+            return false;
+        }
+        let Some(workspace_owner) = self.review_surface.workspace_owner() else {
+            return false;
+        };
+        let Some(visible_row_range) =
+            session.visible_row_range_for_viewport(scroll_top_px, viewport_height_px)
+        else {
+            return false;
+        };
+        let overscan_rows = 8usize;
+        let first_visible_row = visible_row_range.start.saturating_sub(overscan_rows);
+        let last_visible_row = visible_row_range
+            .end
+            .saturating_add(overscan_rows)
+            .min(session.row_count());
+        let requested_row_range = first_visible_row..last_visible_row;
+        let viewport = hunk_editor::Viewport {
+            first_visible_row,
+            visible_row_count: requested_row_range.len(),
+            horizontal_offset: 0,
+        };
+        if session.cached_display_rows_covering(requested_row_range.clone()) {
+            session.refresh_display_geometry_from_cached_display_rows();
+            return true;
+        }
+
+        let Some(display_rows) = workspace_owner.build_display_rows_for_viewport(viewport) else {
+            return false;
+        };
+        if !display_rows.covers_row_range(requested_row_range) {
+            return false;
+        }
+        session.cache_display_rows(display_rows);
+        true
+    }
+
+    pub(super) fn rebuild_review_surface_display_rows(&mut self) -> bool {
+        let Some(session) = self.review_workspace_session.as_mut() else {
+            self.review_surface.clear_workspace_surface_snapshot();
+            return false;
+        };
+        session.clear_cached_display_rows();
+        self.review_surface.clear_workspace_surface_snapshot();
+        self.seed_review_surface_display_rows()
+    }
+
+    pub(super) fn current_review_surface_snapshot(
+        &self,
+    ) -> Option<&review_workspace_session::ReviewWorkspaceSurfaceSnapshot> {
+        if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            return self.review_surface.last_surface_snapshot.as_ref();
+        }
+
+        None
+    }
+
+    pub(super) fn current_review_visible_state(
+        &self,
+    ) -> Option<review_workspace_session::ReviewWorkspaceVisibleState> {
+        if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            return self
+                .current_review_surface_snapshot()
+                .map(|snapshot| snapshot.visible_state.clone());
+        }
+
+        None
+    }
+
+    pub(super) fn current_review_surface_scroll_top_px(&self) -> usize {
+        self.review_surface
+            .diff_scroll_handle
+            .offset()
+            .y
+            .min(Pixels::ZERO)
+            .abs()
+            .as_f32()
+            .round() as usize
+    }
+
+    pub(super) fn uses_review_workspace_sections_surface(&self) -> bool {
+        self.workspace_view_mode == WorkspaceViewMode::Diff && self.review_workspace_session.is_some()
+    }
+
+    pub(super) fn current_review_surface_top_row(&self) -> Option<usize> {
+        if self.workspace_view_mode != WorkspaceViewMode::Diff {
+            return None;
+        }
+
+        let row_count = self.active_diff_row_count();
         if row_count == 0 {
-            return;
+            return None;
         }
 
-        if self.diff_row_metadata.len() == row_count {
-            let mut current_file_header = None::<usize>;
-            let mut current_hunk_header = None::<usize>;
-            for row_ix in 0..row_count {
-                let meta = &self.diff_row_metadata[row_ix];
-                match meta.kind {
-                    DiffStreamRowKind::EmptyState => {
-                        current_file_header = None;
-                        current_hunk_header = None;
-                    }
-                    DiffStreamRowKind::FileHeader => {
-                        current_file_header = Some(row_ix);
-                        current_hunk_header = None;
-                    }
-                    DiffStreamRowKind::CoreHunkHeader => {
-                        if current_file_header.is_none() {
-                            current_file_header = self.file_row_ranges.iter().find_map(|range| {
-                                if row_ix >= range.start_row && row_ix < range.end_row {
-                                    Some(range.start_row)
-                                } else {
-                                    None
-                                }
-                            });
-                        }
-                        current_hunk_header = Some(row_ix);
-                    }
-                    _ => {}
-                }
+        self.current_review_visible_state().and_then(|state| state.top_row)
+    }
 
-                self.diff_visible_file_header_lookup[row_ix] = current_file_header;
-                self.diff_visible_hunk_header_lookup[row_ix] = current_hunk_header;
-            }
-            return;
+    pub(super) fn current_review_visible_row_range(&self) -> Option<std::ops::Range<usize>> {
+        if self.workspace_view_mode != WorkspaceViewMode::Diff {
+            return None;
         }
 
-        let mut current_hunk_header = None::<usize>;
-        for row_ix in 0..row_count {
-            if self
-                .diff_rows
-                .get(row_ix)
-                .is_some_and(|row| row.kind == DiffRowKind::HunkHeader)
-            {
-                current_hunk_header = Some(row_ix);
-            }
-
-            let file_header_ix = self.file_row_ranges.iter().find_map(|range| {
-                if row_ix >= range.start_row && row_ix < range.end_row {
-                    Some(range.start_row)
-                } else {
-                    None
-                }
-            });
-            self.diff_visible_file_header_lookup[row_ix] = file_header_ix;
-            self.diff_visible_hunk_header_lookup[row_ix] = current_hunk_header;
+        let row_count = self.active_diff_row_count();
+        if row_count == 0 {
+            return None;
         }
+
+        self.current_review_visible_state()
+            .and_then(|state| state.visible_row_range)
+    }
+
+    pub(super) fn current_review_surface_scroll_offset(&self) -> Point<Pixels> {
+        if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            return self.review_surface.diff_scroll_handle.offset();
+        }
+
+        point(px(0.), px(0.))
+    }
+
+    pub(super) fn active_diff_row_count(&self) -> usize {
+        if self.workspace_view_mode == WorkspaceViewMode::Diff {
+            self.review_workspace_session
+                .as_ref()
+                .map(|session| session.row_count())
+                .unwrap_or(0)
+        } else {
+            0
+        }
+    }
+
+    pub(super) fn active_diff_row(&self, row_ix: usize) -> Option<&SideBySideRow> {
+        (self.workspace_view_mode == WorkspaceViewMode::Diff)
+            .then(|| {
+                self.review_workspace_session
+                    .as_ref()
+                    .and_then(|session| session.row(row_ix))
+            })
+            .flatten()
+    }
+
+    pub(super) fn active_diff_row_metadata(&self, row_ix: usize) -> Option<&DiffStreamRowMeta> {
+        (self.workspace_view_mode == WorkspaceViewMode::Diff)
+            .then(|| {
+                self.review_workspace_session
+                    .as_ref()
+                    .and_then(|session| session.row_metadata(row_ix))
+            })
+            .flatten()
     }
 
     fn next_snapshot_epoch(&mut self) -> usize {
@@ -527,7 +781,7 @@ impl DiffViewer {
     fn invalidate_segment_prefetch(&mut self) {
         self.next_segment_prefetch_epoch();
         self.segment_prefetch_task = Task::ready(());
-        self.segment_prefetch_anchor_row = None;
+        self.review_surface.last_prefetched_visible_row_range = None;
     }
 
     fn start_auto_refresh(&mut self, cx: &mut Context<Self>) {
@@ -595,6 +849,479 @@ impl DiffViewer {
 
     fn recently_scrolling(&self) -> bool {
         self.last_scroll_activity_at.elapsed() < AUTO_REFRESH_SCROLL_DEBOUNCE
+    }
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone)]
+struct ReviewWorkspaceProjectedSideRow {
+    display_row_index: usize,
+    row_index: usize,
+    raw_row_range: std::ops::Range<usize>,
+    row: hunk_editor::WorkspaceDisplayRow,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone)]
+struct ReviewWorkspaceProjectedSideRows {
+    rows: Vec<ReviewWorkspaceProjectedSideRow>,
+}
+
+#[cfg(test)]
+fn projected_review_workspace_side_rows(
+    render_snapshot: crate::app::native_files_editor::WorkspaceProjectedRenderSnapshot,
+) -> Option<ReviewWorkspaceProjectedSideRows> {
+    let mut rows = Vec::<ReviewWorkspaceProjectedSideRow>::new();
+    for (row, display_row) in render_snapshot
+        .projection
+        .visible_rows
+        .into_iter()
+        .zip(render_snapshot.visible_display_rows)
+    {
+        let workspace_row_range = row.workspace_row_range?;
+        if workspace_row_range.is_empty() {
+            return None;
+        }
+        let raw_row_index = workspace_row_range.start;
+        let display_row_index = row.row_index;
+        rows.push(ReviewWorkspaceProjectedSideRow {
+            display_row_index,
+            row_index: raw_row_index,
+            raw_row_range: workspace_row_range,
+            row: display_row.clone(),
+        });
+    }
+    Some(ReviewWorkspaceProjectedSideRows { rows })
+}
+
+#[cfg(test)]
+fn projected_workspace_display_rows(
+    snapshot: hunk_editor::WorkspaceProjectedSnapshot,
+) -> Option<Vec<review_workspace_session::ReviewWorkspaceDisplayRowEntry>> {
+    let visible_display_rows = snapshot
+        .visible_rows
+        .iter()
+        .map(|row| hunk_editor::WorkspaceDisplayRow {
+            row_index: row.row_index,
+            location: row.location.clone(),
+            raw_start_column: row.raw_start_column,
+            raw_end_column: row.raw_end_column,
+            raw_column_offsets: row.raw_column_offsets.clone(),
+            text: row.text.clone(),
+            whitespace_markers: row.whitespace_markers.clone(),
+            search_highlights: row.search_highlights.clone(),
+        })
+        .collect::<Vec<_>>();
+    projected_review_workspace_side_rows(crate::app::native_files_editor::WorkspaceProjectedRenderSnapshot {
+        projection: snapshot,
+        visible_display_rows,
+        syntax_by_display_row: BTreeMap::new(),
+        line_number_digits: 1,
+    }).map(|rows| {
+        rows.rows
+            .into_iter()
+            .map(|row| review_workspace_session::ReviewWorkspaceDisplayRowEntry {
+                display_row_index: row.display_row_index,
+                row_index: row.row_index,
+                raw_row_range: row.raw_row_range,
+                left: row.row.clone(),
+                right: hunk_editor::WorkspaceDisplayRow {
+                    row_index: row.display_row_index,
+                    location: None,
+                    raw_start_column: 0,
+                    raw_end_column: 0,
+                    raw_column_offsets: vec![0],
+                    text: String::new(),
+                    whitespace_markers: Vec::new(),
+                    search_highlights: Vec::new(),
+                },
+            })
+            .collect()
+    })
+}
+
+#[cfg(test)]
+fn test_render_snapshot_from_projected(
+    snapshot: hunk_editor::WorkspaceProjectedSnapshot,
+) -> crate::app::native_files_editor::WorkspaceProjectedRenderSnapshot {
+    let visible_display_rows = snapshot
+        .visible_rows
+        .iter()
+        .map(|row| hunk_editor::WorkspaceDisplayRow {
+            row_index: row.row_index,
+            location: row.location.clone(),
+            raw_start_column: row.raw_start_column,
+            raw_end_column: row.raw_end_column,
+            raw_column_offsets: row.raw_column_offsets.clone(),
+            text: row.text.clone(),
+            whitespace_markers: row.whitespace_markers.clone(),
+            search_highlights: row.search_highlights.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    crate::app::native_files_editor::WorkspaceProjectedRenderSnapshot {
+        projection: snapshot,
+        visible_display_rows,
+        syntax_by_display_row: BTreeMap::new(),
+        line_number_digits: 1,
+    }
+}
+
+#[cfg(test)]
+fn review_workspace_display_row_entries_from_projected_sides(
+    left: &ReviewWorkspaceProjectedSideRows,
+    right: &ReviewWorkspaceProjectedSideRows,
+) -> Option<Vec<review_workspace_session::ReviewWorkspaceDisplayRowEntry>> {
+    let right_rows_by_display = right
+        .rows
+        .iter()
+        .map(|row| (row.display_row_index, row))
+        .collect::<BTreeMap<_, _>>();
+    let mut entries = Vec::with_capacity(left.rows.len());
+    for left_row in &left.rows {
+        let right_row = right_rows_by_display.get(&left_row.display_row_index)?;
+        if right_row.raw_row_range != left_row.raw_row_range {
+            return None;
+        }
+        entries.push(review_workspace_session::ReviewWorkspaceDisplayRowEntry {
+            display_row_index: left_row.display_row_index,
+            row_index: left_row.row_index,
+            raw_row_range: left_row.raw_row_range.clone(),
+            left: left_row.row.clone(),
+            right: right_row.row.clone(),
+        });
+    }
+    Some(entries)
+}
+
+#[cfg(test)]
+fn review_workspace_display_row_entries(
+    left_rows: &BTreeMap<usize, hunk_editor::WorkspaceDisplayRow>,
+    right_rows: &BTreeMap<usize, hunk_editor::WorkspaceDisplayRow>,
+) -> Vec<review_workspace_session::ReviewWorkspaceDisplayRowEntry> {
+    left_rows
+        .iter()
+        .filter_map(|(display_row_index, left)| {
+            Some(review_workspace_session::ReviewWorkspaceDisplayRowEntry {
+                display_row_index: *display_row_index,
+                row_index: *display_row_index,
+                raw_row_range: *display_row_index..display_row_index.saturating_add(1),
+                left: left.clone(),
+                right: right_rows.get(display_row_index)?.clone(),
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod review_projection_tests {
+    use super::*;
+
+    #[test]
+    fn projected_workspace_rows_convert_when_mapping_is_one_to_one() {
+        let rows = projected_workspace_display_rows(
+            hunk_editor::WorkspaceProjectedSnapshot {
+                viewport: hunk_editor::Viewport {
+                    first_visible_row: 0,
+                    visible_row_count: 2,
+                    horizontal_offset: 0,
+                },
+                total_display_rows: 2,
+                visible_rows: vec![
+                    hunk_editor::WorkspaceProjectedRow {
+                        row_index: 0,
+                        workspace_row_range: Some(4..5),
+                        location: None,
+                        kind: hunk_editor::DisplayRowKind::Text,
+                        raw_start_column: 0,
+                        raw_end_column: 3,
+                        raw_column_offsets: vec![0, 1, 2, 3],
+                        start_column: 0,
+                        end_column: 3,
+                        text: "abc".to_string(),
+                        is_wrapped: false,
+                        whitespace_markers: Vec::new(),
+                        search_highlights: Vec::new(),
+                        overlays: Vec::new(),
+                    },
+                    hunk_editor::WorkspaceProjectedRow {
+                        row_index: 1,
+                        workspace_row_range: Some(5..6),
+                        location: None,
+                        kind: hunk_editor::DisplayRowKind::Text,
+                        raw_start_column: 0,
+                        raw_end_column: 2,
+                        raw_column_offsets: vec![0, 1, 2],
+                        start_column: 0,
+                        end_column: 2,
+                        text: "de".to_string(),
+                        is_wrapped: false,
+                        whitespace_markers: Vec::new(),
+                        search_highlights: Vec::new(),
+                        overlays: Vec::new(),
+                    },
+                ],
+            },
+        )
+        .expect("one-to-one rows should convert");
+
+        assert_eq!(
+            rows.iter().map(|entry| entry.row_index).collect::<Vec<_>>(),
+            vec![4, 5]
+        );
+        assert_eq!(rows[0].left.text, "abc");
+        assert_eq!(rows[0].display_row_index, 0);
+    }
+
+    #[test]
+    fn projected_workspace_rows_preserve_duplicate_raw_row_mappings() {
+        let rows = projected_workspace_display_rows(
+            hunk_editor::WorkspaceProjectedSnapshot {
+                viewport: hunk_editor::Viewport {
+                    first_visible_row: 0,
+                    visible_row_count: 2,
+                    horizontal_offset: 0,
+                },
+                total_display_rows: 2,
+                visible_rows: vec![
+                    hunk_editor::WorkspaceProjectedRow {
+                        row_index: 0,
+                        workspace_row_range: Some(4..5),
+                        location: None,
+                        kind: hunk_editor::DisplayRowKind::Text,
+                        raw_start_column: 0,
+                        raw_end_column: 80,
+                        raw_column_offsets: vec![0; 81],
+                        start_column: 0,
+                        end_column: 80,
+                        text: "left".to_string(),
+                        is_wrapped: false,
+                        whitespace_markers: Vec::new(),
+                        search_highlights: Vec::new(),
+                        overlays: Vec::new(),
+                    },
+                    hunk_editor::WorkspaceProjectedRow {
+                        row_index: 1,
+                        workspace_row_range: Some(4..5),
+                        location: None,
+                        kind: hunk_editor::DisplayRowKind::Text,
+                        raw_start_column: 80,
+                        raw_end_column: 120,
+                        raw_column_offsets: vec![0; 41],
+                        start_column: 80,
+                        end_column: 120,
+                        text: "right".to_string(),
+                        is_wrapped: true,
+                        whitespace_markers: Vec::new(),
+                        search_highlights: Vec::new(),
+                        overlays: Vec::new(),
+                    },
+                ],
+            },
+        );
+
+        let rows = rows.expect("projected rows should preserve wrapped display rows");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].display_row_index, 0);
+        assert_eq!(rows[1].display_row_index, 1);
+        assert_eq!(rows[0].row_index, 4);
+        assert_eq!(rows[1].row_index, 4);
+        assert_eq!(rows[0].raw_row_range, 4..5);
+        assert_eq!(rows[1].raw_row_range, 4..5);
+    }
+
+    #[test]
+    fn projected_workspace_rows_preserve_multi_row_raw_ranges() {
+        let rows = projected_workspace_display_rows(
+            hunk_editor::WorkspaceProjectedSnapshot {
+                viewport: hunk_editor::Viewport {
+                    first_visible_row: 0,
+                    visible_row_count: 1,
+                    horizontal_offset: 0,
+                },
+                total_display_rows: 1,
+                visible_rows: vec![hunk_editor::WorkspaceProjectedRow {
+                    row_index: 0,
+                    workspace_row_range: Some(4..7),
+                    location: None,
+                    kind: hunk_editor::DisplayRowKind::FoldPlaceholder {
+                        hidden_line_count: 2,
+                    },
+                    raw_start_column: 0,
+                    raw_end_column: 18,
+                    raw_column_offsets: (0..=18).collect(),
+                    start_column: 0,
+                    end_column: 18,
+                    text: "… 2 hidden lines".to_string(),
+                    is_wrapped: false,
+                    whitespace_markers: Vec::new(),
+                    search_highlights: Vec::new(),
+                    overlays: Vec::new(),
+                }],
+            },
+        )
+        .expect("fold placeholder rows should convert");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].row_index, 4);
+        assert_eq!(rows[0].raw_row_range, 4..7);
+        assert_eq!(rows[0].display_row_index, 0);
+    }
+
+    #[test]
+    fn review_workspace_display_row_entries_preserve_row_order() {
+        let left_rows = BTreeMap::from([
+            (
+                4,
+                hunk_editor::WorkspaceDisplayRow {
+                    row_index: 4,
+                    location: None,
+                    raw_start_column: 0,
+                    raw_end_column: 3,
+                    raw_column_offsets: vec![0, 1, 2, 3],
+                    text: "abc".to_string(),
+                    whitespace_markers: Vec::new(),
+                    search_highlights: Vec::new(),
+                },
+            ),
+            (
+                5,
+                hunk_editor::WorkspaceDisplayRow {
+                    row_index: 5,
+                    location: None,
+                    raw_start_column: 0,
+                    raw_end_column: 2,
+                    raw_column_offsets: vec![0, 1, 2],
+                    text: "de".to_string(),
+                    whitespace_markers: Vec::new(),
+                    search_highlights: Vec::new(),
+                },
+            ),
+        ]);
+        let right_rows = left_rows.clone();
+
+        let entries = review_workspace_display_row_entries(&left_rows, &right_rows);
+
+        assert_eq!(
+            entries.iter().map(|entry| entry.row_index).collect::<Vec<_>>(),
+            vec![4, 5]
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.display_row_index)
+                .collect::<Vec<_>>(),
+            vec![4, 5]
+        );
+    }
+
+    #[test]
+    fn projected_review_workspace_side_rows_merge_by_display_row_index() {
+        let left = projected_review_workspace_side_rows(test_render_snapshot_from_projected(
+            hunk_editor::WorkspaceProjectedSnapshot {
+            viewport: hunk_editor::Viewport {
+                first_visible_row: 0,
+                visible_row_count: 2,
+                horizontal_offset: 0,
+            },
+            total_display_rows: 2,
+            visible_rows: vec![
+                hunk_editor::WorkspaceProjectedRow {
+                    row_index: 0,
+                    workspace_row_range: Some(4..5),
+                    location: None,
+                    kind: hunk_editor::DisplayRowKind::Text,
+                    raw_start_column: 0,
+                    raw_end_column: 5,
+                    raw_column_offsets: vec![0, 1, 2, 3, 4, 5],
+                    start_column: 0,
+                    end_column: 5,
+                    text: "left".to_string(),
+                    is_wrapped: false,
+                    whitespace_markers: Vec::new(),
+                    search_highlights: Vec::new(),
+                    overlays: Vec::new(),
+                },
+                hunk_editor::WorkspaceProjectedRow {
+                    row_index: 1,
+                    workspace_row_range: Some(4..5),
+                    location: None,
+                    kind: hunk_editor::DisplayRowKind::Text,
+                    raw_start_column: 5,
+                    raw_end_column: 9,
+                    raw_column_offsets: vec![0, 1, 2, 3, 4],
+                    start_column: 5,
+                    end_column: 9,
+                    text: "wrap".to_string(),
+                    is_wrapped: true,
+                    whitespace_markers: Vec::new(),
+                    search_highlights: Vec::new(),
+                    overlays: Vec::new(),
+                },
+            ],
+        },
+        ))
+        .expect("left projected rows should build");
+        let right = projected_review_workspace_side_rows(test_render_snapshot_from_projected(
+            hunk_editor::WorkspaceProjectedSnapshot {
+            viewport: hunk_editor::Viewport {
+                first_visible_row: 0,
+                visible_row_count: 2,
+                horizontal_offset: 0,
+            },
+            total_display_rows: 2,
+            visible_rows: vec![
+                hunk_editor::WorkspaceProjectedRow {
+                    row_index: 0,
+                    workspace_row_range: Some(4..5),
+                    location: None,
+                    kind: hunk_editor::DisplayRowKind::Text,
+                    raw_start_column: 0,
+                    raw_end_column: 5,
+                    raw_column_offsets: vec![0, 1, 2, 3, 4, 5],
+                    start_column: 0,
+                    end_column: 5,
+                    text: "right".to_string(),
+                    is_wrapped: false,
+                    whitespace_markers: Vec::new(),
+                    search_highlights: Vec::new(),
+                    overlays: Vec::new(),
+                },
+                hunk_editor::WorkspaceProjectedRow {
+                    row_index: 1,
+                    workspace_row_range: Some(4..5),
+                    location: None,
+                    kind: hunk_editor::DisplayRowKind::Text,
+                    raw_start_column: 5,
+                    raw_end_column: 9,
+                    raw_column_offsets: vec![0, 1, 2, 3, 4],
+                    start_column: 5,
+                    end_column: 9,
+                    text: "cell".to_string(),
+                    is_wrapped: true,
+                    whitespace_markers: Vec::new(),
+                    search_highlights: Vec::new(),
+                    overlays: Vec::new(),
+                },
+            ],
+        },
+        ))
+        .expect("right projected rows should build");
+
+        let entries = review_workspace_display_row_entries_from_projected_sides(&left, &right)
+            .expect("projected sides should merge");
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].display_row_index, 0);
+        assert_eq!(entries[1].display_row_index, 1);
+        assert_eq!(entries[0].row_index, 4);
+        assert_eq!(entries[1].row_index, 4);
+        assert_eq!(entries[0].raw_row_range, 4..5);
+        assert_eq!(entries[1].raw_row_range, 4..5);
+        assert_eq!(entries[0].left.row_index, 0);
+        assert_eq!(entries[1].left.row_index, 1);
+        assert_eq!(entries[0].right.row_index, 0);
+        assert_eq!(entries[1].right.row_index, 1);
     }
 }
 

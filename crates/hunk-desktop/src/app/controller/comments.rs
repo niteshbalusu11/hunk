@@ -1,15 +1,4 @@
-#[derive(Debug, Clone)]
-pub(super) struct RowCommentAnchor {
-    pub(super) file_path: String,
-    pub(super) line_side: CommentLineSide,
-    pub(super) old_line: Option<u32>,
-    pub(super) new_line: Option<u32>,
-    pub(super) hunk_header: Option<String>,
-    pub(super) line_text: String,
-    pub(super) context_before: String,
-    pub(super) context_after: String,
-    pub(super) anchor_hash: String,
-}
+pub(super) type RowCommentAnchor = crate::app::review_workspace_session::ReviewCommentAnchor;
 
 #[derive(Debug, Clone)]
 struct FuzzyCommentKey {
@@ -24,15 +13,24 @@ struct FuzzyCommentKey {
 }
 
 impl DiffViewer {
+    fn invalidate_review_comment_surface_snapshot(&mut self) {
+        if self.uses_review_workspace_sections_surface() {
+            self.review_surface.clear_workspace_surface_snapshot();
+        }
+    }
+
     fn reset_comment_row_match_cache(&mut self) {
         self.comment_row_matches.clear();
         self.comment_open_row_counts.clear();
+        self.invalidate_review_comment_surface_snapshot();
     }
 
     fn rebuild_comment_row_match_cache(&mut self) {
         self.comment_row_matches.clear();
-        self.comment_open_row_counts = vec![0; self.diff_rows.len()];
-        if self.diff_rows.is_empty() || self.comments_cache.is_empty() {
+        let row_count = self.active_diff_row_count();
+        self.comment_open_row_counts = vec![0; row_count];
+        self.invalidate_review_comment_surface_snapshot();
+        if row_count == 0 || self.comments_cache.is_empty() {
             return;
         }
         let (row_anchor_index, rows_by_path) = self.build_comment_row_anchor_index();
@@ -56,20 +54,10 @@ impl DiffViewer {
     fn build_comment_row_anchor_index(
         &self,
     ) -> (BTreeMap<usize, RowCommentAnchor>, BTreeMap<String, Vec<usize>>) {
-        let mut row_anchor_index = BTreeMap::new();
-        let mut rows_by_path = BTreeMap::<String, Vec<usize>>::new();
-
-        for row_ix in 0..self.diff_rows.len() {
-            if let Some(anchor) = self.build_row_comment_anchor(row_ix) {
-                rows_by_path
-                    .entry(anchor.file_path.clone())
-                    .or_default()
-                    .push(row_ix);
-                row_anchor_index.insert(row_ix, anchor);
-            }
-        }
-
-        (row_anchor_index, rows_by_path)
+        self.review_workspace_session
+            .as_ref()
+            .map(|session| session.build_comment_anchor_index(COMMENT_CONTEXT_RADIUS_ROWS))
+            .unwrap_or_default()
     }
 
     fn load_database_store() -> Option<DatabaseStore> {
@@ -86,6 +74,7 @@ impl DiffViewer {
         self.hovered_comment_row = None;
         self.active_comment_editor_row = None;
         self.comments_preview_open = false;
+        self.invalidate_review_comment_surface_snapshot();
     }
 
     fn auto_show_non_open_if_open_empty(&mut self) {
@@ -98,15 +87,18 @@ impl DiffViewer {
     }
 
     fn clamp_comment_rows_to_diff(&mut self) {
-        if self.diff_rows.is_empty() {
+        let row_count = self.active_diff_row_count();
+        if row_count == 0 {
             self.hovered_comment_row = None;
             self.active_comment_editor_row = None;
+            self.invalidate_review_comment_surface_snapshot();
             return;
         }
 
-        let max_ix = self.diff_rows.len().saturating_sub(1);
+        let max_ix = row_count.saturating_sub(1);
         self.hovered_comment_row = self.hovered_comment_row.map(|ix| ix.min(max_ix));
         self.active_comment_editor_row = self.active_comment_editor_row.map(|ix| ix.min(max_ix));
+        self.invalidate_review_comment_surface_snapshot();
     }
 
     fn comment_scope_repo_root(&self) -> Option<String> {
@@ -266,22 +258,9 @@ impl DiffViewer {
         if !self.review_comments_enabled() {
             return false;
         }
-        let Some(row) = self.diff_rows.get(row_ix) else {
-            return false;
-        };
-        if !matches!(row.kind, DiffRowKind::Code | DiffRowKind::Meta | DiffRowKind::Empty) {
-            return false;
-        }
-        if self.diff_row_metadata.len() != self.diff_rows.len() {
-            return false;
-        }
-
-        self.diff_row_metadata.get(row_ix).is_some_and(|meta| {
-            matches!(
-                meta.kind,
-                DiffStreamRowKind::CoreCode | DiffStreamRowKind::CoreMeta | DiffStreamRowKind::CoreEmpty
-            )
-        })
+        self.review_workspace_session
+            .as_ref()
+            .is_some_and(|session| session.row_supports_comments(row_ix))
     }
 
     pub(super) fn on_diff_row_hover(&mut self, row_ix: usize, cx: &mut Context<Self>) {
@@ -292,11 +271,8 @@ impl DiffViewer {
             return;
         }
         self.hovered_comment_row = Some(row_ix);
+        self.invalidate_review_comment_surface_snapshot();
         cx.notify();
-    }
-
-    pub(super) fn row_open_comment_count(&self, row_ix: usize) -> usize {
-        self.comment_open_row_counts.get(row_ix).copied().unwrap_or(0)
     }
 
     pub(super) fn open_comment_editor_for_row(
@@ -310,6 +286,7 @@ impl DiffViewer {
         }
         self.active_comment_editor_row = Some(row_ix);
         self.comment_status_message = None;
+        self.invalidate_review_comment_surface_snapshot();
         let state = self.comment_input_state.clone();
         state.update(cx, |input, cx| {
             input.set_value("", window, cx);
@@ -323,6 +300,7 @@ impl DiffViewer {
         cx: &mut Context<Self>,
     ) {
         self.active_comment_editor_row = None;
+        self.invalidate_review_comment_surface_snapshot();
         let state = self.comment_input_state.clone();
         state.update(cx, |input, cx| {
             input.set_value("", window, cx);
@@ -380,8 +358,7 @@ impl DiffViewer {
             old_line: anchor.old_line,
             new_line: anchor.new_line,
             row_stable_id: self
-                .diff_row_metadata
-                .get(row_ix)
+                .active_diff_row_metadata(row_ix)
                 .map(|row| row.stable_id),
             hunk_header: anchor.hunk_header,
             line_text: anchor.line_text,
@@ -610,14 +587,16 @@ impl DiffViewer {
         }
 
         if let Some((status, start_row)) = self
-            .file_row_ranges
-            .iter()
-            .find(|range| range.path == comment.file_path)
+            .active_diff_file_range_for_path(comment.file_path.as_str())
             .map(|range| (range.status, range.start_row))
         {
             self.comments_preview_open = false;
-            self.selected_path = Some(comment.file_path);
-            self.selected_status = Some(status);
+            if self.workspace_view_mode == WorkspaceViewMode::Diff {
+                self.set_review_selected_file(Some(comment.file_path), Some(status));
+            } else {
+                self.selected_path = Some(comment.file_path);
+                self.selected_status = Some(status);
+            }
             self.select_row_and_scroll(start_row, false, cx);
             self.comment_status_message =
                 Some("Comment anchor not found; jumped to file.".to_string());
@@ -640,9 +619,9 @@ impl DiffViewer {
 
         let now = now_unix_ms();
         let changed_paths = self
-            .files
+            .active_diff_files()
             .iter()
-            .map(|file| file.path.as_str())
+            .map(|file| file.path.clone())
             .collect::<BTreeSet<_>>();
         let mut should_reload = false;
         let mut seen_ids = Vec::new();
@@ -717,76 +696,9 @@ impl DiffViewer {
     }
 
     pub(super) fn build_row_comment_anchor(&self, row_ix: usize) -> Option<RowCommentAnchor> {
-        if !self.row_supports_comments(row_ix) {
-            return None;
-        }
-        let row = self.diff_rows.get(row_ix)?;
-        let file_path = self.row_file_path(row_ix)?;
-        let hunk_header = self.row_hunk_header(row_ix);
-        let line_text = Self::row_diff_lines(row).join("\n");
-
-        let (line_side, old_line, new_line) = if row.kind == DiffRowKind::Code {
-            if row.right.kind != DiffCellKind::None {
-                (CommentLineSide::Right, row.left.line, row.right.line)
-            } else if row.left.kind != DiffCellKind::None {
-                (CommentLineSide::Left, row.left.line, row.right.line)
-            } else {
-                (CommentLineSide::Meta, None, None)
-            }
-        } else {
-            (CommentLineSide::Meta, None, None)
-        };
-
-        let context_before = self.collect_row_context(row_ix, true);
-        let context_after = self.collect_row_context(row_ix, false);
-        let anchor_hash = compute_comment_anchor_hash(
-            file_path.as_str(),
-            hunk_header.as_deref(),
-            line_text.as_str(),
-            context_before.as_str(),
-            context_after.as_str(),
-        );
-
-        Some(RowCommentAnchor {
-            file_path,
-            line_side,
-            old_line,
-            new_line,
-            hunk_header,
-            line_text,
-            context_before,
-            context_after,
-            anchor_hash,
-        })
-    }
-
-    fn collect_row_context(&self, row_ix: usize, before: bool) -> String {
-        if self.diff_rows.is_empty() {
-            return String::new();
-        }
-        let anchor_path = self.row_file_path(row_ix);
-
-        let range = if before {
-            let start = row_ix.saturating_sub(COMMENT_CONTEXT_RADIUS_ROWS);
-            start..row_ix
-        } else {
-            let start = row_ix.saturating_add(1);
-            let end = start
-                .saturating_add(COMMENT_CONTEXT_RADIUS_ROWS)
-                .min(self.diff_rows.len());
-            start..end
-        };
-
-        let mut lines = Vec::new();
-        for ix in range {
-            if let Some(row) = self.diff_rows.get(ix) {
-                if anchor_path.is_some() && self.row_file_path(ix) != anchor_path {
-                    continue;
-                }
-                lines.extend(Self::row_diff_lines(row));
-            }
-        }
-        lines.join("\n")
+        self.review_workspace_session
+            .as_ref()
+            .and_then(|session| session.build_comment_anchor(row_ix, COMMENT_CONTEXT_RADIUS_ROWS))
     }
 
     pub(super) fn row_diff_lines(row: &SideBySideRow) -> Vec<String> {

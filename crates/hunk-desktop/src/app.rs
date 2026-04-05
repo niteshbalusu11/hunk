@@ -10,15 +10,14 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use codex_app_server_protocol::SkillMetadata;
 use gpui::{
-    AnchoredPositionMode, Animation, AnimationExt as _, AnyElement, AnyWindowHandle, App,
-    AppContext as _, Bounds, ClipboardItem, Context, Corner, Decorations, DragMoveEvent, Empty,
-    Entity, EntityId, EntityInputHandler, FocusHandle, InteractiveElement as _, IntoElement,
-    IsZero as _, KeyBinding, ListAlignment, ListOffset, ListSizingBehavior, ListState, Menu,
-    MenuItem, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, OsAction,
-    ParentElement as _, PathPromptOptions, Pixels, Point, Render, ScrollHandle, ScrollWheelEvent,
-    SharedString, StatefulInteractiveElement as _, Styled as _, SystemMenuType, Task,
-    TitlebarOptions, Window, WindowOptions, actions, anchored, canvas, deferred, div, list, point,
-    prelude::FluentBuilder as _, px,
+    AnchoredPositionMode, Animation, AnimationExt as _, AnyWindowHandle, App, AppContext as _,
+    Bounds, ClipboardItem, Context, Corner, Decorations, DragMoveEvent, Empty, Entity, EntityId,
+    EntityInputHandler, FocusHandle, InteractiveElement as _, KeyBinding, ListAlignment,
+    ListOffset, ListSizingBehavior, ListState, Menu, MenuItem, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, OsAction, ParentElement as _, PathPromptOptions, Pixels, Point,
+    Render, ScrollHandle, ScrollWheelEvent, SharedString, StatefulInteractiveElement as _,
+    Styled as _, SystemMenuType, Task, TitlebarOptions, Window, WindowOptions, actions, anchored,
+    canvas, deferred, div, list, point, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     ActiveTheme as _, Colorize as _, GlobalState, Root, RopeExt, StyledExt as _, Theme, ThemeMode,
@@ -42,8 +41,7 @@ use hunk_domain::config::{
 };
 use hunk_domain::db::{
     CommentLineSide, CommentRecord, CommentStatus, DatabaseStore, NewComment,
-    compute_comment_anchor_hash, format_comment_clipboard_blob, next_status_for_unmatched_anchor,
-    now_unix_ms,
+    format_comment_clipboard_blob, next_status_for_unmatched_anchor, now_unix_ms,
 };
 use hunk_domain::diff::{DiffCell, DiffCellKind, DiffRowKind, SideBySideRow};
 use hunk_domain::markdown_preview::MarkdownPreviewBlock;
@@ -105,7 +103,7 @@ use project_picker::{
 use refresh_policy::{
     GitWorkspaceRefreshRequest, SnapshotRefreshBehavior, SnapshotRefreshPriority,
     SnapshotRefreshRequest, diff_state_changed, line_stats_paths_from_dirty_paths,
-    missing_line_stat_paths, repo_watch_refresh_request,
+    missing_line_stat_paths, repo_watch_refresh_request, retained_selection_path,
     should_bootstrap_empty_files_workspace_editor, should_refresh_line_stats_after_snapshot,
     should_reload_diff_after_snapshot, should_reload_empty_files_workspace_tree,
     should_reload_repo_tree_after_snapshot, should_request_startup_git_workspace_refresh,
@@ -145,7 +143,6 @@ const MARKDOWN_PREVIEW_DEBOUNCE: Duration = Duration::from_millis(200);
 const DIFF_SEGMENT_PREFETCH_RADIUS_ROWS: usize = 120;
 const DIFF_SEGMENT_PREFETCH_STEP_ROWS: usize = 24;
 const DIFF_SEGMENT_PREFETCH_BATCH_ROWS: usize = 96;
-const DIFF_PROGRESSIVE_BATCH_FILES: usize = 8;
 const SIDEBAR_REPO_LIST_ESTIMATED_ROW_HEIGHT: f32 = 24.0;
 const COMMENT_CONTEXT_RADIUS_ROWS: usize = 2;
 const COMMENT_RETENTION_DAYS: i64 = 14;
@@ -167,6 +164,7 @@ mod ai_thread_catalog_scheduler;
 mod ai_thread_flow;
 mod branch_activation;
 mod branch_picker;
+mod comment_overlay;
 mod fuzzy_match;
 mod project_open;
 mod project_picker;
@@ -188,8 +186,10 @@ mod native_files_editor;
 mod notifications;
 mod render;
 mod repo_file_search;
+mod review_workspace_session;
 mod terminal_cursor;
 mod theme;
+mod workspace_surface;
 mod workspace_view;
 
 actions!(
@@ -1010,6 +1010,9 @@ struct WorkspaceProjectState {
     review_default_right_source_id: Option<String>,
     review_left_source_id: Option<String>,
     review_right_source_id: Option<String>,
+    review_loaded_left_source_id: Option<String>,
+    review_loaded_right_source_id: Option<String>,
+    review_loaded_collapsed_files: BTreeSet<String>,
     branch_name: String,
     branch_has_upstream: bool,
     branch_ahead_count: usize,
@@ -1026,20 +1029,16 @@ struct WorkspaceProjectState {
     collapsed_files: BTreeSet<String>,
     selected_path: Option<String>,
     selected_status: Option<FileStatus>,
-    diff_rows: Vec<SideBySideRow>,
-    diff_row_metadata: Vec<DiffStreamRowMeta>,
-    diff_row_segment_cache: Vec<Option<DiffRowSegmentCache>>,
-    diff_visible_file_header_lookup: Vec<Option<usize>>,
-    diff_visible_hunk_header_lookup: Vec<Option<usize>>,
-    file_row_ranges: Vec<FileRowRange>,
     file_line_stats: BTreeMap<String, LineStats>,
-    diff_list_state: ListState,
+    review_surface: ReviewWorkspaceSurfaceState,
     review_files: Vec<ChangedFile>,
     review_file_status_by_path: BTreeMap<String, FileStatus>,
     review_file_line_stats: BTreeMap<String, LineStats>,
     review_overall_line_stats: LineStats,
     review_compare_loading: bool,
     review_compare_error: Option<String>,
+    review_workspace_session: Option<review_workspace_session::ReviewWorkspaceSession>,
+    review_loaded_snapshot_fingerprint: Option<RepoSnapshotFingerprint>,
     overall_line_stats: LineStats,
     last_git_workspace_fingerprint: Option<RepoSnapshotFingerprint>,
     recent_commits_loading: bool,
@@ -1062,10 +1061,272 @@ struct WorkspaceProjectState {
     editor_markdown_preview_revision: usize,
     editor_markdown_preview: bool,
     editor_search_visible: bool,
+}
+
+struct ReviewWorkspaceSurfaceState {
+    status_message: Option<String>,
+    selected_path: Option<String>,
+    workspace_owner: Option<ReviewWorkspaceSurfaceOwner>,
+    workspace_search_matches: Vec<review_workspace_session::ReviewWorkspaceSearchTarget>,
     selection_anchor_row: Option<usize>,
     selection_head_row: Option<usize>,
-    last_visible_row_start: Option<usize>,
+    diff_scroll_handle: ScrollHandle,
+    diff_split_ratio: f32,
+    diff_split_bounds: Option<Bounds<Pixels>>,
+    diff_left_line_number_width: f32,
+    diff_right_line_number_width: f32,
+    last_surface_snapshot: Option<review_workspace_session::ReviewWorkspaceSurfaceSnapshot>,
+    last_prefetched_visible_row_range: Option<std::ops::Range<usize>>,
     last_diff_scroll_offset: Option<gpui::Point<gpui::Pixels>>,
+}
+
+struct ReviewWorkspaceSurfaceOwner {
+    left_workspace_editor: native_files_editor::SharedFilesEditor,
+    right_workspace_editor: native_files_editor::SharedFilesEditor,
+}
+
+#[derive(Debug, Clone)]
+struct ReviewWorkspaceProjectedSideRow {
+    display_row_index: usize,
+    row_index: usize,
+    raw_row_range: std::ops::Range<usize>,
+    row: hunk_editor::WorkspaceDisplayRow,
+}
+
+#[derive(Debug, Clone)]
+struct ReviewWorkspaceProjectedSideRows {
+    rows: Vec<ReviewWorkspaceProjectedSideRow>,
+    rows_by_display_row: BTreeMap<usize, hunk_editor::WorkspaceDisplayRow>,
+    syntax_by_display_row:
+        BTreeMap<usize, Vec<crate::app::native_files_editor::paint::RowSyntaxSpan>>,
+}
+
+impl ReviewWorkspaceSurfaceOwner {
+    fn new(
+        session: &crate::app::review_workspace_session::ReviewWorkspaceSession,
+        preferred_path: Option<&str>,
+    ) -> anyhow::Result<Self> {
+        let layout = session.layout().clone();
+        let preferred_path = preferred_path.map(std::path::Path::new);
+        let left_workspace_editor = Rc::new(RefCell::new(
+            crate::app::native_files_editor::FilesEditor::new(),
+        ));
+        left_workspace_editor
+            .borrow_mut()
+            .open_workspace_layout_documents(
+                layout.clone(),
+                session.editor_documents(
+                    crate::app::review_workspace_session::ReviewWorkspaceEditorSide::Left,
+                ),
+                preferred_path,
+            )?;
+
+        let right_workspace_editor = Rc::new(RefCell::new(
+            crate::app::native_files_editor::FilesEditor::new(),
+        ));
+        right_workspace_editor
+            .borrow_mut()
+            .open_workspace_layout_documents(
+                layout,
+                session.editor_documents(
+                    crate::app::review_workspace_session::ReviewWorkspaceEditorSide::Right,
+                ),
+                preferred_path,
+            )?;
+
+        Ok(Self {
+            left_workspace_editor,
+            right_workspace_editor,
+        })
+    }
+
+    fn active_workspace_path_buf(&self) -> Option<PathBuf> {
+        self.left_workspace_editor
+            .borrow()
+            .active_workspace_path_buf()
+    }
+
+    fn activate_workspace_path(&self, path: &std::path::Path) -> bool {
+        let left_handled = self
+            .left_workspace_editor
+            .borrow_mut()
+            .activate_workspace_path(path)
+            .unwrap_or(false);
+        let right_handled = self
+            .right_workspace_editor
+            .borrow_mut()
+            .activate_workspace_path(path)
+            .unwrap_or(false);
+        left_handled || right_handled
+    }
+
+    fn activate_workspace_excerpt(&self, excerpt_id: hunk_editor::WorkspaceExcerptId) -> bool {
+        let left_handled = self
+            .left_workspace_editor
+            .borrow_mut()
+            .activate_workspace_excerpt(excerpt_id)
+            .unwrap_or(false);
+        let right_handled = self
+            .right_workspace_editor
+            .borrow_mut()
+            .activate_workspace_excerpt(excerpt_id)
+            .unwrap_or(false);
+        left_handled || right_handled
+    }
+
+    fn set_search_query(&self, query: Option<&str>) {
+        self.left_workspace_editor
+            .borrow_mut()
+            .set_search_query(query);
+        self.right_workspace_editor
+            .borrow_mut()
+            .set_search_query(query);
+    }
+
+    fn build_display_rows_for_viewport(
+        &self,
+        viewport: hunk_editor::Viewport,
+    ) -> Option<crate::app::review_workspace_session::ReviewWorkspaceDisplayRows> {
+        let mut left_editor = self.left_workspace_editor.borrow_mut();
+        let left_projected = projected_review_workspace_side_rows(
+            left_editor.build_workspace_projected_render_snapshot(viewport, 4)?,
+        )?;
+        let left_rows = left_projected.rows_by_display_row.clone();
+        let left_syntax_by_display_row = left_projected.syntax_by_display_row.clone();
+        drop(left_editor);
+
+        let mut right_editor = self.right_workspace_editor.borrow_mut();
+        let right_projected = projected_review_workspace_side_rows(
+            right_editor.build_workspace_projected_render_snapshot(viewport, 4)?,
+        )?;
+        let right_rows = right_projected.rows_by_display_row.clone();
+        let right_syntax_by_display_row = right_projected.syntax_by_display_row.clone();
+
+        let rows = review_workspace_display_row_entries_from_projected_sides(
+            &left_projected,
+            &right_projected,
+        )?;
+
+        Some(
+            crate::app::review_workspace_session::ReviewWorkspaceDisplayRows {
+                rows,
+                left_by_display_row: left_rows,
+                right_by_display_row: right_rows,
+                left_syntax_by_display_row,
+                right_syntax_by_display_row,
+            },
+        )
+    }
+}
+
+fn projected_review_workspace_side_rows(
+    render_snapshot: crate::app::native_files_editor::WorkspaceProjectedRenderSnapshot,
+) -> Option<ReviewWorkspaceProjectedSideRows> {
+    let mut rows = Vec::<ReviewWorkspaceProjectedSideRow>::new();
+    let mut rows_by_display_row = BTreeMap::<usize, hunk_editor::WorkspaceDisplayRow>::new();
+    for (row, display_row) in render_snapshot
+        .projection
+        .visible_rows
+        .into_iter()
+        .zip(render_snapshot.visible_display_rows)
+    {
+        let workspace_row_range = row.workspace_row_range?;
+        if workspace_row_range.is_empty() {
+            return None;
+        }
+        let raw_row_index = workspace_row_range.start;
+        let display_row_index = row.row_index;
+        rows.push(ReviewWorkspaceProjectedSideRow {
+            display_row_index,
+            row_index: raw_row_index,
+            raw_row_range: workspace_row_range,
+            row: display_row.clone(),
+        });
+        rows_by_display_row.insert(display_row_index, display_row);
+    }
+    Some(ReviewWorkspaceProjectedSideRows {
+        rows,
+        rows_by_display_row,
+        syntax_by_display_row: render_snapshot.syntax_by_display_row,
+    })
+}
+
+fn review_workspace_display_row_entries_from_projected_sides(
+    left: &ReviewWorkspaceProjectedSideRows,
+    right: &ReviewWorkspaceProjectedSideRows,
+) -> Option<Vec<crate::app::review_workspace_session::ReviewWorkspaceDisplayRowEntry>> {
+    let right_rows_by_display = right
+        .rows
+        .iter()
+        .map(|row| (row.display_row_index, row))
+        .collect::<BTreeMap<_, _>>();
+    let mut entries = Vec::with_capacity(left.rows.len());
+    for left_row in &left.rows {
+        let right_row = right_rows_by_display.get(&left_row.display_row_index)?;
+        if right_row.raw_row_range != left_row.raw_row_range {
+            return None;
+        }
+        entries.push(
+            crate::app::review_workspace_session::ReviewWorkspaceDisplayRowEntry {
+                display_row_index: left_row.display_row_index,
+                row_index: left_row.row_index,
+                raw_row_range: left_row.raw_row_range.clone(),
+                left: left_row.row.clone(),
+                right: right_row.row.clone(),
+            },
+        );
+    }
+    Some(entries)
+}
+
+impl ReviewWorkspaceSurfaceState {
+    fn new() -> Self {
+        Self {
+            status_message: None,
+            selected_path: None,
+            workspace_owner: None,
+            workspace_search_matches: Vec::new(),
+            selection_anchor_row: None,
+            selection_head_row: None,
+            diff_scroll_handle: ScrollHandle::default(),
+            diff_split_ratio: 0.5,
+            diff_split_bounds: None,
+            diff_left_line_number_width: crate::app::data::line_number_column_width(
+                DIFF_LINE_NUMBER_MIN_DIGITS,
+            ),
+            diff_right_line_number_width: crate::app::data::line_number_column_width(
+                DIFF_LINE_NUMBER_MIN_DIGITS,
+            ),
+            last_surface_snapshot: None,
+            last_prefetched_visible_row_range: None,
+            last_diff_scroll_offset: None,
+        }
+    }
+
+    fn clear_workspace_surface_snapshot(&mut self) {
+        self.last_surface_snapshot = None;
+    }
+
+    fn clear_workspace_editors(&mut self) {
+        self.workspace_owner = None;
+    }
+
+    fn clear_workspace_search_matches(&mut self) {
+        self.workspace_search_matches.clear();
+    }
+
+    fn clear_row_selection(&mut self) {
+        self.selection_anchor_row = None;
+        self.selection_head_row = None;
+    }
+
+    fn workspace_owner(&self) -> Option<&ReviewWorkspaceSurfaceOwner> {
+        self.workspace_owner.as_ref()
+    }
+
+    fn set_workspace_owner(&mut self, workspace_owner: ReviewWorkspaceSurfaceOwner) {
+        self.workspace_owner = Some(workspace_owner);
+    }
 }
 
 struct DiffViewer {
@@ -1096,6 +1357,9 @@ struct DiffViewer {
     review_default_right_source_id: Option<String>,
     review_left_source_id: Option<String>,
     review_right_source_id: Option<String>,
+    review_loaded_left_source_id: Option<String>,
+    review_loaded_right_source_id: Option<String>,
+    review_loaded_collapsed_files: BTreeSet<String>,
     branch_name: String,
     branch_has_upstream: bool,
     branch_ahead_count: usize,
@@ -1280,24 +1544,16 @@ struct DiffViewer {
     collapsed_files: BTreeSet<String>,
     selected_path: Option<String>,
     selected_status: Option<FileStatus>,
-    diff_rows: Vec<SideBySideRow>,
-    diff_row_metadata: Vec<DiffStreamRowMeta>,
-    diff_row_segment_cache: Vec<Option<DiffRowSegmentCache>>,
-    diff_visible_file_header_lookup: Vec<Option<usize>>,
-    diff_visible_hunk_header_lookup: Vec<Option<usize>>,
-    file_row_ranges: Vec<FileRowRange>,
     file_line_stats: BTreeMap<String, LineStats>,
-    diff_list_state: ListState,
-    diff_split_ratio: f32,
-    diff_split_bounds: Option<Bounds<Pixels>>,
-    diff_left_line_number_width: f32,
-    diff_right_line_number_width: f32,
+    review_surface: ReviewWorkspaceSurfaceState,
     review_files: Vec<ChangedFile>,
     review_file_status_by_path: BTreeMap<String, FileStatus>,
     review_file_line_stats: BTreeMap<String, LineStats>,
     review_overall_line_stats: LineStats,
     review_compare_loading: bool,
     review_compare_error: Option<String>,
+    review_workspace_session: Option<review_workspace_session::ReviewWorkspaceSession>,
+    review_loaded_snapshot_fingerprint: Option<RepoSnapshotFingerprint>,
     overall_line_stats: LineStats,
     refresh_epoch: usize,
     auto_refresh_unmodified_streak: u32,
@@ -1334,14 +1590,9 @@ struct DiffViewer {
     focus_handle: FocusHandle,
     repo_tree_focus_handle: FocusHandle,
     files_editor_focus_handle: FocusHandle,
-    selection_anchor_row: Option<usize>,
-    selection_head_row: Option<usize>,
     drag_selecting_rows: bool,
     scroll_selected_after_reload: bool,
-    last_visible_row_start: Option<usize>,
-    last_diff_scroll_offset: Option<gpui::Point<gpui::Pixels>>,
     last_scroll_activity_at: Instant,
-    segment_prefetch_anchor_row: Option<usize>,
     segment_prefetch_epoch: usize,
     segment_prefetch_task: Task<()>,
     fps: f32,

@@ -1,0 +1,1935 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Range;
+use std::path::PathBuf;
+
+use hunk_domain::db::{CommentLineSide, compute_comment_anchor_hash};
+use hunk_domain::diff::SideBySideRow;
+use hunk_domain::diff::{DiffCellKind, DiffHunk, DiffLineKind, DiffRowKind, parse_patch_document};
+use hunk_editor::{
+    WorkspaceDisplayRow, WorkspaceDocument, WorkspaceDocumentId, WorkspaceExcerptId,
+    WorkspaceExcerptKind, WorkspaceExcerptSpec, WorkspaceLayout, WorkspaceLayoutError,
+};
+use hunk_git::compare::CompareSnapshot;
+use hunk_git::git::{FileStatus, LineStats};
+use hunk_text::{BufferId, TextBuffer};
+
+#[allow(clippy::duplicate_mod)]
+#[path = "review_workspace_session_geometry.rs"]
+mod geometry_impl;
+#[allow(clippy::duplicate_mod)]
+#[path = "review_workspace_session_search.rs"]
+mod search_impl;
+pub(crate) use geometry_impl::ReviewWorkspaceDisplayGeometry;
+#[allow(unused_imports)]
+pub(crate) use search_impl::ReviewWorkspaceSearchTarget;
+#[allow(clippy::duplicate_mod)]
+#[path = "workspace_display_buffers.rs"]
+mod workspace_display_buffers;
+
+use crate::app::data::{CachedStyledSegment, DiffSegmentQuality, DiffStream, DiffStreamRowKind};
+#[cfg(test)]
+use crate::app::native_files_editor::WorkspaceEditorSession;
+use crate::app::native_files_editor::paint::RowSyntaxSpan;
+use crate::app::{DiffRowSegmentCache, DiffStreamRowMeta};
+#[cfg(test)]
+use hunk_editor::Viewport;
+#[cfg(test)]
+use hunk_text::TextSnapshot;
+#[cfg(test)]
+use workspace_display_buffers::build_workspace_display_snapshot_from_document_snapshots;
+
+const FILE_HEADER_SURFACE_ROWS: usize = 1;
+const HUNK_HEADER_SURFACE_ROWS: usize = 1;
+pub(crate) const REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX: usize = 26;
+pub(crate) const REVIEW_SURFACE_HUNK_DIVIDER_HEIGHT_PX: usize = 6;
+const REVIEW_LINE_NUMBER_MIN_DIGITS: u32 = 3;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReviewCommentAnchor {
+    pub(crate) file_path: String,
+    pub(crate) line_side: CommentLineSide,
+    pub(crate) old_line: Option<u32>,
+    pub(crate) new_line: Option<u32>,
+    pub(crate) hunk_header: Option<String>,
+    pub(crate) line_text: String,
+    pub(crate) context_before: String,
+    pub(crate) context_after: String,
+    pub(crate) anchor_hash: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReviewFileAnchorReconcileState {
+    Ready,
+    Deferred,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReviewWorkspaceFileRange {
+    pub(crate) path: String,
+    pub(crate) status: FileStatus,
+    pub(crate) start_row: usize,
+    pub(crate) end_row: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReviewWorkspaceHunkRange {
+    pub(crate) path: String,
+    pub(crate) header: String,
+    pub(crate) start_row: usize,
+    pub(crate) end_row: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReviewWorkspaceSection {
+    pub(crate) index: usize,
+    pub(crate) excerpt_id: WorkspaceExcerptId,
+    pub(crate) path: String,
+    pub(crate) status: FileStatus,
+    pub(crate) start_row: usize,
+    pub(crate) end_row: usize,
+    pub(crate) show_file_header: bool,
+    pub(crate) hunk_header: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReviewWorkspaceVisibleFileHeader {
+    pub(crate) row_index: usize,
+    pub(crate) path: String,
+    pub(crate) status: FileStatus,
+    pub(crate) line_stats: LineStats,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ReviewWorkspaceViewportSection {
+    pub(crate) pixel_range: Range<usize>,
+    pub(crate) rows: Vec<ReviewWorkspaceViewportRow>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ReviewWorkspaceViewportCodeCell {
+    pub(crate) display_row: WorkspaceDisplayRow,
+    pub(crate) syntax_spans: Vec<RowSyntaxSpan>,
+    pub(crate) changed_ranges: Vec<Range<usize>>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ReviewWorkspaceViewportRow {
+    pub(crate) display_row_index: usize,
+    pub(crate) row_index: usize,
+    pub(crate) stable_id: u64,
+    pub(crate) row_kind: DiffRowKind,
+    pub(crate) stream_kind: DiffStreamRowKind,
+    pub(crate) file_path: Option<String>,
+    pub(crate) file_status: Option<FileStatus>,
+    pub(crate) file_line_stats: Option<LineStats>,
+    pub(crate) file_is_collapsed: bool,
+    pub(crate) can_view_file: bool,
+    pub(crate) show_comment_affordance: bool,
+    pub(crate) open_comment_count: usize,
+    pub(crate) text: String,
+    pub(crate) left_cell_kind: DiffCellKind,
+    pub(crate) left_line: Option<u32>,
+    pub(crate) right_cell_kind: DiffCellKind,
+    pub(crate) right_line: Option<u32>,
+    pub(crate) surface_top_px: usize,
+    pub(crate) height_px: usize,
+    pub(crate) left_cell: ReviewWorkspaceViewportCodeCell,
+    pub(crate) right_cell: ReviewWorkspaceViewportCodeCell,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ReviewWorkspaceViewportSnapshot {
+    pub(crate) total_surface_height_px: usize,
+    pub(crate) sections: Vec<ReviewWorkspaceViewportSection>,
+}
+
+impl ReviewWorkspaceViewportSnapshot {
+    pub(crate) fn visible_pixel_range(&self) -> Option<Range<usize>> {
+        Some(self.sections.first()?.pixel_range.start..self.sections.last()?.pixel_range.end)
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn row_by_raw_index(&self, row_index: usize) -> Option<&ReviewWorkspaceViewportRow> {
+        self.sections
+            .iter()
+            .flat_map(|section| section.rows.iter())
+            .find(|row| row.row_index == row_index)
+    }
+
+    pub(crate) fn row_at_viewport_position(
+        &self,
+        viewport_origin_px: usize,
+        local_y_px: usize,
+    ) -> Option<&ReviewWorkspaceViewportRow> {
+        let surface_y_px = viewport_origin_px.saturating_add(local_y_px);
+        self.sections
+            .iter()
+            .flat_map(|section| section.rows.iter())
+            .find(|row| {
+                let top_px = row.surface_top_px;
+                let bottom_px = top_px.saturating_add(row.height_px);
+                surface_y_px >= top_px && surface_y_px < bottom_px
+            })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ReviewWorkspaceSurfaceSnapshot {
+    pub(crate) scroll_top_px: usize,
+    pub(crate) viewport_height_px: usize,
+    pub(crate) viewport: ReviewWorkspaceViewportSnapshot,
+    pub(crate) sticky_file_header: Option<ReviewWorkspaceVisibleFileHeader>,
+    pub(crate) active_comment_editor_overlay: Option<ReviewWorkspaceFloatingOverlay>,
+    pub(crate) visible_state: ReviewWorkspaceVisibleState,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ReviewWorkspaceSurfaceOptions {
+    pub(crate) comment_affordance_rows: BTreeSet<usize>,
+    pub(crate) comment_open_counts_by_row: BTreeMap<usize, usize>,
+    pub(crate) active_comment_editor_row: Option<usize>,
+    pub(crate) collapsed_paths: BTreeSet<String>,
+    pub(crate) view_file_enabled_paths: BTreeSet<String>,
+    pub(crate) search_highlight_columns_by_row: BTreeMap<usize, Vec<Range<usize>>>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ReviewWorkspaceDisplayRows {
+    pub(crate) rows: Vec<ReviewWorkspaceDisplayRowEntry>,
+    pub(crate) left_by_display_row: BTreeMap<usize, WorkspaceDisplayRow>,
+    pub(crate) right_by_display_row: BTreeMap<usize, WorkspaceDisplayRow>,
+    pub(crate) left_syntax_by_display_row: BTreeMap<usize, Vec<RowSyntaxSpan>>,
+    pub(crate) right_syntax_by_display_row: BTreeMap<usize, Vec<RowSyntaxSpan>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReviewWorkspaceDisplayRowEntry {
+    pub(crate) display_row_index: usize,
+    pub(crate) row_index: usize,
+    pub(crate) raw_row_range: Range<usize>,
+    pub(crate) left: WorkspaceDisplayRow,
+    pub(crate) right: WorkspaceDisplayRow,
+}
+
+impl ReviewWorkspaceDisplayRows {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    pub(crate) fn covers_row_range(&self, row_range: Range<usize>) -> bool {
+        row_range.clone().all(|row| {
+            self.rows
+                .iter()
+                .any(|entry| entry.raw_row_range.start <= row && row < entry.raw_row_range.end)
+        })
+    }
+
+    pub(crate) fn merge_from(&mut self, newer: Self) {
+        self.left_by_display_row.extend(newer.left_by_display_row);
+        self.right_by_display_row.extend(newer.right_by_display_row);
+        self.left_syntax_by_display_row
+            .extend(newer.left_syntax_by_display_row);
+        self.right_syntax_by_display_row
+            .extend(newer.right_syntax_by_display_row);
+
+        let mut rows_by_display = self
+            .rows
+            .drain(..)
+            .map(|entry| (entry.display_row_index, entry))
+            .collect::<BTreeMap<_, _>>();
+        rows_by_display.extend(
+            newer
+                .rows
+                .into_iter()
+                .map(|entry| (entry.display_row_index, entry)),
+        );
+        self.rows = rows_by_display.into_values().collect();
+    }
+
+    fn entries_for_raw_range(
+        &self,
+        row_range: Range<usize>,
+    ) -> Vec<ReviewWorkspaceDisplayRowEntry> {
+        self.rows
+            .iter()
+            .filter(|entry| {
+                entry.raw_row_range.start < row_range.end
+                    && row_range.start < entry.raw_row_range.end
+            })
+            .cloned()
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReviewWorkspaceFloatingOverlay {
+    pub(crate) row_index: usize,
+    pub(crate) top_px: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReviewWorkspaceVisibleState {
+    pub(crate) visible_row_range: Option<Range<usize>>,
+    pub(crate) visible_display_row_range: Option<Range<usize>>,
+    pub(crate) top_row: Option<usize>,
+    pub(crate) top_display_row: Option<usize>,
+    pub(crate) visible_file_header_row: Option<usize>,
+    pub(crate) visible_hunk_header_row: Option<usize>,
+    pub(crate) visible_file_path: Option<String>,
+    pub(crate) visible_file_status: Option<FileStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReviewWorkspaceSegmentPrefetchRow {
+    pub(crate) row_index: usize,
+    pub(crate) file_path: Option<String>,
+    pub(crate) left_text: String,
+    pub(crate) left_kind: DiffCellKind,
+    pub(crate) right_text: String,
+    pub(crate) right_kind: DiffCellKind,
+    pub(crate) quality: DiffSegmentQuality,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReviewWorkspaceSegmentPrefetchRequest {
+    pub(crate) scroll_top_px: usize,
+    pub(crate) viewport_height_px: usize,
+    pub(crate) anchor_row: usize,
+    pub(crate) overscan_rows: usize,
+    pub(crate) force_upgrade: bool,
+    pub(crate) recently_scrolling: bool,
+    pub(crate) batch_limit: usize,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ReviewWorkspaceSession {
+    layout: WorkspaceLayout,
+    file_line_stats: BTreeMap<String, LineStats>,
+    file_ranges: Vec<ReviewWorkspaceFileRange>,
+    hunk_ranges: Vec<ReviewWorkspaceHunkRange>,
+    sections: Vec<ReviewWorkspaceSection>,
+    left_document_buffers: BTreeMap<WorkspaceDocumentId, TextBuffer>,
+    right_document_buffers: BTreeMap<WorkspaceDocumentId, TextBuffer>,
+    rows: Vec<SideBySideRow>,
+    row_metadata: Vec<DiffStreamRowMeta>,
+    row_segments: Vec<Option<DiffRowSegmentCache>>,
+    cached_display_rows: ReviewWorkspaceDisplayRows,
+    display_geometry: ReviewWorkspaceDisplayGeometry,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReviewWorkspaceEditorSide {
+    Left,
+    Right,
+}
+
+impl ReviewWorkspaceSession {
+    pub(crate) fn from_compare_snapshot(
+        snapshot: &CompareSnapshot,
+        collapsed_files: &BTreeSet<String>,
+    ) -> Result<Self, WorkspaceLayoutError> {
+        let mut next_document_id = 1_u64;
+        let mut next_excerpt_id = 1_u64;
+        let mut documents = Vec::with_capacity(snapshot.files.len());
+        let mut excerpt_specs = Vec::new();
+        let mut excerpt_headers = BTreeMap::new();
+
+        for file in &snapshot.files {
+            let patch = snapshot
+                .patches_by_path
+                .get(file.path.as_str())
+                .map(String::as_str)
+                .unwrap_or_default();
+            let document = parse_patch_document(patch);
+            let document_id = WorkspaceDocumentId::new(next_document_id);
+            next_document_id = next_document_id.saturating_add(1);
+
+            let document_line_count =
+                if collapsed_files.contains(file.path.as_str()) || document.hunks.is_empty() {
+                    let excerpt_id = WorkspaceExcerptId::new(next_excerpt_id);
+                    next_excerpt_id = next_excerpt_id.saturating_add(1);
+                    excerpt_specs.push(
+                        WorkspaceExcerptSpec::new(
+                            excerpt_id,
+                            document_id,
+                            WorkspaceExcerptKind::DiffHunk,
+                            0..1,
+                        )
+                        .with_chrome_rows(FILE_HEADER_SURFACE_ROWS, 0),
+                    );
+                    excerpt_headers.insert(excerpt_id, None);
+                    1
+                } else {
+                    let mut next_document_line = 0_usize;
+                    for (hunk_ix, hunk) in document.hunks.iter().enumerate() {
+                        let code_row_count = surface_code_row_count_for_hunk(hunk);
+                        let line_range =
+                            next_document_line..next_document_line.saturating_add(code_row_count);
+                        let excerpt_id = WorkspaceExcerptId::new(next_excerpt_id);
+                        next_excerpt_id = next_excerpt_id.saturating_add(1);
+                        excerpt_specs.push(
+                            WorkspaceExcerptSpec::new(
+                                excerpt_id,
+                                document_id,
+                                WorkspaceExcerptKind::DiffHunk,
+                                line_range,
+                            )
+                            .with_chrome_rows(
+                                usize::from(hunk_ix == 0).saturating_add(HUNK_HEADER_SURFACE_ROWS),
+                                hunk.trailing_meta.len(),
+                            ),
+                        );
+                        excerpt_headers.insert(excerpt_id, Some(hunk.header.clone()));
+                        next_document_line = next_document_line.saturating_add(code_row_count);
+                    }
+                    next_document_line
+                };
+
+            documents.push(WorkspaceDocument::new(
+                document_id,
+                file.path.clone(),
+                BufferId::new(document_id.get()),
+                document_line_count,
+            ));
+        }
+
+        let layout = WorkspaceLayout::new(documents, excerpt_specs, 0)?;
+        let mut file_ranges = Vec::<ReviewWorkspaceFileRange>::with_capacity(snapshot.files.len());
+        let file_status_by_path = snapshot
+            .files
+            .iter()
+            .map(|file| (file.path.clone(), file.status))
+            .collect::<BTreeMap<_, _>>();
+        let mut file_range_index_by_document = BTreeMap::<WorkspaceDocumentId, usize>::new();
+        let mut hunk_ranges = Vec::new();
+
+        let mut sections = Vec::with_capacity(layout.excerpts().len());
+        let mut first_excerpt_by_document = BTreeSet::new();
+        for (section_ix, excerpt) in layout.excerpts().iter().enumerate() {
+            let Some(document) = layout.document(excerpt.spec.document_id) else {
+                continue;
+            };
+            let path = document.path.to_string_lossy().to_string();
+            let Some(status) = file_status_by_path.get(path.as_str()).copied() else {
+                continue;
+            };
+            let show_file_header = first_excerpt_by_document.insert(document.id);
+            if let Some(file_range_ix) = file_range_index_by_document.get(&document.id).copied() {
+                file_ranges[file_range_ix].end_row = excerpt.global_row_range.end;
+            } else {
+                file_range_index_by_document.insert(document.id, file_ranges.len());
+                file_ranges.push(ReviewWorkspaceFileRange {
+                    path: path.clone(),
+                    status,
+                    start_row: excerpt.global_row_range.start,
+                    end_row: excerpt.global_row_range.end,
+                });
+            }
+            let hunk_header = excerpt_headers.get(&excerpt.spec.id).cloned().flatten();
+            if let Some(header) = hunk_header.as_ref() {
+                hunk_ranges.push(ReviewWorkspaceHunkRange {
+                    path: path.clone(),
+                    header: header.clone(),
+                    start_row: excerpt
+                        .global_row_range
+                        .start
+                        .saturating_add(usize::from(show_file_header)),
+                    end_row: excerpt.global_row_range.end,
+                });
+            }
+            sections.push(ReviewWorkspaceSection {
+                index: section_ix,
+                excerpt_id: excerpt.spec.id,
+                path,
+                status,
+                start_row: excerpt.global_row_range.start,
+                end_row: excerpt.global_row_range.end,
+                show_file_header,
+                hunk_header,
+            });
+        }
+
+        Ok(Self {
+            layout,
+            file_line_stats: snapshot.file_line_stats.clone(),
+            file_ranges,
+            hunk_ranges,
+            sections,
+            left_document_buffers: BTreeMap::new(),
+            right_document_buffers: BTreeMap::new(),
+            rows: Vec::new(),
+            row_metadata: Vec::new(),
+            row_segments: Vec::new(),
+            cached_display_rows: ReviewWorkspaceDisplayRows::default(),
+            display_geometry: ReviewWorkspaceDisplayGeometry::default(),
+        })
+    }
+
+    pub(crate) fn with_render_stream(mut self, stream: &DiffStream) -> Self {
+        if self.layout.total_rows() != stream.rows.len() {
+            tracing::error!(
+                layout_rows = self.layout.total_rows(),
+                stream_rows = stream.rows.len(),
+                "review workspace layout rows diverged from render stream"
+            );
+        }
+        debug_assert_eq!(stream.rows.len(), stream.row_metadata.len());
+        debug_assert_eq!(stream.rows.len(), stream.row_segments.len());
+        self.rows = stream.rows.clone();
+        self.row_metadata = stream.row_metadata.clone();
+        self.row_segments = stream.row_segments.clone();
+        self.cached_display_rows = ReviewWorkspaceDisplayRows::default();
+        self.rebuild_document_buffers();
+        self.rebuild_display_geometry(None);
+        self
+    }
+
+    pub(crate) fn file_ranges(&self) -> &[ReviewWorkspaceFileRange] {
+        &self.file_ranges
+    }
+
+    pub(crate) fn file_range_for_path(&self, path: &str) -> Option<&ReviewWorkspaceFileRange> {
+        self.file_ranges.iter().find(|range| range.path == path)
+    }
+
+    pub(crate) fn first_file(&self) -> Option<&ReviewWorkspaceFileRange> {
+        self.file_ranges.first()
+    }
+
+    pub(crate) fn first_path(&self) -> Option<&str> {
+        self.first_file().map(|range| range.path.as_str())
+    }
+
+    pub(crate) fn contains_path(&self, path: &str) -> bool {
+        self.file_range_for_path(path).is_some()
+    }
+
+    pub(crate) fn path_at_surface_row(&self, row: usize) -> Option<&str> {
+        self.file_ranges
+            .iter()
+            .find(|range| range.start_row <= row && row < range.end_row)
+            .map(|range| range.path.as_str())
+    }
+
+    pub(crate) fn excerpt_id_at_surface_row(&self, row: usize) -> Option<WorkspaceExcerptId> {
+        self.layout
+            .excerpt_at_row(row)
+            .map(|excerpt| excerpt.spec.id)
+    }
+
+    pub(crate) fn file_at_or_after_surface_row(
+        &self,
+        row: usize,
+    ) -> Option<&ReviewWorkspaceFileRange> {
+        self.file_ranges
+            .iter()
+            .find(|range| row < range.end_row)
+            .or_else(|| self.file_ranges.last())
+    }
+
+    pub(crate) fn adjacent_file(
+        &self,
+        current_path: Option<&str>,
+        direction: isize,
+    ) -> Option<&ReviewWorkspaceFileRange> {
+        let current_ix = current_path
+            .and_then(|path| {
+                self.file_ranges
+                    .iter()
+                    .position(|candidate| candidate.path == path)
+            })
+            .unwrap_or(0);
+        let max_ix = self.file_ranges.len().saturating_sub(1) as isize;
+        let target_ix = (current_ix as isize + direction).clamp(0, max_ix) as usize;
+        self.file_ranges.get(target_ix)
+    }
+
+    pub(crate) fn status_for_path(&self, path: &str) -> Option<FileStatus> {
+        self.file_range_for_path(path).map(|range| range.status)
+    }
+
+    pub(crate) fn visible_file_header_at_surface_row(
+        &self,
+        row: usize,
+    ) -> Option<ReviewWorkspaceVisibleFileHeader> {
+        let header_row = self.visible_file_header_row(row)?;
+        let file_range = self
+            .file_ranges
+            .iter()
+            .find(|range| range.start_row == header_row)?;
+        Some(ReviewWorkspaceVisibleFileHeader {
+            row_index: file_range.start_row,
+            path: file_range.path.clone(),
+            status: file_range.status,
+            line_stats: self
+                .file_line_stats
+                .get(file_range.path.as_str())
+                .copied()
+                .unwrap_or_default(),
+        })
+    }
+
+    pub(crate) fn line_number_digit_widths(&self) -> (u32, u32) {
+        let mut max_left_digits = REVIEW_LINE_NUMBER_MIN_DIGITS;
+        let mut max_right_digits = REVIEW_LINE_NUMBER_MIN_DIGITS;
+
+        for row in &self.rows {
+            if row.kind != DiffRowKind::Code {
+                continue;
+            }
+            if let Some(line) = row.left.line {
+                max_left_digits = max_left_digits.max(review_decimal_digits(line));
+            }
+            if let Some(line) = row.right.line {
+                max_right_digits = max_right_digits.max(review_decimal_digits(line));
+            }
+        }
+
+        (max_left_digits, max_right_digits)
+    }
+
+    pub(crate) fn visible_file_header_row(&self, row: usize) -> Option<usize> {
+        self.file_ranges
+            .iter()
+            .find(|range| range.start_row <= row && row < range.end_row)
+            .map(|range| range.start_row)
+    }
+
+    pub(crate) fn hunk_ranges(&self) -> &[ReviewWorkspaceHunkRange] {
+        &self.hunk_ranges
+    }
+
+    pub(crate) fn section(&self, section_ix: usize) -> Option<&ReviewWorkspaceSection> {
+        self.sections.get(section_ix)
+    }
+
+    pub(crate) fn section_pixel_range(&self, section_ix: usize) -> Option<&Range<usize>> {
+        self.display_geometry.section_pixel_range(section_ix)
+    }
+
+    pub(crate) fn total_surface_height_px(&self) -> usize {
+        self.display_geometry.total_surface_height_px()
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn display_geometry_total_surface_height_px(&self) -> usize {
+        self.display_geometry.total_surface_height_px()
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn display_row_range_for_raw_row(&self, row_ix: usize) -> Option<Range<usize>> {
+        self.display_geometry.row_display_range(row_ix)
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn display_row_boundary_for_raw_row(&self, boundary_ix: usize) -> Option<usize> {
+        self.display_geometry.row_display_boundary(boundary_ix)
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn display_geometry_section_pixel_range(
+        &self,
+        section_ix: usize,
+    ) -> Option<&Range<usize>> {
+        self.display_geometry.section_pixel_range(section_ix)
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn display_geometry_section_display_row_range(
+        &self,
+        section_ix: usize,
+    ) -> Option<&Range<usize>> {
+        self.display_geometry.section_display_row_range(section_ix)
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn display_geometry_total_display_rows(&self) -> usize {
+        self.display_geometry.total_display_rows()
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn build_viewport_snapshot(
+        &self,
+        scroll_top_px: usize,
+        viewport_height_px: usize,
+        overscan_sections: usize,
+        overscan_rows: usize,
+        options: &ReviewWorkspaceSurfaceOptions,
+    ) -> ReviewWorkspaceViewportSnapshot {
+        let display_rows = self.build_display_rows_for_viewport_projection(
+            scroll_top_px,
+            viewport_height_px,
+            overscan_sections,
+            overscan_rows,
+        );
+        self.build_viewport_snapshot_with_display_rows(
+            scroll_top_px,
+            viewport_height_px,
+            overscan_sections,
+            overscan_rows,
+            options,
+            &display_rows,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build_viewport_snapshot_with_display_rows(
+        &self,
+        scroll_top_px: usize,
+        viewport_height_px: usize,
+        overscan_sections: usize,
+        overscan_rows: usize,
+        options: &ReviewWorkspaceSurfaceOptions,
+        display_rows: &ReviewWorkspaceDisplayRows,
+    ) -> ReviewWorkspaceViewportSnapshot {
+        let mut sections = Vec::new();
+        for section_ix in self.visible_section_range_for_viewport(
+            scroll_top_px,
+            viewport_height_px,
+            overscan_sections,
+        ) {
+            let Some(section) = self.section(section_ix) else {
+                continue;
+            };
+            let Some(pixel_range) = self.section_pixel_range(section_ix).cloned() else {
+                continue;
+            };
+            let visible_row_range = self
+                .section_visible_row_range(
+                    section_ix,
+                    scroll_top_px,
+                    viewport_height_px,
+                    overscan_rows,
+                )
+                .unwrap_or(section.start_row..section.end_row);
+            debug_assert!(display_rows.covers_row_range(visible_row_range.clone()));
+            let display_row_entries = display_rows.entries_for_raw_range(visible_row_range.clone());
+            let _top_spacer_height_px = self
+                .row_boundary_offset_px(visible_row_range.start)
+                .unwrap_or(pixel_range.start)
+                .saturating_sub(pixel_range.start);
+            let _bottom_spacer_height_px = pixel_range.end.saturating_sub(
+                self.row_boundary_offset_px(visible_row_range.end)
+                    .unwrap_or(pixel_range.end),
+            );
+            let mut display_row_offsets_by_raw_row = BTreeMap::<usize, usize>::new();
+            let rows = display_row_entries
+                .into_iter()
+                .filter_map(|entry| {
+                    let row_index = entry.row_index;
+                    let left_display_row_index = entry.left.row_index;
+                    let right_display_row_index = entry.right.row_index;
+                    let left_display_row = entry.left;
+                    let right_display_row = entry.right;
+                    let visible_start_px = self
+                        .row_boundary_offset_px(visible_row_range.start)
+                        .unwrap_or(pixel_range.start);
+                    let row = self.row(row_index)?;
+                    let row_metadata = self.row_metadata(row_index);
+                    let file_path = row_metadata
+                        .and_then(|meta| meta.file_path.clone())
+                        .or_else(|| self.row_file_path(row_index).map(ToString::to_string));
+                    let file_status =
+                        row_metadata.and_then(|meta| meta.file_status).or_else(|| {
+                            file_path
+                                .as_deref()
+                                .and_then(|path| self.status_for_path(path))
+                        });
+                    let file_is_collapsed = file_path
+                        .as_deref()
+                        .is_some_and(|path| options.collapsed_paths.contains(path));
+                    let can_view_file = file_path
+                        .as_deref()
+                        .is_some_and(|path| options.view_file_enabled_paths.contains(path));
+                    let row_segment_cache = self.row_segment_cache(row_index);
+                    let row_height_px = self.surface_row_height_px(row_index);
+                    let display_row_offset = display_row_offsets_by_raw_row
+                        .entry(row_index)
+                        .and_modify(|offset| *offset = offset.saturating_add(1))
+                        .or_insert(0);
+                    let display_row_offset = *display_row_offset;
+                    let surface_top_px = self
+                        .row_top_offset_px(row_index)
+                        .unwrap_or(visible_start_px)
+                        .saturating_add(display_row_offset.saturating_mul(row_height_px));
+                    let right_search_highlights = if right_display_row.search_highlights.is_empty()
+                    {
+                        options
+                            .search_highlight_columns_by_row
+                            .get(&row_index)
+                            .map(|ranges| {
+                                review_project_search_highlights_for_display_row(
+                                    &right_display_row,
+                                    ranges,
+                                )
+                            })
+                            .unwrap_or_default()
+                    } else {
+                        right_display_row
+                            .search_highlights
+                            .iter()
+                            .map(|highlight| highlight.start_column..highlight.end_column)
+                            .collect()
+                    };
+                    Some(ReviewWorkspaceViewportRow {
+                        display_row_index: entry.display_row_index,
+                        row_index,
+                        stable_id: row_metadata
+                            .map(|meta| meta.stable_id)
+                            .unwrap_or(row_index as u64),
+                        row_kind: row.kind,
+                        stream_kind: row_metadata
+                            .map(|meta| meta.kind)
+                            .unwrap_or_else(|| review_stream_row_kind_for_row(row.kind)),
+                        file_line_stats: file_path
+                            .as_deref()
+                            .and_then(|path| self.file_line_stats.get(path).copied()),
+                        file_path,
+                        file_status,
+                        file_is_collapsed,
+                        can_view_file,
+                        show_comment_affordance: options
+                            .comment_affordance_rows
+                            .contains(&row_index),
+                        open_comment_count: options
+                            .comment_open_counts_by_row
+                            .get(&row_index)
+                            .copied()
+                            .unwrap_or_default(),
+                        text: row.text.clone(),
+                        left_cell_kind: row.left.kind,
+                        left_line: row.left.line,
+                        right_cell_kind: row.right.kind,
+                        right_line: row.right.line,
+                        surface_top_px,
+                        height_px: row_height_px,
+                        left_cell: ReviewWorkspaceViewportCodeCell {
+                            display_row: left_display_row,
+                            syntax_spans: display_rows
+                                .left_syntax_by_display_row
+                                .get(&left_display_row_index)
+                                .cloned()
+                                .unwrap_or_default(),
+                            changed_ranges: review_changed_ranges_for_display_row(
+                                row_segment_cache.map(|cache| &cache.left),
+                            ),
+                        },
+                        right_cell: ReviewWorkspaceViewportCodeCell {
+                            display_row: WorkspaceDisplayRow {
+                                search_highlights: right_search_highlights
+                                    .into_iter()
+                                    .map(|range| hunk_editor::SearchHighlight {
+                                        start_column: range.start,
+                                        end_column: range.end,
+                                    })
+                                    .collect(),
+                                ..right_display_row
+                            },
+                            syntax_spans: display_rows
+                                .right_syntax_by_display_row
+                                .get(&right_display_row_index)
+                                .cloned()
+                                .unwrap_or_default(),
+                            changed_ranges: review_changed_ranges_for_display_row(
+                                row_segment_cache.map(|cache| &cache.right),
+                            ),
+                        },
+                    })
+                })
+                .collect();
+            sections.push(ReviewWorkspaceViewportSection { pixel_range, rows });
+        }
+
+        ReviewWorkspaceViewportSnapshot {
+            total_surface_height_px: self.total_surface_height_px(),
+            sections,
+        }
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn build_surface_snapshot(
+        &self,
+        scroll_top_px: usize,
+        viewport_height_px: usize,
+        overscan_sections: usize,
+        overscan_rows: usize,
+        options: &ReviewWorkspaceSurfaceOptions,
+    ) -> ReviewWorkspaceSurfaceSnapshot {
+        let display_rows = self.build_display_rows_for_viewport_projection(
+            scroll_top_px,
+            viewport_height_px,
+            overscan_sections,
+            overscan_rows,
+        );
+        self.build_surface_snapshot_with_display_rows(
+            scroll_top_px,
+            viewport_height_px,
+            overscan_sections,
+            overscan_rows,
+            options,
+            &display_rows,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn build_surface_snapshot_with_display_rows(
+        &self,
+        scroll_top_px: usize,
+        viewport_height_px: usize,
+        overscan_sections: usize,
+        overscan_rows: usize,
+        options: &ReviewWorkspaceSurfaceOptions,
+        display_rows: &ReviewWorkspaceDisplayRows,
+    ) -> ReviewWorkspaceSurfaceSnapshot {
+        let viewport = self.build_viewport_snapshot_with_display_rows(
+            scroll_top_px,
+            viewport_height_px,
+            overscan_sections,
+            overscan_rows,
+            options,
+            display_rows,
+        );
+        let visible_state =
+            self.build_visible_state_from_viewport(scroll_top_px, viewport_height_px, &viewport);
+        let sticky_file_header = visible_state.top_row.and_then(|top_row| {
+            let header = self.visible_file_header_at_surface_row(top_row)?;
+            (header.row_index != top_row).then_some(header)
+        });
+        let active_comment_editor_overlay =
+            options.active_comment_editor_row.and_then(|row_index| {
+                let row_top_px = self.row_top_offset_px(row_index)?;
+                let top_px = crate::app::comment_overlay::review_comment_overlay_top_px(
+                    row_top_px,
+                    scroll_top_px,
+                    viewport_height_px,
+                    REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX,
+                )
+                .round() as usize;
+                Some(ReviewWorkspaceFloatingOverlay { row_index, top_px })
+            });
+
+        ReviewWorkspaceSurfaceSnapshot {
+            scroll_top_px,
+            viewport_height_px,
+            viewport,
+            sticky_file_header,
+            active_comment_editor_overlay,
+            visible_state,
+        }
+    }
+
+    pub(crate) fn viewport_row_indices(
+        &self,
+        scroll_top_px: usize,
+        viewport_height_px: usize,
+        overscan_sections: usize,
+        overscan_rows: usize,
+    ) -> Vec<usize> {
+        let mut row_indices = Vec::new();
+        for section_ix in self.visible_section_range_for_viewport(
+            scroll_top_px,
+            viewport_height_px,
+            overscan_sections,
+        ) {
+            let Some(section) = self.section(section_ix) else {
+                continue;
+            };
+            let visible_row_range = self
+                .section_visible_row_range(
+                    section_ix,
+                    scroll_top_px,
+                    viewport_height_px,
+                    overscan_rows,
+                )
+                .unwrap_or(section.start_row..section.end_row);
+            row_indices.extend(visible_row_range);
+        }
+        row_indices
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn display_viewport_for_surface_viewport(
+        &self,
+        scroll_top_px: usize,
+        viewport_height_px: usize,
+        overscan_display_rows: usize,
+    ) -> Option<Viewport> {
+        let visible_row_range =
+            self.visible_row_range_for_viewport(scroll_top_px, viewport_height_px)?;
+        self.display_viewport_for_raw_row_range(visible_row_range, overscan_display_rows)
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn display_viewport_for_raw_row_range(
+        &self,
+        raw_row_range: Range<usize>,
+        overscan_display_rows: usize,
+    ) -> Option<Viewport> {
+        if raw_row_range.is_empty() {
+            return None;
+        }
+
+        let total_display_rows = self.display_geometry_total_display_rows();
+        if total_display_rows == 0 {
+            return None;
+        }
+
+        let start = self.display_row_boundary_for_raw_row(raw_row_range.start)?;
+        let end = self.display_row_boundary_for_raw_row(raw_row_range.end)?;
+        let first_visible_row = start.saturating_sub(overscan_display_rows);
+        let visible_end = end
+            .saturating_add(overscan_display_rows)
+            .min(total_display_rows);
+        let visible_row_count = visible_end.saturating_sub(first_visible_row);
+        (visible_row_count > 0).then_some(Viewport {
+            first_visible_row,
+            visible_row_count,
+            horizontal_offset: 0,
+        })
+    }
+
+    pub(crate) fn build_segment_prefetch_rows(
+        &self,
+        request: ReviewWorkspaceSegmentPrefetchRequest,
+    ) -> Vec<ReviewWorkspaceSegmentPrefetchRow> {
+        let prioritized_rows = prioritized_prefetch_row_indices_for_rows(
+            self.viewport_row_indices(
+                request.scroll_top_px,
+                request.viewport_height_px,
+                1,
+                request.overscan_rows,
+            ),
+            request.anchor_row,
+        );
+        let max_rows = if request.force_upgrade {
+            prioritized_rows.len()
+        } else {
+            request.batch_limit.min(prioritized_rows.len())
+        };
+
+        let mut pending_rows = Vec::with_capacity(max_rows);
+        for row_ix in prioritized_rows {
+            if pending_rows.len() >= max_rows {
+                break;
+            }
+
+            let Some(row) = self.row(row_ix) else {
+                continue;
+            };
+            if row.kind != DiffRowKind::Code {
+                continue;
+            }
+
+            let file_path = self.row_file_path(row_ix).map(ToString::to_string);
+            let base_quality = file_path
+                .as_deref()
+                .and_then(|path| self.file_line_stats.get(path).copied())
+                .map(review_base_segment_quality_for_file)
+                .unwrap_or(DiffSegmentQuality::Detailed);
+            let target_quality =
+                review_effective_segment_quality(base_quality, request.recently_scrolling);
+
+            if self
+                .row_segment_cache(row_ix)
+                .is_some_and(|cache| cache.quality >= target_quality)
+            {
+                continue;
+            }
+
+            pending_rows.push(ReviewWorkspaceSegmentPrefetchRow {
+                row_index: row_ix,
+                file_path,
+                left_text: row.left.text.clone(),
+                left_kind: row.left.kind,
+                right_text: row.right.text.clone(),
+                right_kind: row.right.kind,
+                quality: target_quality,
+            });
+        }
+
+        pending_rows
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn build_visible_state(
+        &self,
+        scroll_top_px: usize,
+        viewport_height_px: usize,
+    ) -> ReviewWorkspaceVisibleState {
+        let viewport = self.build_viewport_snapshot(
+            scroll_top_px,
+            viewport_height_px,
+            1,
+            0,
+            &ReviewWorkspaceSurfaceOptions::default(),
+        );
+        self.build_visible_state_from_viewport(scroll_top_px, viewport_height_px, &viewport)
+    }
+
+    fn build_visible_state_from_viewport(
+        &self,
+        scroll_top_px: usize,
+        viewport_height_px: usize,
+        viewport: &ReviewWorkspaceViewportSnapshot,
+    ) -> ReviewWorkspaceVisibleState {
+        let visible_row_range =
+            self.visible_row_range_for_viewport(scroll_top_px, viewport_height_px);
+        let viewport_bottom = scroll_top_px
+            .saturating_add(viewport_height_px.max(REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX));
+        let visible_viewport_rows = viewport
+            .sections
+            .iter()
+            .flat_map(|section| section.rows.iter())
+            .filter(|row| {
+                let row_bottom_px = row.surface_top_px.saturating_add(row.height_px);
+                row_bottom_px > scroll_top_px && row.surface_top_px < viewport_bottom
+            })
+            .collect::<Vec<_>>();
+        let visible_display_row_range = visible_viewport_rows.first().and_then(|first| {
+            visible_viewport_rows
+                .last()
+                .map(|last| first.display_row_index..last.display_row_index.saturating_add(1))
+        });
+        let top_row = visible_viewport_rows
+            .first()
+            .map(|row| row.row_index)
+            .or_else(|| visible_row_range.as_ref().map(|range| range.start));
+        let top_display_row = visible_viewport_rows
+            .first()
+            .map(|row| row.display_row_index);
+        let visible_file_header_row = visible_row_range.as_ref().and_then(|range| {
+            self.file_ranges
+                .iter()
+                .find(|file| file.start_row < range.end && range.start < file.end_row)
+                .map(|file| file.start_row)
+        });
+        let visible_hunk_header_row = visible_row_range.as_ref().and_then(|range| {
+            self.hunk_ranges
+                .iter()
+                .find(|hunk| hunk.start_row < range.end && range.start < hunk.end_row)
+                .map(|hunk| hunk.start_row)
+        });
+        let visible_file_path = top_row
+            .and_then(|row| self.path_at_surface_row(row))
+            .map(ToString::to_string);
+        let visible_file_status = visible_file_path
+            .as_deref()
+            .and_then(|path| self.status_for_path(path));
+
+        ReviewWorkspaceVisibleState {
+            visible_file_header_row,
+            visible_hunk_header_row,
+            visible_file_path,
+            visible_file_status,
+            visible_row_range,
+            visible_display_row_range,
+            top_row,
+            top_display_row,
+        }
+    }
+
+    pub(crate) fn visible_hunk_header_row(&self, row: usize) -> Option<usize> {
+        self.hunk_ranges
+            .iter()
+            .find(|range| range.start_row <= row && row < range.end_row)
+            .map(|range| range.start_row)
+    }
+
+    pub(crate) fn hunk_header_at_surface_row(&self, row: usize) -> Option<&str> {
+        let header_row = self.visible_hunk_header_row(row)?;
+        self.hunk_ranges
+            .iter()
+            .find(|range| range.start_row == header_row)
+            .map(|range| range.header.as_str())
+    }
+
+    pub(crate) fn row_count(&self) -> usize {
+        self.layout.total_rows()
+    }
+
+    pub(crate) fn row_top_offset_px(&self, row_ix: usize) -> Option<usize> {
+        self.display_geometry.row_top_offset_px(row_ix)
+    }
+
+    pub(crate) fn row_boundary_offset_px(&self, boundary_ix: usize) -> Option<usize> {
+        self.display_geometry.row_boundary_offset_px(boundary_ix)
+    }
+
+    pub(crate) fn visible_row_range_for_viewport(
+        &self,
+        scroll_top_px: usize,
+        viewport_height_px: usize,
+    ) -> Option<Range<usize>> {
+        let row_count = self.row_count();
+        if row_count == 0 || self.row_boundary_offset_px(1).is_none() {
+            return None;
+        }
+
+        let start = self.row_index_for_pixel(scroll_top_px);
+        let viewport_bottom = scroll_top_px
+            .saturating_add(viewport_height_px.max(REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX));
+        let end = self
+            .row_index_for_pixel(viewport_bottom.saturating_sub(1))
+            .saturating_add(1)
+            .min(row_count);
+        Some(
+            start.min(row_count.saturating_sub(1))..end.max(start.saturating_add(1)).min(row_count),
+        )
+    }
+
+    pub(crate) fn visible_section_range_for_viewport(
+        &self,
+        scroll_top_px: usize,
+        viewport_height_px: usize,
+        overscan_sections: usize,
+    ) -> Range<usize> {
+        if self.sections.is_empty() {
+            return 0..0;
+        }
+
+        let viewport_bottom = scroll_top_px
+            .saturating_add(viewport_height_px.max(REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX));
+        let first_visible = self
+            .sections
+            .partition_point(|section| {
+                self.section_pixel_range(section.index)
+                    .is_some_and(|range| range.end <= scroll_top_px)
+            })
+            .min(self.sections.len().saturating_sub(1));
+        let last_visible_exclusive = self
+            .sections
+            .partition_point(|section| {
+                self.section_pixel_range(section.index)
+                    .is_some_and(|range| range.start < viewport_bottom)
+            })
+            .max(first_visible.saturating_add(1))
+            .min(self.sections.len());
+
+        first_visible.saturating_sub(overscan_sections)
+            ..last_visible_exclusive
+                .saturating_add(overscan_sections)
+                .min(self.sections.len())
+    }
+
+    pub(crate) fn section_visible_row_range(
+        &self,
+        section_ix: usize,
+        scroll_top_px: usize,
+        viewport_height_px: usize,
+        overscan_rows: usize,
+    ) -> Option<Range<usize>> {
+        let section = self.section(section_ix)?;
+        let overscan_rows = overscan_rows.max(1);
+        let visible = self.visible_row_range_for_viewport(scroll_top_px, viewport_height_px)?;
+
+        if visible.end <= section.start_row {
+            let end = section
+                .start_row
+                .saturating_add(overscan_rows)
+                .min(section.end_row);
+            return Some(section.start_row..end.max(section.start_row.saturating_add(1)));
+        }
+
+        if section.end_row <= visible.start {
+            let start = section
+                .end_row
+                .saturating_sub(overscan_rows)
+                .max(section.start_row);
+            return Some(start..section.end_row);
+        }
+
+        let start = visible
+            .start
+            .saturating_sub(overscan_rows)
+            .max(section.start_row);
+        let end = visible
+            .end
+            .saturating_add(overscan_rows)
+            .min(section.end_row);
+        Some(start..end.max(start.saturating_add(1)).min(section.end_row))
+    }
+
+    pub(crate) fn row(&self, row_ix: usize) -> Option<&SideBySideRow> {
+        if row_ix >= self.layout.total_rows() {
+            return None;
+        }
+        self.rows.get(row_ix)
+    }
+
+    pub(crate) fn row_metadata(&self, row_ix: usize) -> Option<&DiffStreamRowMeta> {
+        if row_ix >= self.layout.total_rows() {
+            return None;
+        }
+        self.row_metadata.get(row_ix)
+    }
+
+    pub(crate) fn row_segment_cache(&self, row_ix: usize) -> Option<&DiffRowSegmentCache> {
+        if row_ix >= self.layout.total_rows() {
+            return None;
+        }
+        self.row_segments.get(row_ix).and_then(Option::as_ref)
+    }
+
+    pub(crate) fn set_row_segment_cache_if_better(
+        &mut self,
+        row_ix: usize,
+        row_cache: DiffRowSegmentCache,
+    ) -> bool {
+        let Some(slot) = self.row_segments.get_mut(row_ix) else {
+            return false;
+        };
+        let should_replace = slot
+            .as_ref()
+            .map(|cached| row_cache.quality > cached.quality)
+            .unwrap_or(true);
+        if should_replace {
+            *slot = Some(row_cache);
+            return true;
+        }
+        false
+    }
+
+    pub(crate) fn layout(&self) -> &WorkspaceLayout {
+        &self.layout
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn refresh_display_geometry_from_display_rows(
+        &mut self,
+        display_rows: &ReviewWorkspaceDisplayRows,
+    ) {
+        self.rebuild_display_geometry(Some(display_rows));
+    }
+
+    pub(crate) fn refresh_display_geometry_from_cached_display_rows(&mut self) {
+        let geometry = ReviewWorkspaceDisplayGeometry::build(
+            &self.rows,
+            &self.sections,
+            Some(&self.cached_display_rows),
+        );
+        self.display_geometry = geometry;
+    }
+
+    pub(crate) fn cached_display_rows_covering(&self, row_range: Range<usize>) -> bool {
+        !self.cached_display_rows.is_empty() && self.cached_display_rows.covers_row_range(row_range)
+    }
+
+    pub(crate) fn cached_display_rows(&self) -> Option<&ReviewWorkspaceDisplayRows> {
+        (!self.cached_display_rows.is_empty()).then_some(&self.cached_display_rows)
+    }
+
+    pub(crate) fn cache_display_rows(&mut self, display_rows: ReviewWorkspaceDisplayRows) {
+        self.cached_display_rows.merge_from(display_rows);
+        self.refresh_display_geometry_from_cached_display_rows();
+    }
+
+    pub(crate) fn clear_cached_display_rows(&mut self) {
+        self.cached_display_rows = ReviewWorkspaceDisplayRows::default();
+        self.rebuild_display_geometry(None);
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn build_editor_session(
+        &self,
+        preferred_path: Option<&str>,
+    ) -> WorkspaceEditorSession {
+        let mut session = WorkspaceEditorSession::new();
+        session.open_workspace_layout(
+            self.layout.clone(),
+            preferred_path.map(std::path::Path::new),
+        );
+        session
+    }
+
+    pub(crate) fn editor_documents(
+        &self,
+        side: ReviewWorkspaceEditorSide,
+    ) -> Vec<(PathBuf, String)> {
+        let buffers = match side {
+            ReviewWorkspaceEditorSide::Left => &self.left_document_buffers,
+            ReviewWorkspaceEditorSide::Right => &self.right_document_buffers,
+        };
+        self.layout
+            .documents()
+            .iter()
+            .map(|document| {
+                let text = buffers
+                    .get(&document.id)
+                    .map(TextBuffer::text)
+                    .unwrap_or_else(|| blank_workspace_document_text(document.line_count.max(1)));
+                (document.path.clone(), text)
+            })
+            .collect()
+    }
+
+    pub(crate) fn file_anchor_reconcile_state(
+        &self,
+        file_path: &str,
+        patch_loading: bool,
+    ) -> ReviewFileAnchorReconcileState {
+        let mut has_anchor_rows = false;
+        let mut saw_rows_for_file = false;
+
+        for row in &self.row_metadata {
+            if row.file_path.as_deref() != Some(file_path) {
+                continue;
+            }
+            saw_rows_for_file = true;
+            match row.kind {
+                DiffStreamRowKind::CoreCode
+                | DiffStreamRowKind::CoreHunkHeader
+                | DiffStreamRowKind::CoreMeta
+                | DiffStreamRowKind::CoreEmpty => {
+                    has_anchor_rows = true;
+                }
+                DiffStreamRowKind::FileLoading | DiffStreamRowKind::FileCollapsed => {
+                    return ReviewFileAnchorReconcileState::Deferred;
+                }
+                DiffStreamRowKind::FileError => {
+                    return ReviewFileAnchorReconcileState::Unavailable;
+                }
+                DiffStreamRowKind::FileHeader | DiffStreamRowKind::EmptyState => {}
+            }
+        }
+
+        if has_anchor_rows {
+            ReviewFileAnchorReconcileState::Ready
+        } else if patch_loading || saw_rows_for_file {
+            ReviewFileAnchorReconcileState::Deferred
+        } else {
+            ReviewFileAnchorReconcileState::Unavailable
+        }
+    }
+
+    pub(crate) fn row_supports_comments(&self, row_ix: usize) -> bool {
+        let Some(row) = self.row(row_ix) else {
+            return false;
+        };
+        if !matches!(
+            row.kind,
+            DiffRowKind::Code | DiffRowKind::Meta | DiffRowKind::Empty
+        ) {
+            return false;
+        }
+
+        self.row_metadata(row_ix).is_some_and(|meta| {
+            matches!(
+                meta.kind,
+                DiffStreamRowKind::CoreCode
+                    | DiffStreamRowKind::CoreMeta
+                    | DiffStreamRowKind::CoreEmpty
+            )
+        })
+    }
+
+    pub(crate) fn row_file_path(&self, row_ix: usize) -> Option<&str> {
+        self.row_metadata(row_ix)
+            .and_then(|meta| meta.file_path.as_deref())
+            .or_else(|| self.path_at_surface_row(row_ix))
+    }
+
+    pub(crate) fn row_hunk_header(&self, row_ix: usize) -> Option<&str> {
+        self.hunk_header_at_surface_row(row_ix)
+    }
+
+    pub(crate) fn build_comment_anchor(
+        &self,
+        row_ix: usize,
+        context_radius_rows: usize,
+    ) -> Option<ReviewCommentAnchor> {
+        if !self.row_supports_comments(row_ix) {
+            return None;
+        }
+
+        let row = self.row(row_ix)?;
+        let file_path = self.row_file_path(row_ix)?.to_string();
+        let hunk_header = self.row_hunk_header(row_ix).map(ToString::to_string);
+        let line_text = Self::row_diff_lines(row).join("\n");
+
+        let (line_side, old_line, new_line) = if row.kind == DiffRowKind::Code {
+            if row.right.kind != DiffCellKind::None {
+                (CommentLineSide::Right, row.left.line, row.right.line)
+            } else if row.left.kind != DiffCellKind::None {
+                (CommentLineSide::Left, row.left.line, row.right.line)
+            } else {
+                (CommentLineSide::Meta, None, None)
+            }
+        } else {
+            (CommentLineSide::Meta, None, None)
+        };
+
+        let context_before = self.collect_row_context(row_ix, true, context_radius_rows);
+        let context_after = self.collect_row_context(row_ix, false, context_radius_rows);
+        let anchor_hash = compute_comment_anchor_hash(
+            file_path.as_str(),
+            hunk_header.as_deref(),
+            line_text.as_str(),
+            context_before.as_str(),
+            context_after.as_str(),
+        );
+
+        Some(ReviewCommentAnchor {
+            file_path,
+            line_side,
+            old_line,
+            new_line,
+            hunk_header,
+            line_text,
+            context_before,
+            context_after,
+            anchor_hash,
+        })
+    }
+
+    pub(crate) fn build_comment_anchor_index(
+        &self,
+        context_radius_rows: usize,
+    ) -> (
+        BTreeMap<usize, ReviewCommentAnchor>,
+        BTreeMap<String, Vec<usize>>,
+    ) {
+        let mut row_anchor_index = BTreeMap::new();
+        let mut rows_by_path = BTreeMap::<String, Vec<usize>>::new();
+
+        for row_ix in 0..self.row_count() {
+            let Some(anchor) = self.build_comment_anchor(row_ix, context_radius_rows) else {
+                continue;
+            };
+            rows_by_path
+                .entry(anchor.file_path.clone())
+                .or_default()
+                .push(row_ix);
+            row_anchor_index.insert(row_ix, anchor);
+        }
+
+        (row_anchor_index, rows_by_path)
+    }
+
+    fn collect_row_context(
+        &self,
+        row_ix: usize,
+        before: bool,
+        context_radius_rows: usize,
+    ) -> String {
+        let row_count = self.row_count();
+        if row_count == 0 {
+            return String::new();
+        }
+
+        let anchor_path = self.row_file_path(row_ix).map(ToString::to_string);
+        let range = if before {
+            let start = row_ix.saturating_sub(context_radius_rows);
+            start..row_ix
+        } else {
+            let start = row_ix.saturating_add(1);
+            let end = start.saturating_add(context_radius_rows).min(row_count);
+            start..end
+        };
+
+        let mut lines = Vec::new();
+        for ix in range {
+            let Some(row) = self.row(ix) else {
+                continue;
+            };
+            if anchor_path.is_some() && self.row_file_path(ix) != anchor_path.as_deref() {
+                continue;
+            }
+            lines.extend(Self::row_diff_lines(row));
+        }
+        lines.join("\n")
+    }
+
+    fn row_diff_lines(row: &SideBySideRow) -> Vec<String> {
+        let mut lines = Vec::new();
+        match row.kind {
+            DiffRowKind::Code => {
+                if row.left.kind == DiffCellKind::Removed {
+                    lines.push(format!("-{}", row.left.text));
+                }
+                if row.right.kind == DiffCellKind::Added {
+                    lines.push(format!("+{}", row.right.text));
+                }
+                if row.left.kind == DiffCellKind::Context {
+                    lines.push(format!(" {}", row.left.text));
+                }
+                if row.left.kind == DiffCellKind::None
+                    && row.right.kind == DiffCellKind::None
+                    && !row.text.is_empty()
+                {
+                    lines.push(row.text.clone());
+                }
+            }
+            DiffRowKind::HunkHeader => {}
+            DiffRowKind::Meta | DiffRowKind::Empty => {
+                lines.push(row.text.clone());
+            }
+        }
+        lines
+    }
+
+    fn rebuild_display_geometry(&mut self, display_rows: Option<&ReviewWorkspaceDisplayRows>) {
+        self.display_geometry =
+            ReviewWorkspaceDisplayGeometry::build(&self.rows, &self.sections, display_rows);
+    }
+
+    fn rebuild_document_buffers(&mut self) {
+        let mut left_document_lines = self
+            .layout
+            .documents()
+            .iter()
+            .map(|document| (document.id, vec![String::new(); document.line_count.max(1)]))
+            .collect::<BTreeMap<_, _>>();
+        let mut right_document_lines = self
+            .layout
+            .documents()
+            .iter()
+            .map(|document| (document.id, vec![String::new(); document.line_count.max(1)]))
+            .collect::<BTreeMap<_, _>>();
+
+        for row_ix in 0..self.layout.total_rows().min(self.rows.len()) {
+            let Some(location) = self.layout.locate_row(row_ix) else {
+                continue;
+            };
+            let Some(document_line) = location.document_line else {
+                continue;
+            };
+            let Some(row) = self.rows.get(row_ix) else {
+                continue;
+            };
+            if let Some(lines) = left_document_lines.get_mut(&location.document_id)
+                && let Some(slot) = lines.get_mut(document_line)
+            {
+                *slot = row.left.text.clone();
+            }
+            if let Some(lines) = right_document_lines.get_mut(&location.document_id)
+                && let Some(slot) = lines.get_mut(document_line)
+            {
+                *slot = row.right.text.clone();
+            }
+        }
+
+        self.left_document_buffers = self.build_document_buffers_from_lines(&left_document_lines);
+        self.right_document_buffers = self.build_document_buffers_from_lines(&right_document_lines);
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn build_display_snapshot_for_side(
+        &self,
+        visible_row_range: Range<usize>,
+        side: ReviewWorkspaceEditorSide,
+    ) -> Vec<WorkspaceDisplayRow> {
+        if visible_row_range.is_empty() {
+            return Vec::new();
+        }
+
+        let document_snapshots = self.document_snapshots_for_side(side);
+        build_workspace_display_snapshot_from_document_snapshots(
+            &self.layout,
+            Viewport {
+                first_visible_row: visible_row_range.start,
+                visible_row_count: visible_row_range.len(),
+                horizontal_offset: 0,
+            },
+            4,
+            false,
+            &document_snapshots,
+        )
+        .visible_rows
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    fn build_display_rows_for_viewport_projection(
+        &self,
+        scroll_top_px: usize,
+        viewport_height_px: usize,
+        overscan_sections: usize,
+        overscan_rows: usize,
+    ) -> ReviewWorkspaceDisplayRows {
+        let mut rows = Vec::new();
+        let mut left_by_display_row = BTreeMap::new();
+        let mut right_by_display_row = BTreeMap::new();
+        for section_ix in self.visible_section_range_for_viewport(
+            scroll_top_px,
+            viewport_height_px,
+            overscan_sections,
+        ) {
+            let Some(section) = self.section(section_ix) else {
+                continue;
+            };
+            let visible_row_range = self
+                .section_visible_row_range(
+                    section_ix,
+                    scroll_top_px,
+                    viewport_height_px,
+                    overscan_rows,
+                )
+                .unwrap_or(section.start_row..section.end_row);
+            for row in self.build_display_snapshot_for_side(
+                visible_row_range.clone(),
+                ReviewWorkspaceEditorSide::Left,
+            ) {
+                left_by_display_row.insert(row.row_index, row);
+            }
+            for row in self.build_display_snapshot_for_side(
+                visible_row_range.clone(),
+                ReviewWorkspaceEditorSide::Right,
+            ) {
+                right_by_display_row.insert(row.row_index, row);
+            }
+        }
+        rows.extend(
+            left_by_display_row
+                .iter()
+                .filter_map(|(display_row_index, left)| {
+                    Some(ReviewWorkspaceDisplayRowEntry {
+                        display_row_index: *display_row_index,
+                        row_index: *display_row_index,
+                        raw_row_range: *display_row_index..display_row_index.saturating_add(1),
+                        left: left.clone(),
+                        right: right_by_display_row.get(display_row_index)?.clone(),
+                    })
+                }),
+        );
+        ReviewWorkspaceDisplayRows {
+            rows,
+            left_by_display_row,
+            right_by_display_row,
+            left_syntax_by_display_row: BTreeMap::new(),
+            right_syntax_by_display_row: BTreeMap::new(),
+        }
+    }
+
+    pub(crate) fn build_search_highlight_columns_by_row(
+        &self,
+        matches: &[ReviewWorkspaceSearchTarget],
+    ) -> BTreeMap<usize, Vec<Range<usize>>> {
+        let mut highlights = BTreeMap::<usize, Vec<Range<usize>>>::new();
+        for target in matches {
+            let Some(range) = target.raw_column_range.clone() else {
+                continue;
+            };
+            highlights.entry(target.row_index).or_default().push(range);
+        }
+        highlights
+    }
+
+    fn build_document_buffers_from_lines(
+        &self,
+        document_lines: &BTreeMap<WorkspaceDocumentId, Vec<String>>,
+    ) -> BTreeMap<WorkspaceDocumentId, TextBuffer> {
+        self.layout
+            .documents()
+            .iter()
+            .map(|document| {
+                let text = document_lines
+                    .get(&document.id)
+                    .map(|lines| lines.join("\n"))
+                    .unwrap_or_else(|| blank_workspace_document_text(document.line_count.max(1)));
+                (
+                    document.id,
+                    TextBuffer::new(document.buffer_id, text.as_str()),
+                )
+            })
+            .collect()
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    fn document_snapshots_for_side(
+        &self,
+        side: ReviewWorkspaceEditorSide,
+    ) -> BTreeMap<WorkspaceDocumentId, TextSnapshot> {
+        let buffers = match side {
+            ReviewWorkspaceEditorSide::Left => &self.left_document_buffers,
+            ReviewWorkspaceEditorSide::Right => &self.right_document_buffers,
+        };
+        buffers
+            .iter()
+            .map(|(document_id, buffer)| (*document_id, buffer.snapshot()))
+            .collect()
+    }
+
+    fn surface_row_height_px(&self, row_ix: usize) -> usize {
+        match self.rows.get(row_ix).map(|row| row.kind) {
+            Some(DiffRowKind::HunkHeader) => REVIEW_SURFACE_HUNK_DIVIDER_HEIGHT_PX,
+            Some(DiffRowKind::Code | DiffRowKind::Meta | DiffRowKind::Empty) | None => {
+                REVIEW_SURFACE_COMPACT_ROW_HEIGHT_PX
+            }
+        }
+    }
+
+    fn row_index_for_pixel(&self, pixel_offset: usize) -> usize {
+        let row_count = self.row_count();
+        let row_boundaries = (0..=row_count)
+            .filter_map(|boundary_ix| self.row_boundary_offset_px(boundary_ix))
+            .collect::<Vec<_>>();
+        if row_count == 0 || row_boundaries.len() < 2 {
+            return 0;
+        }
+
+        row_boundaries
+            .partition_point(|boundary| *boundary <= pixel_offset)
+            .saturating_sub(1)
+            .min(row_count.saturating_sub(1))
+    }
+}
+
+fn review_stream_row_kind_for_row(row_kind: DiffRowKind) -> DiffStreamRowKind {
+    match row_kind {
+        DiffRowKind::Code => DiffStreamRowKind::CoreCode,
+        DiffRowKind::HunkHeader => DiffStreamRowKind::CoreHunkHeader,
+        DiffRowKind::Meta => DiffStreamRowKind::CoreMeta,
+        DiffRowKind::Empty => DiffStreamRowKind::CoreEmpty,
+    }
+}
+
+fn blank_workspace_document_text(line_count: usize) -> String {
+    vec![String::new(); line_count.max(1)].join("\n")
+}
+
+fn review_base_segment_quality_for_file(line_stats: LineStats) -> DiffSegmentQuality {
+    if line_stats.changed() <= 8_000 {
+        DiffSegmentQuality::Detailed
+    } else {
+        DiffSegmentQuality::SyntaxOnly
+    }
+}
+
+fn review_effective_segment_quality(
+    base_quality: DiffSegmentQuality,
+    recently_scrolling: bool,
+) -> DiffSegmentQuality {
+    if !recently_scrolling {
+        return base_quality;
+    }
+
+    match base_quality {
+        DiffSegmentQuality::Detailed => DiffSegmentQuality::SyntaxOnly,
+        DiffSegmentQuality::SyntaxOnly => DiffSegmentQuality::Plain,
+        DiffSegmentQuality::Plain => DiffSegmentQuality::Plain,
+    }
+}
+
+fn review_project_search_highlights_for_display_row(
+    row: &WorkspaceDisplayRow,
+    raw_ranges: &[Range<usize>],
+) -> Vec<Range<usize>> {
+    raw_ranges
+        .iter()
+        .filter_map(|range| {
+            let start = range.start.max(row.raw_start_column);
+            let end = range.end.min(row.raw_end_column);
+            if start >= end {
+                return None;
+            }
+
+            Some(
+                review_workspace_display_column_for_raw(row, start)
+                    ..review_workspace_display_column_for_raw(row, end),
+            )
+        })
+        .collect()
+}
+
+fn review_changed_ranges_for_display_row(
+    cached_segments: Option<&Vec<CachedStyledSegment>>,
+) -> Vec<Range<usize>> {
+    let Some(cached_segments) = cached_segments else {
+        return Vec::new();
+    };
+
+    let mut ranges = Vec::new();
+    let mut cursor = 0usize;
+    let mut active_start = None;
+
+    for segment in cached_segments {
+        let len = segment.plain_text.chars().count();
+        if len == 0 {
+            continue;
+        }
+        let end = cursor.saturating_add(len);
+        if segment.changed {
+            active_start.get_or_insert(cursor);
+        } else if let Some(start) = active_start.take() {
+            ranges.push(start..cursor);
+        }
+        cursor = end;
+    }
+
+    if let Some(start) = active_start {
+        ranges.push(start..cursor);
+    }
+
+    ranges
+}
+
+fn review_workspace_display_column_for_raw(row: &WorkspaceDisplayRow, raw_column: usize) -> usize {
+    if row.raw_column_offsets.is_empty() {
+        return 0;
+    }
+
+    let relative_raw = raw_column
+        .saturating_sub(row.raw_start_column)
+        .min(row.raw_column_offsets.len().saturating_sub(1));
+    row.raw_column_offsets[relative_raw]
+}
+
+fn prioritized_prefetch_row_indices_for_rows(
+    mut row_indices: Vec<usize>,
+    anchor_row: usize,
+) -> Vec<usize> {
+    row_indices.sort_unstable();
+    row_indices.dedup();
+    row_indices.sort_by_key(|row_ix| (anchor_row.abs_diff(*row_ix), *row_ix));
+    row_indices
+}
+
+fn review_decimal_digits(value: u32) -> u32 {
+    if value == 0 { 1 } else { value.ilog10() + 1 }
+}
+
+fn surface_code_row_count_for_hunk(hunk: &DiffHunk) -> usize {
+    let mut ix = 0_usize;
+    let mut rows = 0_usize;
+
+    while ix < hunk.lines.len() {
+        match hunk.lines[ix].kind {
+            DiffLineKind::Context | DiffLineKind::Added => {
+                rows = rows.saturating_add(1);
+                ix += 1;
+            }
+            DiffLineKind::Removed => {
+                let removed_start = ix;
+                while ix < hunk.lines.len() && hunk.lines[ix].kind == DiffLineKind::Removed {
+                    ix += 1;
+                }
+                let added_start = ix;
+                while ix < hunk.lines.len() && hunk.lines[ix].kind == DiffLineKind::Added {
+                    ix += 1;
+                }
+                rows = rows.saturating_add(
+                    ix.saturating_sub(added_start)
+                        .max(added_start.saturating_sub(removed_start)),
+                );
+            }
+        }
+    }
+
+    rows
+}

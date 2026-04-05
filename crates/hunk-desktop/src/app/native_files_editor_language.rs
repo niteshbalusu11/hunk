@@ -1,10 +1,12 @@
 use super::*;
+use hunk_language::DiagnosticSeverity;
+#[cfg(test)]
 use hunk_language::{
-    CompletionRequest, CompletionTriggerKind, DefinitionRequest, Diagnostic, DiagnosticSeverity,
-    HoverRequest, SemanticToken,
+    CompletionRequest, CompletionTriggerKind, DefinitionRequest, Diagnostic, HoverRequest,
 };
 
 impl FilesEditor {
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn set_diagnostics(&mut self, diagnostics: Vec<Diagnostic>) {
         self.editor
@@ -12,13 +14,7 @@ impl FilesEditor {
         self.sync_overlays();
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn set_semantic_tokens(&mut self, tokens: Vec<SemanticToken>) {
-        self.editor.apply(EditorCommand::SetSemanticTokens(tokens));
-        self.visible_highlight_cache = None;
-        self.semantic_highlight_revision = self.semantic_highlight_revision.saturating_add(1);
-    }
-
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn request_hover_at_cursor(&mut self) -> Option<HoverRequest> {
         let document = self.document_context()?;
@@ -35,6 +31,7 @@ impl FilesEditor {
         Some(request)
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn take_pending_hover_request(&mut self) -> Option<HoverRequest> {
         let request = self.editor.pending_hover_request().cloned();
@@ -44,6 +41,7 @@ impl FilesEditor {
         request
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn request_definition_at_cursor(&mut self) -> Option<DefinitionRequest> {
         let document = self.document_context()?;
@@ -56,6 +54,7 @@ impl FilesEditor {
         Some(request)
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn take_pending_definition_request(&mut self) -> Option<DefinitionRequest> {
         let request = self.editor.pending_definition_request().cloned();
@@ -65,6 +64,7 @@ impl FilesEditor {
         request
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn trigger_completion(
         &mut self,
@@ -86,6 +86,7 @@ impl FilesEditor {
         Some(request)
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn take_pending_completion_request(&mut self) -> Option<CompletionRequest> {
         let request = self.editor.pending_completion_request().cloned();
@@ -95,9 +96,10 @@ impl FilesEditor {
         request
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     fn document_context(&self) -> Option<hunk_language::DocumentContext> {
-        let path = self.active_path.clone()?;
+        let path = self.active_path_buf()?;
         let snapshot = self.editor.buffer().snapshot();
         Some(hunk_language::DocumentContext {
             path,

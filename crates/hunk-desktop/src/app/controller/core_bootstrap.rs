@@ -415,6 +415,9 @@ impl DiffViewer {
             review_default_right_source_id: None,
             review_left_source_id: None,
             review_right_source_id: None,
+            review_loaded_left_source_id: None,
+            review_loaded_right_source_id: None,
+            review_loaded_collapsed_files: BTreeSet::new(),
             branch_name: "unknown".to_string(),
             branch_has_upstream: false,
             branch_ahead_count: 0,
@@ -599,24 +602,16 @@ impl DiffViewer {
             collapsed_files: BTreeSet::new(),
             selected_path: None,
             selected_status: None,
-            diff_rows: Vec::new(),
-            diff_row_metadata: Vec::new(),
-            diff_row_segment_cache: Vec::new(),
-            diff_visible_file_header_lookup: Vec::new(),
-            diff_visible_hunk_header_lookup: Vec::new(),
-            file_row_ranges: Vec::new(),
             file_line_stats: BTreeMap::new(),
-            diff_list_state: ListState::new(0, ListAlignment::Top, px(360.0)),
-            diff_split_ratio: 0.5,
-            diff_split_bounds: None,
-            diff_left_line_number_width: line_number_column_width(DIFF_LINE_NUMBER_MIN_DIGITS),
-            diff_right_line_number_width: line_number_column_width(DIFF_LINE_NUMBER_MIN_DIGITS),
+            review_surface: ReviewWorkspaceSurfaceState::new(),
             review_files: Vec::new(),
             review_file_status_by_path: BTreeMap::new(),
             review_file_line_stats: BTreeMap::new(),
             review_overall_line_stats: LineStats::default(),
             review_compare_loading: false,
             review_compare_error: None,
+            review_workspace_session: None,
+            review_loaded_snapshot_fingerprint: None,
             overall_line_stats: LineStats::default(),
             refresh_epoch: 0,
             auto_refresh_unmodified_streak: 0,
@@ -653,14 +648,9 @@ impl DiffViewer {
             focus_handle: cx.focus_handle(),
             repo_tree_focus_handle: cx.focus_handle(),
             files_editor_focus_handle: cx.focus_handle(),
-            selection_anchor_row: None,
-            selection_head_row: None,
             drag_selecting_rows: false,
             scroll_selected_after_reload: true,
-            last_visible_row_start: None,
-            last_diff_scroll_offset: None,
             last_scroll_activity_at: Instant::now(),
-            segment_prefetch_anchor_row: None,
             segment_prefetch_epoch: 0,
             segment_prefetch_task: Task::ready(()),
             fps: 0.0,
@@ -770,13 +760,8 @@ impl DiffViewer {
             if matches!(event, InputEvent::Change) {
                 this.sync_editor_search_query(cx);
             }
-            if let InputEvent::PressEnter { secondary } = event
-                && this
-                    .files_editor
-                    .borrow_mut()
-                    .select_next_search_match(!secondary)
-            {
-                cx.notify();
+            if let InputEvent::PressEnter { secondary } = event {
+                this.navigate_editor_search(!secondary, cx);
             }
         })
         .detach();
@@ -895,7 +880,7 @@ impl DiffViewer {
         .detach();
 
         view.initialize_ai_timeline_list_view(cx);
-        view.install_list_scroll_handlers(cx);
+        view.install_scroll_handlers(cx);
         view.subscribe_review_compare_picker_states(cx);
 
         view.update_branch_picker_state(window, cx);
@@ -925,18 +910,8 @@ impl DiffViewer {
         view
     }
 
-    fn install_list_scroll_handlers(&self, cx: &mut Context<Self>) {
+    fn install_scroll_handlers(&self, cx: &mut Context<Self>) {
         let weak_view = cx.entity().downgrade();
-
-        self.diff_list_state.set_scroll_handler({
-            let weak_view = weak_view.clone();
-            move |event, _, cx| {
-                let visible_row = event.visible_range.start;
-                let _ = weak_view.update(cx, |this, cx| {
-                    this.sync_selected_file_from_visible_row(visible_row, cx);
-                });
-            }
-        });
 
         self.ai_timeline_list_state.set_scroll_handler({
             let weak_view = weak_view.clone();

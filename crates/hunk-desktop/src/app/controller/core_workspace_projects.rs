@@ -1,8 +1,4 @@
 impl DiffViewer {
-    fn empty_diff_list_state() -> ListState {
-        ListState::new(0, ListAlignment::Top, px(360.0))
-    }
-
     fn empty_workspace_project_state() -> WorkspaceProjectState {
         WorkspaceProjectState {
             repo_root: None,
@@ -14,6 +10,9 @@ impl DiffViewer {
             review_default_right_source_id: None,
             review_left_source_id: None,
             review_right_source_id: None,
+            review_loaded_left_source_id: None,
+            review_loaded_right_source_id: None,
+            review_loaded_collapsed_files: BTreeSet::new(),
             branch_name: "unknown".to_string(),
             branch_has_upstream: false,
             branch_ahead_count: 0,
@@ -30,20 +29,16 @@ impl DiffViewer {
             collapsed_files: BTreeSet::new(),
             selected_path: None,
             selected_status: None,
-            diff_rows: Vec::new(),
-            diff_row_metadata: Vec::new(),
-            diff_row_segment_cache: Vec::new(),
-            diff_visible_file_header_lookup: Vec::new(),
-            diff_visible_hunk_header_lookup: Vec::new(),
-            file_row_ranges: Vec::new(),
             file_line_stats: BTreeMap::new(),
-            diff_list_state: Self::empty_diff_list_state(),
+            review_surface: ReviewWorkspaceSurfaceState::new(),
             review_files: Vec::new(),
             review_file_status_by_path: BTreeMap::new(),
             review_file_line_stats: BTreeMap::new(),
             review_overall_line_stats: LineStats::default(),
             review_compare_loading: false,
             review_compare_error: None,
+            review_workspace_session: None,
+            review_loaded_snapshot_fingerprint: None,
             overall_line_stats: LineStats::default(),
             last_git_workspace_fingerprint: None,
             recent_commits_loading: false,
@@ -66,10 +61,6 @@ impl DiffViewer {
             editor_markdown_preview_revision: 0,
             editor_markdown_preview: false,
             editor_search_visible: false,
-            selection_anchor_row: None,
-            selection_head_row: None,
-            last_visible_row_start: None,
-            last_diff_scroll_offset: None,
         }
     }
 
@@ -123,6 +114,9 @@ impl DiffViewer {
             review_default_right_source_id: self.review_default_right_source_id.take(),
             review_left_source_id: self.review_left_source_id.take(),
             review_right_source_id: self.review_right_source_id.take(),
+            review_loaded_left_source_id: self.review_loaded_left_source_id.take(),
+            review_loaded_right_source_id: self.review_loaded_right_source_id.take(),
+            review_loaded_collapsed_files: std::mem::take(&mut self.review_loaded_collapsed_files),
             branch_name: std::mem::take(&mut self.branch_name),
             branch_has_upstream: self.branch_has_upstream,
             branch_ahead_count: self.branch_ahead_count,
@@ -139,24 +133,19 @@ impl DiffViewer {
             collapsed_files: std::mem::take(&mut self.collapsed_files),
             selected_path: self.selected_path.take(),
             selected_status: self.selected_status.take(),
-            diff_rows: std::mem::take(&mut self.diff_rows),
-            diff_row_metadata: std::mem::take(&mut self.diff_row_metadata),
-            diff_row_segment_cache: std::mem::take(&mut self.diff_row_segment_cache),
-            diff_visible_file_header_lookup: std::mem::take(
-                &mut self.diff_visible_file_header_lookup,
-            ),
-            diff_visible_hunk_header_lookup: std::mem::take(
-                &mut self.diff_visible_hunk_header_lookup,
-            ),
-            file_row_ranges: std::mem::take(&mut self.file_row_ranges),
             file_line_stats: std::mem::take(&mut self.file_line_stats),
-            diff_list_state: std::mem::replace(&mut self.diff_list_state, Self::empty_diff_list_state()),
+            review_surface: std::mem::replace(
+                &mut self.review_surface,
+                ReviewWorkspaceSurfaceState::new(),
+            ),
             review_files: std::mem::take(&mut self.review_files),
             review_file_status_by_path: std::mem::take(&mut self.review_file_status_by_path),
             review_file_line_stats: std::mem::take(&mut self.review_file_line_stats),
             review_overall_line_stats: self.review_overall_line_stats,
             review_compare_loading: self.review_compare_loading,
             review_compare_error: self.review_compare_error.take(),
+            review_workspace_session: self.review_workspace_session.take(),
+            review_loaded_snapshot_fingerprint: self.review_loaded_snapshot_fingerprint.take(),
             overall_line_stats: self.overall_line_stats,
             last_git_workspace_fingerprint: self.last_git_workspace_fingerprint.take(),
             recent_commits_loading: self.recent_commits_loading,
@@ -182,10 +171,6 @@ impl DiffViewer {
             editor_markdown_preview_revision: self.editor_markdown_preview_revision,
             editor_markdown_preview: self.editor_markdown_preview,
             editor_search_visible: self.editor_search_visible,
-            selection_anchor_row: self.selection_anchor_row.take(),
-            selection_head_row: self.selection_head_row.take(),
-            last_visible_row_start: self.last_visible_row_start.take(),
-            last_diff_scroll_offset: self.last_diff_scroll_offset.take(),
         }
     }
 
@@ -215,6 +200,9 @@ impl DiffViewer {
         self.review_default_right_source_id = state.review_default_right_source_id;
         self.review_left_source_id = state.review_left_source_id;
         self.review_right_source_id = state.review_right_source_id;
+        self.review_loaded_left_source_id = state.review_loaded_left_source_id;
+        self.review_loaded_right_source_id = state.review_loaded_right_source_id;
+        self.review_loaded_collapsed_files = state.review_loaded_collapsed_files;
         self.branch_name = state.branch_name;
         self.branch_has_upstream = state.branch_has_upstream;
         self.branch_ahead_count = state.branch_ahead_count;
@@ -231,20 +219,16 @@ impl DiffViewer {
         self.collapsed_files = state.collapsed_files;
         self.selected_path = state.selected_path;
         self.selected_status = state.selected_status;
-        self.diff_rows = state.diff_rows;
-        self.diff_row_metadata = state.diff_row_metadata;
-        self.diff_row_segment_cache = state.diff_row_segment_cache;
-        self.diff_visible_file_header_lookup = state.diff_visible_file_header_lookup;
-        self.diff_visible_hunk_header_lookup = state.diff_visible_hunk_header_lookup;
-        self.file_row_ranges = state.file_row_ranges;
         self.file_line_stats = state.file_line_stats;
-        self.diff_list_state = state.diff_list_state;
+        self.review_surface = state.review_surface;
         self.review_files = state.review_files;
         self.review_file_status_by_path = state.review_file_status_by_path;
         self.review_file_line_stats = state.review_file_line_stats;
         self.review_overall_line_stats = state.review_overall_line_stats;
         self.review_compare_loading = state.review_compare_loading;
         self.review_compare_error = state.review_compare_error;
+        self.review_workspace_session = state.review_workspace_session;
+        self.review_loaded_snapshot_fingerprint = state.review_loaded_snapshot_fingerprint;
         self.overall_line_stats = state.overall_line_stats;
         self.last_git_workspace_fingerprint = state.last_git_workspace_fingerprint;
         self.recent_commits_loading = state.recent_commits_loading;
@@ -267,10 +251,6 @@ impl DiffViewer {
         self.editor_markdown_preview_revision = state.editor_markdown_preview_revision;
         self.editor_markdown_preview = state.editor_markdown_preview;
         self.editor_search_visible = state.editor_search_visible;
-        self.selection_anchor_row = state.selection_anchor_row;
-        self.selection_head_row = state.selection_head_row;
-        self.last_visible_row_start = state.last_visible_row_start;
-        self.last_diff_scroll_offset = state.last_diff_scroll_offset;
 
         self.snapshot_loading = false;
         self.snapshot_active_request = None;

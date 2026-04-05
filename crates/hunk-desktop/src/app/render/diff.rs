@@ -14,161 +14,6 @@ impl Render for DiffSplitDrag {
 }
 
 impl DiffViewer {
-    fn render_diff(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        if self.repo_discovery_failed {
-            return self.render_open_project_empty_state(cx);
-        }
-
-        if let Some(error_message) = &self.error_message {
-            return v_flex()
-                .size_full()
-                .items_center()
-                .justify_center()
-                .p_4()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().danger)
-                        .child(error_message.clone()),
-                )
-                .into_any_element();
-        }
-        if self.repo_root.is_some()
-            && self.workspace_view_mode != WorkspaceViewMode::Diff
-            && self.files.is_empty()
-        {
-            return v_flex()
-                .size_full()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("No files changed"),
-                )
-                .into_any_element();
-        }
-
-        let (old_label, new_label) = self.diff_column_labels();
-        let diff_list_state = self.diff_list_state.clone();
-        let logical_top = diff_list_state.logical_scroll_top();
-        let visible_row = logical_top.item_ix;
-        let sticky_file_banner =
-            self.render_visible_file_banner(visible_row, logical_top.offset_in_item, cx);
-        let layout = self.diff_column_layout();
-
-        let list = list(diff_list_state.clone(), {
-            cx.processor(move |this, ix: usize, _window, cx| {
-                let Some(row) = this.diff_rows.get(ix) else {
-                    return div().into_any_element();
-                };
-                let is_selected = this.is_row_selected(ix);
-
-                match row.kind {
-                    DiffRowKind::Code => this.render_code_row(ix, row, is_selected, cx),
-                    DiffRowKind::HunkHeader | DiffRowKind::Meta | DiffRowKind::Empty => {
-                        this.render_meta_row(ix, row, is_selected, cx)
-                    }
-                }
-            })
-        })
-        .flex_grow()
-        .size_full()
-        .map(|mut this| {
-            this.style().restrict_scroll_to_axis = Some(true);
-            this
-        })
-        .with_sizing_behavior(ListSizingBehavior::Auto);
-
-        let scrollbar_size = px(DIFF_SCROLLBAR_SIZE);
-        let edge_inset = px(DIFF_BOTTOM_SAFE_INSET);
-        let right_inset = px(DIFF_SCROLLBAR_RIGHT_INSET);
-        let vertical_bar_bottom = edge_inset;
-        let view = cx.entity();
-
-        v_flex()
-            .size_full()
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_h_0()
-                    .when(self.workspace_view_mode == WorkspaceViewMode::Diff, |this| {
-                        this.child(self.render_review_compare_controls(cx))
-                    })
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_h_0()
-                            .relative()
-                            .child(
-                                canvas(
-                                    {
-                                        let view = view.clone();
-                                        move |bounds, _, cx| {
-                                            view.update(cx, |this, cx| {
-                                                this.update_diff_split_bounds(bounds, cx);
-                                            });
-                                        }
-                                    },
-                                    |_, _, _, _| {},
-                                )
-                                .absolute()
-                                .size_full(),
-                            )
-                            .child(
-                                v_flex()
-                                    .size_full()
-                                    .items_stretch()
-                                    .child(self.render_diff_column_header(
-                                        layout,
-                                        old_label.clone(),
-                                        new_label.clone(),
-                                        cx,
-                                    ))
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_h_0()
-                                            .relative()
-                                            .child(
-                                                div()
-                                                    .size_full()
-                                                    .on_scroll_wheel(
-                                                        cx.listener(Self::on_diff_list_scroll_wheel),
-                                                    )
-                                                    .child(list),
-                                            )
-                                            .child(
-                                                div()
-                                                    .absolute()
-                                                    .top_0()
-                                                    .left_0()
-                                                    .right_0()
-                                                    .child(sticky_file_banner),
-                                            )
-                                            .child(
-                                                div()
-                                                    .absolute()
-                                                    .top_0()
-                                                    .right(right_inset)
-                                                    .bottom(vertical_bar_bottom)
-                                                    .w(scrollbar_size)
-                                                    .child(
-                                                        Scrollbar::vertical(&diff_list_state)
-                                                            .scrollbar_show(ScrollbarShow::Always),
-                                                    ),
-                                            ),
-                                    ),
-                            )
-                            .when_some(layout, |this, layout| {
-                                this.child(self.render_diff_split_handle(layout, cx))
-                            }),
-                    ),
-            )
-            .into_any_element()
-    }
-
     fn render_diff_column_header(
         &self,
         layout: Option<DiffColumnLayout>,
@@ -298,19 +143,21 @@ impl DiffViewer {
     }
 
     fn update_diff_split_bounds(&mut self, bounds: Bounds<Pixels>, cx: &mut Context<Self>) {
-        let width_changed = self.diff_split_bounds.is_none_or(|current| {
+        let width_changed = self.review_surface.diff_split_bounds.is_none_or(|current| {
             (current.left() - bounds.left()).abs() > px(0.5)
                 || (current.size.width - bounds.size.width).abs() > px(0.5)
         });
-        let clamped_ratio = self.clamp_diff_split_ratio(bounds.size.width, self.diff_split_ratio);
-        let ratio_changed = (clamped_ratio - self.diff_split_ratio).abs() > f32::EPSILON;
+        let clamped_ratio =
+            self.clamp_diff_split_ratio(bounds.size.width, self.review_surface.diff_split_ratio);
+        let ratio_changed =
+            (clamped_ratio - self.review_surface.diff_split_ratio).abs() > f32::EPSILON;
 
         if !width_changed && !ratio_changed {
             return;
         }
 
-        self.diff_split_bounds = Some(bounds);
-        self.diff_split_ratio = clamped_ratio;
+        self.review_surface.diff_split_bounds = Some(bounds);
+        self.review_surface.diff_split_ratio = clamped_ratio;
         cx.notify();
     }
 
@@ -319,28 +166,30 @@ impl DiffViewer {
         position: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        let Some(bounds) = self.diff_split_bounds else {
+        let Some(bounds) = self.review_surface.diff_split_bounds else {
             return;
         };
         let local_x = (position.x - bounds.left()).clamp(px(0.), bounds.size.width);
         let next_ratio = self.clamp_diff_split_ratio(bounds.size.width, local_x / bounds.size.width);
-        if (next_ratio - self.diff_split_ratio).abs() <= f32::EPSILON {
+        if (next_ratio - self.review_surface.diff_split_ratio).abs() <= f32::EPSILON {
             return;
         }
 
-        self.diff_split_ratio = next_ratio;
+        self.review_surface.diff_split_ratio = next_ratio;
         cx.notify();
     }
 
     fn diff_column_layout(&self) -> Option<DiffColumnLayout> {
-        let bounds = self.diff_split_bounds?;
+        let bounds = self.review_surface.diff_split_bounds?;
         let total_width = bounds.size.width;
         if total_width <= px(0.) {
             return None;
         }
 
-        let left_gutter = px(self.diff_left_line_number_width + DIFF_MARKER_GUTTER_WIDTH + 16.0);
-        let right_gutter = px(self.diff_right_line_number_width + DIFF_MARKER_GUTTER_WIDTH + 16.0);
+        let left_gutter =
+            px(self.review_surface.diff_left_line_number_width + DIFF_MARKER_GUTTER_WIDTH + 16.0);
+        let right_gutter =
+            px(self.review_surface.diff_right_line_number_width + DIFF_MARKER_GUTTER_WIDTH + 16.0);
         let minimum_content_width = px(DIFF_SPLIT_MIN_CODE_WIDTH);
         let left_min = left_gutter + minimum_content_width;
         let right_min = right_gutter + minimum_content_width;
@@ -350,7 +199,8 @@ impl DiffViewer {
             let shared_content = (total_width - left_gutter - right_gutter).max(px(0.)) / 2.;
             left_gutter + shared_content
         } else {
-            (total_width * self.diff_split_ratio).clamp(left_min, total_width - right_min)
+            (total_width * self.review_surface.diff_split_ratio)
+                .clamp(left_min, total_width - right_min)
         };
 
         Some(DiffColumnLayout {
@@ -360,8 +210,10 @@ impl DiffViewer {
     }
 
     fn clamp_diff_split_ratio(&self, total_width: Pixels, candidate_ratio: f32) -> f32 {
-        let left_gutter = px(self.diff_left_line_number_width + DIFF_MARKER_GUTTER_WIDTH + 16.0);
-        let right_gutter = px(self.diff_right_line_number_width + DIFF_MARKER_GUTTER_WIDTH + 16.0);
+        let left_gutter =
+            px(self.review_surface.diff_left_line_number_width + DIFF_MARKER_GUTTER_WIDTH + 16.0);
+        let right_gutter =
+            px(self.review_surface.diff_right_line_number_width + DIFF_MARKER_GUTTER_WIDTH + 16.0);
         let minimum_content_width = px(DIFF_SPLIT_MIN_CODE_WIDTH);
         let left_min = left_gutter + minimum_content_width;
         let right_min = right_gutter + minimum_content_width;
@@ -426,64 +278,6 @@ impl DiffViewer {
                     ),
             )
             .into_any_element()
-    }
-
-    fn render_visible_file_banner(
-        &self,
-        visible_row: usize,
-        top_offset: gpui::Pixels,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let Some((header_row_ix, path, status)) = self.visible_file_header(visible_row) else {
-            return div().w_full().h(px(0.)).into_any_element();
-        };
-
-        if visible_row == header_row_ix && top_offset.is_zero() {
-            return div().w_full().h(px(0.)).into_any_element();
-        }
-
-        let stats = self
-            .active_diff_file_line_stats()
-            .get(path.as_str())
-            .copied()
-            .unwrap_or_default();
-        self.render_sticky_file_status_banner_row(header_row_ix, path.as_str(), status, stats, cx)
-    }
-
-    fn visible_file_header(&self, visible_row: usize) -> Option<(usize, String, FileStatus)> {
-        if self.diff_rows.is_empty() {
-            return None;
-        }
-
-        let capped = visible_row.min(self.diff_rows.len().saturating_sub(1));
-
-        if self.diff_row_metadata.len() == self.diff_rows.len() {
-            let header_ix = self
-                .diff_visible_file_header_lookup
-                .get(capped)
-                .copied()
-                .flatten()?;
-            let meta = self.diff_row_metadata.get(header_ix)?;
-            if meta.kind == DiffStreamRowKind::EmptyState {
-                return None;
-            }
-            let path = meta.file_path.clone()?;
-            let status = meta
-                .file_status
-                .or_else(|| self.status_for_path(path.as_str()))
-                .unwrap_or(FileStatus::Unknown);
-            return Some((header_ix, path, status));
-        }
-
-        let header_ix = self
-            .diff_visible_file_header_lookup
-            .get(capped)
-            .copied()
-            .flatten()?;
-        self.file_row_ranges
-            .iter()
-            .find(|range| range.start_row == header_ix)
-            .map(|range| (range.start_row, range.path.clone(), range.status))
     }
 
     fn diff_column_labels(&self) -> (String, String) {
@@ -579,6 +373,29 @@ impl DiffViewer {
                                     })
                                     .child(status_message),
                             )
+                            .child({
+                                let view = view.clone();
+                                let mut button = Button::new("review-search-toggle")
+                                    .compact()
+                                    .rounded(px(7.0))
+                                    .icon(Icon::new(IconName::Search).size(px(12.0)))
+                                    .tooltip(if self.editor_search_visible {
+                                        "Hide find"
+                                    } else {
+                                        "Show find"
+                                    })
+                                    .on_click(move |_, window, cx| {
+                                        view.update(cx, |this, cx| {
+                                            this.toggle_editor_search_visibility(window, cx);
+                                        });
+                                    });
+                                if self.editor_search_visible {
+                                    button = button.primary();
+                                } else {
+                                    button = button.outline();
+                                }
+                                button
+                            })
                             .child({
                                 let view = view.clone();
                                 Button::new("review-compare-reset")

@@ -29,9 +29,11 @@ pub(super) fn compact_cached_segments_for_render(
         let first_syntax = chunk[0].syntax;
         let mut mixed_syntax = false;
         let mut changed = false;
+        let mut search_match = false;
         for segment in chunk {
             plain_text.push_str(segment.plain_text.as_ref());
             changed |= segment.changed;
+            search_match |= segment.search_match;
             if segment.syntax != first_syntax {
                 mixed_syntax = true;
             }
@@ -45,6 +47,7 @@ pub(super) fn compact_cached_segments_for_render(
                 first_syntax
             },
             changed,
+            search_match,
         });
     }
 
@@ -60,6 +63,7 @@ pub(super) fn cached_runtime_fallback_segments(text: &str) -> Vec<CachedStyledSe
         plain_text: SharedString::from(text.to_string()),
         syntax: SyntaxTokenKind::Plain,
         changed: false,
+        search_match: false,
     }]
 }
 

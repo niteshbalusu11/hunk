@@ -268,3 +268,13 @@ pub(super) fn line_stats_paths_from_dirty_paths(
         .map(|file| file.path.clone())
         .collect()
 }
+
+pub(super) fn retained_selection_path(
+    files: &[ChangedFile],
+    selected_path: Option<&str>,
+) -> Option<String> {
+    selected_path
+        .filter(|selected_path| files.iter().any(|file| file.path == *selected_path))
+        .map(ToString::to_string)
+        .or_else(|| files.first().map(|file| file.path.clone()))
+}

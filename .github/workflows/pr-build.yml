@@ -32,7 +32,7 @@ env:
 
 jobs:
   linux:
-    name: Linux Checks + Artifacts
+    name: Linux Checks
     runs-on: ubuntu-22.04
     timeout-minutes: 60
 
@@ -50,6 +50,7 @@ jobs:
       - name: Install Zig
         uses: mlugg/setup-zig@v2
         with:
+          use-cache: false
           version: 0.15.2
 
       - name: Cache cargo registry and Rust dependencies
@@ -88,11 +89,12 @@ jobs:
             rpm
         shell: bash
 
-      - name: Resolve release version
-        run: |
-          version="$(./scripts/resolve_hunk_version.sh)"
-          echo "HUNK_RELEASE_VERSION=$version" >> "$GITHUB_ENV"
-        shell: bash
+      # Temporarily disabled for PR builds; release packaging stays in release workflows.
+      # - name: Resolve release version
+      #   run: |
+      #     version="$(./scripts/resolve_hunk_version.sh)"
+      #     echo "HUNK_RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+      #   shell: bash
 
       - name: Check formatting
         run: cargo fmt --all --check
@@ -106,33 +108,38 @@ jobs:
         run: cargo test --workspace
         shell: bash
 
-      - name: Package Linux artifacts
-        run: ./scripts/package_linux_release_zed_like.sh --formats tarball,deb,rpm
+      - name: Build hunk-desktop
+        run: cargo build -p hunk-desktop --locked
         shell: bash
 
-      - name: Upload Linux tarball artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: hunk-linux-x86_64-tarball
-          path: target/dist/Hunk-${{ env.HUNK_RELEASE_VERSION }}-linux-x86_64.tar.gz
-          if-no-files-found: error
-
-      - name: Upload Linux Debian artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: hunk-linux-x86_64-deb
-          path: target/dist/hunk-desktop_${{ env.HUNK_RELEASE_VERSION }}-1_amd64.deb
-          if-no-files-found: error
-
-      - name: Upload Linux RPM artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: hunk-linux-x86_64-rpm
-          path: target/dist/*.rpm
-          if-no-files-found: error
+      # Temporarily disabled for PR builds; release packaging stays in release workflows.
+      # - name: Package Linux artifacts
+      #   run: ./scripts/package_linux_release_zed_like.sh --formats tarball,deb,rpm
+      #   shell: bash
+      #
+      # - name: Upload Linux tarball artifact
+      #   uses: actions/upload-artifact@v7
+      #   with:
+      #     name: hunk-linux-x86_64-tarball
+      #     path: target/dist/Hunk-${{ env.HUNK_RELEASE_VERSION }}-linux-x86_64.tar.gz
+      #     if-no-files-found: error
+      #
+      # - name: Upload Linux Debian artifact
+      #   uses: actions/upload-artifact@v7
+      #   with:
+      #     name: hunk-linux-x86_64-deb
+      #     path: target/dist/hunk-desktop_${{ env.HUNK_RELEASE_VERSION }}-1_amd64.deb
+      #     if-no-files-found: error
+      #
+      # - name: Upload Linux RPM artifact
+      #   uses: actions/upload-artifact@v7
+      #   with:
+      #     name: hunk-linux-x86_64-rpm
+      #     path: target/dist/*.rpm
+      #     if-no-files-found: error
 
   build:
-    name: ${{ matrix.name }} Artifacts
+    name: ${{ matrix.name }} Build
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     env:
@@ -171,6 +178,7 @@ jobs:
       - name: Install Zig
         uses: mlugg/setup-zig@v2
         with:
+          use-cache: false
           version: 0.15.2
 
       - name: Cache cargo registry and Rust dependencies
@@ -181,25 +189,26 @@ jobs:
             . -> target
           cache-on-failure: "true"
 
-      - name: Resolve release version
-        if: runner.os != 'Windows'
-        run: ${{ matrix.resolve_version }}
-        shell: bash
-
-      - name: Resolve release version
-        if: runner.os == 'Windows'
-        run: ${{ matrix.resolve_version }}
-        shell: pwsh
-
-      - name: Install cargo-packager
-        if: runner.os == 'macOS'
-        run: ${{ matrix.install_packager }}
-        shell: bash
-
-      - name: Install cargo-packager
-        if: runner.os == 'Windows'
-        run: ${{ matrix.install_packager }}
-        shell: pwsh
+      # Temporarily disabled for PR builds; release packaging stays in release workflows.
+      # - name: Resolve release version
+      #   if: runner.os != 'Windows'
+      #   run: ${{ matrix.resolve_version }}
+      #   shell: bash
+      #
+      # - name: Resolve release version
+      #   if: runner.os == 'Windows'
+      #   run: ${{ matrix.resolve_version }}
+      #   shell: pwsh
+      #
+      # - name: Install cargo-packager
+      #   if: runner.os == 'macOS'
+      #   run: ${{ matrix.install_packager }}
+      #   shell: bash
+      #
+      # - name: Install cargo-packager
+      #   if: runner.os == 'Windows'
+      #   run: ${{ matrix.install_packager }}
+      #   shell: pwsh
 
       - name: Run hunk-terminal tests
         if: runner.os == 'macOS'
@@ -211,84 +220,95 @@ jobs:
         run: cargo test -p hunk-terminal --tests
         shell: pwsh
 
-      - name: Detect Apple signing configuration
+      - name: Build hunk-desktop
         if: runner.os == 'macOS'
-        id: detect_macos_signing
-        run: |
-          if [[ -n "${APPLE_CERTIFICATE_P12_BASE64:-}" \
-             && -n "${APPLE_CERTIFICATE_PASSWORD:-}" \
-             && -n "${APPLE_SIGNING_IDENTITY:-}" \
-             && -n "${APPLE_NOTARY_API_KEY_BASE64:-}" \
-             && -n "${APPLE_NOTARY_KEY_ID:-}" \
-             && -n "${APPLE_NOTARY_ISSUER:-}" ]]; then
-            echo "MACOS_SIGNING_ENABLED=true" >> "$GITHUB_ENV"
-            echo "signing_enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "MACOS_SIGNING_ENABLED=false" >> "$GITHUB_ENV"
-            echo "signing_enabled=false" >> "$GITHUB_OUTPUT"
-            echo "Apple signing secrets unavailable; packaging unsigned macOS artifact for workflow validation." >&2
-          fi
+        run: ./scripts/run_with_macos_sdk_env.sh cargo build -p hunk-desktop --locked
         shell: bash
 
-      - name: Import Apple signing certificate
-        if: runner.os == 'macOS' && steps.detect_macos_signing.outputs.signing_enabled == 'true'
-        run: |
-          KEYCHAIN_PASSWORD="$RUNNER_TEMP/hunk-release-keychain"
-          CERT_PATH="$RUNNER_TEMP/hunk-signing-cert.p12"
-          echo "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > "$CERT_PATH"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security set-keychain-settings -lut 21600 build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security import "$CERT_PATH" -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" build.keychain
-        shell: bash
-
-      - name: Prepare Apple notary API key
-        if: runner.os == 'macOS' && steps.detect_macos_signing.outputs.signing_enabled == 'true'
-        run: |
-          KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_NOTARY_KEY_ID}.p8"
-          echo "$APPLE_NOTARY_API_KEY_BASE64" | base64 --decode > "$KEY_PATH"
-          chmod 600 "$KEY_PATH"
-          echo "APPLE_NOTARY_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
-        shell: bash
-
-      - name: Package macOS artifact
-        if: runner.os == 'macOS'
-        id: package_macos
-        run: |
-          artifact_path="$(./scripts/package_macos_release.sh | tail -n 1)"
-          echo "artifact_path=$artifact_path" >> "$GITHUB_OUTPUT"
-        shell: bash
-
-      - name: Upload signed macOS artifact
-        if: runner.os == 'macOS' && steps.detect_macos_signing.outputs.signing_enabled == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: hunk-macos-arm64-dmg
-          path: ${{ steps.package_macos.outputs.artifact_path }}
-          if-no-files-found: error
-
-      - name: Upload unsigned macOS artifact
-        if: runner.os == 'macOS' && steps.detect_macos_signing.outputs.signing_enabled != 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: hunk-macos-arm64-dmg-unsigned
-          path: ${{ steps.package_macos.outputs.artifact_path }}
-          if-no-files-found: error
-
-      - name: Package Windows artifact
+      - name: Build hunk-desktop
         if: runner.os == 'Windows'
-        id: package_windows
-        run: |
-          $artifactPath = (pwsh ./scripts/package_windows_release.ps1 | Select-Object -Last 1).Trim()
-          "artifact_path=$artifactPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        run: cargo build -p hunk-desktop --locked
         shell: pwsh
 
-      - name: Upload Windows artifact
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v7
-        with:
-          name: hunk-windows-x86_64-msi
-          path: ${{ steps.package_windows.outputs.artifact_path }}
-          if-no-files-found: error
+      # Temporarily disabled for PR builds; release packaging stays in release workflows.
+      # - name: Detect Apple signing configuration
+      #   if: runner.os == 'macOS'
+      #   id: detect_macos_signing
+      #   run: |
+      #     if [[ -n "${APPLE_CERTIFICATE_P12_BASE64:-}" \
+      #        && -n "${APPLE_CERTIFICATE_PASSWORD:-}" \
+      #        && -n "${APPLE_SIGNING_IDENTITY:-}" \
+      #        && -n "${APPLE_NOTARY_API_KEY_BASE64:-}" \
+      #        && -n "${APPLE_NOTARY_KEY_ID:-}" \
+      #        && -n "${APPLE_NOTARY_ISSUER:-}" ]]; then
+      #       echo "MACOS_SIGNING_ENABLED=true" >> "$GITHUB_ENV"
+      #       echo "signing_enabled=true" >> "$GITHUB_OUTPUT"
+      #     else
+      #       echo "MACOS_SIGNING_ENABLED=false" >> "$GITHUB_ENV"
+      #       echo "signing_enabled=false" >> "$GITHUB_OUTPUT"
+      #       echo "Apple signing secrets unavailable; packaging unsigned macOS artifact for workflow validation." >&2
+      #     fi
+      #   shell: bash
+      #
+      # - name: Import Apple signing certificate
+      #   if: runner.os == 'macOS' && steps.detect_macos_signing.outputs.signing_enabled == 'true'
+      #   run: |
+      #     KEYCHAIN_PASSWORD="$RUNNER_TEMP/hunk-release-keychain"
+      #     CERT_PATH="$RUNNER_TEMP/hunk-signing-cert.p12"
+      #     echo "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > "$CERT_PATH"
+      #     security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+      #     security set-keychain-settings -lut 21600 build.keychain
+      #     security default-keychain -s build.keychain
+      #     security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+      #     security import "$CERT_PATH" -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+      #     security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+      #   shell: bash
+      #
+      # - name: Prepare Apple notary API key
+      #   if: runner.os == 'macOS' && steps.detect_macos_signing.outputs.signing_enabled == 'true'
+      #   run: |
+      #     KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_NOTARY_KEY_ID}.p8"
+      #     echo "$APPLE_NOTARY_API_KEY_BASE64" | base64 --decode > "$KEY_PATH"
+      #     chmod 600 "$KEY_PATH"
+      #     echo "APPLE_NOTARY_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+      #   shell: bash
+      #
+      # - name: Package macOS artifact
+      #   if: runner.os == 'macOS'
+      #   id: package_macos
+      #   run: |
+      #     artifact_path="$(./scripts/package_macos_release.sh | tail -n 1)"
+      #     echo "artifact_path=$artifact_path" >> "$GITHUB_OUTPUT"
+      #   shell: bash
+      #
+      # - name: Upload signed macOS artifact
+      #   if: runner.os == 'macOS' && steps.detect_macos_signing.outputs.signing_enabled == 'true'
+      #   uses: actions/upload-artifact@v7
+      #   with:
+      #     name: hunk-macos-arm64-dmg
+      #     path: ${{ steps.package_macos.outputs.artifact_path }}
+      #     if-no-files-found: error
+      #
+      # - name: Upload unsigned macOS artifact
+      #   if: runner.os == 'macOS' && steps.detect_macos_signing.outputs.signing_enabled != 'true'
+      #   uses: actions/upload-artifact@v7
+      #   with:
+      #     name: hunk-macos-arm64-dmg-unsigned
+      #     path: ${{ steps.package_macos.outputs.artifact_path }}
+      #     if-no-files-found: error
+      #
+      # - name: Package Windows artifact
+      #   if: runner.os == 'Windows'
+      #   id: package_windows
+      #   run: |
+      #     $artifactPath = (pwsh ./scripts/package_windows_release.ps1 | Select-Object -Last 1).Trim()
+      #     "artifact_path=$artifactPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      #   shell: pwsh
+      #
+      # - name: Upload Windows artifact
+      #   if: runner.os == 'Windows'
+      #   uses: actions/upload-artifact@v7
+      #   with:
+      #     name: hunk-windows-x86_64-msi
+      #     path: ${{ steps.package_windows.outputs.artifact_path }}
+      #     if-no-files-found: error
