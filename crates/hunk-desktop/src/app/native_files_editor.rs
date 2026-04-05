@@ -8,7 +8,6 @@ use anyhow::Result;
 use gpui::*;
 use hunk_editor::{
     EditorCommand, EditorState, FoldRegion, OverlayDescriptor, OverlayKind, Viewport,
-    WorkspaceExcerptId,
 };
 use hunk_language::{
     FoldCandidate, HighlightCapture, LanguageRegistry, SyntaxSession, merge_highlight_layers,
@@ -665,11 +664,6 @@ impl FilesEditor {
 
     pub(crate) fn active_workspace_path_buf(&self) -> Option<PathBuf> {
         self.active_path_buf()
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn active_workspace_excerpt_id(&self) -> Option<WorkspaceExcerptId> {
-        self.workspace_session.active_excerpt_id()
     }
 
     fn refresh_visible_syntax_highlights(

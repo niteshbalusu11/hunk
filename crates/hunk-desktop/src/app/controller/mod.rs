@@ -22,7 +22,7 @@ use super::data::{
 };
 use super::*;
 use hunk_git::branch::{
-    RenameBranchIfSafeOutcome, rename_branch, rename_branch_if_current_unpublished,
+    RenameBranchIfSafeOutcome, rename_branch_if_current_unpublished,
     review_url_for_branch_with_provider_map, sanitize_branch_name,
 };
 use hunk_git::compare::{CompareSource, load_compare_snapshot, resolve_default_base_branch_name};

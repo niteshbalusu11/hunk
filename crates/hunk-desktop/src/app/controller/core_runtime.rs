@@ -843,12 +843,8 @@ struct ReviewWorkspaceProjectedSideRow {
 
 #[cfg(test)]
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct ReviewWorkspaceProjectedSideRows {
     rows: Vec<ReviewWorkspaceProjectedSideRow>,
-    rows_by_display_row: BTreeMap<usize, hunk_editor::WorkspaceDisplayRow>,
-    syntax_by_display_row:
-        BTreeMap<usize, Vec<crate::app::native_files_editor::paint::RowSyntaxSpan>>,
 }
 
 #[cfg(test)]
@@ -856,7 +852,6 @@ fn projected_review_workspace_side_rows(
     render_snapshot: crate::app::native_files_editor::WorkspaceProjectedRenderSnapshot,
 ) -> Option<ReviewWorkspaceProjectedSideRows> {
     let mut rows = Vec::<ReviewWorkspaceProjectedSideRow>::new();
-    let mut rows_by_display_row = BTreeMap::<usize, hunk_editor::WorkspaceDisplayRow>::new();
     for (row, display_row) in render_snapshot
         .projection
         .visible_rows
@@ -875,13 +870,8 @@ fn projected_review_workspace_side_rows(
             raw_row_range: workspace_row_range,
             row: display_row.clone(),
         });
-        rows_by_display_row.insert(display_row_index, display_row);
     }
-    Some(ReviewWorkspaceProjectedSideRows {
-        rows,
-        rows_by_display_row,
-        syntax_by_display_row: render_snapshot.syntax_by_display_row,
-    })
+    Some(ReviewWorkspaceProjectedSideRows { rows })
 }
 
 #[cfg(test)]

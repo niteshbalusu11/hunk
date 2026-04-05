@@ -838,43 +838,6 @@ impl DiffViewer {
         }
     }
 
-    #[allow(dead_code)]
-    pub(super) fn rename_current_branch_from_input(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.can_run_active_branch_actions() {
-            self.git_status_message = Some("Activate a branch before renaming it.".to_string());
-            cx.notify();
-            return;
-        }
-
-        let raw_name = self.branch_input_state.read(cx).value().to_string();
-        if raw_name.trim().is_empty() {
-            self.git_status_message = Some("New branch name is required.".to_string());
-            cx.notify();
-            return;
-        }
-
-        let current_branch = self.git_workspace.branch_name.clone();
-        let sanitized = sanitize_branch_name(&raw_name);
-        self.branch_input_state.update(cx, |state, cx| {
-            state.set_value(sanitized.clone(), window, cx);
-        });
-        if sanitized == current_branch {
-            self.git_status_message =
-                Some("New branch name must differ from the current branch.".to_string());
-            cx.notify();
-            return;
-        }
-
-        self.run_git_action("Rename branch", cx, move |repo_root| {
-            rename_branch(&repo_root, &current_branch, &sanitized)?;
-            Ok(format!("Renamed branch {} to {}", current_branch, sanitized))
-        });
-    }
-
     pub(super) fn publish_current_branch(&mut self, cx: &mut Context<Self>) {
         if !self.can_run_active_branch_actions() {
             let message = "Activate a branch before publishing.".to_string();

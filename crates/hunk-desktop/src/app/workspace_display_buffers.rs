@@ -1,12 +1,9 @@
-#![allow(dead_code)]
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
-use hunk_editor::{
-    Viewport, WorkspaceDisplaySnapshot, WorkspaceDocumentId, WorkspaceExcerptId, WorkspaceLayout,
-    build_workspace_display_snapshot,
-};
+#[cfg(test)]
+use hunk_editor::{Viewport, WorkspaceDisplaySnapshot, build_workspace_display_snapshot};
+use hunk_editor::{WorkspaceDocumentId, WorkspaceExcerptId, WorkspaceLayout};
 use hunk_text::TextSnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,6 +14,8 @@ pub(crate) struct WorkspaceSearchMatch {
     pub(crate) byte_range: Range<usize>,
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 pub(crate) fn build_workspace_display_snapshot_from_document_snapshots(
     layout: &WorkspaceLayout,
     viewport: Viewport,
@@ -36,6 +35,8 @@ pub(crate) fn build_workspace_display_snapshot_from_document_snapshots(
     )
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 pub(crate) fn snapshot_line_text(snapshot: &TextSnapshot, line: usize) -> String {
     let start = snapshot.line_to_byte(line).unwrap_or(0);
     let end = if line + 1 < snapshot.line_count() {

@@ -6,7 +6,7 @@ use hunk_domain::db::{CommentLineSide, compute_comment_anchor_hash};
 use hunk_domain::diff::SideBySideRow;
 use hunk_domain::diff::{DiffCellKind, DiffHunk, DiffLineKind, DiffRowKind, parse_patch_document};
 use hunk_editor::{
-    Viewport, WorkspaceDisplayRow, WorkspaceDocument, WorkspaceDocumentId, WorkspaceExcerptId,
+    WorkspaceDisplayRow, WorkspaceDocument, WorkspaceDocumentId, WorkspaceExcerptId,
     WorkspaceExcerptKind, WorkspaceExcerptSpec, WorkspaceLayout, WorkspaceLayoutError,
 };
 use hunk_git::compare::CompareSnapshot;
@@ -27,9 +27,12 @@ pub(crate) use search_impl::ReviewWorkspaceSearchTarget;
 mod workspace_display_buffers;
 
 use crate::app::data::{CachedStyledSegment, DiffSegmentQuality, DiffStream, DiffStreamRowKind};
+#[cfg(test)]
 use crate::app::native_files_editor::WorkspaceEditorSession;
 use crate::app::native_files_editor::paint::RowSyntaxSpan;
 use crate::app::{DiffRowSegmentCache, DiffStreamRowMeta};
+#[cfg(test)]
+use hunk_editor::Viewport;
 #[cfg(test)]
 use hunk_text::TextSnapshot;
 #[cfg(test)]
@@ -111,7 +114,6 @@ pub(crate) struct ReviewWorkspaceViewportCodeCell {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ReviewWorkspaceViewportRow {
-    #[allow(dead_code)]
     pub(crate) display_row_index: usize,
     pub(crate) row_index: usize,
     pub(crate) stable_id: u64,
@@ -155,39 +157,6 @@ impl ReviewWorkspaceViewportSnapshot {
             .find(|row| row.row_index == row_index)
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn visible_display_row_range(&self) -> Option<Range<usize>> {
-        let first = self
-            .sections
-            .iter()
-            .flat_map(|section| section.rows.iter())
-            .next()?;
-        let last = self
-            .sections
-            .iter()
-            .flat_map(|section| section.rows.iter())
-            .last()?;
-        Some(first.display_row_index..last.display_row_index.saturating_add(1))
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn top_display_row(&self) -> Option<usize> {
-        self.sections
-            .iter()
-            .flat_map(|section| section.rows.iter())
-            .next()
-            .map(|row| row.display_row_index)
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn top_raw_row(&self) -> Option<usize> {
-        self.sections
-            .iter()
-            .flat_map(|section| section.rows.iter())
-            .next()
-            .map(|row| row.row_index)
-    }
-
     pub(crate) fn row_at_viewport_position(
         &self,
         viewport_origin_px: usize,
@@ -228,9 +197,7 @@ pub(crate) struct ReviewWorkspaceSurfaceOptions {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ReviewWorkspaceDisplayRows {
     pub(crate) rows: Vec<ReviewWorkspaceDisplayRowEntry>,
-    #[allow(dead_code)]
     pub(crate) left_by_display_row: BTreeMap<usize, WorkspaceDisplayRow>,
-    #[allow(dead_code)]
     pub(crate) right_by_display_row: BTreeMap<usize, WorkspaceDisplayRow>,
     pub(crate) left_syntax_by_display_row: BTreeMap<usize, Vec<RowSyntaxSpan>>,
     pub(crate) right_syntax_by_display_row: BTreeMap<usize, Vec<RowSyntaxSpan>>,
@@ -351,7 +318,6 @@ pub(crate) struct ReviewWorkspaceSession {
     display_geometry: ReviewWorkspaceDisplayGeometry,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReviewWorkspaceEditorSide {
     Left,
@@ -643,24 +609,28 @@ impl ReviewWorkspaceSession {
     }
 
     pub(crate) fn total_surface_height_px(&self) -> usize {
-        self.display_geometry_total_surface_height_px()
+        self.display_geometry.total_surface_height_px()
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn display_geometry_total_surface_height_px(&self) -> usize {
         self.display_geometry.total_surface_height_px()
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn display_row_range_for_raw_row(&self, row_ix: usize) -> Option<Range<usize>> {
         self.display_geometry.row_display_range(row_ix)
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn display_row_boundary_for_raw_row(&self, boundary_ix: usize) -> Option<usize> {
         self.display_geometry.row_display_boundary(boundary_ix)
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn display_geometry_section_pixel_range(
         &self,
@@ -669,6 +639,7 @@ impl ReviewWorkspaceSession {
         self.display_geometry.section_pixel_range(section_ix)
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn display_geometry_section_display_row_range(
         &self,
@@ -677,6 +648,7 @@ impl ReviewWorkspaceSession {
         self.display_geometry.section_display_row_range(section_ix)
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn display_geometry_total_display_rows(&self) -> usize {
         self.display_geometry.total_display_rows()
@@ -984,6 +956,7 @@ impl ReviewWorkspaceSession {
         row_indices
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn display_viewport_for_surface_viewport(
         &self,
@@ -996,6 +969,7 @@ impl ReviewWorkspaceSession {
         self.display_viewport_for_raw_row_range(visible_row_range, overscan_display_rows)
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn display_viewport_for_raw_row_range(
         &self,
@@ -1331,6 +1305,7 @@ impl ReviewWorkspaceSession {
         &self.layout
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn refresh_display_geometry_from_display_rows(
         &mut self,
@@ -1366,6 +1341,7 @@ impl ReviewWorkspaceSession {
         self.rebuild_display_geometry(None);
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn build_editor_session(
         &self,
@@ -1379,7 +1355,6 @@ impl ReviewWorkspaceSession {
         session
     }
 
-    #[allow(dead_code)]
     pub(crate) fn editor_documents(
         &self,
         side: ReviewWorkspaceEditorSide,

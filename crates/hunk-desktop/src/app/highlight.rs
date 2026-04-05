@@ -62,6 +62,7 @@ pub(super) fn build_line_segments(
     merge_styled_segments(&chars, &syntax_map, &changed_map)
 }
 
+#[cfg_attr(test, allow(dead_code))]
 pub(super) fn build_syntax_only_line_segments(
     file_path: Option<&str>,
     line: &str,

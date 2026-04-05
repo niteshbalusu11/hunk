@@ -8,7 +8,6 @@ use hunk_text::{BufferId, TextBuffer};
 use super::FilesEditor;
 
 impl FilesEditor {
-    #[allow(dead_code)]
     pub(crate) fn open_workspace_layout_documents(
         &mut self,
         layout: WorkspaceLayout,
@@ -51,7 +50,6 @@ impl FilesEditor {
         self.install_workspace_buffers_for_open_session(workspace_buffers)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn activate_workspace_path(&mut self, path: &Path) -> Result<bool> {
         if self.active_path() == Some(path) {
             return Ok(true);
@@ -161,7 +159,6 @@ impl FilesEditor {
         Ok(workspace_buffers)
     }
 
-    #[allow(dead_code)]
     fn validate_workspace_layout_buffers(
         &self,
         layout: &WorkspaceLayout,

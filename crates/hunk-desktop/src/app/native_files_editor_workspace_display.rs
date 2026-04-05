@@ -2,19 +2,27 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use hunk_editor::{
-    DisplayRow, EditorCommand, EditorState, SearchHighlight, Viewport, WorkspaceDisplayRow,
-    WorkspaceDisplaySnapshot, WorkspaceDocumentId, WorkspaceExcerptId, WorkspaceLayout,
-    WorkspaceProjectedSnapshot, WorkspaceRowLocation, build_workspace_projected_snapshot,
+    DisplayRow, EditorCommand, EditorState, Viewport, WorkspaceDisplayRow,
+    WorkspaceProjectedSnapshot, build_workspace_projected_snapshot,
 };
-use hunk_text::{Selection, TextBuffer, TextPosition, TextSnapshot};
+#[cfg(test)]
+use hunk_editor::{
+    SearchHighlight, WorkspaceDisplaySnapshot, WorkspaceDocumentId, WorkspaceExcerptId,
+    WorkspaceLayout, WorkspaceRowLocation,
+};
+#[cfg(test)]
+use hunk_text::TextSnapshot;
+use hunk_text::{Selection, TextBuffer, TextPosition};
 
 #[allow(clippy::duplicate_mod)]
 #[path = "workspace_display_buffers.rs"]
+#[cfg(test)]
 mod workspace_display_buffers;
 
+#[cfg(test)]
 use workspace_display_buffers::{
     WorkspaceSearchMatch, build_workspace_display_snapshot_from_document_snapshots,
-    find_workspace_search_matches, snapshot_line_text,
+    find_workspace_search_matches,
 };
 
 use super::RowSyntaxSpan;
@@ -25,11 +33,13 @@ pub(crate) struct WorkspaceProjectedRenderSnapshot {
     pub(crate) projection: WorkspaceProjectedSnapshot,
     pub(crate) visible_display_rows: Vec<WorkspaceDisplayRow>,
     pub(crate) syntax_by_display_row: BTreeMap<usize, Vec<RowSyntaxSpan>>,
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) line_number_digits: usize,
 }
 
 impl FilesEditor {
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn build_workspace_display_snapshot(
         &self,
@@ -64,7 +74,6 @@ impl FilesEditor {
         Some(snapshot)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn build_workspace_projected_snapshot(
         &self,
         viewport: Viewport,
@@ -103,37 +112,28 @@ impl FilesEditor {
         viewport: Viewport,
         tab_width: usize,
     ) -> Option<WorkspaceProjectedRenderSnapshot> {
-        let layout = self.workspace_session.layout()?.clone();
         let projection = self.build_workspace_projected_snapshot(viewport, tab_width)?;
         let visible_display_rows =
             workspace_display_rows_from_projected_snapshot(&projection.visible_rows)?;
         let syntax_by_display_row =
             self.workspace_display_segments_by_row(&visible_display_rows)?;
-        let line_number_digits = layout
-            .documents()
-            .iter()
-            .map(|document| document.line_count.max(1).to_string().len())
-            .max()
-            .unwrap_or(1);
-
         Some(WorkspaceProjectedRenderSnapshot {
             projection,
             visible_display_rows,
             syntax_by_display_row,
-            line_number_digits,
+            #[cfg(test)]
+            line_number_digits: self
+                .workspace_session
+                .layout()?
+                .documents()
+                .iter()
+                .map(|document| document.line_count.max(1).to_string().len())
+                .max()
+                .unwrap_or(1),
         })
     }
 
-    #[allow(dead_code)]
-    fn workspace_buffer_line_text(
-        &self,
-        document_id: WorkspaceDocumentId,
-        line: usize,
-    ) -> Option<String> {
-        let buffer = self.workspace_buffer_for_document(document_id)?;
-        Some(snapshot_line_text(&buffer.snapshot(), line))
-    }
-
+    #[cfg(test)]
     #[allow(dead_code)]
     fn workspace_buffer_for_document(
         &self,
@@ -225,6 +225,8 @@ fn workspace_display_rows_from_projected_snapshot(
         .collect()
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 fn apply_workspace_search_highlights(
     layout: &WorkspaceLayout,
     visible_rows: &mut [WorkspaceDisplayRow],
@@ -268,6 +270,8 @@ fn apply_workspace_search_highlights(
     }
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 fn workspace_search_highlights_for_row(
     row: &WorkspaceDisplayRow,
     location: &WorkspaceRowLocation,
@@ -312,6 +316,8 @@ fn workspace_search_highlights_for_row(
     highlights
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 fn workspace_display_column_for_raw(row: &WorkspaceDisplayRow, raw_column: usize) -> usize {
     if row.raw_column_offsets.is_empty() {
         return 0;

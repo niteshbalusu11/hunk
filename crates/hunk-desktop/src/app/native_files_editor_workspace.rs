@@ -154,6 +154,7 @@ impl WorkspaceEditorSession {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn active_document_id(&self) -> Option<WorkspaceDocumentId> {
         self.active_document_id
     }

@@ -111,6 +111,7 @@ impl ReviewWorkspaceDisplayGeometry {
         }
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn row_display_range(&self, row_ix: usize) -> Option<Range<usize>> {
         let start = *self.row_display_boundaries.get(row_ix)?;
@@ -118,37 +119,36 @@ impl ReviewWorkspaceDisplayGeometry {
         Some(start..end)
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn row_display_boundary(&self, boundary_ix: usize) -> Option<usize> {
         self.row_display_boundaries.get(boundary_ix).copied()
     }
 
-    #[allow(dead_code)]
     pub(crate) fn row_top_offset_px(&self, row_ix: usize) -> Option<usize> {
         self.row_top_offsets_px.get(row_ix).copied()
     }
 
-    #[allow(dead_code)]
     pub(crate) fn row_boundary_offset_px(&self, boundary_ix: usize) -> Option<usize> {
         self.row_top_offsets_px.get(boundary_ix).copied()
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn section_display_row_range(&self, section_ix: usize) -> Option<&Range<usize>> {
         self.section_display_row_ranges.get(section_ix)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn section_pixel_range(&self, section_ix: usize) -> Option<&Range<usize>> {
         self.section_pixel_ranges.get(section_ix)
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn total_display_rows(&self) -> usize {
         self.total_display_rows
     }
 
-    #[allow(dead_code)]
     pub(crate) fn total_surface_height_px(&self) -> usize {
         self.total_surface_height_px
     }
