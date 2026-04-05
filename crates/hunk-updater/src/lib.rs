@@ -188,6 +188,15 @@ pub fn resolve_public_key_base64() -> Option<String> {
         })
 }
 
+pub fn required_public_key_base64() -> Result<String> {
+    resolve_public_key_base64().ok_or_else(|| {
+        anyhow!(
+            "updater public key is not configured; set {} at runtime or compile it into the build",
+            UPDATE_PUBLIC_KEY_ENV_VAR
+        )
+    })
+}
+
 pub fn resolve_private_key_base64() -> Option<String> {
     env::var(UPDATE_PRIVATE_KEY_ENV_VAR)
         .ok()
@@ -244,29 +253,28 @@ pub fn fetch_release_manifest(manifest_url: &str) -> Result<ReleaseManifest> {
         .with_context(|| format!("failed to read update manifest bytes from {manifest_url}"))?
         .to_vec();
 
-    if let Some(public_key_base64) = resolve_public_key_base64() {
-        let signature_url = format!("{manifest_url}.sig");
-        let signature = client
-            .get(signature_url.as_str())
-            .send()
-            .with_context(|| {
-                format!("failed to fetch update manifest signature from {signature_url}")
-            })?
-            .error_for_status()
-            .with_context(|| {
-                format!("update manifest signature request failed for {signature_url}")
-            })?
-            .text()
-            .with_context(|| {
-                format!("failed to read update manifest signature from {signature_url}")
-            })?;
-        verify_payload_signature(
-            &manifest_bytes,
-            signature.trim(),
-            public_key_base64.as_str(),
-        )
-        .with_context(|| format!("failed to verify update manifest from {manifest_url}"))?;
-    }
+    let public_key_base64 = required_public_key_base64()?;
+    let signature_url = format!("{manifest_url}.sig");
+    let signature = client
+        .get(signature_url.as_str())
+        .send()
+        .with_context(|| {
+            format!("failed to fetch update manifest signature from {signature_url}")
+        })?
+        .error_for_status()
+        .with_context(|| {
+            format!("update manifest signature request failed for {signature_url}")
+        })?
+        .text()
+        .with_context(|| {
+            format!("failed to read update manifest signature from {signature_url}")
+        })?;
+    verify_payload_signature(
+        &manifest_bytes,
+        signature.trim(),
+        public_key_base64.as_str(),
+    )
+    .with_context(|| format!("failed to verify update manifest from {manifest_url}"))?;
 
     serde_json::from_slice::<ReleaseManifest>(&manifest_bytes)
         .with_context(|| format!("failed to parse update manifest from {manifest_url}"))

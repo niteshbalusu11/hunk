@@ -62,16 +62,16 @@ impl DiffViewer {
             return;
         }
 
-        let Some(public_key) = hunk_updater::resolve_public_key_base64() else {
-            let message = format!(
-                "Updater public key is not configured. Set {} before enabling installs.",
-                hunk_updater::UPDATE_PUBLIC_KEY_ENV_VAR
-            );
-            self.update_status = UpdateStatus::Error(message.clone());
-            self.git_status_message = Some(message.clone());
-            Self::push_error_notification(message, cx);
-            cx.notify();
-            return;
+        let public_key = match hunk_updater::required_public_key_base64() {
+            Ok(public_key) => public_key,
+            Err(err) => {
+                let message = err.to_string();
+                self.update_status = UpdateStatus::Error(message.clone());
+                self.git_status_message = Some(message.clone());
+                Self::push_error_notification(message, cx);
+                cx.notify();
+                return;
+            }
         };
 
         let version = update.version.clone();
