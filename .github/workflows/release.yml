@@ -15,6 +15,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
+  HUNK_UPDATE_PUBLIC_KEY: ${{ secrets.HUNK_UPDATE_PUBLIC_KEY }}
 
 jobs:
   macos:
@@ -122,11 +123,25 @@ jobs:
           echo "artifact_path=$artifact_path" >> "$GITHUB_OUTPUT"
         shell: bash
 
+      - name: Create macOS OTA tarball
+        run: |
+          ota_path="target/dist/Hunk-${HUNK_RELEASE_VERSION}-macos-arm64.app.tar.gz"
+          rm -f "$ota_path"
+          tar -C target/packager/macos -czf "$ota_path" Hunk.app
+        shell: bash
+
       - name: Upload macOS release artifact
         uses: actions/upload-artifact@v7
         with:
           name: hunk-macos-arm64-dmg
           path: ${{ steps.package.outputs.artifact_path }}
+          if-no-files-found: error
+
+      - name: Upload macOS OTA tarball artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: hunk-macos-arm64-app-tarball
+          path: target/dist/Hunk-${{ env.HUNK_RELEASE_VERSION }}-macos-arm64.app.tar.gz
           if-no-files-found: error
 
   linux:
@@ -284,17 +299,119 @@ jobs:
       - windows
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      HUNK_UPDATE_PRIVATE_KEY_BASE64: ${{ secrets.HUNK_UPDATE_PRIVATE_KEY_BASE64 }}
+      HUNK_UPDATE_MANIFEST_R2_ACCESS_KEY_ID: ${{ secrets.HUNK_UPDATE_MANIFEST_R2_ACCESS_KEY_ID }}
+      HUNK_UPDATE_MANIFEST_R2_SECRET_ACCESS_KEY: ${{ secrets.HUNK_UPDATE_MANIFEST_R2_SECRET_ACCESS_KEY }}
+      HUNK_UPDATE_MANIFEST_R2_S3_API_URL: ${{ secrets.HUNK_UPDATE_MANIFEST_R2_S3_API_URL }}
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          clean: false
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install AWS CLI when missing
+        run: |
+          if command -v aws >/dev/null 2>&1; then
+            aws --version
+            exit 0
+          fi
+          sudo apt-get update
+          sudo apt-get install -y awscli
+        shell: bash
+
+      - name: Resolve release version
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "${GITHUB_REF_TYPE:-}" == "tag" && "$GITHUB_REF_NAME" == v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(./scripts/resolve_hunk_version.sh)"
+          fi
+          echo "HUNK_RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+        shell: bash
+
       - name: Download release artifacts
         uses: actions/download-artifact@v8
         with:
           path: dist
 
+      - name: Generate updater manifest and detached signatures
+        if: env.HUNK_UPDATE_PRIVATE_KEY_BASE64 != ''
+        run: |
+          base_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          pub_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          macos_ota_path="$(find dist/hunk-macos-arm64-app-tarball -type f -name "Hunk-${HUNK_RELEASE_VERSION}-macos-arm64.app.tar.gz" | head -n 1)"
+          windows_msi_path="$(find dist/hunk-windows-x86_64-msi -type f -name '*.msi' | head -n 1)"
+          linux_tarball_path="$(find dist/hunk-linux-x86_64-tarball -type f -name "Hunk-${HUNK_RELEASE_VERSION}-linux-x86_64.tar.gz" | head -n 1)"
+
+          : "${macos_ota_path:?missing macOS OTA tarball artifact}"
+          : "${windows_msi_path:?missing Windows MSI artifact}"
+          : "${linux_tarball_path:?missing Linux tarball artifact}"
+
+          cargo run -p hunk-updater --bin hunk-update-manifest -- \
+            --version "$HUNK_RELEASE_VERSION" \
+            --base-url "$base_url" \
+            --private-key-base64 "$HUNK_UPDATE_PRIVATE_KEY_BASE64" \
+            --output-dir dist/update-manifest \
+            --pub-date "$pub_date" \
+            --asset "macos-aarch64:app:$macos_ota_path" \
+            --asset "windows-x86_64:wix:$windows_msi_path" \
+            --asset "linux-x86_64:tarball:$linux_tarball_path"
+        shell: bash
+
+      - name: Skip updater manifest generation when signing key is unavailable
+        if: env.HUNK_UPDATE_PRIVATE_KEY_BASE64 == ''
+        run: |
+          echo "Updater signing key is not configured; skipping stable.json and detached signature generation." >&2
+        shell: bash
+
       - name: Generate SHA256SUMS
         run: |
           cd dist
           find . -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+        shell: bash
+
+      - name: Upload updater manifest bundle artifact
+        if: env.HUNK_UPDATE_PRIVATE_KEY_BASE64 != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: hunk-update-manifest
+          path: dist/update-manifest
+          if-no-files-found: error
+
+      - name: Publish updater manifest to Cloudflare R2
+        if: env.HUNK_UPDATE_PRIVATE_KEY_BASE64 != '' && env.HUNK_UPDATE_MANIFEST_R2_ACCESS_KEY_ID != '' && env.HUNK_UPDATE_MANIFEST_R2_SECRET_ACCESS_KEY != '' && env.HUNK_UPDATE_MANIFEST_R2_S3_API_URL != ''
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.HUNK_UPDATE_MANIFEST_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.HUNK_UPDATE_MANIFEST_R2_SECRET_ACCESS_KEY }}
+          AWS_EC2_METADATA_DISABLED: "true"
+          AWS_DEFAULT_REGION: "auto"
+        run: |
+          s3_url="${HUNK_UPDATE_MANIFEST_R2_S3_API_URL}"
+          endpoint_url="${s3_url%/*}"
+          bucket_name="${s3_url##*/}"
+
+          if [[ -z "$endpoint_url" || -z "$bucket_name" || "$endpoint_url" == "$s3_url" ]]; then
+            echo "error: invalid HUNK_UPDATE_MANIFEST_R2_S3_API_URL: $s3_url" >&2
+            exit 1
+          fi
+
+          aws --endpoint-url "$endpoint_url" s3 cp dist/update-manifest/stable.json "s3://$bucket_name/stable.json" \
+            --content-type application/json \
+            --cache-control "no-cache, no-store, must-revalidate"
+          aws --endpoint-url "$endpoint_url" s3 cp dist/update-manifest/stable.json.sig "s3://$bucket_name/stable.json.sig" \
+            --content-type "text/plain; charset=utf-8" \
+            --cache-control "no-cache, no-store, must-revalidate"
+        shell: bash
+
+      - name: Skip Cloudflare R2 manifest publish when bucket credentials are unavailable
+        if: env.HUNK_UPDATE_PRIVATE_KEY_BASE64 != '' && (env.HUNK_UPDATE_MANIFEST_R2_ACCESS_KEY_ID == '' || env.HUNK_UPDATE_MANIFEST_R2_SECRET_ACCESS_KEY == '' || env.HUNK_UPDATE_MANIFEST_R2_S3_API_URL == '')
+        run: |
+          echo "Cloudflare R2 manifest publishing is not configured; skipping stable.json upload." >&2
         shell: bash
 
       - name: List prepared release artifacts
@@ -308,9 +425,6 @@ jobs:
           fi
 
           release_args=(--repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes)
-          if [[ "${GITHUB_REF_NAME,,}" == *alpha* ]]; then
-            release_args+=(--prerelease)
-          fi
 
           if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$GITHUB_REF_NAME" "${release_args[@]}"
